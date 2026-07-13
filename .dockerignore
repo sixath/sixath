@@ -1,0 +1,13 @@
+.git
+.idea
+.claude
+.cursor
+.learnings
+.superpowers
+docs
+web
+scripts
+portal/bin
+framework/**/*_test.go
+**/node_modules
+**/.DS_Store

@@ -1,0 +1,17 @@
+# Nested app repos (tracked separately)
+/framework/
+/portal/
+/web/
+
+# Local / IDE
+.idea/
+.claude/
+.cursor/
+.learnings/
+.superpowers/
+*.local
+
+# Build / OS
+**/bin/
+**/node_modules/
+**/.DS_Store
