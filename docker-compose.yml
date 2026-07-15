@@ -4,7 +4,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
     ports:
-      - "3306:3306"
+      # host 3306 often taken; expose on 13306
+      - "13306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -20,8 +21,9 @@ services:
       context: .
       dockerfile: portal/Dockerfile
     ports:
-      - "8000:8000"
-      - "9000:9000"
+      # host 8000 taken by moya-aiops; use 18000/19000
+      - "18000:8000"
+      - "19000:9000"
     volumes:
       - ./portal/configs/config.docker.yaml:/data/conf/config.yaml:ro
     depends_on:
@@ -33,7 +35,8 @@ services:
       context: ./web
       dockerfile: Dockerfile
     ports:
-      - "8080:80"
+      # host 8080 taken by http-server; use 18080
+      - "18080:80"
     depends_on:
       - portal
 

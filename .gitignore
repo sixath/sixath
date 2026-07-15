@@ -18,3 +18,8 @@
 
 __pycache__/
 *.pyc
+
+# Local secrets / debug artifacts
+tool.json
+.playwright-cli/
+scripts/deploy_remote.py
