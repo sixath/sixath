@@ -1,7 +1,7 @@
 # Skill 创建写前 Schema 校验与质量启发式设计
 
 **日期**: 2026-07-23  
-**状态**: Spec review 已通过；待用户确认后进入 writing-plans  
+**状态**: 已落地  
 **方案**: 写前硬拦 schema（name + description）+ 质量启发式仅 warn  
 **关联**:  
 - [harness-engineering-gap-design](./2026-07-11-harness-engineering-gap-design.md)（验证回压 / G4；本设计为技能写路径的第一道传感器）  
@@ -167,6 +167,10 @@ skill_manage(create|edit|patch|write_file→SKILL.md)
 
 ## 9. 下一步
 
+实现已落地于 framework 分支 `feat/skill-schema-validate`；实施计划见 [`docs/superpowers/plans/2026-07-23-skill-schema-validate.md`](../plans/2026-07-23-skill-schema-validate.md)。
+
+历史步骤（已完成）：
+
 1. Spec review loop → 用户审阅本文件  
-2. 通过后调用 **writing-plans** 产出实施计划（建议路径：`docs/superpowers/plans/2026-07-23-skill-schema-validate.md`）  
+2. 通过后调用 **writing-plans** 产出实施计划  
 3. 实施时以 H1–H6 / warn 码为追溯键
