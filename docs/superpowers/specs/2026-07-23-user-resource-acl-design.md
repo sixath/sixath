@@ -1,7 +1,7 @@
 # 用户体系与统一 Resource ACL 设计
 
 **日期**: 2026-07-23  
-**状态**: 已确认  
+**状态**: 已落地（portal `feature/user-resource-acl`）  
 **方案**: 统一 Resource + Grant（方案 2）；本期不含 Public Hub  
 **关联**:  
 - `portal/internal/data/model/agent.go`（`agents.workspace`）  
