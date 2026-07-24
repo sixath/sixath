@@ -1,7 +1,7 @@
 # Web 登录门禁设计（Phase 1 Token + Phase 2 OIDC 预留）
 
 **日期**: 2026-07-24  
-**状态**: 草案（待实现）  
+**状态**: Phase 1 已落地（web feature/web-login-gate）  
 **方案**: 分阶段 — Phase 1 全屏 Token 登录壳；Phase 2 OIDC（邮箱 + 邀请链接）另开实现  
 **关联**:  
 - `docs/superpowers/specs/2026-07-23-user-resource-acl-design.md`（Bearer → `caller_user_id`）  
