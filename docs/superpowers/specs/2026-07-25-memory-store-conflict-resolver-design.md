@@ -1,6 +1,6 @@
 # MemoryStore P2-D1：结构化 supersede + ConflictResolver 接口
 
-> 状态：已确认（待实现计划）  
+> 状态：实现中  
 
 > 日期：2026-07-25  
 > 回链：[门面 §8.3](./2026-07-25-memory-store-facade-design.md)、[P2-A user scope](./2026-07-25-memory-store-user-scope-design.md)、[P2-C turn extract](./2026-07-25-memory-store-turn-extract-design.md)  
