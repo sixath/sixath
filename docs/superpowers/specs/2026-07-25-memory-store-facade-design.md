@@ -435,15 +435,18 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
 按依赖顺序：
 
 1. **正式 User 主体**：`users` 表 + `chat_sessions.user_id`；`scope=user` 读写启用。  
+   → **P2-A**：[2026-07-25-memory-store-user-scope-design.md](./2026-07-25-memory-store-user-scope-design.md)（已交付）。  
 2. **Turn 后提取管线**：`AddFromTurn` + LLM Extractor（Go-only）。  
+   → **P2-C**：[2026-07-25-memory-store-turn-extract-design.md](./2026-07-25-memory-store-turn-extract-design.md)。  
 3. **冲突消解**：`ConflictResolver`；`supersede` 语义完善。  
 4. **向量 Sidecar**：`VectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
 5. **可选图记忆**：Neo4j provider。  
-6. **Prefetch 策略增强**：user 优先、配额、去重。  
-7. **清理**：删除或彻底改编 `memory.Manager`；评估合并冗余 FTS；去掉旧配置键。  
+6. **Prefetch 策略增强**：配额、去重（user 优先车道已在 P2-A）。  
+7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（`feat/memory-store-p2b-p2c` 交付；Prefetch 仅 `StorePrefetchBackend`）；评估合并冗余 FTS；去掉旧配置键（`SATH_MEMORY_WRITE_ENABLED` 重命名仍后续）。  
+
 8. **（更后）Go MCP Server**：暴露同一 `MemoryStore`。
 
-二期启动时应修订本规格状态或另开 `memory-store-p2` 规格，并回链 2026-05-26 中未裁剪章节。
+P2-A/B/C 之外的项另开迭代规格；并回链 2026-05-26 中未裁剪章节。
 
 ---
 
