@@ -131,6 +131,7 @@ Phase 1 已提供全屏 Token 登录与路由守卫。产品需要邮箱密码�
 |------|------|
 | `/login` | 主：邮箱+密码 → `saveCredentials`；次要折叠：「开发者 Token 登录」 |
 | `/register` | `?invite=` 必填语义；预览 org；邮箱+密码+确认 |
+| `/verify-email` | SMTP 开启时邮件链落地：读 `?token=` → 调 `verify-email` API → 提示结果并链回登录 |
 
 ### 5.2 壳内
 
@@ -143,6 +144,12 @@ Phase 1 已提供全屏 Token 登录与路由守卫。产品需要邮箱密码�
 门禁 / 退出 / 401 / `sixath-auth-gate`：沿用 Phase 1。  
 SMTP 开启时：登录后可轻提示未验证邮箱（不强制墙）。
 
+**登录后 Org 选择默认策略**
+
+1. 若响应 `orgs.length === 1`：自动写入 `sixath-org-id`。  
+2. 若多个：保留已存 org（若仍在列表中），否则清空并引导用户在 `/orgs` 选择（不强制打断 `next` 跳转）。  
+3. 若零个：清空 org；用户可去「新建组织」。
+
 ---
 
 ## 6. 配置
@@ -150,7 +157,7 @@ SMTP 开启时：登录后可轻提示未验证邮箱（不强制墙）。
 | 项 | 说明 |
 |----|------|
 | 现有 `auth.bootstrap_*` | 保留 |
-| 可选 `auth.bootstrap_email` / `bootstrap_password` | 便于非 Token 演示 |
+| 可选 `auth.bootstrap_email` / `bootstrap_password` | 给**现有** bootstrap 用户补邮箱/密码（upsert），非另建账号 |
 | `auth.smtp_*` 或 env | host/port/user/pass/from；未配 = 验邮关 |
 | Web `VITE_*` | 无强制变更；登录改走 API |
 

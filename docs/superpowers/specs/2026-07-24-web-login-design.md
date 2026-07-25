@@ -121,15 +121,13 @@ Org：localStorage → `VITE_ORG_ID`（可选；抑制会话时 org 仍可读，
 
 ---
 
-## 6. Phase 2 预留（本期仅规格，不实现）
+## 6. Phase 2
 
-后续另开 plan/spec，预期方向：
+**已被取代**：邮箱登录 / 邀请注册的正式设计见  
+`docs/superpowers/specs/2026-07-25-email-invite-auth-design.md`  
+（Portal 内聚邮箱+密码+邀请；OIDC 仅预留，非本期必接 IdP）。
 
-1. 接入 OIDC IdP；登录页主路径改为「邮箱登录」。  
-2. 邀请链接：`/register?invite=...` → IdP 注册或 portal 换票后加入目标 org。  
-3. Portal：验 JWT **或** 换发内部 Bearer，写入/映射 `user_tokens` / `users`（email）。  
-4. 业务 API 契约尽量不变：`Authorization: Bearer <internal-or-access-token>`。  
-5. Phase 1 的 Token 表单可降级为「高级 / 开发者登录」。
+Phase 1 Token 全屏门禁与 `sixath-auth-gate` 行为仍有效；Phase 2 将 Token 表单降为开发者入口。
 
 ---
 
