@@ -94,6 +94,7 @@ type StructuralReplaceResolver struct{}
     - `Supersede` → backend supersede 写  
     - `Ignore` → `(MemoryHit{}, nil)` 且不写（D2）  
     - `KeepBoth` → **错误**（D1 fail closed；避免与 replace 语义冲突）  
+- `Facade.Delete` 与 `Remember(remove)` 均委托同一 backend 级联软删路径（见 §2.3）。  
 - agent 路径不变，不经 ConflictResolver。
 
 ### 2.3 Units 写语义
