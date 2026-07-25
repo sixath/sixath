@@ -1,7 +1,7 @@
 # 邮箱登录与邀请注册设计（Phase 2）
 
 **日期**: 2026-07-25  
-**状态**: 草案（待实现）  
+**状态**: Phase 2 已落地（portal/web `feature/email-invite-auth`；待合并 main）  
 **方案**: Portal 内聚 Auth（邮箱+密码+邀请）；OIDC 仅预留  
 **关联**:  
 - `docs/superpowers/specs/2026-07-24-web-login-design.md`（Phase 1 Token 门禁）  
