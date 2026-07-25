@@ -1,6 +1,7 @@
 # MemoryStore P2-D1：结构化 supersede + ConflictResolver 接口
 
-> 状态：设计中  
+> 状态：已确认（待实现计划）  
+
 > 日期：2026-07-25  
 > 回链：[门面 §8.3](./2026-07-25-memory-store-facade-design.md)、[P2-A user scope](./2026-07-25-memory-store-user-scope-design.md)、[P2-C turn extract](./2026-07-25-memory-store-turn-extract-design.md)  
 > 前置：P2-A（user units）；表已含 `status=superseded` 与 `supersedes_id`（迁移 `009`）  
@@ -100,10 +101,12 @@ type StructuralReplaceResolver struct{}
 | Action | 行为 |
 |--------|------|
 | `add` | INSERT `active`（不变） |
-| `replace` | 要求 `UnitID`；旧行必须 `active`；**同一事务**：INSERT 新行（`supersedes_id=旧id`，`status=active`）+ UPDATE 旧行 `status=superseded`；返回**新** hit |
+| `replace` | 要求 `UnitID`；旧行必须 `active`；**同一事务**：INSERT 新行（`supersedes_id=旧id`，`status=active`）+ UPDATE 旧行 `status=superseded`；返回**新** hit。新行其余字段（`content_hash`、`metadata`、`user_id`/`agent_id`、`source_session_id` 等）与同 scope 的 `add` 规则一致 |
 | `remove` | 从目标出发，沿 `supersedes_id` 收集整条链（见 §2.4），全部 `status=deleted` |
+| `Delete(ref)` | **必须与 `Remember(remove)` 共用同一套链收集 + 软删实现**（门面 §3.4：Delete ≡ remove）；禁止只删单行 |
 
-禁止对 `superseded` / `deleted` 行再 `replace`（not found），避免分叉链。
+禁止对 `superseded` / `deleted` 行再 `replace`（not found），避免分叉链。  
+对不存在或已 `deleted` 的 id 执行 `remove` / `Delete` → not found（与 Get(deleted) 对齐）。
 
 ### 2.4 级联 remove 的链定义
 
@@ -156,9 +159,9 @@ Hit metadata 建议带：`status`、`supersedes_id`（若有），便于工具/�
 
 ## 5. 测试与验收
 
-1. replace：两行；旧 superseded + supersedes_id；新 active；Recall 只见新内容。  
+1. replace（**session 与 user 各至少一条**）：两行；旧 superseded + supersedes_id；新 active；Recall 只见新内容。  
 2. 对 superseded id 再 replace → not found。  
-3. remove 级联：链上全部 deleted；Recall 空。  
+3. remove **与 Delete** 级联：链上全部 deleted；Recall 空；对已 deleted id 再删 → not found。  
 4. Get(superseded id) 成功；Get(deleted) not found。  
 5. Facade `Conflicts=nil` 与显式 Structural 行为一致。  
 6. agent replace 回归（文件原地）仍绿。  
