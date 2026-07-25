@@ -21,11 +21,11 @@
 | Password | `portal/internal/biz/password.go` (+ test) |
 | Identity / invites | `portal/internal/biz/identity.go`, `portal/internal/data/identity_mysql.go`, `portal/internal/data/invite_mysql.go`, `portal/internal/data/bootstrap.go` |
 | Auth usecase | `portal/internal/biz/auth_usecase.go` (+ test) |
-| Org/invite API | Extend `portal/internal/biz/acl_api.go` or new `org_api.go`; `portal/internal/server/auth_api.go`, `org_api.go`; `http.go` routes |
+| Org/invite API | Extend `portal/internal/biz/acl_api.go` or new `org_usecase.go`; handlers `portal/internal/server/auth_http.go`, `org_http.go`; `http.go` routes |
 | Middleware | `portal/internal/server/middleware/auth.go` (+ test) |
 | Mailer | `portal/internal/biz/mailer.go` (noop + SMTP stub) |
 | Wire | `portal/cmd/backend/wire.go` / providers |
-| Web | `web/src/api/authApi.ts` or extend `client.ts`; `LoginPage.tsx`; `RegisterPage.tsx`; `VerifyEmailPage.tsx`; `OrgListPage.tsx`; `OrgDetailPage.tsx`; `App.tsx` nav |
+| Web | `web/src/api/sessionAuth.ts` (+ Bearer org APIs in `client.ts` or `orgApi.ts`); `LoginPage.tsx`; `RegisterPage.tsx`; `VerifyEmailPage.tsx`; `OrgListPage.tsx`; `OrgDetailPage.tsx`; `App.tsx` nav |
 
 **Out of scope:** OIDC, password reset, Playwright e2e, forcing email verification on business APIs.
 
@@ -120,6 +120,10 @@ RevokeInvite(ctx, id string) error
 ```
 
 Preview validity helper: not revoked, not expired, `max_uses==0 || used_count < max_uses`.
+
+Also add `EmailVerifyTokenRepo` (or methods on IdentityRepo): `CreateVerifyToken`, `ConsumeVerifyToken` — used by Task 6 when SMTP is on.
+
+Register must increment `used_count` atomically (transaction or conditional `UPDATE ... WHERE used_count < max_uses OR max_uses=0`) so single-use invites cannot double-register under concurrency.
 
 - [ ] **Step 4: GORM impl + unit tests with sqlite/mysql fake if project pattern allows; else table-driven pure helpers for invite validity**
 
@@ -236,9 +240,9 @@ JSON shapes match spec §4. Invite create response includes `invite_token` and `
 
 - [ ] **Step 2: LoginPage** — email/password primary; submit → login API → `applyLoginSession` → navigate next. Collapsible developer Token form (existing).
 
-- [ ] **Step 3: RegisterPage** — require invite query; preview; register; apply session
+- [ ] **Step 3: RegisterPage** — require invite query; preview; email + password + confirm password (client-side match); register; apply session. User `name` defaults to email local-part (server also sets).
 
-- [ ] **Step 4: VerifyEmailPage** — public route
+- [ ] **Step 4: VerifyEmailPage** — public route. Optional: after email login, if `email_verified===false` show a muted banner (no hard block).
 
 - [ ] **Step 5: `npm test` && `npm run build`**
 
