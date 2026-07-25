@@ -439,6 +439,8 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
 2. **Turn 后提取管线**：`AddFromTurn` + LLM Extractor（Go-only）。  
    → **P2-C**：[2026-07-25-memory-store-turn-extract-design.md](./2026-07-25-memory-store-turn-extract-design.md)（`feat/memory-store-p2b-p2c` 已实现，默认关闭）。  
 3. **冲突消解**：`ConflictResolver`；`supersede` 语义完善。  
+   → **P2-D1**：[2026-07-25-memory-store-conflict-resolver-design.md](./2026-07-25-memory-store-conflict-resolver-design.md)（结构化 supersede；LLM → P2-D2）。  
+
 4. **向量 Sidecar**：`VectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
 5. **可选图记忆**：Neo4j provider。  
 6. **Prefetch 策略增强**：配额、去重（user 优先车道已在 P2-A）。  
