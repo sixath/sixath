@@ -437,7 +437,7 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
 1. **正式 User 主体**：`users` 表 + `chat_sessions.user_id`；`scope=user` 读写启用。  
    → **P2-A**：[2026-07-25-memory-store-user-scope-design.md](./2026-07-25-memory-store-user-scope-design.md)（已交付）。  
 2. **Turn 后提取管线**：`AddFromTurn` + LLM Extractor（Go-only）。  
-   → **P2-C**：[2026-07-25-memory-store-turn-extract-design.md](./2026-07-25-memory-store-turn-extract-design.md)。  
+   → **P2-C**：[2026-07-25-memory-store-turn-extract-design.md](./2026-07-25-memory-store-turn-extract-design.md)（`feat/memory-store-p2b-p2c` 已实现，默认关闭）。  
 3. **冲突消解**：`ConflictResolver`；`supersede` 语义完善。  
 4. **向量 Sidecar**：`VectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
 5. **可选图记忆**：Neo4j provider。  

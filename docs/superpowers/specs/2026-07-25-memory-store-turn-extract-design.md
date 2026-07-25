@@ -1,6 +1,7 @@
 # MemoryStore P2-C：Turn 后 LLM 提取（AddFromTurn）
 
-> 状态：实现中（P2-C）  
+> 状态：已实现（待冒烟）· 分支 `feat/memory-store-p2b-p2c`  
+
 > 日期：2026-07-25  
 > 回链：[门面 §8.2](./2026-07-25-memory-store-facade-design.md)、[2026-05-26 §5](../../../framework/docs/superpowers/specs/2026-05-26-multi-layer-memory-design.md)（裁剪）  
 > 前置：P2-A `scope=user`（已交付）；P2-B 删除 `memory.Manager` / `SearchPrefetchBackend`（本分支 `feat/memory-store-p2b-p2c` 先完成）
