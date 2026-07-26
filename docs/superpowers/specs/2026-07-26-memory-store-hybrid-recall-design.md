@@ -69,21 +69,23 @@ flowchart TD
 | 条件 | 说明 |
 |------|------|
 | `vectorReady()` | 同 E1：`UnitVectors != nil && UnitEmbedder != nil && !embedTripped` |
-| `strings.TrimSpace(q.Query) != ""` | 空 query（Prefetch 最近 N 条等）不 Embed |
+| `strings.TrimSpace(q.Query) != ""` | 调用方显式空 query（如取最近 N 条）不 Embed；注：Prefetch 空 `UserMessage` 在其自身入口即返回，不会到达这里 |
 | `hybridAllowed(ctx, q.AgentID)` | Agent 门控，见 §2.3；`AgentID` 空或回调 nil → true |
+
+**执行顺序**：串行——先跑 LIKE 支路，再跑 Embed + Search + hydrate（实现简单；向量支路最坏加 800ms，可接受。并行化归后续优化）。
 
 **RRF 融合**
 
 - 两路各取 `N = 2 * effLimit`（`effLimit = q.Limit`，`<=0` 时取 backend 默认 5）。LIKE 支路即现有 `session.Recall`（改传 `Limit=N`）；向量支路 `UnitVectorQuery{Limit: N}` → hydrate active。  
-- `score(unit) = Σ_路 1/(60 + rank_路)`，rank 从 1 起；只出现在一路的照常计入。  
-- 同 `unit_id` 去重合并（分数相加），按 score 降序、同分按 LIKE 支路原序，截断到 `effLimit`。  
+- `score(unit) = Σ_路 1/(60 + rank_路)`；**rank 定义**：LIKE 支路 = backend 返回列表的 1-based 下标；向量支路 = **hydrate 过滤后**列表的 1-based 下标（非 Search 原始位置）。只出现在一路的照常计入。  
+- 同 `unit_id` 去重合并（分数相加）。排序：score 降序；同分依次按 LIKE 支路原序 → 向量支路原序 → `unit_id` 字典序。截断到 `effLimit`。  
+- **`q.MinScore`（MUST）**：units hybrid 路径**继续忽略** `RecallQuery.MinScore`（今日 LIKE 路径本就忽略；RRF 分量纲 ≈ `1/(60+rank)`，若被当 cosine 阈值过滤会清空结果）。与 agent/files 路径的 MinScore 语义不同，须在工具文档注明。  
 - 输出 `MemoryHit.Score` = RRF 分（打破今日恒 0；Prefetch 只用 Content 不受影响，工具展示分数变化为**有意**）。
 
 **失败语义（fail-open）**
 
-- Embed 返回 error（含模型不支持 Embed）→ trip 熔断 + 本轮纯 LIKE。  
-- Embed 超时（独立 800ms context）→ 本轮纯 LIKE，**不** trip（偶发慢请求不永久降级）。  
-- `Search` / hydrate 出错 → 丢弃向量支路，返回 LIKE 结果；不向调用方报错。  
+- 向量支路任何失败（Embed error / 超时 / Search / hydrate 出错）→ 丢弃向量支路，返回 LIKE 支路结果并**截断到 `effLimit`**（LIKE 支路已按 `N=2*effLimit` 取数，禁止把 N 条泄漏给调用方）；不向调用方报错。  
+- **熔断判定（MUST）**：读路径 Embed 用独立 helper（不复用写路径 `embedOne`），以专用 800ms 子 context 调用；error 分类——子 context 超时（`context.DeadlineExceeded` 源于本 800ms 预算）或父 context `Canceled`/`DeadlineExceeded` → **不 trip**，仅本轮降级；其余 error（含模型不支持 Embed、4xx/5xx）→ trip E1 进程熔断。写路径 `embedOne`（任意 error 即 trip）本切片**不改**。  
 - LIKE 支路出错 → 与今日一致直接返回 error（主路径语义不变）。
 
 ### 2.2 写路径解耦（相对 E1 的差异）
@@ -96,6 +98,7 @@ flowchart TD
 | D2 关闭时的写入 | 零向量副作用 | Embed + Upsert（服务 hybrid 读） |
 
 - `syncUpsert` 去掉 `semanticEnabled(in)` 条件；`syncUpsertVec`（复用 D2 peer 已算向量）不变。  
+- **add 早退路径（MUST）**：当前 `rememberAdd` 在 D2 关闭时直接 `return f.session.Remember(...)`，根本不经过 `syncUpsert`——必须改为写入成功后同样调用 `syncUpsert`（replace 路径已有调用点，add 早退分支需补）。  
 - D2 peer 发现（`vectorPeers`）与裁决流程不动。  
 - E1 规格「D2 关闭时零 Embed」承诺由本规格**显式取代**（写放大与 hybrid 收益绑定；熔断兜底）。
 
@@ -109,6 +112,8 @@ message RuntimeToolsConfig {
   optional bool hybrid_recall = 9;  // unset = 开；false = 该 Agent 读路径只走 LIKE
 }
 ```
+
+**三态贯穿（MUST）**：`unset = 开` 要求 presence 信息全链路保留——proto `optional bool`、`biz.RuntimeToolsConfig` 用 `*bool`、`internal/data/model` 持久化列（JSON）同样用 `*bool` / omitempty。`RuntimeToolsFromProto` 必须用 `HasHybridRecall()`（或 `p.HybridRecall != nil`）判定 presence，**禁止**只调 `GetHybridRecall()`（会把 unset 坍缩成 false，导致默认关）。Update 语义：请求未携带该字段时保留原值。
 
 **biz**：
 
@@ -144,11 +149,11 @@ agent 查不到 / AgentID 空 / HybridRecall == nil → true
 
 | 项 | 值 |
 |----|-----|
-| Embed 超时 | 独立 context，常量 800ms |
+| Embed 超时 | 独立子 context，常量 800ms（仅读路径） |
 | 查询向量缓存 | 进程内 LRU，key = `agentID + "\x00" + query`，容量 64；同一轮 Prefetch 的 user+session 两次 Recall 只 Embed 一次 |
-| 熔断 | 复用 E1 `embedTripped`（读写共用；Embed error 才 trip，超时不 trip） |
+| 熔断 | 复用 E1 `embedTripped`（读写共用同一标志位）；trip 判定见 §2.1 失败语义 |
 
-缓存实现放 framework（Facade 内或独立小结构），不引第三方依赖。
+缓存实现放 framework（Facade 内或独立小结构），不引第三方依赖；**MUST 并发安全**（互斥锁或等价——Prefetch 的连续 Recall 与 `memory_recall` 工具调用可并发发生）。
 
 ---
 
@@ -172,20 +177,22 @@ agent 查不到 / AgentID 空 / HybridRecall == nil → true
 |---|------|------|
 | 1 | hybrid 开、索引热 | 无共享子串的语义近邻进结果；`Score > 0` |
 | 2 | 仅 LIKE 能命中（该 unit 无向量） | 结果仍含该 unit（稀疏索引不丢字面命中） |
-| 3 | Embed error | 回退 LIKE；同进程再次 Recall 不再调 Embed（熔断） |
-| 4 | Embed 超时 | 回退 LIKE；不 trip；后续调用仍尝试向量 |
+| 3 | Embed error（非超时/取消） | 回退 LIKE；同进程再次 Recall 不再调 Embed（熔断） |
+| 4 | Embed 超时（800ms 子 context 到期） | 回退 LIKE；不 trip；后续调用仍尝试向量 |
 | 5 | `HybridRecall` 回调返回 false | 不调 Embed/Search，纯 LIKE |
 | 6 | 回调 nil / AgentID 空 | 默认走 hybrid（若 `vectorReady`） |
 | 7 | 空 query | 不 Embed；行为与现有 backend 一致 |
-| 8 | 写解耦 | `ToolSemanticConflict=false` 且非 turn_extract 的 add 仍 Upsert |
+| 8 | 写解耦 | `ToolSemanticConflict=false` 且非 turn_extract 的 add 仍 Upsert（覆盖 `rememberAdd` 早退分支） |
 | 9 | RRF 去重 | 同 unit 两路命中只留一条，分数为两路贡献之和 |
 | 10 | Prefetch 传 AgentID | user/session `RecallQuery.AgentID` == PrefetchQuery.AgentID |
+| 11 | fail-open 截断 | Embed 失败时返回条数 ≤ `effLimit`（LIKE 的 `N=2*effLimit` 不泄漏） |
+| 12 | MinScore 忽略 | `q.MinScore=0.9` 不影响 units hybrid 返回 |
+| 13 | 查询向量缓存 | 同 agentID+query 连续两次 Recall 只 Embed 一次；并发 Recall 下无 data race（`-race`） |
 
 ### Portal 单测
 
 1. `HybridRecall=nil` → gate true；`=false` → gate false；agent 查不到 → true。  
-2. proto `optional bool` round-trip（unset / true / false）经 Create/Update/Get。  
-3. 查询向量缓存：同 agentID+query 连续两次 Recall 只 Embed 一次。
+2. proto `optional bool` round-trip（unset / true / false）经 Create/Update/Get；Update 未携带字段时保留原值；`RuntimeToolsFromProto` 对 unset 产出 nil 而非 false。
 
 ### 验收（手工 / 集成）
 
