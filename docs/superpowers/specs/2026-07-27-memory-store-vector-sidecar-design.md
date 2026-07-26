@@ -305,7 +305,7 @@ CREATE INDEX IF NOT EXISTS idx_uv_scope ON unit_vectors(scope_type, scope_id);
 | Embed 时 AgentID 空且无 aux | 与 D2 一致：解析失败 → error → 当次回退 LIKE 并触发熔断 |
 | sidecar 与主表漂移 | Delete 直接 id + hydrate active；接受短暂不一致 |
 | SQLite 全表扫 | 会话事实量小；E2 ANN |
-| D2 刚开启时索引冷 | 仅此后写入有向量；可接受，rebuild 归后续 |
+| D2 刚开启时索引冷 | 仅此后写入有向量；存量 → [P2-E2.1 backfill](./2026-07-26-memory-store-vector-backfill-design.md) |
 | 插件接口固化 | 字段最小；Score 钉死 [-1,1] |
 
 ---
