@@ -1,6 +1,6 @@
 # MemoryStore P2-D1：结构化 supersede + ConflictResolver 接口
 
-> 状态：实现中  
+> 状态：已交付  
 
 > 日期：2026-07-25  
 > 回链：[门面 §8.3](./2026-07-25-memory-store-facade-design.md)、[P2-A user scope](./2026-07-25-memory-store-user-scope-design.md)、[P2-C turn extract](./2026-07-25-memory-store-turn-extract-design.md)  
@@ -170,11 +170,9 @@ Hit metadata 建议带：`status`、`supersedes_id`（若有），便于工具/�
 
 ---
 
-## 6. 后续：P2-D2（规格预留，本迭代不实现）
+## 6. 后续：P2-D2
 
-- `LLMConflictResolver`：在 `add`（含 Turn 提取）时对同 scope active units 做语义矛盾检测。  
-- 决策映射：Ignore / Supersede / KeepBoth。  
-- 需独立规格：提示词、费用、fail-open、与 hash 去重的优先级。
+→ [2026-07-26-memory-store-llm-conflict-design.md](./2026-07-26-memory-store-llm-conflict-design.md)（`SemanticConflictResolver`；hash → Recall top-K → LLM；fail-closed）。
 
 ---
 
