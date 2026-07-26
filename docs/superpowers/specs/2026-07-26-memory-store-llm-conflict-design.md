@@ -88,15 +88,35 @@ type SemanticConflictResolver interface {
 
 | 字段 | 含义 |
 |------|------|
-| `SemanticConflicts SemanticConflictResolver` | nil = 不做语义步骤 |
+| `SemanticConflicts SemanticConflictResolver` | nil = 永不跑语义步骤（直 add，仍做 hash） |
 | `SemanticConflictK int` | Recall limit，默认 **8** |
+| `ToolSemanticConflict bool` | **工具** `add` 是否启用语义冲突；默认 **false** |
 | （既有）`Conflicts ConflictResolver` | 仅 `replace`；nil → Structural |
 
-`rememberUnits`：
+提取路径**不**用单独 Facade 布尔：由调用方在 `RememberInput.Metadata["source"]=="turn_extract"` 标明（P2-C Pipeline 已写该字段）。Portal 仅在 `memory_extraction.enabled` 时跑 Pipeline；故「提取开 ⇒ 提取 add 可走语义」由 **Pipeline 是否调用 + Facade 见 `source=turn_extract`** 共同保证。
+
+`rememberUnits(add)` 语义分支伪代码：
+
+```text
+if hash hit → skip (MemoryHit{}, nil)
+enabled := false
+if f.SemanticConflicts != nil {
+  if meta source == "turn_extract" {
+    enabled = true          // 提取路径：见 source 即启用语义（上游已受 extraction 开关约束）
+  } else if f.ToolSemanticConflict {
+    enabled = true          // 工具路径：独立开关
+  }
+}
+if !enabled → backend add
+peers := Recall(... K ...)
+if len(peers)==0 → backend add
+verdict, err := SemanticConflicts.ResolveAdd(...)
+...
+```
 
 | Action | 行为 |
 |--------|------|
-| `add` | §2 流程图；见下「语义启用」 |
+| `add` | 上表编排 |
 | `replace` | **仅** D1 `Conflicts` 门闩 → backend supersede（不变） |
 | `remove` | 直 backend（不变） |
 
@@ -104,20 +124,23 @@ type SemanticConflictResolver interface {
 
 **Target 校验：** `TargetUnitID` 必须 ∈ 本次 `peers`，且 Get 后为 `active`；否则视为无效裁决 → fail-closed 不写。
 
-### 2.3 语义启用条件
+### 2.3 语义启用条件（Portal ↔ Facade）
 
-| 调用路径 | 启用条件 |
-|----------|----------|
-| Turn 提取产生的 `add` | `memory_extraction.enabled`（及现有 env）为 true，**且**已装配 `SemanticConflicts` + 可用模型 |
-| 工具 `memory_remember(add)` | **独立** `memory_conflict.enabled` / `SATH_MEMORY_CONFLICT_ENABLED`（**默认 false**），且已装配 resolver + 模型 |
+| 调用路径 | Portal | Facade |
+|----------|--------|--------|
+| Turn 提取 `add` | 仅当 `memory_extraction.enabled`（+ env）为 true 时调用 Pipeline；Pipeline `Metadata source=turn_extract` | `SemanticConflicts != nil` 且 `source=turn_extract` → 跑语义 |
+| 工具 `memory_remember(add)` | 将 `memory_conflict.enabled` / `SATH_MEMORY_CONFLICT_ENABLED`（**默认 false**）映射为 `FacadeConfig.ToolSemanticConflict` | `SemanticConflicts != nil` 且 `ToolSemanticConflict` → 跑语义 |
 
-未配置模型 / resolver=nil：跳过语义步骤并 **直 add**（与「调用失败 fail-closed」区分：未配置 ≠ 调用失败）。
+未装配 resolver（nil）：两路径都跳过语义并 **直 add**（未配置 ≠ 调用失败）。  
+有 resolver 但工具开关 false：工具 `add` 直 add；提取 `add` 仍可按 `source=turn_extract` 跑语义。
 
 ### 2.4 候选集与 hash
 
-1. Facade 对 session/user `add` **统一**做 active `content_hash` 检查（与 P2-C List 扫描语义一致）；命中 → 不写。  
+1. Facade 对 session/user `add` **统一**做 active `content_hash` 检查（与 P2-C List 扫描语义一致）；命中 → 不写，返回 `(MemoryHit{}, nil)`。  
 2. Pipeline 可保留自身 hash 预过滤（优化，非唯一关卡）。  
 3. Recall：`source=units`，`query=candidate.Content`，`limit=K`。  
+   - **Peer 发现依赖现有关键词/LIKE 子串匹配**（非向量）。措辞完全不同、无共享子串的「矛盾事实」可能 peers 为空 → **直 add**（本切片接受该限制；向量预筛另开迭代）。  
+   - 验收用例构造须保证矛盾对在现有 Recall 下能互相命中（共享关键词/子串），或显式断言「peers 空 → 直 add」。  
 4. peers 为空 → 直 add，不调 LLM。  
 5. 仅 `scope=session|user`。
 
@@ -134,34 +157,35 @@ type SemanticConflictResolver interface {
 
 ### 2.6 LLM 约束
 
-- 输入：candidate + peers（id、content；单条截断）。  
+- 输入：candidate + peers（id、content；单条 content 截断对齐 P2-C `maxTurnFactBytes`=2048）。  
 - 输出：`{"decision":"supersede"|"ignore"|"keep_both","target_unit_id":"..."}`。  
 - `supersede` 时 `target_unit_id` 必填且 ∈ peers。  
-- 模型：复用提取 auxiliary 或 Agent chat model（与 P2-C 解析策略一致）。  
-- 单次 completion；短超时。  
+- 模型：复用提取 auxiliary 或 Agent chat model（与 P2-C JSON 解析 / fail 策略一致）。  
+- 单次 completion；短超时（建议与提取 auxiliary 同级或更短）。  
 - 日志：decision、target、耗时；不记录全文 prompt。
 
 ---
 
 ## 3. Portal 接线
 
-- 有 LLM client 时注入 `LLMSemanticConflictResolver`。  
-- `agent_extra.yaml`：`memory_conflict.enabled`（默认 false）+ env 覆盖。  
-- 提取路径不另设总闸：跟随 `memory_extraction.enabled`。  
-- 更新 `docs/memory-integration.md`（P2-D2 小节）；Backlog 去掉「LLM 语义冲突」或标已规格化。
+- 有可用 LLM client 时注入 `LLMSemanticConflictResolver`；否则 `SemanticConflicts=nil`。  
+- `agent_extra.yaml`：`memory_conflict.enabled`（默认 false）+ `SATH_MEMORY_CONFLICT_ENABLED` → `FacadeConfig.ToolSemanticConflict`。  
+- 提取路径不另设 Facade 布尔：跟随 `memory_extraction.enabled`；Pipeline 继续写 `source=turn_extract`。  
+- 更新 `docs/memory-integration.md`（P2-D2 小节）；Backlog 标已规格化 / 实现中。
 
 ---
 
 ## 4. 测试与验收
 
 1. hash 命中 → 不调 LLM、不写。  
-2. 开关关 / resolver nil / 无模型 → 直 add。  
+2. `ToolSemanticConflict=false` 且非 `turn_extract` → 直 add；`SemanticConflicts=nil` → 任意 add 直 add。  
 3. peers 空 → 直 add。  
 4. KeepBoth → 两条 active。  
-5. Supersede → 新 id、旧 superseded；Recall 只见新。  
+5. Supersede（peers 经 LIKE 可命中）→ 新 id、旧 superseded；Recall 只见新。  
 6. LLM error / 非法 JSON / 非法 target → 不写。  
 7. 工具 `replace` 仍仅 Structural。  
-8. 提取开：矛盾事实可 supersede；P2-C hash 回归仍绿。  
+8. 提取开 + resolver 已注入：构造 **Recall 可命中** 的矛盾对 → supersede；P2-C hash 回归仍绿。  
+9. `ToolSemanticConflict=false` + 注入 stub resolver：工具 add **不**调用 stub；`source=turn_extract` 的 add **会**调用 stub。
 
 验收：两开关默认关时与现网一致；无新迁移。
 
@@ -171,10 +195,11 @@ type SemanticConflictResolver interface {
 
 | 位置 | 变更 |
 |------|------|
-| `framework/memory/conflict.go`（或 `semantic_conflict.go`） | `SemanticConflictResolver`、Verdict、LLM 实现 |
-| `framework/memory/facade.go` | add 编排；hash；K |
+| `framework/memory/semantic_conflict.go`（新建，或扩 `conflict.go`） | `SemanticConflictResolver`、Verdict、LLM 实现 |
+| `framework/memory/facade.go` | add 编排；hash；K；`ToolSemanticConflict` |
+| `framework/memory/turn_extract.go` | `Remember` 后仅当返回 hit 含非空 `ID` 时 `written++`（Ignore/hash skip 不计） |
 | `framework/memory/*_test.go` | §4 用例 |
-| Portal `memory_store` / agent_extra / extract 接线 | 双开关 + 注入 |
+| Portal `memory_store` / agent_extra / extract 接线 | 双开关映射 + 注入 |
 | `portal/docs/memory-integration.md` | 文档 |
 
 ---
