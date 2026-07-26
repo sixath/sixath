@@ -22,7 +22,7 @@
 
 | 项 | 归属 |
 |----|------|
-| 存量 units backfill / rebuild | 后续（老数据靠 LIKE 支路） |
+| 存量 units backfill / rebuild | **P2-E2.1 已交付** → [./2026-07-26-memory-store-vector-backfill-design.md](./2026-07-26-memory-store-vector-backfill-design.md) |
 | `QdrantUnitVectorIndex` / ANN | E3 |
 | agent files / transcript 向量化 | 不做 |
 | 改 D2 裁决语义或 peer 发现逻辑 | 不动（peer 发现继续按 E1） |
@@ -220,7 +220,7 @@ agent 查不到 / AgentID 空 / HybridRecall == nil → true
 | 风险 | 缓解 |
 |------|------|
 | Prefetch 每轮多一次 Embed 延迟 | 800ms 超时 + LRU 缓存 + fail-open |
-| 存量 units 无向量 | LIKE 支路保底；backfill 归后续 |
+| 存量 units 无向量 | LIKE 支路保底；backfill → [P2-E2.1](./2026-07-26-memory-store-vector-backfill-design.md) |
 | 写放大（每条 units 写入都 Embed） | 熔断兜底；与 hybrid 收益绑定 |
 | `Score` 语义变化影响展示 | Prefetch 不受影响；工具展示变化为有意，文档注明 |
 | proto `optional` 前端三态成本 | 本切片仅 API；UI follow-up |
@@ -230,7 +230,7 @@ agent 查不到 / AgentID 空 / HybridRecall == nil → true
 
 ## 7. 后续（非本切片）
 
-- 存量 backfill / rebuild CLI。  
+- ~~存量 backfill / rebuild CLI~~ → **P2-E2.1 已交付**：[./2026-07-26-memory-store-vector-backfill-design.md](./2026-07-26-memory-store-vector-backfill-design.md)。  
 - E3：`QdrantUnitVectorIndex` / ANN。  
 - RRF k、Embed 超时、MinScore 可配置化。  
 - 前端 Agent 面板「混合召回」开关。

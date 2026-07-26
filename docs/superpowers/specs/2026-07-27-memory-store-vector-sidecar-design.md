@@ -313,6 +313,7 @@ CREATE INDEX IF NOT EXISTS idx_uv_scope ON unit_vectors(scope_type, scope_id);
 ## 7. 后续（非本切片）
 
 - **E2**：已交付 → [./2026-07-26-memory-store-hybrid-recall-design.md](./2026-07-26-memory-store-hybrid-recall-design.md)  
+- **E2.1**：已交付 → [./2026-07-26-memory-store-vector-backfill-design.md](./2026-07-26-memory-store-vector-backfill-design.md)（`Has` + Backfiller + 启动 job + CLI）  
 - **E3**：`QdrantUnitVectorIndex`。  
-- Rebuild / backfill；级联 id 回传 Delete。  
+- 级联 id 回传 Delete。  
 - Neo4j 图记忆。
