@@ -1,6 +1,6 @@
 # Agent 面板 Hybrid Recall UI（切片 C）
 
-> 状态：已定稿  
+> 状态：已交付  
 > 日期：2026-07-26  
 > 回链：[P2-E2 Hybrid Recall](./2026-07-26-memory-store-hybrid-recall-design.md)、[P2-E2.1 Vector Backfill](./2026-07-26-memory-store-vector-backfill-design.md)、[portal `memory-integration.md`](../../../portal/docs/memory-integration.md)  
 > 前置：Portal API 已交付 `runtime_tools.hybrid_recall`（`optional bool`）；gate unset=开、`false`=仅 LIKE  

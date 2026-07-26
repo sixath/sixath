@@ -231,6 +231,6 @@ agent 查不到 / AgentID 空 / HybridRecall == nil → true
 ## 7. 后续（非本切片）
 
 - ~~存量 backfill / rebuild CLI~~ → **P2-E2.1 已交付**：[./2026-07-26-memory-store-vector-backfill-design.md](./2026-07-26-memory-store-vector-backfill-design.md)。  
+- ~~前端 Agent 面板「混合召回」开关~~ → **已交付**：[./2026-07-26-agent-hybrid-recall-ui-design.md](./2026-07-26-agent-hybrid-recall-ui-design.md)（web `feat/hybrid-recall-ui`）。  
 - E3：`QdrantUnitVectorIndex` / ANN。  
-- RRF k、Embed 超时、MinScore 可配置化。  
-- 前端 Agent 面板「混合召回」开关。
+- RRF k、Embed 超时、MinScore 可配置化。
