@@ -15,7 +15,7 @@
 1. 引入 **可插拔** `UnitVectorIndex` 接口（framework 稳定边界），写路径与 D2 peer 发现只认接口，不绑具体存储。  
 2. 本切片交付首个 provider：**SQLiteUnitVectorIndex**（独立 `.db`，BLOB 向量 + 余弦近邻）。  
 3. D2 peer 发现在索引可用时改为：**embed 候选 → Search top-K → 回主表取 active 内容**；不可用时 **fail-open 回退 LIKE**。  
-4. **仅当本次写入会走 D2 语义门**（`semanticEnabled`：`source=turn_extract` 或 `ToolSemanticConflict`）时，才做 Embed + Upsert；D2 关闭时**零额外 Embed**。Delete 清理直接 id 在 `UnitVectors != nil` 时仍可执行（无 Embed 成本）。  
+4. **仅当本次写入会走 D2 语义门**（`semanticEnabled`：`source=turn_extract` 或 `ToolSemanticConflict`）时，才做 Embed + Upsert；D2 关闭时**零额外 Embed**。Delete 清理直接 id 在 `UnitVectors != nil` 时仍可执行（无 Embed 成本）。**E2 起**：该「D2 关闭零 Embed」承诺已被 [P2-E2](./2026-07-26-memory-store-hybrid-recall-design.md) 取代（成功 units 写入在 `vectorReady` 时即 Upsert）。  
 5. Embedder **复用**与 D2 相同的模型解析：`memory_extraction.auxiliary`，否则当前 Agent chat model（按调用动态解析，携带 `AgentID`）；不单列冲突开关。  
 6. Embed **进程级负缓存/熔断**（MUST）：首次或连续 Embed 失败后降级为本进程向量路径不可用，避免每次写入重复打失败的 `/embeddings`。  
 7. 后续可加 Qdrant / 内存 / 列存等实现，**不改 Facade 编排**。
@@ -312,7 +312,7 @@ CREATE INDEX IF NOT EXISTS idx_uv_scope ON unit_vectors(scope_type, scope_id);
 
 ## 7. 后续（非本切片）
 
-- **E2**：`Recall(source=units)` hybrid；可选 D2 关闭时预热。  
+- **E2**：已交付 → [./2026-07-26-memory-store-hybrid-recall-design.md](./2026-07-26-memory-store-hybrid-recall-design.md)  
 - **E3**：`QdrantUnitVectorIndex`。  
 - Rebuild / backfill；级联 id 回传 Delete。  
 - Neo4j 图记忆。

@@ -1,6 +1,6 @@
 # MemoryStore P2-E2：units Hybrid Recall（RRF 融合 + 写路径解耦）
 
-> 状态：设计中  
+> 状态：已交付  
 > 日期：2026-07-26  
 > 回链：[P2-E1 向量 Sidecar](./2026-07-27-memory-store-vector-sidecar-design.md)、[门面 §8.3](./2026-07-25-memory-store-facade-design.md)、[P2-D2 LLM 语义冲突](./2026-07-26-memory-store-llm-conflict-design.md)  
 > 前置：P2-E1（`UnitVectorIndex` + SQLite + D2 peer 发现）已交付  

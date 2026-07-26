@@ -443,7 +443,8 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
    → **P2-D2**：[2026-07-26-memory-store-llm-conflict-design.md](./2026-07-26-memory-store-llm-conflict-design.md)（LLM 语义冲突；待实现）。  
 
 4. **向量 Sidecar**：`UnitVectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
-   → **P2-E1**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（已交付＝可插拔接口 + SQLite provider + D2 peer 发现；**E2** hybrid recall / **E3** 其他 provider 待开）。  
+   → **P2-E1**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（已交付＝可插拔接口 + SQLite provider + D2 peer 发现）。  
+   → **P2-E2**：[2026-07-26-memory-store-hybrid-recall-design.md](./2026-07-26-memory-store-hybrid-recall-design.md)（已交付＝units LIKE∪向量 RRF hybrid + 写路径解耦 + Agent `hybrid_recall`；**E3** 其他 provider 待开）。  
 5. **可选图记忆**：Neo4j provider。  
 6. **Prefetch 策略增强**：配额、去重（user 优先车道已在 P2-A）。  
 7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（`feat/memory-store-p2b-p2c` 交付；Prefetch 仅 `StorePrefetchBackend`）；评估合并冗余 FTS；去掉旧配置键（`SATH_MEMORY_WRITE_ENABLED` 重命名仍后续）。  
