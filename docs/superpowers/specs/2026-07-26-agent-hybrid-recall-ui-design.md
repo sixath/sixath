@@ -75,8 +75,8 @@
 // RuntimeToolsConfig 增加
 hybrid_recall?: boolean
 
-// normalize：保留 true | false | undefined（snake + camel）
-hybrid_recall: cfg.hybrid_recall ?? cfg.hybridRecall  // 注意 false 不能被 ?? 吃掉——应用显式 hasOwn / typeof === 'boolean'
+// normalize：用显式布尔检测，保留 true | false | undefined（snake + camel）
+// 禁止 `cfg.hybrid_recall ?? cfg.hybridRecall` 单独依赖 ??（false 安全，但缺 key 与显式需分清）
 
 // serializeRuntimeTools：
 // 1) 对 RUNTIME_TOOL_FIELDS 仍全量 !!（防 PUT 丢 browser_enabled）
@@ -88,6 +88,8 @@ hybrid_recall: cfg.hybrid_recall ?? cfg.hybridRecall  // 注意 false 不能被 
 **禁止**将 `hybrid_recall` 加入 `RUNTIME_TOOL_FIELDS`（语义是默认开 / 显式关，与其余 opt-in 相反）。
 
 编码助手预设**不**设置 `hybrid_recall`（保持 omit）。
+
+**重映射落点（§4.1）：**「跟随默认 → 有显式历史时发 `true`」发生在 **AgentForm 提交路径**（组装 `runtime_tools` / 调用 `serializeRuntimeTools` **之前**），不塞进 `serializeRuntimeTools` 内部——后者只负责「已有 `undefined|true|false` → wire JSON」。
 
 ---
 
@@ -103,9 +105,17 @@ hybrid_recall: cfg.hybrid_recall ?? cfg.hybridRecall  // 注意 false 不能被 
 
 ### e2e `e2e/agent-runtime-tools.spec.ts` + `helpers/mock-api.ts`
 
-- 选「关」→ POST/PUT body 含 `hybrid_recall: false`  
-- 选「跟随默认」→ body **不含** `hybrid_recall`  
-- 详情页 unset 显示「跟随默认」，不显示为关  
+按 Create / Update 分场景（对齐 §4.1，禁止笼统写「跟随默认 → 永不带字段」）：
+
+| 场景 | 期望 body |
+|------|-----------|
+| **Create** + 选「跟随默认」 | **不含** `hybrid_recall` |
+| **Create** + 选「关」 | `hybrid_recall: false` |
+| **Update**，加载时无显式值 + 选「跟随默认」 | **不含** `hybrid_recall` |
+| **Update**，加载时已有显式 `false` + 改选「跟随默认」 | `hybrid_recall: true`（不能 omit，否则 portal 保留库中 `false`） |
+| **Update** + 选「关」 | `hybrid_recall: false` |
+
+详情页：unset 显示「跟随默认」，不显示为关。
 
 ### 命令
 
@@ -155,11 +165,15 @@ Portal 已实现：Update 请求**省略** `hybrid_recall` 时**保留库中 pre
 
 ## 6. 验收清单
 
+**Web（本切片主交付）**
+
 1. 新建 Agent 默认「跟随默认」，创建请求无 `hybrid_recall`。  
-2. 编辑改为「关」，详情显示关，后续对话读路径仅 LIKE（需后端已部署 E2）。  
-3. 改为「开」或从关改「跟随默认」（有显式历史时发 `true`），hybrid 恢复。  
-4. 单测 + e2e 绿。  
-5. 三仓 `feat/p2e-vector-sidecar` PR 已开。  
+2. 编辑改为「关」，详情显示关；有显式历史时再选「跟随默认」→ body 含 `true`（非 omit）。  
+3. 单测 + e2e 绿。  
+
+**Sidecar 收尾（可与 web 并行，独立验收闸）**
+
+4. `framework` / `portal` / monorepo docs 的 `feat/p2e-vector-sidecar` 各自 Push + PR 已开（portal 不含 `internal/service/data/`）。  
 
 ---
 
