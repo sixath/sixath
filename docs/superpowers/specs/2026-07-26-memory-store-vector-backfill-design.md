@@ -4,7 +4,7 @@
 > 日期：2026-07-26  
 > 回链：[P2-E2 Hybrid Recall](./2026-07-26-memory-store-hybrid-recall-design.md)、[P2-E1 向量 Sidecar](./2026-07-27-memory-store-vector-sidecar-design.md)、[门面 §8.3](./2026-07-25-memory-store-facade-design.md)  
 > 前置：P2-E1（`UnitVectorIndex` + Embedder）、P2-E2（写路径解耦 + hybrid 读）已交付  
-> 切片：**E2.1 only** — 共享 `UnitBackfiller` + `Has` 接口扩展 + 启动增量 job + CLI；不做 Qdrant、分布式锁、前端 UI、断点续跑
+> 切片：**E2.1 only** — `Has` 接口 + `UnitBackfiller` + Facade `EmbedTripped` 可注入共享 + 启动增量 job + CLI；不做 Qdrant、分布式锁、前端 UI、断点续跑、keyset 分页
 
 ---
 
@@ -15,8 +15,9 @@
 1. 把存量 `status=active` 的 session/user units 补进 `UnitVectorIndex`，使 E2 hybrid 对老数据也有向量支路。  
 2. **同一套核心**：启动增量 job 与 CLI 共用 `UnitBackfiller`。  
 3. 默认只补缺（sidecar 对比）；CLI `--force` 才对已有向量重 Embed。  
-4. 不阻塞对话：后台限速 + 复用 E1 进程级 `embedTripped` 熔断；失败跳过单条，不回滚主表。  
-5. Embed 模型按 **unit 的 `agent_id`** 解析（与在线写路径一致）；空则走 auxiliary，仍失败则 skip。
+4. 不阻塞对话：后台限速 + 与 Facade **共享**进程级 `embedTripped`（本切片导出 `FacadeConfig.EmbedTripped *atomic.Bool`）；失败跳过单条，不回滚主表。  
+5. Embed 模型按 **unit 的 `agent_id`** 解析（与在线写路径一致）；空则走 auxiliary，仍失败则 skip。  
+6. Backfiller 经 `SessionUnitsBackend.List` 扫库（**禁止**经 Facade.List，避免 user 空 ScopeID 静默空结果）。
 
 ### 非目标
 
@@ -91,34 +92,54 @@ framework 新建（名称可微调）：
 
 ```go
 type BackfillConfig struct {
-	Store        MemoryStore       // List active
-	Index        UnitVectorIndex   // Has + Upsert
+	// Units MUST be SessionUnitsBackend (Portal MySQL / in-memory), NOT Facade.
+	// Facade.List(ScopeUser, ScopeID="") silently returns empty — would zero-scan user corpus.
+	Units        SessionUnitsBackend
+	Index        UnitVectorIndex // Has + Upsert
 	Embedder     UnitEmbedder
 	Force        bool
 	DryRun       bool
 	BatchSize    int           // default 50
 	BatchSleep   time.Duration // default 200ms
 	Scopes       []Scope       // default session + user
-	EmbedTripped *atomic.Bool  // nil → 自建；Portal 注入与 Facade 同实例
+	EmbedTripped *atomic.Bool  // nil → 自建；Portal 注入 Facade 同指针（见 §2.5）
 }
 
 type BackfillStats struct {
 	Scanned  int
 	Missing  int // Force 时计为「将重算」的候选数
 	Upserted int
-	Skipped  int
-	Failed   int
+	Skipped  int // 空内容、缺 scopeID、agent 解析失败等可跳过项
+	Failed   int // Upsert 返回 error（非维度致命）时 +1，继续下一条
 	Tripped  bool
 }
 
 func (b *UnitBackfiller) Run(ctx context.Context) (BackfillStats, error)
 ```
 
-**分页**：对每个 scope，用 `ListFilter{Scope, Status:"active", Limit:BatchSize, Offset}` 递增 Offset，直到不足一页。`ScopeID` 空 = 该 scope 下全部（依赖 Portal List 支持）。
+**分页**：对每个 scope，用 `ListFilter{Scope, Status:"active", Limit:BatchSize, Offset}` 递增 Offset（`ScopeID` 空），直到不足一页。**MUST** 调 `Units.List`，禁止经 Facade。
+
+**scopeID 推导与 Has 分组（MUST）**：`MemoryHit` 无独立 ScopeID 字段。每条 hit：
+
+| Scope | scopeID 来源 |
+|-------|----------------|
+| session | `Metadata["source_session_id"]`（string） |
+| user | `Metadata["user_id"]`（string） |
+
+缺失或空白 → `Skipped++`，不 Embed。同一页内按推导出的 `scopeID` **分组**，每组一次 `Has(ctx, scope, scopeID, ids)`，再按 Force/缺向量决定 Embed。
 
 **AgentID**：`Metadata["agent_id"]`（string）；空则 `Embed(ctx, "", texts)`，由 Portal Embedder 走 aux 回退。
 
 **DryRun（MUST）**：**不**调用 Embed、**不** Upsert；只 List + Has 统计 `Scanned`/`Missing`。
+
+**错误分类**
+
+| 事件 | 计数 / 行为 |
+|------|-------------|
+| Upsert 一般错误 | `Failed++`，继续 |
+| Upsert 维度不匹配（SQLite dims） | 提前结束 Run，返回 error；文档提示删 sidecar DB 再 `--force` |
+| Embed 能力性错误（未实现 Embed、鉴权/网关类） | trip 共享 breaker，本轮结束，`Tripped=true` |
+| 空 Content / 缺 scopeID / agent 解析失败 | `Skipped++`，不 trip |
 
 ### 2.4 启动 job vs CLI
 
@@ -153,13 +174,23 @@ backfill-vectors [--conf configs] [--force] [--dry-run] \
 |------|------|
 | Backfill 与 Remember 并发 Upsert 同 id | 后写覆盖；可接受短暂重复 Embed |
 | 扫后 unit 被 soft-delete | Upsert 残留靠 hydrate 过滤（同 E1） |
+| Offset 分页期间并发 soft-delete / Replace | 本轮可能**漏扫**部分行；下次启动 job / CLI 补齐（**可接受**；Has 兜底使重复扫安全） |
+| Offset 分页期间并发新增 | 可能重扫已处理行；Has 跳过，安全 |
 | 多副本并行 Force | **不做**分布式锁；文档：多副本勿并行 Force |
 
-**熔断**
+**熔断共享（MUST，本切片交付）**
 
-- 与 Facade 共享 `embedTripped`（或包装同一 Embedder）。  
-- Embed **能力性错误**（未实现 Embed、鉴权/网关类、连续失败策略与 E1 写路径一致）→ trip，**本轮 Run 提前结束**（已处理页保留）。  
-- 空内容、agent 解析失败 → `Skipped++`，不 trip。  
+`Facade.embedTripped` 今日为未导出值字段，无法共享。本切片**必须**改 Facade：
+
+```go
+// FacadeConfig
+EmbedTripped *atomic.Bool // nil → NewFacade 内自建；非 nil → 读写该指针
+
+// Facade 内部持 *atomic.Bool（与 Config 同源）
+```
+
+Portal 在装配时：先建共享 `var tripped atomic.Bool`（或 `new(atomic.Bool)`），同时注入 `FacadeConfig.EmbedTripped` 与 `BackfillConfig.EmbedTripped`。  
+Backfiller 的 trip 条件由自身错误分类决定（§2.3 表）；trip 后写共享 breaker，使在线 hybrid/写 Upsert 同步降级（语义同 E1「失败即降级」）。
 
 **限速**：批间 `BatchSleep`（默认 200ms）；BatchSize 默认 50。
 
@@ -173,8 +204,9 @@ backfill-vectors [--conf configs] [--force] [--dry-run] \
 
 | 组件 | 关系 |
 |------|------|
-| P2-E1 | 扩展 `Has`；复用 Index/Embedder/熔断 |
+| P2-E1 | 扩展 `Has`；复用 Index/Embedder；导出共享 `EmbedTripped` |
 | P2-E2 | 补齐存量后 hybrid 向量支路有数据；不改 Recall 编排 |
+| `SessionUnitsBackend` | Backfiller **只**经此 List；禁止 Facade |
 | `memory_units` MySQL | 只读 List；无 migration |
 | Prefetch / 对话路径 | 不被阻塞；job 异步 |
 
@@ -191,11 +223,14 @@ backfill-vectors [--conf configs] [--force] [--dry-run] \
 | 3 | 补缺 | 3 active、1 已有向量 → Embed 2 次；Stats 正确 |
 | 4 | Force | Embed 3 次 |
 | 5 | DryRun | 无 Embed、无 Upsert；Missing 有值 |
-| 6 | 能力性 Embed 错误 | Tripped；Run 提前结束 |
-| 7 | 单条 skip | 空内容 → Skipped，继续 |
+| 6 | 能力性 Embed 错误 | Tripped；Run 提前结束；共享 breaker 被置位 |
+| 7 | 单条 skip | 空内容 / 缺 scopeID → Skipped，继续 |
 | 8 | 分页 | BatchSize=2、5 条 → 扫完无重复无遗漏 |
 | 9 | scope 过滤 | 只 session 不碰 user |
 | 10 | AgentID 传递 | Embed 收到 unit 的 agent_id |
+| 11 | 页内多 scopeID | 分组 Has；各 scope 隔离正确 |
+| 12 | Facade EmbedTripped 注入 | NewFacade 非 nil 指针与 Backfiller 共享；一方 trip 另一方可见 |
+| 13 | Upsert 失败 | Failed++，不 trip，继续 |
 
 ### Portal
 
@@ -227,8 +262,11 @@ backfill-vectors [--conf configs] [--force] [--dry-run] \
 |------|------|
 | 大库启动扫描成本 | 限速 + 只补缺；建议首次用 CLI |
 | 多副本重复 Embed | 文档约束；Upsert 幂等 |
-| 维度基准冲突 | 报错提示删 DB 再 force |
+| 维度基准冲突 | Upsert 报错提前结束；提示删 DB 再 force |
 | Metadata 无 agent_id | aux 回退；再失败 skip |
+| Offset 深分页 O(n²) | 本切片接受；§7 后续 keyset 游标 |
+| 并发 delete 漏扫 | 下次 job 补齐（§2.5 已声明可接受） |
+| 误注入 Facade 作 Store | 类型钉死 `SessionUnitsBackend` + 测试/文档警示 |
 
 ---
 
@@ -236,5 +274,6 @@ backfill-vectors [--conf configs] [--force] [--dry-run] \
 
 - 前端 hybrid_recall 开关 UI（切片 C）。  
 - E3 Qdrant。  
+- keyset 分页（按 id 游标）替代 Offset。  
 - 断点续跑 / yaml 可配限速。  
 - 模型版本字段驱动自动 rebuild。
