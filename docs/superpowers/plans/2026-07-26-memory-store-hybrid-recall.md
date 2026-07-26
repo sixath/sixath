@@ -74,7 +74,9 @@ func TestFacade_Add_D2Off_StillUpsertsVector(t *testing.T) {
 	ctx := context.Background()
 	idx := NewInMemoryUnitVectorIndex()
 	defer idx.Close()
-	emb := &countingEmbedder{vec: []float32{1, 0}}
+	emb := &fakeEmbedder{byKey: map[string][]float32{
+		"prefers dark mode": {1, 0},
+	}}
 	sess := NewSessionMemory()
 	f := NewFacade(FacadeConfig{
 		Session:              sess,
@@ -89,8 +91,8 @@ func TestFacade_Add_D2Off_StillUpsertsVector(t *testing.T) {
 	if err != nil || hit.ID == "" {
 		t.Fatalf("Remember = %+v err=%v", hit, err)
 	}
-	if emb.n != 1 {
-		t.Fatalf("embed calls = %d, want 1 (write decoupled)", emb.n)
+	if emb.count() != 1 {
+		t.Fatalf("embed calls = %d, want 1 (write decoupled)", emb.count())
 	}
 	hits, err := idx.Search(ctx, UnitVectorQuery{
 		Scope: ScopeSession, ScopeID: "s1", Vector: []float32{1, 0}, Limit: 5,
@@ -104,7 +106,7 @@ func TestFacade_Add_D2Off_StillUpsertsVector(t *testing.T) {
 // otherwise duplicate a minimal local stub in this file.
 ```
 
-若 `countingEmbedder` 已在 `facade_vector_test.go` 且同 package，直接复用。
+若 `fakeEmbedder`（`facade_vector_test.go`：`byKey` + `count()`）已可用则复用；否则在本文件新建等价 stub。计划中的 `countingEmbedder`/`fixedEmbedder` 仅为示意命名。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -139,7 +141,11 @@ if !f.semanticEnabled(in) || f.semanticConflicts == nil {
 $env:GOMAXPROCS='1'; go test ./memory -count=1 -p 1 -vet=off -run "TestFacade_Add_D2Off_StillUpsertsVector|TestFacade_"
 ```
 
-Expected: PASS（注意：E1 里「D2 关零 Upsert」类测试若存在，须按 E2 改写断言为「仍 Upsert」——搜 `D2Off` / `SkipsUpsert` / `zero` 并更新）
+Expected: PASS。**必须改写**现有 E1 断言「D2 关零 Upsert」的测试（至少）：
+- `TestFacade_D2Disabled_NoEmbedNoUpsert` → 改为期望 add 仍 Embed+Upsert（或删除该用例，由本 task #8 覆盖）
+- `TestFacade_StructuralReplace_D2Off_DeletesOldAndSkipsUpsert` → 改为 D2Off 时 Delete 旧 **且** Upsert 新（与 §2.2 表一致）
+
+先用 `rg "D2Off|D2Disabled|SkipsUpsert" memory/*_test.go` 列出全部相关用例再改。
 
 - [ ] **Step 5: Commit（framework）**
 
@@ -188,13 +194,20 @@ func TestRRFMerge_DedupSumsRanks(t *testing.T) {
 }
 
 func TestRRFMerge_TieBreakLikeThenVectorThenID(t *testing.T) {
-	// two singles with same single-list rank-1 score
+	// z and y both rank-1 on their lists → same score 1/61; a is like rank-2 → 1/62.
+	// After score: z and y tied; like-present wins over vector-only → z before y; then a.
 	like := []MemoryHit{{ID: "z"}, {ID: "a"}}
 	vec := []MemoryHit{{ID: "y"}}
 	out := rrfMerge(like, vec, 3)
-	// all score 1/61; order: like order for z,a then y
-	if out[0].ID != "z" || out[1].ID != "a" || out[2].ID != "y" {
-		t.Fatalf("tie order = %+v", out)
+	if len(out) != 3 || out[0].ID != "z" || out[1].ID != "y" || out[2].ID != "a" {
+		t.Fatalf("tie order = %+v, want z,y,a", out)
+	}
+	// equal score + both like-absent impossible here; equal score + both like-present:
+	like2 := []MemoryHit{{ID: "m"}, {ID: "n"}} // ranks 1,2
+	vec2 := []MemoryHit{{ID: "n"}, {ID: "m"}}   // ranks 1,2 → both get 1/61+1/62
+	out2 := rrfMerge(like2, vec2, 2)
+	if out2[0].ID != "m" || out2[1].ID != "n" {
+		t.Fatalf("equal dual-hit tie want like order m,n got %+v", out2)
 	}
 }
 ```
@@ -652,7 +665,7 @@ if c.HybridRecall != nil {
 
 model 同构 `*bool`；`bizRuntimeToolsToModel` / `modelRuntimeToolsToBiz` 拷贝指针（注意勿共享可变状态时可拷贝值再取址）。
 
-**Update 语义：** 若 service 层整包替换 `runtime_tools`，保持现状即可（整包 FromProto 已带 presence）。若存在字段级 merge，须「未携带则保留」——检查 `agent.go` Update；本切片若整包替换则在测试注明。
+**Update 语义（本切片）：** Portal UpdateAgent 在 `req.RuntimeTools != nil` 时**整包替换** `runtime_tools`；未携带 `runtime_tools` 则保留原 JSON。测试覆盖：(a) unset/true/false From↔ToProto；(b) Create 后 Get 保持 unset；(c) Update 不带 `runtime_tools` 时 HybridRecall 原值保留。无需字段级 merge。
 
 - [ ] **Step 5: 跑测试**
 
