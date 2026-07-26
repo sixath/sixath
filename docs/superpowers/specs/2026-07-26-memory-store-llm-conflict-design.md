@@ -45,9 +45,9 @@ D1 规格 §6 预留本切片。
 flowchart TD
   A[Facade Remember add session/user] --> H{active content_hash 命中?}
   H -->|是| Skip[不写 skipped=hash_dedupe]
-  H -->|否| On{语义冲突启用?}
+  H -->|否| On{turn_extract 或 ToolSemanticConflict?}
   On -->|否| Add[backend add]
-  On -->|是| R[Recall units top-K]
+  On -->|是| R[Recall units top-K LIKE]
   R --> Empty{peers 空?}
   Empty -->|是| Add
   Empty -->|否| L[SemanticConflictResolver.ResolveAdd]
@@ -151,9 +151,9 @@ verdict, err := SemanticConflicts.ResolveAdd(...)
 | Ignore | 不写；可选 skipped reason `conflict_ignore` |
 | KeepBoth | `backend.Remember(add)` |
 | Supersede | backend supersede 链（§2.2） |
-| LLM/超时/非法 JSON/非法 target | **fail-closed 不写**；reason `conflict_llm_error` / `conflict_invalid_target` |
+| LLM/超时/非法 JSON/非法 target | **fail-closed 不写**；Facade 返回 `(MemoryHit{}, nil)`（与 D1 `ConflictIgnore` 同形）；reason `conflict_llm_error` / `conflict_invalid_target` |
 
-对外：不因冲突检测向对话抛硬错误（工具可返回 skipped 观测字段）。
+对外：不因冲突检测向对话抛硬错误（勿向工具/Pipeline 返回 error；工具可返回 skipped 观测字段）。
 
 ### 2.6 LLM 约束
 
