@@ -32,7 +32,10 @@ $env:GOMAXPROCS='1'; go test ./memory -count=1 -p 1 -vet=off
 | `framework/memory/facade_*_test.go` | 适配 pointer breaker；共享 trip 测 |
 | `portal/internal/chat/memory_backfill.go` | 启动 job 单例 + 装配 Backfiller |
 | `portal/internal/chat/memory_backfill_test.go` | 单例 / nil Index no-op |
+| `portal/internal/chat/memory_backfill_cli.go` | CLI flag→config 纯函数 |
+| `portal/internal/chat/memory_vector.go` | `dynamicUnitEmbedder`：模型不可用时 wrap `ErrEmbedModelUnavailable` |
 | `portal/internal/chat/memory_store.go` / `memory_conflict.go` | 共享 breaker 注入 Facade |
+| `portal/internal/service/chat.go`（`newChatService`） | `BuildMemoryStore` 后调用 `StartUnitVectorBackfill(sessionUnits)` |
 | `portal/cmd/backfill-vectors/main.go` | CLI |
 | `portal/docs/memory-integration.md` | 文档 |
 | monorepo specs | E2.1 状态 / 交叉链接 |
@@ -173,7 +176,10 @@ func NewFacade(cfg FacadeConfig) *Facade {
 }
 ```
 
-所有 `f.embedTripped.Load/Store` 改为指针方法。既有测试 `f.embedTripped.Store(true)` 仍可用。
+所有 `f.embedTripped.Load/Store` 改为指针方法。既有测试 `f.embedTripped.Store(true)` 仍可用。  
+顺手更新 `Facade` 上「Rebuild 会复位 breaker」类注释：改为「若注入共享指针则跨 Facade 实例保持；仅自建指针时随实例丢弃」。
+
+测试文件需 `import "sync/atomic"`（若尚未导入）。
 
 - [ ] **Step 4: 全量 memory 回归**
 
@@ -203,9 +209,10 @@ git commit -m "feat(memory): injectable shared EmbedTripped breaker"
 
 ```go
 meta := map[string]any{
-	"source_session_id": "s1",
+	"source_session_id": "s1", // session 路径：Remember 会用 ScopeID 覆盖写出；断言以 hit.Metadata 为准
 	"agent_id":          "ag1",
 }
+// user scope 测试 MUST 显式设 Metadata["user_id"]——SessionMemory 不会自动补（MySQL 后端才会）
 ```
 
 最小用例：
@@ -300,18 +307,29 @@ git commit -m "feat(memory): UnitBackfiller for vector sidecar fill/rebuild"
 
 **Files:**
 - Modify: `portal/internal/chat/memory_store.go`、`memory_conflict.go`（或 `memory_vector.go`）
+- Modify: `portal/internal/chat/memory_vector.go`（`dynamicUnitEmbedder` 返回 sentinel）
 - Create: `portal/internal/chat/memory_backfill.go`
 - Create: `portal/internal/chat/memory_backfill_test.go`
-- Modify: `portal/cmd/backend/main.go`（或 chat bootstrap）调用 `StartUnitVectorBackfill`
+- Modify: `portal/internal/service/chat.go` 的 `newChatService`（**不是** `cmd/backend/main.go`——`sessionUnits` 只在此作用域可得）：在 `BuildMemoryStore` + `SetMemoryAgentGetter` 之后调用 `StartUnitVectorBackfill(sessionUnits)`
 
-- [ ] **Step 1: 共享 breaker**
+- [ ] **Step 1: 共享 breaker + Embedder sentinel**
 
 ```go
 var memoryEmbedTripped = &atomic.Bool{}
 ```
 
 `BuildMemoryStore` → `FacadeConfig.EmbedTripped: memoryEmbedTripped`。  
-Portal Embedder **不必**改 sentinel（在线 `embedOne` 仍任意 err trip）；Backfiller 测试用 stub。
+更新 `Facade` 旁注释：共享指针后「Rebuild Prefetch Facade 不再复位 breaker」（符合 E2.1 §2.5）。
+
+**MUST（对齐 spec §0.5）**：`dynamicUnitEmbedder.Embed` 在「解析不到可用模型」时返回：
+
+```go
+fmt.Errorf("%w: unit embed model unavailable", memory.ErrEmbedModelUnavailable)
+```
+
+至少覆盖：`resolveMemoryAuxModel` 失败、`m == nil`。这样 Backfiller `errors.Is(..., ErrEmbedModelUnavailable)` → Skipped 不 trip；在线 `embedOne` 仍对任意 err `Store(true)`（E1 行为不变）。
+
+单测：stub/集成断言「模型不可用 → Backfill Skipped、shared breaker 仍 false」。
 
 - [ ] **Step 2: 启动 job**
 
@@ -322,7 +340,7 @@ func StartUnitVectorBackfill(units memory.SessionUnitsBackend) {
 }
 ```
 
-`Units` 必须是 MySQL `sessionUnitsBackend`（与 Facade.Session 同源），**禁止**传 Facade。
+`Units` 必须是 MySQL `sessionUnitsBackend`（与 Facade.Session 同源），**禁止**传 Facade。注入点：`newChatService`。
 
 单测：并发 Start 两次 → 内部 Run 启动计数 1；Index nil → no-op。
 
@@ -330,8 +348,8 @@ func StartUnitVectorBackfill(units memory.SessionUnitsBackend) {
 
 ```powershell
 cd portal/.worktrees/p2e-vector-sidecar
-$env:GOMAXPROCS='1'; go test ./internal/chat -count=1 -p 1 -vet=off -run Backfill
-git add internal/chat cmd/backend/main.go
+$env:GOMAXPROCS='1'; go test ./internal/chat -count=1 -p 1 -vet=off -run "Backfill|EmbedModelUnavailable"
+git add internal/chat internal/service/chat.go
 git commit -m "feat(memory): start unit vector backfill job with shared breaker"
 ```
 
@@ -349,6 +367,8 @@ git commit -m "feat(memory): start unit vector backfill job with shared breaker"
 func TestParseBackfillFlags(t *testing.T) {
 	cfg, err := parseBackfillArgs([]string{"--force", "--dry-run", "--scope", "session", "--batch", "10", "--sleep", "0s"})
 	// Force, DryRun, Scopes==[session], BatchSize==10, BatchSleep==0
+	cfgAll, err := parseBackfillArgs([]string{"--scope", "all"})
+	// Scopes == [session, user]（或空切片表示默认，与 NewUnitBackfiller 默认一致——钉死一种）
 }
 ```
 
