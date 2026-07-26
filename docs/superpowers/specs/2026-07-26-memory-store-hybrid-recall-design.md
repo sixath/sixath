@@ -51,17 +51,18 @@ E1 交付后：
 
 ```mermaid
 flowchart TD
-  R[Facade.Recall source=units] --> B[session.Recall LIKE/时序]
-  R --> G{hybrid 可读?}
-  G -->|否| Out[返回 LIKE 结果]
-  G -->|是| E[Embed query 800ms 超时]
-  E -->|error| Trip[熔断 embedTripped] --> Out
-  E -->|timeout| Out
+  R[Facade.Recall source=units] --> G{hybrid 可读?}
+  G -->|否| B0[session.Recall 原样 Limit=q.Limit] --> Out0[原样返回]
+  G -->|是| B[session.Recall Limit=N]
+  B --> E[Embed query 800ms 子 context]
+  E -->|error 非超时/取消| Trip[trip 熔断] --> Cut[LIKE 结果截断到 effLimit]
+  E -->|timeout/父取消| Cut
   E -->|ok| S[UnitVectorIndex.Search top-N]
+  S -->|err| Cut
   S --> H[hydrate active 复用 E1]
-  B --> F[RRF 融合去重]
-  H --> F
-  F --> Out2[按 score 截断 Limit]
+  H -->|err| Cut
+  H --> F[RRF 融合去重]
+  F --> Out2[按 score 截断 effLimit]
 ```
 
 **hybrid 可读**（全部满足才走向量支路）：
@@ -73,6 +74,8 @@ flowchart TD
 | `hybridAllowed(ctx, q.AgentID)` | Agent 门控，见 §2.3；`AgentID` 空或回调 nil → true |
 
 **执行顺序**：串行——先跑 LIKE 支路，再跑 Embed + Search + hydrate（实现简单；向量支路最坏加 800ms，可接受。并行化归后续优化）。
+
+**Limit 语义（MUST）**：hybrid **不可读**时 `session.Recall` 原样透传（含原始 `q.Limit`），行为与今日逐字节一致；仅 hybrid **可读**时 LIKE 与 `Search` 才按 `N = 2*effLimit` 取数，最终统一截断到 `effLimit`。
 
 **RRF 融合**
 
@@ -113,7 +116,7 @@ message RuntimeToolsConfig {
 }
 ```
 
-**三态贯穿（MUST）**：`unset = 开` 要求 presence 信息全链路保留——proto `optional bool`、`biz.RuntimeToolsConfig` 用 `*bool`、`internal/data/model` 持久化列（JSON）同样用 `*bool` / omitempty。`RuntimeToolsFromProto` 必须用 `HasHybridRecall()`（或 `p.HybridRecall != nil`）判定 presence，**禁止**只调 `GetHybridRecall()`（会把 unset 坍缩成 false，导致默认关）。Update 语义：请求未携带该字段时保留原值。
+**三态贯穿（MUST）**：`unset = 开` 要求 presence 信息全链路保留——proto `optional bool`、`biz.RuntimeToolsConfig` 用 `*bool`、`internal/data/model` 持久化列（JSON）同样用 `*bool` / omitempty。`RuntimeToolsFromProto` 必须用 `HasHybridRecall()`（或 `p.HybridRecall != nil`）判定 presence，**禁止**只调 `GetHybridRecall()`（会把 unset 坍缩成 false，导致默认关）；`RuntimeToolsToProto` 对 nil 保持 unset，勿写成 false。Update 语义：请求未携带该字段时保留原值。
 
 **biz**：
 
