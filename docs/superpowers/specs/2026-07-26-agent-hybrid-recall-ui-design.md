@@ -1,6 +1,6 @@
 # Agent 面板 Hybrid Recall UI（切片 C）
 
-> 状态：设计中  
+> 状态：已定稿  
 > 日期：2026-07-26  
 > 回链：[P2-E2 Hybrid Recall](./2026-07-26-memory-store-hybrid-recall-design.md)、[P2-E2.1 Vector Backfill](./2026-07-26-memory-store-vector-backfill-design.md)、[portal `memory-integration.md`](../../../portal/docs/memory-integration.md)  
 > 前置：Portal API 已交付 `runtime_tools.hybrid_recall`（`optional bool`）；gate unset=开、`false`=仅 LIKE  
@@ -130,7 +130,7 @@ cd web && npm test && npx tsc --noEmit && npm run test:e2e
 | 场景 | 行为 |
 |------|------|
 | 旧 Agent 无该字段 | 表单显示「跟随默认」；保存若不改选则继续 omit |
-| 用户从 `false` 改回「跟随默认」 | 省略字段；依赖 portal Update **省略时保留库中值**？——**冲突点见下** |
+| 用户从 `false` 改回「跟随默认」 | 发 `hybrid_recall: true`（见 §4.1；omit 无法清 unset） |
 
 ### 4.1 Update omit 与「恢复默认」
 
