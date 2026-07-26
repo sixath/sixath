@@ -16,7 +16,7 @@
 2. **同一套核心**：启动增量 job 与 CLI 共用 `UnitBackfiller`。  
 3. 默认只补缺（sidecar 对比）；CLI `--force` 才对已有向量重 Embed。  
 4. 不阻塞对话：后台限速 + 与 Facade **共享**进程级 `embedTripped`（本切片导出 `FacadeConfig.EmbedTripped *atomic.Bool`）；失败跳过单条，不回滚主表。  
-5. Embed 模型按 **unit 的 `agent_id`** 解析（与在线写路径一致）；空则走 auxiliary，仍失败则 skip。  
+5. Embed 模型按 **unit 的 `agent_id`** 解析（与在线写路径一致）；无法解析到可用模型则 **skip**（不 trip）；**已调用** Embed 后的能力性错误（未实现 Embed、鉴权/网关）则 **trip**。  
 6. Backfiller 经 `SessionUnitsBackend.List` 扫库（**禁止**经 Facade.List，避免 user 空 ScopeID 静默空结果）。
 
 ### 非目标
@@ -54,21 +54,28 @@ E2 写路径已与 D2 解耦：之后的成功写入会 Upsert。但部署前已
 ```mermaid
 flowchart TD
   Start[Backfiller.Run] --> Page[List active units 分页]
-  Page --> Has[UnitVectorIndex.Has 批量]
+  Page -->|List err| Fatal[return stats, err]
+  Page --> Derive[推导 scopeID / agent_id]
+  Derive --> Group[按 scopeID 分组]
+  Group --> Has[UnitVectorIndex.Has 批量]
+  Has -->|Has err| Fatal
   Has --> Need{缺向量 或 Force?}
   Need -->|否| Next
   Need -->|是| Dry{DryRun?}
   Dry -->|是| SkipDry[计数 Missing 不 Embed]
   Dry -->|否| Emb[UnitEmbedder.Embed agent_id]
+  Emb -->|能力性错误| Trip[trip + return stats,nil]
+  Emb -->|无可解析模型等| Skip[Skipped++]
   Emb -->|ok| Up[Upsert]
-  Emb -->|能力性错误| Trip[trip + 结束本轮]
-  Emb -->|单条可跳过| Skip[Skipped++]
-  Up --> Sleep[批间限速]
-  SkipDry --> Sleep
+  Up -->|ok| Sleep
+  Up -->|一般错误| Fail[Failed++]
+  Up -->|dims 不匹配| Fatal
+  Fail --> Sleep
   Skip --> Sleep
-  Sleep --> Next{还有页?}
+  SkipDry --> Sleep
+  Sleep[批间限速] --> Next{还有页?}
   Next -->|是| Page
-  Next -->|否| Done[返回 Stats]
+  Next -->|否| Done[return stats, nil]
 ```
 
 ### 2.2 接口扩展（E1 稳定边界）
@@ -132,14 +139,18 @@ func (b *UnitBackfiller) Run(ctx context.Context) (BackfillStats, error)
 
 **DryRun（MUST）**：**不**调用 Embed、**不** Upsert；只 List + Has 统计 `Scanned`/`Missing`。
 
-**错误分类**
+**错误分类与 `Run` 返回契约（MUST）**
 
-| 事件 | 计数 / 行为 |
-|------|-------------|
-| Upsert 一般错误 | `Failed++`，继续 |
-| Upsert 维度不匹配（SQLite dims） | 提前结束 Run，返回 error；文档提示删 sidecar DB 再 `--force` |
-| Embed 能力性错误（未实现 Embed、鉴权/网关类） | trip 共享 breaker，本轮结束，`Tripped=true` |
-| 空 Content / 缺 scopeID / agent 解析失败 | `Skipped++`，不 trip |
+| 事件 | 计数 / 行为 | `Run` 返回 |
+|------|-------------|------------|
+| `Units.List` error | 提前结束（已处理页 Stats 保留） | `(stats, err)` |
+| `Index.Has` error | 同上 | `(stats, err)` |
+| Upsert 一般错误 | `Failed++`，继续 | 最终 `(stats, nil)`（除非另有致命） |
+| Upsert 维度不匹配（SQLite dims） | 提前结束；提示删 sidecar DB 再 `--force` | `(stats, err)` |
+| Embed 能力性错误（未实现 Embed、鉴权/网关类） | trip 共享 breaker，本轮结束，`Tripped=true` | `(stats, nil)` |
+| 空 Content / 缺 scopeID / 无法解析到可用模型 | `Skipped++`，不 trip | 继续 |
+
+CLI：装配失败 → 非 0；`Run` 返回非 nil error → 非 0；仅 `Tripped`（`err==nil`）→ warning + 退 **0**。
 
 ### 2.4 启动 job vs CLI
 
@@ -150,7 +161,7 @@ func (b *UnitBackfiller) Run(ctx context.Context) (BackfillStats, error)
 | 时机 | backend 就绪后 `go Run`，独立可取消 ctx | 显式命令 |
 | Index/Embedder nil | no-op | 报错退出非 0 |
 | 单例 | 进程内 mutex/`sync.Once`，防重复 wiring | N/A |
-| 退出 | 日志打 Stats；不阻止服务就绪 | Stats 打 stdout；装配失败非 0；Tripped 时 warning 但退 **0**（fail-open） |
+| 退出 | 日志打 Stats；不阻止服务就绪 | Stats 打 stdout；装配失败非 0；`Run` 非 nil error → 非 0；仅 Tripped（err=nil）→ warning 退 **0** |
 
 **CLI**（建议 `portal/cmd/backfill-vectors`）：
 
@@ -231,6 +242,7 @@ Backfiller 的 trip 条件由自身错误分类决定（§2.3 表）；trip 后�
 | 11 | 页内多 scopeID | 分组 Has；各 scope 隔离正确 |
 | 12 | Facade EmbedTripped 注入 | NewFacade 非 nil 指针与 Backfiller 共享；一方 trip 另一方可见 |
 | 13 | Upsert 失败 | Failed++，不 trip，继续 |
+| 14 | Upsert dims 不匹配 | Run 返回 error；部分 Upserted 保留；不 trip |
 
 ### Portal
 
