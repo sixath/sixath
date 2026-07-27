@@ -452,7 +452,8 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
 7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（已交付）；评估合并冗余 FTS；去掉旧配置键。  
    → **P2-G**：[2026-07-27-memory-store-config-cleanup-design.md](./2026-07-27-memory-store-config-cleanup-design.md)（`memory_store:` + env 硬切换；FTS 保留内部包；已交付）。  
 
-8. **（更后）Go MCP Server**：暴露同一 `MemoryStore`。
+8. **（更后）Go MCP Server**：暴露同一 `MemoryStore`。  
+   → **P2-J**：[2026-07-27-memory-store-mcp-server-design.md](./2026-07-27-memory-store-mcp-server-design.md)（stdio + HTTP；`memory_remember`/`recall`/`get`；默认 in-memory；已交付）。
 
 P2-A/B/C 之外的项另开迭代规格；并回链 2026-05-26 中未裁剪章节。
 
