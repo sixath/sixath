@@ -443,8 +443,10 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
    → **P2-D2**：[2026-07-26-memory-store-llm-conflict-design.md](./2026-07-26-memory-store-llm-conflict-design.md)（LLM 语义冲突；已交付）。  
 
 4. **向量 Sidecar**：`VectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
-   → **P2-E**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（sqlite + Embedder + peer 向量；已交付；Qdrant 后续）。  
+   → **P2-E**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（sqlite + Embedder + peer 向量；已交付）。  
+   → **P2-H**：[2026-07-27-memory-store-qdrant-design.md](./2026-07-27-memory-store-qdrant-design.md)（Qdrant provider；已交付）。  
 5. **可选图记忆**：Neo4j provider。  
+   → **P2-I**：[2026-07-27-memory-store-neo4j-graph-design.md](./2026-07-27-memory-store-neo4j-graph-design.md)（GraphStore + 独立 GraphExtractor + Recall RRF；已交付）。  
 6. **Prefetch 策略增强**：配额、去重（user 优先车道已在 P2-A）。  
    → **P2-F**：[2026-07-27-memory-store-prefetch-quota-design.md](./2026-07-27-memory-store-prefetch-quota-design.md)（全局 max_total + hash 去重；已交付）。  
 7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（已交付）；评估合并冗余 FTS；去掉旧配置键。  

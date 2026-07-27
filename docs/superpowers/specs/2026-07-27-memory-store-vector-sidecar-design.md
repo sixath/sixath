@@ -105,4 +105,4 @@ Env：`SATH_MEMORY_VECTOR_ENABLED` 覆盖 enabled。
 
 ## 5. 门面清单回链
 
-门面 §8.4「向量 Sidecar」→ 本规格 **P2-E**（sqlite 切片）；Qdrant 另开。
+门面 §8.4「向量 Sidecar」→ 本规格 **P2-E**（sqlite 切片）；**P2-H** Qdrant 见 [2026-07-27-memory-store-qdrant-design.md](./2026-07-27-memory-store-qdrant-design.md)。
