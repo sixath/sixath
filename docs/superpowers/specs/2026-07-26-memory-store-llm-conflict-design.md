@@ -1,6 +1,6 @@
 # MemoryStore P2-D2：LLM 语义冲突消解
 
-> 状态：实现中  
+> 状态：已交付  
 
 > 日期：2026-07-26  
 > 回链：[门面 §8.3](./2026-07-25-memory-store-facade-design.md)、[P2-D1 ConflictResolver](./2026-07-25-memory-store-conflict-resolver-design.md)、[P2-C turn extract](./2026-07-25-memory-store-turn-extract-design.md)  

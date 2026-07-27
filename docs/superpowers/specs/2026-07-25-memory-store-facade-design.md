@@ -440,11 +440,13 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
    → **P2-C**：[2026-07-25-memory-store-turn-extract-design.md](./2026-07-25-memory-store-turn-extract-design.md)（`feat/memory-store-p2b-p2c` 已实现，默认关闭）。  
 3. **冲突消解**：`ConflictResolver`；`supersede` 语义完善。  
    → **P2-D1**：[2026-07-25-memory-store-conflict-resolver-design.md](./2026-07-25-memory-store-conflict-resolver-design.md)（结构化 supersede；已交付）。  
-   → **P2-D2**：[2026-07-26-memory-store-llm-conflict-design.md](./2026-07-26-memory-store-llm-conflict-design.md)（LLM 语义冲突；待实现）。  
+   → **P2-D2**：[2026-07-26-memory-store-llm-conflict-design.md](./2026-07-26-memory-store-llm-conflict-design.md)（LLM 语义冲突；已交付）。  
 
 4. **向量 Sidecar**：`VectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
+   → **P2-E**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（sqlite + Embedder + peer 向量；已交付；Qdrant 后续）。  
 5. **可选图记忆**：Neo4j provider。  
 6. **Prefetch 策略增强**：配额、去重（user 优先车道已在 P2-A）。  
+   → **P2-F**：[2026-07-27-memory-store-prefetch-quota-design.md](./2026-07-27-memory-store-prefetch-quota-design.md)（全局 max_total + hash 去重；已交付）。  
 7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（`feat/memory-store-p2b-p2c` 交付；Prefetch 仅 `StorePrefetchBackend`）；评估合并冗余 FTS；去掉旧配置键（`SATH_MEMORY_WRITE_ENABLED` 重命名仍后续）。  
 
 8. **（更后）Go MCP Server**：暴露同一 `MemoryStore`。
