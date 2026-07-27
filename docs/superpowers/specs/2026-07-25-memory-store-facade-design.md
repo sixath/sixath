@@ -417,7 +417,7 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
 - 现有 `MEMORY.md` / `USER.md`：**无需**导入 units。  
 - 会话消息：仍在 MySQL；transcript 索引可按现逻辑重建。  
 - Agent prompt / Skills：更新工具名与 scope 说明。  
-- `SATH_MEMORY_WRITE_ENABLED`：映射为 `agent_workspace.write_enabled`。
+- `SATH_AGENT_MEMORY_WRITE_ENABLED` / `memory_store.agent_workspace.write_enabled`：映射 agent 文件写入开关（旧 `SATH_MEMORY_WRITE_ENABLED` 已移除，见 P2-G）。
 
 ### 7.3 错误码（工具 JSON）
 
@@ -447,7 +447,8 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
 5. **可选图记忆**：Neo4j provider。  
 6. **Prefetch 策略增强**：配额、去重（user 优先车道已在 P2-A）。  
    → **P2-F**：[2026-07-27-memory-store-prefetch-quota-design.md](./2026-07-27-memory-store-prefetch-quota-design.md)（全局 max_total + hash 去重；已交付）。  
-7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（`feat/memory-store-p2b-p2c` 交付；Prefetch 仅 `StorePrefetchBackend`）；评估合并冗余 FTS；去掉旧配置键（`SATH_MEMORY_WRITE_ENABLED` 重命名仍后续）。  
+7. **清理**：~~删除 `memory.Manager` / `SearchPrefetchBackend` / `SummaryMemory`~~ → **P2-B**（已交付）；评估合并冗余 FTS；去掉旧配置键。  
+   → **P2-G**：[2026-07-27-memory-store-config-cleanup-design.md](./2026-07-27-memory-store-config-cleanup-design.md)（`memory_store:` + env 硬切换；FTS 保留内部包；已交付）。  
 
 8. **（更后）Go MCP Server**：暴露同一 `MemoryStore`。
 
