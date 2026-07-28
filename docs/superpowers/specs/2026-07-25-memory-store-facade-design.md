@@ -442,8 +442,10 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
    → **P2-D1**：[2026-07-25-memory-store-conflict-resolver-design.md](./2026-07-25-memory-store-conflict-resolver-design.md)（结构化 supersede；已交付）。  
    → **P2-D2**：[2026-07-26-memory-store-llm-conflict-design.md](./2026-07-26-memory-store-llm-conflict-design.md)（LLM 语义冲突；已交付）。  
 
-4. **向量 Sidecar**：`VectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
-   → **P2-E**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（sqlite + Embedder + peer 向量；已交付）。  
+4. **向量 Sidecar**：`UnitVectorIndex`（sqlite 开发 / qdrant 生产）；Portal Embedder 接线。  
+   → **P2-E1**：[2026-07-27-memory-store-vector-sidecar-design.md](./2026-07-27-memory-store-vector-sidecar-design.md)（已交付＝可插拔接口 + SQLite provider + D2 peer 发现）。  
+   → **P2-E2**：[2026-07-26-memory-store-hybrid-recall-design.md](./2026-07-26-memory-store-hybrid-recall-design.md)（已交付＝units LIKE∪向量 RRF hybrid + 写路径解耦 + Agent `hybrid_recall`）。  
+   → **P2-E2.1**：[2026-07-26-memory-store-vector-backfill-design.md](./2026-07-26-memory-store-vector-backfill-design.md)（已交付＝`Has` + `UnitBackfiller` + 启动增量 job + `backfill-vectors` CLI + 共享 `EmbedTripped`；**E3** 其他 provider 待开）。  
    → **P2-H**：[2026-07-27-memory-store-qdrant-design.md](./2026-07-27-memory-store-qdrant-design.md)（Qdrant provider；已交付）。  
 5. **可选图记忆**：Neo4j provider。  
    → **P2-I**：[2026-07-27-memory-store-neo4j-graph-design.md](./2026-07-27-memory-store-neo4j-graph-design.md)（GraphStore + 独立 GraphExtractor + Recall RRF；已交付）。  

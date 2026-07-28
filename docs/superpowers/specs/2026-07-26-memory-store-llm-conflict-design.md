@@ -47,7 +47,7 @@ flowchart TD
   H -->|是| Skip[不写 skipped=hash_dedupe]
   H -->|否| On{turn_extract 或 ToolSemanticConflict?}
   On -->|否| Add[backend add]
-  On -->|是| R[Recall units top-K LIKE]
+  On -->|是| R[Recall units top-K（向量或 LIKE）]
   R --> Empty{peers 空?}
   Empty -->|是| Add
   Empty -->|否| L[SemanticConflictResolver.ResolveAdd]
@@ -139,8 +139,8 @@ verdict, err := SemanticConflicts.ResolveAdd(...)
 1. Facade 对 session/user `add` **统一**做 active `content_hash` 检查（与 P2-C List 扫描语义一致）；命中 → 不写，返回 `(MemoryHit{}, nil)`。  
 2. Pipeline 可保留自身 hash 预过滤（优化，非唯一关卡）。  
 3. Recall：`source=units`，`query=candidate.Content`，`limit=K`。  
-   - **Peer 发现依赖现有关键词/LIKE 子串匹配**（非向量）。措辞完全不同、无共享子串的「矛盾事实」可能 peers 为空 → **直 add**（本切片接受该限制；向量预筛另开迭代）。  
-   - 验收用例构造须保证矛盾对在现有 Recall 下能互相命中（共享关键词/子串），或显式断言「peers 空 → 直 add」。  
+   - peer 发现默认 LIKE 子串匹配；装配 `UnitVectorIndex` + `UnitEmbedder` 且未熔断时改走向量近邻（见 P2-E1 规格），熔断后回退 LIKE。  
+   - 未装配向量 sidecar 时，措辞完全不同、无共享子串的「矛盾事实」可能 peers 为空 → **直 add**；验收用例须保证矛盾对在所用召回路径下能互相命中，或显式断言「peers 空 → 直 add」。  
 4. peers 为空 → 直 add，不调 LLM。  
 5. 仅 `scope=session|user`。
 
