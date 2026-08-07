@@ -455,7 +455,9 @@ Portal `DefaultMemoryConfig` 与 Hermes flags **迁移映射**到上述块；旧
    → **P2-G**：[2026-07-27-memory-store-config-cleanup-design.md](./2026-07-27-memory-store-config-cleanup-design.md)（`memory_store:` + env 硬切换；FTS 保留内部包；已交付）。  
 
 8. **（更后）Go MCP Server**：暴露同一 `MemoryStore`。  
-   → **P2-J**：[2026-07-27-memory-store-mcp-server-design.md](./2026-07-27-memory-store-mcp-server-design.md)（stdio + HTTP；`memory_remember`/`recall`/`get`；默认 in-memory；已交付）。
+   → **P2-J**：[2026-07-27-memory-store-mcp-server-design.md](./2026-07-27-memory-store-mcp-server-design.md)（stdio + HTTP；`memory_remember`/`recall`/`get`；默认 in-memory；已交付）。  
+9. **（三期）过程式修复**：失败信号 → episode 边界 → 动作槽 → 可撤销/观测 → 默关过程态试点。  
+   → **P3 伞规格**：[2026-07-30-procedural-repair-harness-design.md](./2026-07-30-procedural-repair-harness-design.md)（草案；**禁止**跳过 P3-A…D 直接全站 auto-commit）。
 
 P2-A/B/C 之外的项另开迭代规格；并回链 2026-05-26 中未裁剪章节。
 
