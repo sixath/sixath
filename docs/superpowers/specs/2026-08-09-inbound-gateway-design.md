@@ -253,7 +253,7 @@ Web 渠道：
 
 ## 8. 后续（非一期）
 
-1. 企微应用 / 群机器人**入站** Adapter（与现有出站并存或逐步统一配置）。
+1. 企微**智能机器人**双向 Adapter（见 [wecom-bot-gateway-design](./2026-08-09-wecom-bot-gateway-design.md)）；自建应用回调可另开。
 2. 微信等第三方 bot Adapter。
 3. Channel 配置统一（Gateway 权威 vs Portal 出站）与管理 UI。
 4. 若运维需要：Gateway 水平扩展 + session 亲和或无状态（仅缓存）。
