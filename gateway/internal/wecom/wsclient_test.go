@@ -11,27 +11,29 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/websocket"
+	"github.com/gorilla/websocket"
 )
 
 type capturedFrame struct {
-	Cmd     string
-	ReqID   string
-	Body    json.RawMessage
-	Raw     []byte
+	Cmd   string
+	ReqID string
+	Body  json.RawMessage
+	Raw   []byte
 }
+
+var testUpgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
 func startMockWSServer(t *testing.T, handle func(ctx context.Context, conn *websocket.Conn)) (wsURL string, closeFn func()) {
 	t.Helper()
 	upgraded := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, nil)
+		conn, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Errorf("websocket.Accept: %v", err)
+			t.Errorf("websocket.Upgrade: %v", err)
 			return
 		}
 		close(upgraded)
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer conn.Close()
 		handle(r.Context(), conn)
 	}))
 	wsURL = "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -46,9 +48,10 @@ func startMockWSServer(t *testing.T, handle func(ctx context.Context, conn *webs
 
 func readFrame(t *testing.T, ctx context.Context, conn *websocket.Conn) capturedFrame {
 	t.Helper()
-	_, data, err := conn.Read(ctx)
+	_ = ctx
+	_, data, err := conn.ReadMessage()
 	if err != nil {
-		t.Fatalf("conn.Read: %v", err)
+		t.Fatalf("conn.ReadMessage: %v", err)
 	}
 	var f Frame
 	if err := json.Unmarshal(data, &f); err != nil {
@@ -59,12 +62,13 @@ func readFrame(t *testing.T, ctx context.Context, conn *websocket.Conn) captured
 
 func writeJSON(t *testing.T, ctx context.Context, conn *websocket.Conn, v any) {
 	t.Helper()
+	_ = ctx
 	data, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
-		t.Fatalf("conn.Write: %v", err)
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatalf("conn.WriteMessage: %v", err)
 	}
 }
 
@@ -79,13 +83,13 @@ func TestWSClient_SubscribeAndPing(t *testing.T) {
 		first := readFrame(t, ctx, conn)
 		subscribed <- first
 		writeJSON(t, ctx, conn, Frame{
-			Cmd:     CmdSubscribe,
 			Headers: FrameHeaders{ReqID: first.ReqID},
-			Body:    json.RawMessage(`{"errcode":0,"errmsg":"ok"}`),
+			ErrCode: 0,
+			ErrMsg:  "ok",
 		})
 		for {
 			fr, err := func() (capturedFrame, error) {
-				_, data, err := conn.Read(ctx)
+				_, data, err := conn.ReadMessage()
 				if err != nil {
 					return capturedFrame{}, err
 				}
@@ -175,14 +179,14 @@ func TestWSClient_RespondStream(t *testing.T) {
 			return
 		}
 		writeJSON(t, ctx, conn, Frame{
-			Cmd:     CmdSubscribe,
 			Headers: FrameHeaders{ReqID: first.ReqID},
-			Body:    json.RawMessage(`{"errcode":0,"errmsg":"ok"}`),
+			ErrCode: 0,
+			ErrMsg:  "ok",
 		})
 		once.Do(func() { close(ready) })
 
 		for {
-			_, data, err := conn.Read(ctx)
+			_, data, err := conn.ReadMessage()
 			if err != nil {
 				return
 			}
@@ -291,13 +295,13 @@ func TestWSClient_RespondStream_Truncates(t *testing.T) {
 	wsURL, closeSrv := startMockWSServer(t, func(ctx context.Context, conn *websocket.Conn) {
 		first := readFrame(t, ctx, conn)
 		writeJSON(t, ctx, conn, Frame{
-			Cmd:     CmdSubscribe,
 			Headers: FrameHeaders{ReqID: first.ReqID},
-			Body:    json.RawMessage(`{"errcode":0}`),
+			ErrCode: 0,
+			ErrMsg:  "ok",
 		})
 		close(ready)
 		for {
-			_, data, err := conn.Read(ctx)
+			_, data, err := conn.ReadMessage()
 			if err != nil {
 				return
 			}
@@ -354,9 +358,9 @@ func TestWSClient_SubscribeRejected(t *testing.T) {
 	wsURL, closeSrv := startMockWSServer(t, func(ctx context.Context, conn *websocket.Conn) {
 		first := readFrame(t, ctx, conn)
 		writeJSON(t, ctx, conn, Frame{
-			Cmd:     CmdSubscribe,
 			Headers: FrameHeaders{ReqID: first.ReqID},
-			Body:    json.RawMessage(`{"errcode":40013,"errmsg":"invalid secret"}`),
+			ErrCode: 40013,
+			ErrMsg:  "invalid secret",
 		})
 		// keep conn briefly
 		time.Sleep(50 * time.Millisecond)
@@ -385,9 +389,9 @@ func TestWSClient_OnMessageCallback(t *testing.T) {
 	wsURL, closeSrv := startMockWSServer(t, func(ctx context.Context, conn *websocket.Conn) {
 		first := readFrame(t, ctx, conn)
 		writeJSON(t, ctx, conn, Frame{
-			Cmd:     CmdSubscribe,
 			Headers: FrameHeaders{ReqID: first.ReqID},
-			Body:    json.RawMessage(`{"errcode":0}`),
+			ErrCode: 0,
+			ErrMsg:  "ok",
 		})
 		close(ready)
 		writeJSON(t, ctx, conn, Frame{
@@ -396,7 +400,7 @@ func TestWSClient_OnMessageCallback(t *testing.T) {
 			Body:    json.RawMessage(`{"msgid":"M1","msgtype":"text"}`),
 		})
 		// wait until client closes
-		_, _, _ = conn.Read(ctx)
+		_, _, _ = conn.ReadMessage()
 	})
 	defer closeSrv()
 

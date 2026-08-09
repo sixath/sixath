@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/websocket"
+	"github.com/gorilla/websocket"
 )
 
 const defaultPingInterval = 30 * time.Second
@@ -29,6 +30,7 @@ type ClientConfig struct {
 }
 
 // Client is a WeCom aibot WebSocket long-connection client.
+// Uses gorilla/websocket: coder/websocket handshake gets HTTP 404 from openws.work.weixin.qq.com.
 type Client struct {
 	cfg ClientConfig
 
@@ -50,9 +52,17 @@ func NewClient(cfg ClientConfig) *Client {
 // Run dials, subscribes, then loops reading frames and sending pings.
 // It returns when the connection ends or ctx is canceled so the caller can reconnect.
 func (c *Client) Run(ctx context.Context) error {
-	conn, _, err := websocket.Dial(ctx, c.cfg.URL, nil)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dialer := websocket.Dialer{HandshakeTimeout: 15 * time.Second}
+	conn, resp, err := dialer.DialContext(ctx, c.cfg.URL, http.Header{})
 	if err != nil {
-		return fmt.Errorf("wecom ws dial: %w", err)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		return fmt.Errorf("wecom ws dial: status=%d: %w", status, err)
 	}
 	c.mu.Lock()
 	c.conn = conn
@@ -61,7 +71,7 @@ func (c *Client) Run(ctx context.Context) error {
 		c.mu.Lock()
 		c.conn = nil
 		c.mu.Unlock()
-		_ = conn.Close(websocket.StatusNormalClosure, "")
+		_ = conn.Close()
 	}()
 
 	reqID := newReqID()
@@ -81,14 +91,16 @@ func (c *Client) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("wecom subscribe ack: %w", err)
 	}
-	var ackBody SubscribeAckBody
-	if len(ack.Body) > 0 {
-		if err := json.Unmarshal(ack.Body, &ackBody); err != nil {
-			return fmt.Errorf("wecom subscribe ack decode: %w", err)
-		}
+	// Official ack puts errcode/errmsg at top level (not inside body).
+	if ack.ErrCode != 0 {
+		return fmt.Errorf("wecom subscribe rejected: errcode=%d errmsg=%s", ack.ErrCode, ack.ErrMsg)
 	}
-	if ackBody.ErrCode != 0 {
-		return fmt.Errorf("wecom subscribe rejected: errcode=%d errmsg=%s", ackBody.ErrCode, ackBody.ErrMsg)
+	// Tolerate mock/legacy body-shaped ack.
+	if len(ack.Body) > 0 {
+		var ackBody SubscribeAckBody
+		if err := json.Unmarshal(ack.Body, &ackBody); err == nil && ackBody.ErrCode != 0 {
+			return fmt.Errorf("wecom subscribe rejected: errcode=%d errmsg=%s", ackBody.ErrCode, ackBody.ErrMsg)
+		}
 	}
 
 	pingTicker := time.NewTicker(c.cfg.PingInterval)
@@ -111,6 +123,7 @@ func (c *Client) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			_ = conn.Close()
 			return ctx.Err()
 		case err := <-errCh:
 			if ctx.Err() != nil {
@@ -171,11 +184,15 @@ func (c *Client) writeFrame(ctx context.Context, fr Frame) error {
 	if c.conn == nil {
 		return fmt.Errorf("wecom ws not connected")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(fr)
 	if err != nil {
 		return err
 	}
-	return c.conn.Write(ctx, websocket.MessageText, data)
+	_ = c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	return c.conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func (c *Client) readFrame(ctx context.Context) (Frame, error) {
@@ -185,8 +202,16 @@ func (c *Client) readFrame(ctx context.Context) (Frame, error) {
 	if conn == nil {
 		return Frame{}, fmt.Errorf("wecom ws not connected")
 	}
-	_, data, err := conn.Read(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetReadDeadline(deadline)
+	} else {
+		_ = conn.SetReadDeadline(time.Time{})
+	}
+	_, data, err := conn.ReadMessage()
 	if err != nil {
+		if ctx.Err() != nil {
+			return Frame{}, ctx.Err()
+		}
 		return Frame{}, err
 	}
 	var fr Frame

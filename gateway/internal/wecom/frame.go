@@ -16,9 +16,12 @@ const (
 
 // Frame is a WeCom long-connection JSON frame.
 type Frame struct {
-	Cmd     string          `json:"cmd"`
+	Cmd     string          `json:"cmd,omitempty"`
 	Headers FrameHeaders    `json:"headers"`
 	Body    json.RawMessage `json:"body,omitempty"`
+	// ErrCode/ErrMsg appear at top level on subscribe/respond acks (official docs).
+	ErrCode int    `json:"errcode,omitempty"`
+	ErrMsg  string `json:"errmsg,omitempty"`
 }
 
 // FrameHeaders carries per-frame metadata.
