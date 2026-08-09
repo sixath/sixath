@@ -19,7 +19,7 @@
 | 一期渠道 | **通用 Webhook + Web 走同一入站路径**；具体 IM 适配器后挂 |
 | 部署形态 | **独立 Gateway 进程** |
 | Web 路径 | **Web → Gateway → Portal**（Gateway 代理 SSE） |
-| 会话绑定 | **`channel_id + peer_id` 自动建/续 session**（续聊键不含 `agent_id`） |
+| 会话绑定 | **Webhook/IM：`channel_id + peer_id` 自动建/续**；**Web：显式多 session**（peer=登录用户 ID 仅作归属校验，不折叠会话） |
 | 渠道配置权威 | **Gateway 自管**；Portal 只管 Agent / Session / 对话执行 |
 | Webhook 回复 | **双模**：默认异步（202 + `reply_url`）；请求可声明同步；**Web 仍 SSE 流式** |
 | Web 鉴权 | **在 Gateway 终止**；Portal Runtime 只认 service token + Gateway 断言的调用方身份 |
@@ -105,10 +105,20 @@ NormalizeInbound → ResolveSession → RunTurn/StreamTurn → DeliverReply
 POST /runtime/v1/sessions/resolve
   Request:  { channel_id, peer_id, agent_id?, title? }
   Response: { session_id, agent_id, created }
-  语义:
+  语义（Webhook/IM）:
     - 续聊键 = channel_id + peer_id（见 §3.3）
     - 已存在映射：返回既有 session；**忽略**请求里不同的 agent_id（不改绑、不新开）
     - 首次创建：agent_id = 请求值 ?? Channel 侧传入的 default_agent（Gateway 负责填好）
+  说明：Web **不**用此接口折叠会话；Web 用显式 create/list + turns(session_id)。
+
+POST /runtime/v1/sessions
+  Request:  { agent_id, title?, user_id }   # user_id 由 Gateway 断言写入，不信任客户端自填为权威
+  Response: Session（形状对齐现有 SessionReply 字段）
+
+GET /runtime/v1/sessions?user_id=...
+GET /runtime/v1/sessions/{id}
+GET /runtime/v1/sessions/{id}/messages
+DELETE/PATCH 按需代理现有语义
 
 POST /runtime/v1/turns
   Request:  {
@@ -121,10 +131,6 @@ POST /runtime/v1/turns
   final  → **一期固定**：Portal **同步**返回 JSON
             `{ correlation_id, status: "ok"|"failed", content?, error? }`
             Gateway 在拿到结果后再 POST `reply_url`（Portal 不做出站回调）
-
-GET /runtime/v1/sessions/{id}
-GET /runtime/v1/sessions/{id}/messages
-  # Web UI 历史列表经 Gateway 代理
 ```
 
 **鉴权**:
@@ -154,7 +160,12 @@ channel:{channel_id}:peer:{peer_id}
 - `webhook_secret`, `ip_whitelist`（webhook）
 - `default_reply_mode`（webhook 默认 `async`）
 
-Web 渠道的 `peer_id` 规则：登录用户 ID（或等价稳定身份）；匿名场景需显式策略（一期建议要求登录，与现网一致则沿用现有用户身份）。
+Web 渠道：
+
+- **一期锁定**：`peer_id` = 登录用户稳定 ID（要求登录）。
+- Web **保留多会话 UX**：创建/列表/切换 session 走显式 Session API；发消息带 `session_id`。
+- `channel+peer` 续聊键**不**用于把同一用户的所有 Web 对话折叠成一个 session；peer 用于 **ACL**（session 必须属于该 user）。
+- Webhook/IM：`peer_id` = 外部用户/群等稳定 ID，走 §3.3 自动续聊。
 
 ---
 
@@ -164,8 +175,8 @@ Web 渠道的 `peer_id` 规则：登录用户 ID（或等价稳定身份）；�
 
 1. Web → Gateway：发消息（及既有会话列表/历史读路径经代理）。
 2. Gateway 鉴权终端用户。
-3. `sessions/resolve`（peer 来自 Gateway 断言的用户身份）。
-4. Portal `turns` + `reply_mode=stream`。
+3. Gateway 鉴权用户；若无 `session_id` 则先 create（选 Agent）；有则校验 session 归属该 user（peer）。
+4. Portal `turns` + `reply_mode=stream`（带 session_id）。
 5. Gateway **透传 SSE** → Web。
 6. 客户端取消 / 断连：取消 Portal 请求 ctx。
 
@@ -217,8 +228,8 @@ Web 渠道的 `peer_id` 规则：登录用户 ID（或等价稳定身份）；�
 
 1. 独立启动 Gateway + Portal；Web **只访问 Gateway** 仍可流式聊天。
 2. 配置一条 generic webhook；签名错误拒绝；正确请求返回 202。
-3. 同一 `channel_id + peer_id` 连续两轮落在同一 Portal session。
-4. 不同 peer 不串 session。
+3. 同一 webhook `channel_id + peer_id` 连续两轮落在同一 Portal session；Web 同一用户可有多个 session，互不折叠。
+4. 不同 webhook peer 不串 session；Web 用户不能读写他人 session。
 5. 异步失败时 `reply_url` 收到 failed（或等价状态）。
 6. 现有 Portal Channel / wecom 出站行为不被破坏。
 
@@ -252,6 +263,5 @@ Web 渠道的 `peer_id` 规则：登录用户 ID（或等价稳定身份）；�
 
 ## 9. 开放问题（实现计划阶段收敛）
 
-1. Web 现有 session 列表/创建/历史 API 经 Gateway 的代理切面清单（最小改动集）。
+1. Web 现有 session 列表/创建/历史 API 经 Gateway 的代理切面清单（最小改动集）——计划锁定见实现计划 File map。
 2. Service token 轮换与本地开发默认凭据。
-3. Web `peer_id` 取值：稳定用户 ID vs 允许「每浏览器一会话」的派生规则（须仍满足同 peer 续聊验收）。
