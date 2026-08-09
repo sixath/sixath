@@ -1,12 +1,13 @@
 # 企微智能机器人 Gateway 双向接入
 
 **日期**: 2026-08-09  
-**状态**: 设计已确认；待实现规划  
+**状态**: 设计已确认；待实现（**长连接**）  
 **目标**: 在已落地的入站 Gateway 上增加 **企业微信「智能机器人」** Adapter，支持群/单聊入站对话与应用侧出站回复；Portal 现有 **群 Webhook 出站**（`type=wecom` / `send_to_wecom`）保持不动。
 
 **关联**:
 - [入站 Gateway 设计](./2026-08-09-inbound-gateway-design.md)
 - [企微群机器人出站（Portal）](../../../portal/docs/superpowers/specs/2026-06-04-wecom-bot-design.md)
+- 官方：[智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463)
 
 ---
 
@@ -14,14 +15,18 @@
 
 | 项 | 选择 |
 |----|------|
-| 企微产品 | **智能机器人 AI+**（非自建应用回调） |
+| 企微产品 | **智能机器人 AI+**（非自建应用） |
+| 连接方式 | **长连接（WebSocket）** — Gateway **无公网回调** |
 | 架构模式 | **方案 2**：Gateway 管智能机器人双向；Portal 保留群 Webhook 只出站 |
-| 入站 | 智能机器人回调 URL → Gateway → Runtime `resolve` + `turns(final)` |
-| 出站（对话回复） | 智能机器人回复/发消息能力（实现期对照官方文档锁定具体 API） |
+| 入站 | 企微 → WSS → Gateway → Runtime `resolve` + `turns(final)` |
+| 出站（对话回复） | 长连接 `aibot_respond_msg`（stream markdown） |
 | 出站（告警/工具推群） | **仍用** Portal `type=wecom` Webhook + `send_to_wecom` |
 | 会话 peer | 群：`chat:{chat_id}`；单聊：`user:{user_id}` |
 | 回复卡片 | 必须回显 **发起人** + **问题正文**（去 @机器人） |
-| 非目标（本期） | 自建应用 XML 回调；迁 Portal Webhook；HITL 企微按钮；知识集/工作流编排产品化（企微侧能力，不在本 Adapter 范围） |
+| 部署约束 | **同一 BotID 同时只能一条有效长连接**；多 Gateway 副本勿对同一 bot 重复 `enabled` |
+| 非目标（本期） | URL 回调模式；自建应用 XML；迁 Portal Webhook；HITL 企微按钮；知识集/工作流产品化 |
+
+**为何改长连接：** 部署侧无法稳定暴露公网 HTTPS 回调；控制台选「使用长连接」，凭 BotID + Secret 由 Gateway **主动连出**即可。
 
 ---
 
@@ -31,35 +36,36 @@
 
 - 在群成员中以 **BOT** 出现，可主动发长文/结构化卡片（出站）
 - 支持「引用并 @机器人 可继续」（入站续聊）
-- 管理入口为企微 **智能机器人 AI+**（可单聊/群聊使用）
+- 管理入口为企微 **智能机器人 AI+** → API 配置 → **使用长连接**
 
-与一期 Gateway（`web` + 通用 `webhook`）的关系：智能机器人是 **第二个正式 IM Adapter**，复用 Registry / SessionRouter / RuntimeClient / 幂等，不新开进程。
+与一期 Gateway（`web` + 通用 `webhook`）的关系：智能机器人是 **第二个正式 IM Adapter**，复用 Registry / SessionRouter / RuntimeClient / 幂等；入站不再走 HTTP hook，而是进程内 **WS 客户端**。
 
 与 Portal 群 Webhook 的关系：
 
 | 能力 | 承载 |
 |------|------|
-| @续聊、对话闭环 | Gateway `wecom_bot` |
+| @续聊、对话闭环 | Gateway `wecom_bot`（长连接） |
 | Agent 工具单向推群、Cron 投递 | Portal `wecom` Webhook（不动） |
 
-禁止把同一套凭证混用在两种 Channel 类型上。
+禁止把同一套凭证混用在两种 Channel 类型上。长连接 Secret ≠ URL 回调的 Token/EncodingAESKey。
 
 ---
 
 ## 2. 架构
 
 ```text
-企微智能机器人回调
-        │
+企微 openws.work.weixin.qq.com (WSS)
+        │  Gateway 主动连出
         ▼
 ┌───────────────────────────────────────┐
 │ Gateway                               │
-│  GET/POST /hooks/wecom_bot/{channel_id}│
-│  · URL 校验 / 签名                    │
-│  · Normalize（asker + question_text） │
+│  wecom_bot WS client (per channel)    │
+│  · aibot_subscribe (bot_id+secret)    │
+│  · ping 心跳 ~30s                     │
+│  · aibot_msg_callback → Normalize     │
 │  · peer → Runtime resolve             │
 │  · turns(final)                       │
-│  · Outbound：机器人回复 API           │
+│  · aibot_respond_msg (stream)         │
 └───────────────────────────────────────┘
         │ service token
         ▼
@@ -85,65 +91,67 @@ channels:
     type: wecom_bot
     enabled: true
     default_agent: "<agent-uuid>"
-    # 以下字段名以实现期官方「智能机器人」文档为准；此处为逻辑必填项
-    bot_id: "..."
-    callback_token: "..."          # 回调校验
-    callback_aes_key: "..."        # 若文档要求加密
-    corp_id: "..."                 # 若发消息需要
-    secret: "..."                  # 若换 access_token 需要
-    default_reply_mode: async      # 回调先快速 ack，后台 turns 后再发回复
+    bot_id: "..."           # 控制台 BotID
+    secret: "..."           # 长连接专用 Secret（只显示一次）
+    bot_names: ["小天才"]   # 可选；用于剥离 @提及
+    ws_url: ""              # 可选；默认 wss://openws.work.weixin.qq.com
 ```
 
 说明：
 
-- 智能机器人控制台「创建机器人」后下发的回调地址应指向：  
-  `https://<gateway-public>/hooks/wecom_bot/{channel_id}`
-- 凭证只存在 Gateway 配置（渠道权威在 Gateway，与入站 Gateway 规格一致）
+- 控制台必须选 **「使用长连接」**（与 URL 回调互斥；切模式会踢掉旧连接/旧回调）
+- 凭证只存在 Gateway 配置
+- **不要**配置 `callback_token` / `callback_aes_key`（那是 URL 模式）
 
 ---
 
 ## 4. 入站流程
 
-### 4.1 回调
+### 4.1 连接生命周期
 
-1. **GET（若文档有 URL 验证）**：完成 echo/challenge，通过后企微才推送消息。
-2. **POST**：验签（及解密，若需要）→ 解析事件。
-3. 一期只处理 **文本**（含群 @）；图片/文件可后续扩展。
-4. 在企微要求的时限内先返回成功 ack（`default_reply_mode=async`），再后台跑 Agent。
+1. Gateway 启动（或 channel `enabled`）时：Dial `ws_url` → 发送 `aibot_subscribe`（`bot_id` + `secret`）  
+2. 订阅成功后循环读帧；每 ~30s 发 `ping`  
+3. 断线：指数退避重连（新连接会踢掉旧连接——符合官方「一 bot 一连接」）  
+4. 优雅退出：关闭 WS
 
-### 4.2 Normalize（关键）
+### 4.2 消息回调
 
-从回调体抽出：
+收到 `cmd=aibot_msg_callback`：
 
-| 字段 | 含义 |
+1. 一期只处理 `body.msgtype=text`；其它类型忽略（可打日志）  
+2. `headers.req_id` **必须**在后续 `aibot_respond_msg` 中透传  
+3. Normalize → 幂等 `body.msgid` → Resolve → 后台 `turns(final)`（不阻塞读循环）
+
+长连接模式下 **没有** URL 模式那种流式刷新回调；由我方主动推 stream 更新。
+
+### 4.3 Normalize（关键）
+
+| 字段 | 来源 |
 |------|------|
-| `asker_id` | 提问者企微 user id |
-| `asker_name` | 展示名（回调有则用；无则后续通讯录补全，一期可先显示 userid） |
-| `question_text` | **问题正文**：去掉 `@机器人` / 纯提及壳后的自然语言 |
-| `chat_id` | 群 id（群聊） |
-| `msg_id` | 幂等键 |
-| `quoted` | 若有引用，可附在 content 上下文，但 **不得替代 question_text** |
+| `asker_id` | `body.from.userid` |
+| `asker_name` | 一期 = userid |
+| `question_text` | `body.text.content` 去 `@机器人` |
+| `chat_id` | `body.chatid`（群） |
+| `msg_id` | `body.msgid` |
+| `quoted` | `body.quote`（若有），可附 Runtime content，**不替代** question_text |
 
-**禁止**把任务号、内部 handle、纯 `@小天才 xxx_id` 串当作 `question_text` 回显到卡片「问题」字段（反例：截图中「问题」被写成 `@小天才 9999_…`）。
-
-注入 Runtime 的 user content 建议格式：
+注入 Runtime：
 
 ```text
 [企微] 发起人={asker_name}({asker_id})
 问题：{question_text}
 ```
 
-### 4.3 会话
+### 4.4 会话
 
-- 群：`peer_id = chat:{chat_id}` → 同群续聊同一 session  
+- 群：`peer_id = chat:{chat_id}`  
 - 单聊：`peer_id = user:{asker_id}`  
-- `agent_id` = channel `default_agent`（已存在映射时忽略更换，遵循 Gateway peer 语义）
+- `agent_id` = channel `default_agent`（已有映射不换 agent）  
+- 同 `msgid` 不重复开 turn
 
-幂等：同 `msg_id` 不重复开 turn。
+### 4.5 HITL
 
-### 4.4 HITL
-
-无企微确认交互面：危险确认类 **fail-closed**；出站一条「请到 Web 确认后继续」。
+无企微确认交互面：危险确认 **fail-closed**；出站文案提示去 Web。
 
 ---
 
@@ -151,13 +159,17 @@ channels:
 
 ### 5.1 发送
 
-- turns 完成后，用智能机器人官方 **回复/主动发消息** API 发回原会话（群或单聊）。
-- 文本超长按平台限制切分。
-- token（若需要）进程内缓存，过期重试一次。
+对同一次回调（同一 `req_id`）：
+
+1. **先** `aibot_respond_msg`：`msgtype=stream`，`finish=false`，content 可为「处理中…」（生成稳定 `stream.id`）  
+2. turns 完成后 **再** 同 `stream.id`、`finish=true`，content = 回复卡片（markdown）  
+3. turns 失败：`finish=true` + 失败卡片（含发起人/问题）；**禁止静默**  
+4. 超长：按官方 stream content 上限截断（约 20480 字节）  
+5. 自首次 stream 起有平台超时（文档约 10 分钟）——对齐 Gateway turn timeout（默认 120s）即可
+
+本期不实现模板卡片交互 / `aibot_send_msg` 无触发推送（告警仍走 Portal Webhook）。
 
 ### 5.2 回复卡片约定（必须）
-
-出站正文（markdown/text）须包含：
 
 ```text
 发起人：{asker_name}
@@ -166,14 +178,12 @@ channels:
 {assistant_answer}
 ```
 
-可选扩展字段（与「问题」分离）：任务号、项目、能力版本等——**不得挤占「问题」**。
-
-### 5.3 与 Portal Webhook 出站并存
+### 5.3 与 Portal Webhook 并存
 
 | 路径 | 用途 |
 |------|------|
-| Gateway `wecom_bot` 出站 | 回应当前对话（谁问什么 → 答什么） |
-| Portal `wecom` Webhook | Agent 工具/Cron **单向推群**，不参与 @续聊 peer |
+| Gateway `wecom_bot` 长连接出站 | 回应当前对话 |
+| Portal `wecom` Webhook | 工具/Cron **单向推群** |
 
 ---
 
@@ -181,13 +191,14 @@ channels:
 
 | 组件 | 动作 |
 |------|------|
-| `gateway/internal/adapter/wecom_bot.go` | 新建：校验、normalize、ack、调 outbound |
-| `gateway/internal/wecom/`（可选包） | 加解密/签名/token（按文档） |
-| `gateway/cmd/gateway/main.go` | 注册 `GET|POST /hooks/wecom_bot/{channel_id}` |
-| `gateway/configs/channels.yaml` | 示例 `wecom_bot` 渠道 |
-| Portal | **不改**现有 `type=wecom` 出站；不在本期迁配置 |
+| `gateway/internal/wecom/wsclient.go` | WSS 连接、subscribe、ping、读写帧 |
+| `gateway/internal/wecom/normalize.go` / `card.go` | 与消息体字段解析、卡片格式 |
+| `gateway/internal/adapter/wecom_bot.go` | 按 channel 启停 client；回调 → Runtime → respond |
+| `gateway/cmd/gateway/main.go` | 启动时挂载 wecom_bot runners（**无** `/hooks/wecom_bot` HTTP） |
+| `gateway/configs/channels.yaml` | 示例 `wecom_bot` |
+| Portal | **不改** `type=wecom` |
 
-复用：`channel.Registry`、`session.Router`、`runtimeclient`、`idempotency.Store`、`reply`（若走 HTTP 回调式回复；否则专用 sender）。
+复用：`channel.Registry`、`session.Router`、`runtimeclient`、`idempotency.Store`。
 
 ---
 
@@ -195,37 +206,37 @@ channels:
 
 ### 7.1 单测
 
-- 签名错误拒绝  
-- URL 验证成功路径  
+- subscribe 帧格式 / 坏 secret 失败路径（mock WS）  
 - `question_text` 剥离 `@机器人`  
-- 卡片渲染含发起人+问题  
-- 同 `msg_id` 幂等  
+- 卡片含发起人+问题  
+- 同 `msgid` 幂等  
 - 同 `chat:` peer 两轮同 session  
+- turns 失败仍 `finish=true` 失败卡片  
+- `req_id` 透传
 
 ### 7.2 验收清单
 
-1. 智能机器人控制台回调地址指向 Gateway，验证通过  
-2. 单聊文本 → 收到带「发起人/问题」的回复  
-3. 群 @ 文本 → `chat:` peer 续聊；回复回显提问者与问题正文  
-4. Portal `send_to_wecom` 群 Webhook 行为不变  
-5. HITL 场景出站提示去 Web，不自动放行危险操作  
+1. 控制台选长连接；Gateway 日志显示 subscribe 成功  
+2. 单聊文本 → 收到「发起人/问题」回复  
+3. 群 @ → `chat:` 续聊；问题正文正确（非 `@机器人 msgid`）  
+4. Portal `send_to_wecom` 不变  
+5. HITL 不自动放行  
 
 ---
 
-## 8. 实现期开放问题
+## 8. 实现期锁定（见计划 Locked decisions）
 
-已在实现计划 [`2026-08-09-wecom-bot-gateway.md`](../plans/2026-08-09-wecom-bot-gateway.md) **Locked decisions** 收敛：
-
-1. HTTP 回调 + JSON 加解密（ReceiveId=`""`）；出站用回调内 `response_url` POST markdown（不加密，1h/一次）。  
-2. 字段路径：`chattype`/`chatid`/`from.userid`/`text.content`/`msgid`/`response_url`（文档 100719）。  
+1. 端点默认 `wss://openws.work.weixin.qq.com`；凭证 `bot_id` + `secret`。  
+2. 消息字段同长连接文档 `aibot_msg_callback.body`（与 URL 模式明文结构一致）。  
 3. `asker_name` 一期 = userid。  
-4. 验签强制；`response_url` 走现有公网 SSRF 校验（`qyapi.weixin.qq.com`）。  
+4. 多副本：同一 `bot_id` 仅一台 Gateway `enabled: true`。  
 
 ---
 
 ## 9. 非目标回顾
 
-- 自建应用（应用管理）XML 回调 Adapter（可另开规格）  
-- 把 Portal 群 Webhook 迁入 Gateway  
-- 企微侧「知识集 / 工作流编排 / MCP 插件」产品配置（属企微控制台，不由本 Adapter 实现）  
+- URL 回调 Adapter（可另开；与长连接互斥）  
+- 自建应用 XML 回调  
+- 迁 Portal 群 Webhook  
+- 企微侧知识集 / 工作流 / MCP 产品配置  
 - Webhook 完整 HITL  
