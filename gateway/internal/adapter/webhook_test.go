@@ -60,7 +60,37 @@ func TestWebhook_IPNotWhitelisted_403(t *testing.T) {
 	}
 }
 
+func TestWebhook_ReplyURL_LoopbackRejected_400(t *testing.T) {
+	t.Setenv("GATEWAY_ALLOW_LOOPBACK_REPLY", "0")
+	h, _, cleanup := newWebhookFixture(t, channelYAML(true, nil))
+	defer cleanup()
+
+	rr := postHook(t, h, "demo-webhook", "dev-webhook-secret", "127.0.0.1:1", map[string]any{
+		"content":   "hi",
+		"peer_id":   "p1",
+		"reply_url": "http://127.0.0.1:9999/cb",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestWebhook_ReplyURL_PrivateRejected_400(t *testing.T) {
+	h, _, cleanup := newWebhookFixture(t, channelYAML(true, nil))
+	defer cleanup()
+
+	rr := postHook(t, h, "demo-webhook", "dev-webhook-secret", "127.0.0.1:1", map[string]any{
+		"content":   "hi",
+		"peer_id":   "p1",
+		"reply_url": "http://10.0.0.8/cb",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestWebhook_Async_202_PostsReplyURL(t *testing.T) {
+	t.Setenv("GATEWAY_ALLOW_LOOPBACK_REPLY", "1")
 	var turns int32
 	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -134,6 +164,7 @@ func TestWebhook_Async_202_PostsReplyURL(t *testing.T) {
 }
 
 func TestWebhook_IdempotencyKey_NoSecondTurn(t *testing.T) {
+	t.Setenv("GATEWAY_ALLOW_LOOPBACK_REPLY", "1")
 	var turns int32
 	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -256,6 +287,7 @@ func TestWebhook_Sync_200(t *testing.T) {
 }
 
 func TestWebhook_PortalFailed_ReplyURLFailed(t *testing.T) {
+	t.Setenv("GATEWAY_ALLOW_LOOPBACK_REPLY", "1")
 	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/runtime/v1/sessions/resolve":

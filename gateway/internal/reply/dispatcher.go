@@ -39,6 +39,9 @@ func (d *Dispatcher) PostReplyURL(ctx context.Context, replyURL string, payload 
 		log.Printf("reply: no reply_url; correlation_id=%s status=%s", payload.CorrelationID, payload.Status)
 		return nil
 	}
+	if err := ValidateReplyURL(replyURL); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode reply payload: %w", err)

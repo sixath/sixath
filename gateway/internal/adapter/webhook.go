@@ -3,6 +3,8 @@ package adapter
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -81,7 +83,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel disabled", http.StatusGone)
 		return
 	}
-	if secret := r.Header.Get(HeaderWebhookSecret); secret != ch.WebhookSecret {
+	if !webhookSecretEqual(ch.WebhookSecret, r.Header.Get(HeaderWebhookSecret)) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -232,15 +234,26 @@ func normalizeWebhook(channelID string, ch channel.Channel, raw []byte) (Inbound
 	if mode != "async" && mode != "sync" {
 		return InboundEvent{}, errBadRequest("reply_mode must be async or sync")
 	}
+	replyURL := strings.TrimSpace(body.ReplyURL)
+	if err := reply.ValidateReplyURL(replyURL); err != nil {
+		return InboundEvent{}, errBadRequest(err.Error())
+	}
 	return InboundEvent{
 		ChannelID:      channelID,
 		PeerID:         body.PeerID,
 		Content:        body.Content,
 		AgentID:        agentID,
-		ReplyURL:       strings.TrimSpace(body.ReplyURL),
+		ReplyURL:       replyURL,
 		IdempotencyKey: strings.TrimSpace(body.IdempotencyKey),
 		ReplyMode:      mode,
 	}, nil
+}
+
+// webhookSecretEqual compares secrets in constant time via fixed-length SHA-256 digests.
+func webhookSecretEqual(expected, got string) bool {
+	a := sha256.Sum256([]byte(expected))
+	b := sha256.Sum256([]byte(got))
+	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
 }
 
 type badRequestError string
