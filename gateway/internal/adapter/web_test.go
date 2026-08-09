@@ -25,6 +25,38 @@ func TestWeb_NoBearer_401(t *testing.T) {
 	}
 }
 
+func TestWeb_Runtime403Passthrough(t *testing.T) {
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"user_id": "u1"})
+		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/sessions/s-forbidden":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"FORBIDDEN","message":"not owner"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer portal.Close()
+
+	mux := newWebMux(t, portal.URL)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s-forbidden", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("Content-Type=%q", ct)
+	}
+	if !strings.Contains(rr.Body.String(), `"not owner"`) {
+		t.Fatalf("body=%s", rr.Body.String())
+	}
+}
+
 func TestWeb_AuthMeThenRuntimeWithServiceToken(t *testing.T) {
 	var runtimeAuth, runtimeUser, meAuth string
 	var runtimePath string

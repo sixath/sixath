@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -183,7 +184,7 @@ func (h *WebHandler) streamMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	rc, hdr, err := h.runtime.TurnsStream(r.Context(), userID, turn)
 	if err != nil {
-		http.Error(w, "runtime stream failed", http.StatusBadGateway)
+		writeRuntimeError(w, err)
 		return
 	}
 	// Close Runtime body when the client disconnects so the upstream request ends promptly.
@@ -295,7 +296,7 @@ func decodeJSONBody(r *http.Request, dst any) error {
 
 func writeRuntimeJSON(w http.ResponseWriter, raw json.RawMessage, err error) {
 	if err != nil {
-		http.Error(w, "runtime request failed", http.StatusBadGateway)
+		writeRuntimeError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -305,6 +306,22 @@ func writeRuntimeJSON(w http.ResponseWriter, raw json.RawMessage, err error) {
 		return
 	}
 	_, _ = w.Write(raw)
+}
+
+func writeRuntimeError(w http.ResponseWriter, err error) {
+	var httpErr *runtimeclient.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode > 0 {
+		body := httpErr.Body
+		if len(body) > 0 && json.Valid(body) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(httpErr.StatusCode)
+			_, _ = w.Write(body)
+			return
+		}
+		http.Error(w, strings.TrimSpace(string(body)), httpErr.StatusCode)
+		return
+	}
+	http.Error(w, "runtime request failed", http.StatusBadGateway)
 }
 
 func copySSEHeaders(dst http.ResponseWriter, src http.Header) {

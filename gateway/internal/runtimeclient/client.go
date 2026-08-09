@@ -15,6 +15,25 @@ import (
 
 const headerUserID = "X-Sath-User-Id"
 
+// HTTPError is a non-2xx response from Portal Runtime.
+type HTTPError struct {
+	StatusCode int
+	Method     string
+	Path       string
+	Body       []byte
+}
+
+func (e *HTTPError) Error() string {
+	if e == nil {
+		return "runtime http error"
+	}
+	msg := strings.TrimSpace(string(e.Body))
+	if msg == "" {
+		return fmt.Sprintf("runtime %s %s: status %d", e.Method, e.Path, e.StatusCode)
+	}
+	return fmt.Sprintf("runtime %s %s: status %d: %s", e.Method, e.Path, e.StatusCode, msg)
+}
+
 // Client calls Portal /runtime/v1 with a service token.
 type Client struct {
 	baseURL    string
@@ -191,8 +210,13 @@ func (c *Client) TurnsStream(ctx context.Context, userID string, req TurnRequest
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, nil, fmt.Errorf("runtime %s %s: status %d: %s", http.MethodPost, "/runtime/v1/turns", resp.StatusCode, strings.TrimSpace(string(body)))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, nil, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Method:     http.MethodPost,
+			Path:       "/runtime/v1/turns",
+			Body:       body,
+		}
 	}
 	return resp.Body, resp.Header.Clone(), nil
 }
@@ -233,7 +257,12 @@ func (c *Client) doJSON(ctx context.Context, method, path, userID string, query 
 		return fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("runtime %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+		return &HTTPError{
+			StatusCode: resp.StatusCode,
+			Method:     method,
+			Path:       path,
+			Body:       raw,
+		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
