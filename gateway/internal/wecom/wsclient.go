@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 )
@@ -130,12 +131,22 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 }
 
-// RespondStream sends aibot_respond_msg with msgtype=stream.
-// Content longer than MaxStreamContentBytes is truncated.
-func (c *Client) RespondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
-	if len(content) > MaxStreamContentBytes {
-		content = content[:MaxStreamContentBytes]
+// truncateUTF8MaxBytes shortens s to at most maxBytes without splitting a UTF-8 code point.
+func truncateUTF8MaxBytes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
 	}
+	s = s[:maxBytes]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// RespondStream sends aibot_respond_msg with msgtype=stream.
+// Content longer than MaxStreamContentBytes is truncated on a UTF-8 boundary.
+func (c *Client) RespondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	content = truncateUTF8MaxBytes(content, MaxStreamContentBytes)
 	body, err := json.Marshal(RespondMsgBody{
 		MsgType: "stream",
 		Stream: StreamPayload{

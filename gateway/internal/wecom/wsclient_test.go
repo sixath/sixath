@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 )
@@ -254,6 +255,33 @@ func TestWSClient_RespondStream(t *testing.T) {
 
 	cancel()
 	<-errCh
+}
+
+func TestTruncateUTF8MaxBytes_ChineseNearLimit(t *testing.T) {
+	const char = "中"
+	var long strings.Builder
+	for long.Len() <= MaxStreamContentBytes {
+		long.WriteString(char)
+	}
+	s := long.String()
+	if len(s) <= MaxStreamContentBytes {
+		t.Fatalf("test setup: len=%d want > %d", len(s), MaxStreamContentBytes)
+	}
+	naive := s[:MaxStreamContentBytes]
+	if utf8.ValidString(naive) {
+		t.Fatal("test setup: naive byte slice should be invalid UTF-8")
+	}
+
+	trunc := truncateUTF8MaxBytes(s, MaxStreamContentBytes)
+	if len(trunc) > MaxStreamContentBytes {
+		t.Fatalf("len=%d want <= %d", len(trunc), MaxStreamContentBytes)
+	}
+	if !utf8.ValidString(trunc) {
+		t.Fatalf("truncated content is invalid UTF-8: %q", trunc[len(trunc)-min(8, len(trunc)):])
+	}
+	if len(trunc) == 0 {
+		t.Fatal("expected non-empty truncation")
+	}
 }
 
 func TestWSClient_RespondStream_Truncates(t *testing.T) {
