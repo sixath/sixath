@@ -16,6 +16,10 @@ type Channel struct {
 	IPWhitelist      []string `yaml:"ip_whitelist"`
 	Enabled          bool     `yaml:"enabled"`
 	DefaultReplyMode string   `yaml:"default_reply_mode"` // async|sync
+	BotID            string   `yaml:"bot_id"`
+	Secret           string   `yaml:"secret"`
+	BotNames         []string `yaml:"bot_names"`
+	WSURL            string   `yaml:"ws_url"`
 }
 
 type channelsFile struct {
@@ -47,6 +51,14 @@ func Load(path string) (*Registry, error) {
 		}
 		if ch.IPWhitelist == nil {
 			ch.IPWhitelist = []string{}
+		}
+		if ch.Type == "wecom_bot" && ch.Enabled {
+			if ch.BotID == "" {
+				return nil, fmt.Errorf("channel %q: bot_id is required for enabled wecom_bot", ch.ID)
+			}
+			if ch.Secret == "" {
+				return nil, fmt.Errorf("channel %q: secret is required for enabled wecom_bot", ch.ID)
+			}
 		}
 		reg.byID[ch.ID] = ch
 	}

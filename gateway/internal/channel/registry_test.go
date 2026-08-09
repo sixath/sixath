@@ -97,3 +97,69 @@ channels:
 		t.Fatal("expected error for unknown channel id")
 	}
 }
+
+func TestLoad_WecomBotLongConnFields(t *testing.T) {
+	const yaml = `
+channels:
+  - id: xiaotiancai
+    type: wecom_bot
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    enabled: true
+    bot_id: "BOTID"
+    secret: "SECRET"
+    bot_names: ["小天才"]
+    ws_url: "wss://openws.work.weixin.qq.com"
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "channels.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	ch, err := reg.Get("xiaotiancai")
+	if err != nil {
+		t.Fatalf("Get xiaotiancai: %v", err)
+	}
+	if ch.Type != "wecom_bot" {
+		t.Fatalf("Type=%q want wecom_bot", ch.Type)
+	}
+	if ch.BotID != "BOTID" {
+		t.Fatalf("BotID=%q", ch.BotID)
+	}
+	if ch.Secret != "SECRET" {
+		t.Fatalf("Secret=%q", ch.Secret)
+	}
+	if len(ch.BotNames) != 1 || ch.BotNames[0] != "小天才" {
+		t.Fatalf("BotNames=%v", ch.BotNames)
+	}
+	if ch.WSURL != "wss://openws.work.weixin.qq.com" {
+		t.Fatalf("WSURL=%q", ch.WSURL)
+	}
+}
+
+func TestLoad_WecomBotEnabledRequiresBotIDAndSecret(t *testing.T) {
+	const yaml = `
+channels:
+  - id: bad-wecom
+    type: wecom_bot
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    enabled: true
+    bot_id: ""
+    secret: ""
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "channels.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected Load error for enabled wecom_bot without bot_id/secret")
+	}
+}
