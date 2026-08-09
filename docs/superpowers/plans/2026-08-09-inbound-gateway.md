@@ -6,7 +6,7 @@
 
 **Architecture:** Gateway 终止用户/Webhook 鉴权，调用 Portal Runtime（service token）；Webhook 用 `channel+peer` 映射续聊；Web 保持多 session UX，经 Gateway 代理会话 CRUD + SSE；Portal 既有 Channel/wecom 出站不动。权威规格：[`2026-08-09-inbound-gateway-design.md`](../specs/2026-08-09-inbound-gateway-design.md)。
 
-**Tech Stack:** Go 1.25（`gateway/` 新 module + `portal/` Kratos）、React/Vite（`web/` 代理切流）、Docker Compose、MySQL（peer 映射表）。
+**Tech Stack:** Go（`gateway/` 与 `portal/go.mod` 对齐，当前 `go 1.26`）、React/Vite（`web/` 代理切流）、Docker Compose、MySQL（peer 映射表）。
 
 **Repos:** `gateway/` 落在 sixath 编排仓；`portal/`、`web/` 为嵌套仓——改动在对应目录提交。**Do not commit unless asked**（文档仓提交除外若用户已要求）。
 
@@ -18,6 +18,7 @@
 | `peer_id`（Web） | 登录用户 ID，仅 ACL；不折叠多会话 |
 | `peer_id`（Webhook） | 请求体字段；`channel+peer` → 唯一 session |
 | Service token | 配置项 `runtime.service_token` / env `SATH_RUNTIME_TOKEN`；compose 与本地默认 `dev-runtime-token` |
+| Web 登录态 | **不透明 Bearer**（与现网一致：SHA-256 → `UserIDByTokenHash`）。Gateway **不**自建 JWT；通过 Portal `GET /api/v1/auth/me`（Task 2b 新增）解析 `user_id`，再以 service token 调 Runtime |
 | Turn 超时 | 默认 120s |
 | final 形态 | Portal 同步 JSON；Gateway 再 POST `reply_url` |
 
@@ -31,6 +32,7 @@
 | `portal/internal/biz/channel_peer.go` | Repo 接口 + Resolve 领域逻辑 |
 | `portal/internal/data/channel_peer_mysql.go` | GORM 实现 |
 | `portal/internal/runtime/auth.go` | Service token + `X-Sath-User-Id` 校验中间件 |
+| `portal/internal/server/auth_me.go` | `GET /api/v1/auth/me`（不透明 Bearer → user_id） |
 | `portal/internal/runtime/service.go` | Resolve / CreateSession / List / Turns stream\|final |
 | `portal/internal/runtime/http.go` | 注册 `/runtime/v1/*` |
 | `portal/internal/server/http.go` | 挂 Runtime；Chat 公共入站按开关拒绝 |
@@ -62,6 +64,8 @@
 - Create: `portal/internal/data/channel_peer_mysql.go`
 - Create: `portal/internal/biz/channel_peer_test.go`（或 data 层测试用 sqlite/mysql）
 - Modify: `portal/internal/data/data.go`（AutoMigrate 注册）
+- Modify: `portal/internal/data/data.go` ProviderSet / `portal/internal/biz/biz.go` ProviderSet
+- Modify: `portal/cmd/backend/wire.go` → 重新 `wire` 生成 `wire_gen.go`
 
 - [ ] **Step 1: Write failing test for Resolve semantics**
 
@@ -108,41 +112,50 @@ cd portal && go test ./internal/biz/ -run TestChannelPeerResolve -count=1
 - [ ] **Step 5: Commit (portal repo)**
 
 ```bash
-cd portal && git add internal/data/model/channel_peer_session.go internal/biz/channel_peer.go internal/data/channel_peer_mysql.go internal/data/data.go && git commit -m "feat(runtime): persist channel+peer session mapping"
+cd portal && git add internal/data/model/channel_peer_session.go internal/biz/channel_peer.go internal/data/channel_peer_mysql.go internal/data/data.go internal/biz/biz.go cmd/backend/wire.go cmd/backend/wire_gen.go && git commit -m "feat(runtime): persist channel+peer session mapping"
 ```
 
 ---
 
-### Task 2: Portal Runtime auth 中间件
+### Task 2: Portal `auth/me` + Runtime auth 中间件
 
 **Files:**
+- Create: `portal/internal/server/auth_me.go`（或并入既有 auth handlers）
 - Create: `portal/internal/runtime/auth.go`
 - Create: `portal/internal/runtime/auth_test.go`
-- Modify: `portal/configs/config.yaml`、`config.docker.yaml`（及 conf proto/struct 若项目用结构化配置）
+- Modify: `portal/internal/server/http.go` — `GET /api/v1/auth/me`
+- Modify: configs — `runtime.service_token`
+
+**Web 鉴权策略（锁定）：**
+
+1. 浏览器继续带现有不透明 `Authorization: Bearer <session_token>`。
+2. Gateway 先请求 Portal `GET /api/v1/auth/me`（用户 token）→ `{ user_id }`。
+3. Gateway 再调 `/runtime/v1/*`，只带 `Authorization: Bearer <runtime_token>` + `X-Sath-User-Id: <user_id>`。
+4. Portal Runtime **拒绝**用户 session token 作为 Runtime 信任根。
 
 - [ ] **Step 1: Failing tests**
 
 ```go
-func TestRuntimeAuth_RejectsMissingToken(t *testing.T) { /* 401 */ }
-func TestRuntimeAuth_AcceptsBearerAndSetsUser(t *testing.T) {
-	// Authorization: Bearer <token>; X-Sath-User-Id: u1 → ctx has user
-}
+func TestAuthMe_ReturnsUserID(t *testing.T) { /* valid opaque token → user_id */ }
+func TestRuntimeAuth_RejectsMissingToken(t *testing.T) {}
+func TestRuntimeAuth_AcceptsServiceTokenAndUserHeader(t *testing.T) {}
+func TestRuntimeAuth_RejectsUserSessionTokenAlone(t *testing.T) {}
 ```
 
 - [ ] **Step 2: Run — expect fail**
 
 ```bash
-cd portal && go test ./internal/runtime/ -run TestRuntimeAuth -count=1
+cd portal && go test ./internal/runtime/ ./internal/server/ -run "TestAuthMe|TestRuntimeAuth" -count=1
 ```
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement `auth/me` + Runtime middleware**
 
-校验 `Authorization: Bearer` == 配置 `runtime.service_token`；可选读 `X-Sath-User-Id` 写入 context（Web 路径必填；Webhook resolve 可空或用 peer）。
+`/runtime/v1` 用自定义 Route 注册（同 `chat_sse`），每个 handler 显式套 Runtime auth；全局 `middleware.Auth` 对 `/runtime/v1` skip。
 
 - [ ] **Step 4: Pass + commit**
 
 ```bash
-cd portal && git commit -am "feat(runtime): service token auth for /runtime/v1"
+cd portal && git commit -am "feat(auth): me endpoint and runtime service-token gate"
 ```
 
 ---
@@ -220,7 +233,9 @@ cd portal && go test ./internal/runtime/ -run TestTurns -count=1
 
 - `POST /runtime/v1/turns` with `reply_mode=final|stream`
 - stream：复用 `chat_sse.go` 事件语义；**绑定传入 ctx**，客户端断开即取消
-- final：同步 JSON；超时 120s；HITL 阻塞 → `status=failed`
+- **透传** Web body 中的 `confirm_response` / `input_response`（与 `client.ts` `sendMessageStream` 一致），否则 HITL 确认卡断裂
+- final：同步 JSON；超时 120s；无交互面时 HITL 阻塞 → `status=failed`
+
 
 - [ ] **Step 4: Pass + commit**
 
@@ -268,8 +283,7 @@ portal_base_url: "http://127.0.0.1:8000"
 runtime_token: "dev-runtime-token"
 turn_timeout_sec: 120
 channels_file: "./configs/channels.yaml"
-auth:
-  jwt_secret: "..." # 与 portal 对齐
+# Web 用户鉴权：调用 Portal GET /api/v1/auth/me（不透明 Bearer），无 jwt_secret
 ```
 
 - [ ] **Step 3: `go build ./cmd/gateway`**
@@ -365,12 +379,12 @@ git commit -am "feat(gateway): webhook inbound with async reply and idempotency"
 
 - [ ] **Step 1: Tests**
 
-- 无用户 JWT → 401
-- 转发时使用 service token + `X-Sath-User-Id`
-- SSE 透传 `data:` 行
+- 无用户 Bearer → 401
+- 先 `auth/me` 再 Runtime；转发仅 service token + `X-Sath-User-Id`
+- SSE 透传 `data:`；body 可带 `confirm_response`
 - **取消客户端请求时 Runtime 侧 ctx 取消**（mock 可观察）
 
-- [ ] **Step 2: Implement** — JWT 与 portal 共享 secret；实现上表全部路由。
+- [ ] **Step 2: Implement** — `auth/me` 解析 user；实现上表全部路由；SSE 代理透传 disconnect cancel。
 
 - [ ] **Step 3: Pass + commit**
 
@@ -393,19 +407,20 @@ git commit -am "feat(gateway): web adapter for real chat session routes and SSE"
 
 ```ts
 proxy: {
-  // 会话入站 → gateway（含 /agents/:id/sessions）
+  '/api/v1/sessions': { target: 'http://localhost:8088', changeOrigin: true },
   '/api/v1/agents': {
     target: 'http://localhost:8088',
     changeOrigin: true,
-    // 若不想把全部 agents API 打到 gateway：改用 bypass —
-    // bypass(req) { return req.url?.includes('/sessions') ? undefined : req.url }
+    bypass(req) {
+      // 仅 /agents/:id/sessions* 进 Gateway；Agent CRUD/hub 等回 Portal
+      const u = req.url || ''
+      if (/^\/api\/v1\/agents\/[^/]+\/sessions/.test(u)) return undefined
+      return u
+    },
   },
-  '/api/v1/sessions': { target: 'http://localhost:8088', changeOrigin: true },
   '/api': { target: 'http://localhost:8000', changeOrigin: true },
 }
 ```
-
-**实现约束：** 不得把 `GET/POST /api/v1/agents`（无 `/sessions` 后缀的 Agent CRUD）误送到 Gateway。推荐 `bypass`：仅当 path 匹配 `/api/v1/agents/[^/]+/sessions` 时走 Gateway，其余 agents 回 Portal。
 
 - [ ] **Step 2: compose** — gateway `18088:8088`；env token；web depends_on gateway。
 
@@ -440,7 +455,7 @@ proxy: {
 
 - **抽取 SSE**：优先从 `chat_sse.go` / `chat.go` 抽共享 `RunTurnStream(ctx, ...)`，ctx 取消必须贯穿。
 - **Vite bypass**：`/api/v1/agents` 代理极易误伤 Agent CRUD——以 path 正则限制。
-- **JWT 共享**：Gateway 与 Portal 同一校验密钥。
+- **鉴权**：Gateway 用 `auth/me`，禁止自造 JWT。
 - **嵌套 Git**：portal/web/root 分仓提交；勿提交真实 token。
 
 ---
