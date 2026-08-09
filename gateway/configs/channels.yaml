@@ -1,0 +1,9 @@
+# Example webhook channel stub (loaded by ChannelRegistry in a later task).
+channels:
+  - id: demo-webhook
+    type: webhook
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    webhook_secret: "dev-webhook-secret"
+    ip_whitelist: []
+    enabled: true
+    default_reply_mode: async
