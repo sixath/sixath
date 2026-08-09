@@ -45,6 +45,10 @@ func main() {
 		Reply:       reply.NewDispatcher(nil),
 		TurnTimeout: turnTimeout,
 	}))
+	adapter.MountWeb(mux, adapter.WebDeps{
+		PortalBaseURL: cfg.PortalBaseURL,
+		Runtime:       rt,
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
