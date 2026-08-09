@@ -173,7 +173,7 @@ cd portal && git commit -am "feat(auth): me endpoint and runtime service-token g
 | Runtime | 用途 |
 |---------|------|
 | `POST /runtime/v1/sessions/resolve` | webhook peer 续聊 |
-| `POST /runtime/v1/sessions` | Web 创建（body: agent_id, title?; user from header） |
+| `POST /runtime/v1/sessions` | Web 创建（body: agent_id, title?, parent_session_id?; user from header） |
 | `GET /runtime/v1/sessions` | Web 全量列表 |
 | `GET /runtime/v1/agents/{agent_id}/sessions` | Web 按 Agent 列表 |
 | `GET /runtime/v1/sessions/{id}` | get |
@@ -417,15 +417,9 @@ proxy: {
     target: 'http://localhost:8088',
     changeOrigin: true,
   },
-  // 注意：不要用裸 '/api/v1/agents' + bypass(return u)
   '/api': {
     target: 'http://localhost:8000',
     changeOrigin: true,
-    bypass(req) {
-      const u = req.url || ''
-      // agents/:id/sessions* → 改走 gateway（通过改写由单独插件处理更清晰）
-      return undefined
-    },
     router(req) {
       const u = req.url || ''
       if (/^\/api\/v1\/agents\/[^/]+\/sessions/.test(u)) {
@@ -453,21 +447,25 @@ location ~ ^/api/v1/sessions {
   proxy_http_version 1.1;
   proxy_set_header Connection "";
   proxy_buffering off; # SSE
+  proxy_read_timeout 600s;
+  proxy_send_timeout 600s;
 }
 location ~ ^/api/v1/agents/[^/]+/sessions {
   proxy_pass http://gateway:8088;
   proxy_http_version 1.1;
   proxy_set_header Connection "";
   proxy_buffering off;
+  proxy_read_timeout 600s;
+  proxy_send_timeout 600s;
 }
 location /api/ {
   proxy_pass http://portal:8000;
 }
 ```
 
-（upstream 名按 compose service 调整。）
+（upstream 名按 compose service 调整。超时须 ≥ turn 120s，沿用现网 600s。）
 
-- [ ] **Step 3: compose** — gateway `18088:8088`；env token；web depends_on gateway。
+- [ ] **Step 3: compose** — gateway `18088:8088`；env token；**gateway depends_on portal**；**web depends_on gateway 与 portal**（Agent CRUD 仍直连 portal）。
 
 - [ ] **Step 4: 手动烟雾** — Agent CRUD 仍走 Portal；创建会话/流式走 Gateway；webhook 202。
 
