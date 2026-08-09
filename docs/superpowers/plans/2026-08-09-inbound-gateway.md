@@ -50,8 +50,8 @@
 | `gateway/configs/config.example.yaml` | 示例渠道 + portal |
 | `gateway/Dockerfile` | 镜像 |
 | `docker-compose.yml` | gateway 服务；web 依赖 gateway |
-| `web/vite.config.ts` | sessions 代理 → gateway；其余 `/api` → portal |
-| `web` nginx（若有） | 生产同样切流 |
+| `web/vite.config.ts` | 开发代理：sessions → gateway；其余 `/api` → portal（见 Task 10，禁止错误 bypass） |
+| `web/nginx.conf` | compose 生产同等切流 + SSE `proxy_buffering off` |
 | `_neo4j_q/verify_inbound_gateway.ps1` | E2E 烟雾（可选但建议） |
 
 ---
@@ -150,7 +150,7 @@ cd portal && go test ./internal/runtime/ ./internal/server/ -run "TestAuthMe|Tes
 
 - [ ] **Step 3: Implement `auth/me` + Runtime middleware**
 
-`/runtime/v1` 用自定义 Route 注册（同 `chat_sse`），每个 handler 显式套 Runtime auth；全局 `middleware.Auth` 对 `/runtime/v1` skip。
+`auth/me` 挂在 `/api/v1/auth/` 下时会被全局 Auth skip——**必须在 handler 内**自行 `UserIDByTokenHash`。`/runtime/v1` 自定义 Route + 显式 Runtime auth。`runtime.service_token` / 后续 `chat.public_inbound_enabled` 须进入 conf 加载路径（`conf.proto` 或仿 `web_config.go` 旁路），不能只改 yaml。
 
 - [ ] **Step 4: Pass + commit**
 
@@ -403,30 +403,75 @@ git commit -am "feat(gateway): web adapter for real chat session routes and SSE"
 - Modify: web 生产 nginx（若有）
 - Modify: `README.md`
 
-- [ ] **Step 1: vite 代理（先匹配会话相关，再 fallback Portal）**
+- [ ] **Step 1: vite 代理（按路径选 target，禁止错误 bypass）**
+
+Vite 的 `bypass` 返回 path 表示「交回 Vite 静态处理」，**不会**落到下一条 `/api` 代理。正确做法：用自定义 `configure` / 单入口 middleware，或拆成两条精确前缀且 **Agent CRUD 不要挂在会吞掉全量 `/api/v1/agents` 的规则上**。
+
+推荐实现（二选一，计划锁定 A）：
+
+**A. 两段精确代理 + Portal fallback**
 
 ```ts
 proxy: {
-  '/api/v1/sessions': { target: 'http://localhost:8088', changeOrigin: true },
-  '/api/v1/agents': {
+  '/api/v1/sessions': {
     target: 'http://localhost:8088',
     changeOrigin: true,
+  },
+  // 注意：不要用裸 '/api/v1/agents' + bypass(return u)
+  '/api': {
+    target: 'http://localhost:8000',
+    changeOrigin: true,
     bypass(req) {
-      // 仅 /agents/:id/sessions* 进 Gateway；Agent CRUD/hub 等回 Portal
       const u = req.url || ''
-      if (/^\/api\/v1\/agents\/[^/]+\/sessions/.test(u)) return undefined
-      return u
+      // agents/:id/sessions* → 改走 gateway（通过改写由单独插件处理更清晰）
+      return undefined
+    },
+    router(req) {
+      const u = req.url || ''
+      if (/^\/api\/v1\/agents\/[^/]+\/sessions/.test(u)) {
+        return 'http://localhost:8088'
+      }
+      if (u.startsWith('/api/v1/sessions')) {
+        return 'http://localhost:8088'
+      }
+      return 'http://localhost:8000'
     },
   },
-  '/api': { target: 'http://localhost:8000', changeOrigin: true },
 }
 ```
 
-- [ ] **Step 2: compose** — gateway `18088:8088`；env token；web depends_on gateway。
+若当前 Vite 版本 `router` 行为不便，可在 `gateway` 对「非会话的 `/api/v1/agents*`」做反向代理到 Portal——但 **一期优先 A（vite/nginx 选路）**，避免 Gateway 变成全量 API 网关。
 
-- [ ] **Step 3: 手动烟雾 — 创建会话、流式聊天、webhook 202。
+- [ ] **Step 2: 修改 `web/nginx.conf`（compose 生产路径必改）**
 
-- [ ] **Step 4: Commit root + web**
+当前若为 `location /api/ { proxy_pass portal; }`，改为：
+
+```nginx
+# 会话入站 → gateway
+location ~ ^/api/v1/sessions {
+  proxy_pass http://gateway:8088;
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_buffering off; # SSE
+}
+location ~ ^/api/v1/agents/[^/]+/sessions {
+  proxy_pass http://gateway:8088;
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_buffering off;
+}
+location /api/ {
+  proxy_pass http://portal:8000;
+}
+```
+
+（upstream 名按 compose service 调整。）
+
+- [ ] **Step 3: compose** — gateway `18088:8088`；env token；web depends_on gateway。
+
+- [ ] **Step 4: 手动烟雾** — Agent CRUD 仍走 Portal；创建会话/流式走 Gateway；webhook 202。
+
+- [ ] **Step 5: Commit root + web**
 
 ---
 
