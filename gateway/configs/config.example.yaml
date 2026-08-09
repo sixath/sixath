@@ -1,5 +1,7 @@
 listen: ":8088"
+# Local: 127.0.0.1:8000. Docker Compose: use config.docker.yaml (http://portal:8000).
 portal_base_url: "http://127.0.0.1:8000"
+# Overridable via env SATH_RUNTIME_TOKEN (compose default: dev-runtime-token)
 runtime_token: "dev-runtime-token"
 turn_timeout_sec: 120
 channels_file: "./configs/channels.yaml"

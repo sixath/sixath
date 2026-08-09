@@ -43,5 +43,8 @@ func Load(path string) (*Config, error) {
 	if cfg.ChannelsFile == "" {
 		cfg.ChannelsFile = "./configs/channels.yaml"
 	}
+	if v := os.Getenv("SATH_RUNTIME_TOKEN"); v != "" {
+		cfg.RuntimeToken = v
+	}
 	return &cfg, nil
 }

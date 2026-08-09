@@ -9,6 +9,7 @@ Go AI Agent 平台工作区：可嵌入的 Agent 运行时、后端 Portal、Web
 | [`framework/`](https://github.com/sixath/framework) | sixath/framework | Agent 运行时（ReAct、Tools、Skills、MCP、上下文压缩） |
 | [`portal/`](https://github.com/sixath/portal) | sixath/portal | Kratos 后端（Agent/工具/会话/渠道/Growth） |
 | [`web/`](https://github.com/sixath/web) | sixath/web | React + Vite 管理 UI |
+| `gateway/` | （本仓库） | Inbound Gateway（会话切流、webhook） |
 | `deploy/` | （本仓库） | MySQL 初始化等部署资产 |
 | `docs/` | （本仓库） | 跨仓设计与实施计划 |
 
@@ -27,7 +28,8 @@ docker compose up --build -d
 
 | 服务 | 宿主地址 | 容器内 |
 |------|----------|--------|
-| Web UI | http://localhost:18080 | `:80`（nginx，`/api` → portal） |
+| Web UI | http://localhost:18080 | `:80`（nginx：sessions → gateway，其余 `/api` → portal） |
+| Gateway | http://localhost:18088 | `:8088`（入站会话 / webhook） |
 | Portal HTTP | http://localhost:18000 | `:8000` |
 | Portal gRPC | localhost:19000 | `:9000` |
 | MySQL | localhost:13306 | `:3306`（root / root，库名 `sath`） |
@@ -45,6 +47,7 @@ docker compose down -v       # 连同 MySQL 数据一并清除
 
 ```bash
 docker build -f portal/Dockerfile -t portal .
+docker build -f gateway/Dockerfile -t gateway .
 docker build -t sixath-web ./web
 ```
 
@@ -52,9 +55,10 @@ docker build -t sixath-web ./web
 
 - **framework**：见 [framework README](https://github.com/sixath/framework)
 - **portal**：Go 1.25+、本机 MySQL，见 [portal/README.md](portal/README.md)（开发默认 `localhost:8000`）
-- **web**：`cd web && npm install && npm run dev`（Vite `:5173`，代理 `/api` → `localhost:8000`）
+- **gateway**：`cd gateway && go run ./cmd/gateway`（默认 `:8088`，`portal_base_url` → `localhost:8000`）
+- **web**：`cd web && npm install && npm run dev`（Vite `:5173`；`/api/v1/sessions` 与 agent sessions → `localhost:8088`，其余 `/api` → `localhost:8000`）
 
-开发时请把 portal 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。
+开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。
 
 ## 相关文档
 

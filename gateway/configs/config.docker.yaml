@@ -1,0 +1,6 @@
+listen: ":8088"
+# Compose service DNS — portal listens on :8000 inside the network
+portal_base_url: "http://portal:8000"
+runtime_token: "dev-runtime-token"
+turn_timeout_sec: 120
+channels_file: "./configs/channels.yaml"

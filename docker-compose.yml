@@ -30,6 +30,20 @@ services:
       mysql:
         condition: service_healthy
 
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "18088:8088"
+    environment:
+      SATH_RUNTIME_TOKEN: dev-runtime-token
+    volumes:
+      - ./gateway/configs/config.docker.yaml:/app/configs/config.docker.yaml:ro
+      - ./gateway/configs/channels.yaml:/app/configs/channels.yaml:ro
+    depends_on:
+      - portal
+
   web:
     build:
       context: ./web
@@ -39,6 +53,7 @@ services:
       - "18080:80"
     depends_on:
       - portal
+      - gateway
 
 volumes:
   mysql_data:
