@@ -39,6 +39,8 @@ go run ./cmd/gateway -config ./configs/config.example.yaml
 | `secret` | 控制台 **长连接 Secret**（≠ URL 回调 Token）。 |
 | `bot_names` | 可选。机器人在群里的显示名列表，用于从文本中剥离 `@提及`（如 `["小天才"]`）。 |
 | `ws_url` | 可选。默认 `wss://openws.work.weixin.qq.com`；一般无需修改。 |
+| `corp_id` | 可选。企业 ID；与 `corp_secret` 一起用于把 `from.userid` 解析成通讯录姓名（「发起人」展示）。 |
+| `corp_secret` | 可选。自建应用 Secret（需成员读取权限）；**不要**提交到 Git。未配置时「发起人」回退为 userid。 |
 
 示例（启用前请填入真实凭证）：
 
@@ -52,9 +54,12 @@ channels:
     secret: "<长连接 Secret>"
     bot_names: ["小天才"]
     ws_url: "wss://openws.work.weixin.qq.com"
+    corp_id: "<企业 CorpID>"
+    corp_secret: "<自建应用 Secret>"
 ```
 
 `enabled: true` 时 `bot_id` 与 `secret` 必填，否则 Gateway 启动加载 channels 会失败。
+`corp_id` / `corp_secret` 可选：配置后 Gateway 会调用 `gettoken` →（必要时）`openuserid_to_userid` → `user/get`，将「发起人」显示为 `别名(姓名)`；解析失败不阻塞回复。
 
 ### 3. 单副本约束（重要）
 

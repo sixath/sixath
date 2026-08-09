@@ -24,7 +24,7 @@
 | 出站一期 | `aibot_respond_msg` + `msgtype=stream`：先 `finish=false`「处理中…」，turns 后同 `stream.id` `finish=true` 卡片；透传 `headers.req_id` |
 | 失败出站 | turns 失败仍 `finish=true` + 失败卡片（发起人/问题 + 错误提示）；禁止静默 |
 | peer | `group` → `chat:{chatid}`；`single` → `user:{from.userid}` |
-| `asker_name` | 一期 = userid |
+| `asker_name` | 配置 `corp_id`+`corp_secret` 时解析通讯录显示名；否则回退 userid |
 | `question_text` | 去 `@机器人`；`quote` 可附 Runtime content，不进卡片「问题」 |
 | Runtime content | 规格 §4.3 字面模板 |
 | 超长 | stream content 按 **20480** 字节截断 |

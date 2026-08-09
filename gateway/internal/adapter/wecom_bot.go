@@ -85,19 +85,23 @@ func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 }
 
 func runWecomBotOnce(ctx context.Context, ch channel.Channel, deps WecomBotDeps) error {
+	dir := wecom.NewDirectory(wecom.DirectoryConfig{
+		CorpID: ch.CorpID,
+		Secret: ch.CorpSecret,
+	})
 	var client *wecom.Client
 	client = wecom.NewClient(wecom.ClientConfig{
 		URL:    ch.WSURL,
 		BotID:  ch.BotID,
 		Secret: ch.Secret,
 		OnMessage: func(reqID string, body json.RawMessage) {
-			go handleWecomRawMessage(context.Background(), client, reqID, ch, body, deps)
+			go handleWecomRawMessage(context.Background(), client, reqID, ch, body, deps, dir)
 		},
 	})
 	return client.Run(ctx)
 }
 
-func handleWecomRawMessage(parent context.Context, conn WecomConn, reqID string, ch channel.Channel, body json.RawMessage, deps WecomBotDeps) {
+func handleWecomRawMessage(parent context.Context, conn WecomConn, reqID string, ch channel.Channel, body json.RawMessage, deps WecomBotDeps, dir *wecom.Directory) {
 	n, err := wecom.NormalizeMsgBody(body, wecom.NormalizeOpts{
 		BotNames: ch.BotNames,
 		BotID:    ch.BotID,
@@ -112,6 +116,11 @@ func handleWecomRawMessage(parent context.Context, conn WecomConn, reqID string,
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+	if dir != nil {
+		if name := dir.ResolveDisplayName(ctx, n.AskerID); name != "" {
+			n = n.WithAskerName(name)
+		}
+	}
 	HandleWecomMsgCallback(ctx, conn, reqID, ch, n, deps)
 }
 

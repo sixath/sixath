@@ -30,8 +30,10 @@ type msgCallbackBody struct {
 	AibotID  string `json:"aibotid"`
 	ChatID   string `json:"chatid"`
 	ChatType string `json:"chattype"`
-	From     struct {
+	From struct {
 		UserID string `json:"userid"`
+		Name   string `json:"name"`  // undocumented / future; prefer when present
+		Alias  string `json:"alias"` // undocumented / future
 	} `json:"from"`
 	MsgType string `json:"msgtype"`
 	Text    struct {
@@ -84,7 +86,10 @@ func NormalizeMsgBody(body []byte, opts NormalizeOpts) (Normalized, error) {
 	}
 
 	askerID := raw.From.UserID
-	askerName := askerID
+	askerName := formatWeComDisplayName(raw.From.Name, raw.From.Alias)
+	if askerName == "" {
+		askerName = askerID
+	}
 	question := StripBotMention(raw.Text.Content, opts.BotNames)
 
 	n := Normalized{
@@ -98,4 +103,15 @@ func NormalizeMsgBody(body []byte, opts NormalizeOpts) (Normalized, error) {
 		ChatType:       raw.ChatType,
 	}
 	return n, nil
+}
+
+// WithAskerName returns a copy with AskerName and RuntimeContent updated.
+func (n Normalized) WithAskerName(name string) Normalized {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return n
+	}
+	n.AskerName = name
+	n.RuntimeContent = FormatRuntimeContent(name, n.AskerID, n.QuestionText)
+	return n
 }

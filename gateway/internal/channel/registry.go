@@ -20,6 +20,9 @@ type Channel struct {
 	Secret           string   `yaml:"secret"`
 	BotNames         []string `yaml:"bot_names"`
 	WSURL            string   `yaml:"ws_url"`
+	// Optional self-built app credentials to resolve from.userid → display name.
+	CorpID           string   `yaml:"corp_id"`
+	CorpSecret       string   `yaml:"corp_secret"`
 }
 
 type channelsFile struct {

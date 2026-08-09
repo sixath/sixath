@@ -109,6 +109,8 @@ channels:
     secret: "SECRET"
     bot_names: ["小天才"]
     ws_url: "wss://openws.work.weixin.qq.com"
+    corp_id: "wwCORP"
+    corp_secret: "APPSECRET"
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "channels.yaml")
@@ -139,6 +141,9 @@ channels:
 	}
 	if ch.WSURL != "wss://openws.work.weixin.qq.com" {
 		t.Fatalf("WSURL=%q", ch.WSURL)
+	}
+	if ch.CorpID != "wwCORP" || ch.CorpSecret != "APPSECRET" {
+		t.Fatalf("corp fields: id=%q secret=%q", ch.CorpID, ch.CorpSecret)
 	}
 }
 

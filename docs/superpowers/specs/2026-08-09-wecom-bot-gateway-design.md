@@ -129,7 +129,7 @@ channels:
 | 字段 | 来源 |
 |------|------|
 | `asker_id` | `body.from.userid` |
-| `asker_name` | 一期 = userid |
+| `asker_name` | 优先通讯录解析（`corp_id`+`corp_secret` → `user/get`，必要时先 `openuserid_to_userid`）；否则 `from.name`/`alias`（若有）；再否则 = userid |
 | `question_text` | `body.text.content` 去 `@机器人` |
 | `chat_id` | `body.chatid`（群） |
 | `msg_id` | `body.msgid` |
@@ -228,7 +228,7 @@ channels:
 
 1. 端点默认 `wss://openws.work.weixin.qq.com`；凭证 `bot_id` + `secret`。  
 2. 消息字段同长连接文档 `aibot_msg_callback.body`（与 URL 模式明文结构一致）。  
-3. `asker_name` 一期 = userid。  
+3. `asker_name`：配置 `corp_id`+`corp_secret` 时经通讯录解析为显示名；否则回退 userid。  
 4. 多副本：同一 `bot_id` 仅一台 Gateway `enabled: true`。  
 
 ---
