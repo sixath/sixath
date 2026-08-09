@@ -212,12 +212,14 @@ channels:
 
 ---
 
-## 8. 实现期开放问题（写计划时收敛）
+## 8. 实现期开放问题
 
-1. 智能机器人官方回调字段名、加密算法、同步回复 vs 异步发消息的最终选型（以当前企微文档为准）。  
-2. 群聊 id / 单聊 user id 在回调 JSON/XML 中的准确路径。  
-3. `asker_name` 是否需通讯录 API；一期是否允许先显示 userid。  
-4. 公网暴露：Gateway 需对企微出口 IP 或签名强制校验；`reply_url` 式 SSRF 规则不适用时改用官方 host allowlist。  
+已在实现计划 [`2026-08-09-wecom-bot-gateway.md`](../plans/2026-08-09-wecom-bot-gateway.md) **Locked decisions** 收敛：
+
+1. HTTP 回调 + JSON 加解密（ReceiveId=`""`）；出站用回调内 `response_url` POST markdown（不加密，1h/一次）。  
+2. 字段路径：`chattype`/`chatid`/`from.userid`/`text.content`/`msgid`/`response_url`（文档 100719）。  
+3. `asker_name` 一期 = userid。  
+4. 验签强制；`response_url` 走现有公网 SSRF 校验（`qyapi.weixin.qq.com`）。  
 
 ---
 
