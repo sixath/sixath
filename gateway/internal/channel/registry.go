@@ -76,3 +76,15 @@ func (r *Registry) Get(id string) (Channel, error) {
 	}
 	return ch, nil
 }
+
+// All returns a snapshot of configured channels.
+func (r *Registry) All() []Channel {
+	if r == nil || r.byID == nil {
+		return nil
+	}
+	out := make([]Channel, 0, len(r.byID))
+	for _, ch := range r.byID {
+		out = append(out, ch)
+	}
+	return out
+}

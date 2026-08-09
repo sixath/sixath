@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/sixath/gateway/internal/adapter"
@@ -36,12 +40,16 @@ func main() {
 	rt := runtimeclient.New(cfg.PortalBaseURL, cfg.RuntimeToken)
 	turnTimeout := time.Duration(cfg.TurnTimeoutSec) * time.Second
 
+	// Shared with webhook + wecom_bot so peer sessions and msgid idempotency align.
+	sessions := session.NewRouter(rt, 30*time.Second)
+	idem := idempotency.NewStore(10 * time.Minute)
+
 	mux := http.NewServeMux()
 	mux.Handle("POST /hooks/{channel_id}", adapter.NewWebhookHandler(adapter.WebhookDeps{
 		Registry:    reg,
 		Runtime:     rt,
-		Sessions:    session.NewRouter(rt, 30*time.Second),
-		Idempotency: idempotency.NewStore(10 * time.Minute),
+		Sessions:    sessions,
+		Idempotency: idem,
 		Reply:       reply.NewDispatcher(nil),
 		TurnTimeout: turnTimeout,
 	}))
@@ -54,9 +62,28 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	adapter.StartWecomBots(ctx, adapter.WecomBotDeps{
+		Registry:    reg,
+		Runtime:     rt,
+		Sessions:    sessions,
+		Idempotency: idem,
+		TurnTimeout: turnTimeout,
+	})
+
 	fmt.Printf("sixath-gateway version=%s listen=%s\n", Version, cfg.Listen)
 	fmt.Printf("portal_base_url=%s turn_timeout_sec=%d channels_file=%s\n",
 		cfg.PortalBaseURL, cfg.TurnTimeoutSec, cfg.ChannelsFile)
 
-	log.Fatal(http.ListenAndServe(cfg.Listen, mux))
+	srv := &http.Server{Addr: cfg.Listen, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
