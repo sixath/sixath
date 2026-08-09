@@ -14,7 +14,7 @@
 
 | 项 | 锁定 |
 |----|------|
-| Web 代理切面 | Gateway 对外兼容现有 `/api/v1/sessions*` 对话路径；其余 `/api`（Agent/Tool/Channel 管理等）仍直连 Portal |
+| Web 代理切面 | Gateway 对外兼容 **Web 实际使用的会话路径**（见 Task 9 路径表，含 `/agents/{id}/sessions`、`messages/stream`、`search`、`rewind`）；其余 `/api`（Agent/Tool/Channel 管理等）仍直连 Portal |
 | `peer_id`（Web） | 登录用户 ID，仅 ACL；不折叠多会话 |
 | `peer_id`（Webhook） | 请求体字段；`channel+peer` → 唯一 session |
 | Service token | 配置项 `runtime.service_token` / env `SATH_RUNTIME_TOKEN`；compose 与本地默认 `dev-runtime-token` |
@@ -40,7 +40,7 @@
 | `gateway/internal/config/config.go` | Portal URL、token、listen、channels 文件 |
 | `gateway/internal/channel/registry.go` | 渠道配置加载 |
 | `gateway/internal/runtimeclient/client.go` | Portal Runtime HTTP 客户端 |
-| `gateway/internal/session/router.go` | resolve 缓存（webhook） |
+| `gateway/internal/session/router.go` | webhook resolve 短缓存（随 Task 8 使用） |
 | `gateway/internal/adapter/adapter.go` | Adapter 接口 |
 | `gateway/internal/adapter/web.go` | Web 鉴权 + `/api/v1/sessions*` → Runtime |
 | `gateway/internal/adapter/webhook.go` | `/hooks/{id}`、202、async reply、幂等 |
@@ -147,7 +147,7 @@ cd portal && git commit -am "feat(runtime): service token auth for /runtime/v1"
 
 ---
 
-### Task 3: Portal Runtime HTTP — sessions + resolve
+### Task 3: Portal Runtime HTTP — sessions CRUD + resolve + messages
 
 **Files:**
 - Create: `portal/internal/runtime/service.go`
@@ -155,12 +155,24 @@ cd portal && git commit -am "feat(runtime): service token auth for /runtime/v1"
 - Create: `portal/internal/runtime/sessions_test.go`
 - Modify: `portal/internal/server/http.go`（注册路由，走 Runtime auth）
 
+**Runtime 最小路由（供 Task 9 代理，必须齐）：**
+
+| Runtime | 用途 |
+|---------|------|
+| `POST /runtime/v1/sessions/resolve` | webhook peer 续聊 |
+| `POST /runtime/v1/sessions` | Web 创建（body: agent_id, title?; user from header） |
+| `GET /runtime/v1/sessions` | Web 全量列表 |
+| `GET /runtime/v1/agents/{agent_id}/sessions` | Web 按 Agent 列表 |
+| `GET /runtime/v1/sessions/{id}` | get |
+| `PUT /runtime/v1/sessions/{id}` | update title |
+| `DELETE /runtime/v1/sessions/{id}` | delete |
+| `GET /runtime/v1/sessions/{id}/messages` | 历史 |
+| `GET /runtime/v1/sessions/search` | 搜索（若 ChatUsecase 已有则封装） |
+| `POST /runtime/v1/sessions/{id}/rewind` | rewind（若一期 Web 仍调用；否则 Gateway 可 501 并记入风险——**一期要求代理现有行为，必须封装**） |
+
 - [ ] **Step 1: Contract tests（httptest）**
 
-覆盖：
-- `POST /runtime/v1/sessions/resolve` 同 peer 同 session
-- `POST /runtime/v1/sessions` 创建；`GET` 列表按 user
-- 无 token → 401
+覆盖 resolve、create、list-by-agent、get、messages、无 token → 401、user mismatch → 403。
 
 - [ ] **Step 2: Run — fail**
 
@@ -170,12 +182,12 @@ cd portal && go test ./internal/runtime/ -count=1
 
 - [ ] **Step 3: Implement handlers**
 
-委托现有 `ChatUsecase` / `ChannelPeer` Resolve。响应 JSON 字段与现有 `SessionReply` 对齐（id、agent_id、title、timestamps），降低 Gateway/Web 摩擦。
+委托现有 `ChatUsecase`。JSON 字段对齐现有 Chat HTTP 响应，降低 Gateway 转换量。
 
 - [ ] **Step 4: Pass + commit**
 
 ```bash
-cd portal && git commit -am "feat(runtime): session resolve and CRUD endpoints"
+cd portal && git commit -am "feat(runtime): session CRUD resolve messages search rewind"
 ```
 
 ---
@@ -185,19 +197,16 @@ cd portal && git commit -am "feat(runtime): session resolve and CRUD endpoints"
 **Files:**
 - Modify: `portal/internal/runtime/service.go`
 - Create: `portal/internal/runtime/turns_test.go`
-- Reuse: `portal/internal/service/chat.go` 内 SendMessage/SSE 逻辑（抽取共享函数优先于复制）
+- Reuse: `portal/internal/service/chat.go` + `portal/internal/server/chat_sse.go` 逻辑（抽取共享优先）
 
 - [ ] **Step 1: Failing tests**
 
 ```go
-func TestTurns_FinalReturnsJSON(t *testing.T) {
-	// mock agent runner or short-circuit: reply_mode=final → status ok + content
-}
-func TestTurns_StreamSetsSSEHeaders(t *testing.T) {
-	// Accept handling / Content-Type text/event-stream
-}
-func TestTurns_OwnsSessionACL(t *testing.T) {
-	// X-Sath-User-Id mismatch → 403
+func TestTurns_FinalReturnsJSON(t *testing.T) { /* reply_mode=final → status ok + content */ }
+func TestTurns_StreamSetsSSEHeaders(t *testing.T) { /* text/event-stream */ }
+func TestTurns_OwnsSessionACL(t *testing.T) { /* user mismatch → 403 */ }
+func TestTurns_CancelContext(t *testing.T) {
+	// cancel request ctx mid-stream → runner observes ctx.Done (可用 short sleep stub)
 }
 ```
 
@@ -209,9 +218,9 @@ cd portal && go test ./internal/runtime/ -run TestTurns -count=1
 
 - [ ] **Step 3: Implement**
 
-- `reply_mode=final`：复用非流式 SendMessage 路径，聚合 assistant 文本；超时 context 120s。
-- `reply_mode=stream`：复用现有 SSE 事件写入 ResponseWriter（与 `SendMessage` Accept 流式同语义）。
-- Webhook 调用可不传 user；用 mapping 的 session；HITL 危险确认在 final 路径 fail-closed（若现有 confirm 阻塞，返回 `status=failed` + 明确 error 文案）。
+- `POST /runtime/v1/turns` with `reply_mode=final|stream`
+- stream：复用 `chat_sse.go` 事件语义；**绑定传入 ctx**，客户端断开即取消
+- final：同步 JSON；超时 120s；HITL 阻塞 → `status=failed`
 
 - [ ] **Step 4: Pass + commit**
 
@@ -224,13 +233,17 @@ cd portal && git commit -am "feat(runtime): turns stream and final modes"
 ### Task 5: 关闭对外 Chat 入站
 
 **Files:**
-- Modify: `portal/internal/server/http.go` 或 Chat 服务包装
+- Modify: `portal/internal/server/http.go`（含 `messages` 与 `messages/stream`）
 - Modify: configs：`chat.public_inbound_enabled: false`
 - Create: `portal/internal/server/chat_inbound_gate_test.go`
 
-- [ ] **Step 1: Test** — `public_inbound_enabled=false` 时 `POST /api/v1/sessions/{id}/messages` → 403/404；`/runtime/v1/turns` 仍可用。
+- [ ] **Step 1: Test** — gate=false 时拒绝：
+  - `POST /api/v1/sessions/{id}/messages`
+  - `POST /api/v1/sessions/{id}/messages/stream`
+  - `POST /api/v1/agents/{id}/sessions`（创建）
+  Runtime `/runtime/v1/*` 仍可用。wecom/Channel 管理 API 不受影响（可加一条仍 2xx 的冒烟断言）。
 
-- [ ] **Step 2: Implement gate** — 仅拦截**用户对话写路径**（SendMessage 及如需 CreateSession 对外）。管理 API、Channel CRUD、wecom 出站保持。若测试依赖旧路径，用配置在 test 中开启。
+- [ ] **Step 2: Implement gate**
 
 - [ ] **Step 3: Commit**
 
@@ -255,9 +268,8 @@ portal_base_url: "http://127.0.0.1:8000"
 runtime_token: "dev-runtime-token"
 turn_timeout_sec: 120
 channels_file: "./configs/channels.yaml"
-# web auth: reuse portal JWT secret or gateway-local validator config
 auth:
-  jwt_secret: "..." # 与 portal 对齐，或调用 portal introspect（一期共享 secret）
+  jwt_secret: "..." # 与 portal 对齐
 ```
 
 - [ ] **Step 3: `go build ./cmd/gateway`**
@@ -274,9 +286,9 @@ git add gateway && git commit -m "feat(gateway): scaffold module and config"
 
 **Files:**
 - Create: `gateway/internal/channel/registry.go`, `registry_test.go`
-- Create: `gateway/internal/runtimeclient/client.go`, `client_test.go`（httptest mock Portal）
+- Create: `gateway/internal/runtimeclient/client.go`, `client_test.go`
 
-- [ ] **Step 1: Tests** — 加载 channels.yaml；未知 id error；disabled → 标记；Client Resolve/TurnsFinal/TurnsStream 发正确 header。
+- [ ] **Step 1: Tests** — 加载 channels.yaml；未知 id error；Client 带 Bearer + 可选 `X-Sath-User-Id`。
 
 - [ ] **Step 2: Implement**
 
@@ -289,6 +301,8 @@ type Channel struct {
 }
 ```
 
+Client 方法覆盖 Task 3/4 全部 Runtime 路径（含 stream 返回 `io.ReadCloser`）。
+
 - [ ] **Step 3: Pass + commit**
 
 ```bash
@@ -297,26 +311,27 @@ git add gateway/internal && git commit -m "feat(gateway): channel registry and r
 
 ---
 
-### Task 8: Gateway Webhook adapter（async + sync + 幂等）
+### Task 8: Gateway Webhook adapter（async + sync + 幂等 + 410/IP）
 
 **Files:**
 - Create: `gateway/internal/adapter/adapter.go`
 - Create: `gateway/internal/adapter/webhook.go`
 - Create: `gateway/internal/adapter/webhook_test.go`
 - Create: `gateway/internal/reply/dispatcher.go`
-- Create: `gateway/internal/idempotency/store.go`（进程内 map + TTL 即可一期）
+- Create: `gateway/internal/session/router.go`（resolve 短缓存）
+- Create: `gateway/internal/idempotency/store.go`
 
 - [ ] **Step 1: Tests**
 
 - 错误 secret → 401
-- 正确请求 → 202 + correlation_id；mock Portal final ok → POST reply_url 含 content
-- 同 idempotency_key → 不二次 turns
-- `reply_mode=sync` → 200 + body（短超时测试）
+- **disabled channel → 410**
+- **IP 不在白名单 → 403**（配置非空白名单时）
+- 正确请求 → 202；mock Portal → POST reply_url
+- 同 idempotency_key 不二次 turns
+- `reply_mode=sync` → 200
 - Portal failed → reply_url `status=failed`
 
-- [ ] **Step 2: Implement pipeline**
-
-`Normalize → Resolve → 202 → goroutine TurnsFinal → ReplyDispatcher`
+- [ ] **Step 2: Implement** `Normalize → authz → Resolve → 202 → TurnsFinal → reply_url`
 
 - [ ] **Step 3: Pass + commit**
 
@@ -326,31 +341,41 @@ git commit -am "feat(gateway): webhook inbound with async reply and idempotency"
 
 ---
 
-### Task 9: Gateway Web adapter（鉴权 + sessions 代理 + SSE）
+### Task 9: Gateway Web adapter（真实路径表 + SSE cancel）
 
 **Files:**
 - Create: `gateway/internal/adapter/web.go`
 - Create: `gateway/internal/adapter/web_test.go`
-- Modify: `gateway/cmd/gateway/main.go`（挂路由）
+- Modify: `gateway/cmd/gateway/main.go`
 
-**对外路由（兼容 Web client）：**
+**对外路由（必须与 `web/src/api/client.ts` 一致）：**
 
-| Method | Path | Runtime |
-|--------|------|---------|
-| POST | `/api/v1/sessions` | create |
-| GET | `/api/v1/sessions` / list variants | list |
-| GET/PATCH/DELETE | `/api/v1/sessions/{id}` | get/update/delete |
+| Method | Public path | Runtime |
+|--------|-------------|---------|
+| POST | `/api/v1/agents/{agent_id}/sessions` | create |
+| GET | `/api/v1/agents/{agent_id}/sessions` | list by agent |
+| GET | `/api/v1/sessions` | list all |
+| GET | `/api/v1/sessions/search` | search |
+| GET | `/api/v1/sessions/{id}` | get |
+| PUT | `/api/v1/sessions/{id}` | update |
+| DELETE | `/api/v1/sessions/{id}` | delete |
 | GET | `/api/v1/sessions/{id}/messages` | messages |
-| POST | `/api/v1/sessions/{session_id}/messages` | turns stream（SSE） |
+| POST | `/api/v1/sessions/{id}/messages/stream` | turns stream |
+| POST | `/api/v1/sessions/{id}/rewind` | rewind |
 
-- [ ] **Step 1: Tests** — 无用户 token → 401；有 token 时转发 `Authorization` 换 service token + `X-Sath-User-Id`；SSE 透传至少一行 `data:`。
+- [ ] **Step 1: Tests**
 
-- [ ] **Step 2: Implement** — 复用 portal 同款 JWT 校验（共享 secret）；**不要**把浏览器 cookie/JWT 原样当 Runtime 信任根。
+- 无用户 JWT → 401
+- 转发时使用 service token + `X-Sath-User-Id`
+- SSE 透传 `data:` 行
+- **取消客户端请求时 Runtime 侧 ctx 取消**（mock 可观察）
+
+- [ ] **Step 2: Implement** — JWT 与 portal 共享 secret；实现上表全部路由。
 
 - [ ] **Step 3: Pass + commit**
 
 ```bash
-git commit -am "feat(gateway): web adapter proxying chat sessions and SSE"
+git commit -am "feat(gateway): web adapter for real chat session routes and SSE"
 ```
 
 ---
@@ -361,31 +386,32 @@ git commit -am "feat(gateway): web adapter proxying chat sessions and SSE"
 - Modify: `docker-compose.yml`
 - Create: `gateway/Dockerfile`
 - Modify: `web/vite.config.ts`
-- Modify: `web` 生产 nginx 配置（`web/nginx.conf` 或现有文件；若无则 Dockerfile 内）
-- Modify: `README.md` 端口表（gateway）
+- Modify: web 生产 nginx（若有）
+- Modify: `README.md`
 
-- [ ] **Step 1: vite 双代理**
+- [ ] **Step 1: vite 代理（先匹配会话相关，再 fallback Portal）**
 
 ```ts
 proxy: {
+  // 会话入站 → gateway（含 /agents/:id/sessions）
+  '/api/v1/agents': {
+    target: 'http://localhost:8088',
+    changeOrigin: true,
+    // 若不想把全部 agents API 打到 gateway：改用 bypass —
+    // bypass(req) { return req.url?.includes('/sessions') ? undefined : req.url }
+  },
   '/api/v1/sessions': { target: 'http://localhost:8088', changeOrigin: true },
   '/api': { target: 'http://localhost:8000', changeOrigin: true },
 }
 ```
 
-注意：更具体的 `/api/v1/sessions` 必须写在通用 `/api` **之前**（Vite 按序匹配）。
+**实现约束：** 不得把 `GET/POST /api/v1/agents`（无 `/sessions` 后缀的 Agent CRUD）误送到 Gateway。推荐 `bypass`：仅当 path 匹配 `/api/v1/agents/[^/]+/sessions` 时走 Gateway，其余 agents 回 Portal。
 
-- [ ] **Step 2: compose** — `gateway` 服务暴露 `18088:8088`；env 注入 token；depends_on portal；web depends_on gateway。
+- [ ] **Step 2: compose** — gateway `18088:8088`；env token；web depends_on gateway。
 
-- [ ] **Step 3: 手动烟雾** — portal + gateway 起来后，curl webhook 202；浏览器登录聊天仍流式。
+- [ ] **Step 3: 手动烟雾 — 创建会话、流式聊天、webhook 202。
 
-- [ ] **Step 4: Commit**
-
-```bash
-git add docker-compose.yml gateway README.md
-# web 仓单独 commit vite/nginx
-cd web && git commit -am "chore: proxy chat sessions via inbound gateway"
-```
+- [ ] **Step 4: Commit root + web**
 
 ---
 
@@ -393,44 +419,32 @@ cd web && git commit -am "chore: proxy chat sessions via inbound gateway"
 
 **Files:**
 - Create: `_neo4j_q/verify_inbound_gateway.ps1`
-- Create: `_neo4j_q/verify_inbound_gateway_out.json`（运行产物，可不入库）
 
-- [ ] **Step 1: 脚本断言**
+- [ ] **Step 1: 断言**
 
-1. Webhook bad secret → 非 2xx  
-2. Good secret → 202  
-3. 同 peer 两轮 → 同 `session_id`（查 Portal DB 或 Runtime get）  
-4. 异 peer → 不同 session  
-5. `reply_url` 收到 ok（用本地 httptest 或临时 listener）  
-6. `POST` 旧 Portal messages 直连 → 拒绝  
-7. 经 Gateway SSE/final 一轮成功  
+1. Webhook bad secret → 非 2xx；disabled → 410  
+2. Good → 202；reply_url ok  
+3. 同 webhook peer 两轮同 session；异 peer 不同  
+4. **同一 Web 用户可创建两个 session 且 id 不同**  
+5. 直连 Portal `messages/stream` → 拒绝  
+6. 经 Gateway `messages/stream` 一轮成功  
+7. wecom/Channel 管理 API 仍可用（轻量 GET）
 
-- [ ] **Step 2: Run**
+- [ ] **Step 2: Run script → `ok: true`**
 
-```powershell
-powershell -File _neo4j_q/verify_inbound_gateway.ps1
-```
-
-Expected: 写出 `ok: true` JSON。
-
-- [ ] **Step 3: Commit script + docs note**
-
-```bash
-git add _neo4j_q/verify_inbound_gateway.ps1 docs/superpowers/plans/2026-08-09-inbound-gateway.md
-git commit -m "test: add inbound gateway e2e smoke script"
-```
+- [ ] **Step 3: Commit**
 
 ---
 
 ## 风险与注意
 
-- **抽取 SSE**：优先从 `portal/internal/service/chat.go` 抽共享 `RunTurnStream`，避免 Runtime 与旧 Chat 分叉两套事件。
-- **JWT 共享**：Gateway 与 Portal 必须同一校验密钥；文档写进 `gateway/configs` 注释。
-- **SearchSessions 等**：若 Web 用到会话搜索且路径不在 `/api/v1/sessions` 前缀下，补进 Gateway 代理表（实现时对照 `web/src/api/client.ts` 一次性扫全）。
-- **嵌套 Git**：portal/web/gateway(root) 分仓提交，勿把 `.env` / 真实 token 入库。
+- **抽取 SSE**：优先从 `chat_sse.go` / `chat.go` 抽共享 `RunTurnStream(ctx, ...)`，ctx 取消必须贯穿。
+- **Vite bypass**：`/api/v1/agents` 代理极易误伤 Agent CRUD——以 path 正则限制。
+- **JWT 共享**：Gateway 与 Portal 同一校验密钥。
+- **嵌套 Git**：portal/web/root 分仓提交；勿提交真实 token。
 
 ---
 
 ## 执行手顺建议
 
-1→5 Portal Runtime 可独立测通 → 6→9 Gateway → 10 切流 → 11 E2E。每 Task 结束后保持主路径可编译。
+1→5 Portal Runtime 可独立测通 → 6→9 Gateway → 10 切流 → 11 E2E。
