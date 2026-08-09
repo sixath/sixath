@@ -1,4 +1,5 @@
-# Example webhook channel stub (loaded by ChannelRegistry in a later task).
+# Gateway ChannelRegistry (compose mounts this file).
+# E2E: see _neo4j_q/verify_inbound_gateway.ps1
 channels:
   - id: demo-webhook
     type: webhook
@@ -6,4 +7,12 @@ channels:
     webhook_secret: "dev-webhook-secret"
     ip_whitelist: []
     enabled: true
+    default_reply_mode: async
+  # Used by E2E to assert disabled channel → HTTP 410
+  - id: demo-webhook-disabled
+    type: webhook
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    webhook_secret: "dev-webhook-secret"
+    ip_whitelist: []
+    enabled: false
     default_reply_mode: async

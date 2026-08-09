@@ -477,20 +477,35 @@ location /api/ {
 
 **Files:**
 - Create: `_neo4j_q/verify_inbound_gateway.ps1`
+- Modify: `gateway/configs/channels.yaml`（增加 `demo-webhook-disabled` 供 410 断言）
 
-- [ ] **Step 1: 断言**
+- [x] **Step 1: 断言脚本**
+
+脚本 `_neo4j_q/verify_inbound_gateway.ps1` 覆盖：
 
 1. Webhook bad secret → 非 2xx；disabled → 410  
-2. Good → 202；reply_url ok  
-3. 同 webhook peer 两轮同 session；异 peer 不同  
-4. **同一 Web 用户可创建两个 session 且 id 不同**  
-5. 直连 Portal `messages/stream` → 拒绝  
-6. 经 Gateway `messages/stream` 一轮成功  
-7. wecom/Channel 管理 API 仍可用（轻量 GET）
+2. Good → 202（或 sync 200）  
+3. 同 webhook peer 两轮同 session；异 peer 不同（经 Portal `/runtime/v1/sessions/resolve`）  
+4. **同一 Web 用户可创建两个 session 且 id 不同**（需 `AUTH_TOKEN` + `AGENT_ID`）  
+5. 直连 Portal `messages/stream` → 拒绝（403）  
+6. 经 Gateway `messages/stream` 或 webhook sync final 一轮  
+7. Channel 管理 API 轻量 GET  
 
-- [ ] **Step 2: Run script → `ok: true`**
+**Run:**
 
-- [ ] **Step 3: Commit**
+```powershell
+# compose 默认端口
+$env:GATEWAY_URL = 'http://127.0.0.1:18088'
+$env:PORTAL_URL  = 'http://127.0.0.1:18000'
+powershell -File _neo4j_q/verify_inbound_gateway.ps1
+# → _neo4j_q/verify_inbound_gateway_out.json
+```
+
+服务未起时 exit 2（skip）；失败 exit 1。详见根 `README.md`「Inbound Gateway E2E 烟雾」。
+
+- [ ] **Step 2: Run script → `ok: true`**（需 live portal+gateway+有效 agent）
+
+- [x] **Step 3: Commit**
 
 ---
 

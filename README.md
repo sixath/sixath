@@ -60,6 +60,28 @@ docker build -t sixath-web ./web
 
 开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。
 
+## Inbound Gateway E2E 烟雾
+
+Compose 或本地起好 **portal + gateway** 后：
+
+```powershell
+# 默认探测 GATEWAY 18088/8088、PORTAL 18000/8000
+powershell -File _neo4j_q/verify_inbound_gateway.ps1
+
+# 或显式指定
+$env:GATEWAY_URL = 'http://127.0.0.1:18088'
+$env:PORTAL_URL  = 'http://127.0.0.1:18000'
+$env:WEBHOOK_SECRET = 'dev-webhook-secret'
+$env:CHANNEL_ID = 'demo-webhook'
+$env:RUNTIME_TOKEN = 'dev-runtime-token'
+# Web 多会话 / Gateway SSE（可选）
+$env:AUTH_TOKEN = '<opaque bearer>'
+$env:AGENT_ID = '<agent-uuid>'
+powershell -File _neo4j_q/verify_inbound_gateway.ps1
+```
+
+结果写入 `_neo4j_q/verify_inbound_gateway_out.json`（`ok` + 分项 `checks`）。服务未启动时脚本会 skip 并以 exit code 2 退出；断言失败为 1。
+
 ## 相关文档
 
 - [Portal 架构设计](portal/docs/architecture_design.md)
