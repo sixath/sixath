@@ -16,12 +16,14 @@ channels:
     ip_whitelist: []
     enabled: false
     default_reply_mode: async
-  # WeCom smart-bot long connection (placeholder; enable when credentials are set)
+  # WeCom smart-bot long connection (placeholder — set bot_id/secret then enabled: true)
+  # Console: 智能机器人 AI+ → API →「使用长连接」→ BotID + Secret（≠ Portal wecom Webhook）
+  # Same bot_id must not be enabled on multiple Gateway instances (one active WSS per bot).
   - id: wecom-bot-placeholder
     type: wecom_bot
     default_agent: "00000000-0000-0000-0000-000000000001"
     enabled: false
-    bot_id: ""
-    secret: ""
-    bot_names: []
-    ws_url: "wss://openws.work.weixin.qq.com"
+    bot_id: "" # 控制台 BotID
+    secret: "" # 长连接 Secret（勿提交真实值）
+    bot_names: [] # 可选，如 ["小天才"]，用于剥离 @提及
+    ws_url: "wss://openws.work.weixin.qq.com" # 可选，默认官方端点
