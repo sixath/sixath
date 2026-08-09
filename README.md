@@ -1,6 +1,34 @@
 # Sixath
 
-Go AI Agent 平台工作区：可嵌入的 Agent 运行时、后端 Portal、Web 管理台。应用代码分别在独立 Git 仓库中；本仓库放置 Docker Compose、共享文档与部署编排。
+Go AI Agent 平台工作区：可嵌入的 Agent 运行时、后端 Portal、Web 管理台、入站 Gateway。应用代码分别在独立 Git 仓库中；本仓库放置 Docker Compose、Gateway、共享文档与部署编排。
+
+## 架构总览
+
+```text
+┌──────────┐  /api (管理)     ┌─────────────────┐
+│  Web UI  │─────────────────▶│     Portal      │  Agent / 工具 / MCP /
+│  Vite    │                  │  :8000 管理 API │  记忆 / 渠道出站(wecom webhook)
+└────┬─────┘                  └────────▲────────┘
+     │ 会话 / SSE                       │ /runtime/v1
+     │                                  │ (service token)
+     ▼                                  │
+┌─────────────────┐                     │
+│     Gateway     │─────────────────────┘
+│     :8088       │
+│  · Web 会话代理 │
+│  · Webhook 入站 │
+│  · 企微长连接   │◀──── WSS ── 企微智能机器人 AI+ (openws)
+└─────────────────┘
+```
+
+| 层 | 职责 |
+|----|------|
+| **Web** | 管理台 + 对话 UI；会话流经 Gateway；工具/模型时间线在 SSE 展示 |
+| **Gateway** | 统一入站：Web / 通用 Webhook / 企微 `wecom_bot` 长连接；路由到 Portal Runtime |
+| **Portal** | Agent 执行与持久化；管理 API；群 Webhook **只出站**（`send_to_wecom`） |
+| **Framework** | ReAct、Tools、Skills、MCP、上下文压缩（被 Portal 嵌入） |
+
+详细 Gateway 用法见 [`gateway/README.md`](gateway/README.md)。
 
 ## 仓库布局
 
@@ -9,7 +37,7 @@ Go AI Agent 平台工作区：可嵌入的 Agent 运行时、后端 Portal、Web
 | [`framework/`](https://github.com/sixath/framework) | sixath/framework | Agent 运行时（ReAct、Tools、Skills、MCP、上下文压缩） |
 | [`portal/`](https://github.com/sixath/portal) | sixath/portal | Kratos 后端（Agent/工具/会话/渠道/Growth） |
 | [`web/`](https://github.com/sixath/web) | sixath/web | React + Vite 管理 UI |
-| `gateway/` | （本仓库） | Inbound Gateway（会话切流、webhook） |
+| `gateway/` | （本仓库） | Inbound Gateway（Web / Webhook / 企微长连接） |
 | `deploy/` | （本仓库） | MySQL 初始化等部署资产 |
 | `docs/` | （本仓库） | 跨仓设计与实施计划 |
 
@@ -29,7 +57,7 @@ docker compose up --build -d
 | 服务 | 宿主地址 | 容器内 |
 |------|----------|--------|
 | Web UI | http://localhost:18080 | `:80`（nginx：sessions → gateway，其余 `/api` → portal） |
-| Gateway | http://localhost:18088 | `:8088`（入站会话 / webhook） |
+| Gateway | http://localhost:18088 | `:8088`（入站会话 / webhook / 企微 WS 客户端） |
 | Portal HTTP | http://localhost:18000 | `:8000` |
 | Portal gRPC | localhost:19000 | `:9000` |
 | MySQL | localhost:13306 | `:3306`（root / root，库名 `sath`） |
@@ -39,6 +67,7 @@ Portal 使用 [`portal/configs/config.docker.yaml`](portal/configs/config.docker
 ```bash
 # 常用运维
 docker compose logs -f portal
+docker compose logs -f gateway
 docker compose down          # 停服务，保留数据卷
 docker compose down -v       # 连同 MySQL 数据一并清除
 ```
@@ -53,12 +82,26 @@ docker build -t sixath-web ./web
 
 ## 本地开发（不用 Compose）
 
+建议顺序：MySQL → Portal → Gateway → Web。
+
 - **framework**：见 [framework README](https://github.com/sixath/framework)
 - **portal**：Go 1.25+、本机 MySQL，见 [portal/README.md](portal/README.md)（开发默认 `localhost:8000`）
-- **gateway**：`cd gateway && go run ./cmd/gateway`（默认 `:8088`，`portal_base_url` → `localhost:8000`）
-- **web**：`cd web && npm install && npm run dev`（Vite `:5173`；`/api/v1/sessions` 与 agent sessions → `localhost:8088`，其余 `/api` → `localhost:8000`）
+- **gateway**：见 [`gateway/README.md`](gateway/README.md)  
+  `cd gateway && go run ./cmd/gateway -config ./configs/config.example.yaml`（`:8088` → Portal `localhost:8000`）
+- **web**：`cd web && npm install && npm run dev`（Vite `:5173`；会话相关 → `localhost:8088`，其余 `/api` → `localhost:8000`）
 
-开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。
+开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。  
+`gateway/configs/channels.yaml` 中的企微 `bot_id` / `secret` / `corp_secret` **不要提交**到 Git。
+
+### 企微智能机器人（长连接）速览
+
+1. 控制台选 **智能机器人 AI+ → 使用长连接**，取得 BotID + Secret。
+2. 在 `gateway/configs/channels.yaml` 增加 `type: wecom_bot` 渠道并 `enabled: true`。
+3. 可选配置 `corp_id` + `corp_secret`（自建应用，成员读取），将回复卡片「发起人」解析为通讯录姓名。
+4. 启动 **单实例** Gateway（同一 BotID 禁止多副本同时订阅）。
+5. 群 @ / 单聊发消息 → 收到含发起人、问题、答复的 stream 卡片。
+
+完整步骤、字段表与验收清单见 [`gateway/README.md`](gateway/README.md)。
 
 ## Inbound Gateway E2E 烟雾
 
@@ -84,6 +127,9 @@ powershell -File _neo4j_q/verify_inbound_gateway.ps1
 
 ## 相关文档
 
+- [Gateway 架构与使用](gateway/README.md)
+- [入站 Gateway 设计](docs/superpowers/specs/2026-08-09-inbound-gateway-design.md)
+- [企微智能机器人长连接设计](docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md)
 - [Portal 架构设计](portal/docs/architecture_design.md)
 - [Hermes 能力差距 / Harness 计划](docs/superpowers/)
 - [确认卡 UX 设计](docs/superpowers/specs/2026-07-13-confirm-card-ux-design.md)
@@ -91,4 +137,4 @@ powershell -File _neo4j_q/verify_inbound_gateway.ps1
 ## 说明
 
 - 本仓忽略 `framework/`、`portal/`、`web/` 的嵌套 `.git` 内容（见 `.gitignore`），日常改代码请在对应子仓提交并 push。
-- `tool.json`、含明文口令的部署脚本等本地密钥文件不会入库。
+- `tool.json`、含明文口令的部署脚本、本地 `channels.yaml` 真实凭证等密钥文件不会入库。
