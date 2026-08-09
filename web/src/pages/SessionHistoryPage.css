@@ -1,0 +1,77 @@
+.session-history__header {
+  margin-bottom: 0.5rem;
+}
+
+.session-history__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.session-history__search {
+  flex: 1 1 220px;
+  min-width: 180px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--text-strong);
+  background: var(--card);
+}
+
+.session-history__search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.session-history__agent-filter {
+  flex: 0 1 200px;
+  min-width: 140px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--text-strong);
+  background: var(--card);
+}
+
+.session-history__agent-filter:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.session-history__error {
+  margin-bottom: 1rem;
+}
+
+.session-history__table-wrap {
+  overflow-x: auto;
+}
+
+.session-history__cell-title {
+  font-weight: 600;
+  color: var(--text-strong);
+  max-width: 14rem;
+}
+
+.session-history__cell-preview {
+  color: var(--muted);
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-history__more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+.session-history__empty {
+  text-align: center;
+}

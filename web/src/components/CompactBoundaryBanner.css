@@ -1,0 +1,54 @@
+.compact-boundary-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  padding: 0 0.5rem;
+}
+
+.compact-boundary-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e2e8f0);
+}
+
+.compact-boundary-body {
+  flex-shrink: 0;
+  max-width: min(420px, 100%);
+  text-align: center;
+  padding: 0.65rem 1rem;
+  border: 1px dashed var(--border, #cbd5e1);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-accent, #f8fafc);
+}
+
+.compact-boundary-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-strong, #334155);
+}
+
+.compact-boundary-subtitle {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted, #64748b);
+}
+
+.compact-boundary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--primary, #2563eb);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.compact-boundary-toggle:hover {
+  background: rgba(37, 99, 235, 0.08);
+}

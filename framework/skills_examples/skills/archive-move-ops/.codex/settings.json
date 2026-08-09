@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "fix|debug|error|issue",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\Program Files\\Git\\bin\\bash.exe\" \"C:\\Users\\Admin\\.codex\\skills\\self-improving-agent\\scripts\\activator.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

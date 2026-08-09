@@ -1,0 +1,130 @@
+.tool-select {
+  position: relative;
+  min-width: 280px;
+  flex: 1 1 280px;
+  max-width: 420px;
+}
+
+.tool-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.875rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-select-trigger.has-value {
+  color: var(--text);
+}
+
+.tool-select-trigger.is-open {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #3b82f6) 25%, transparent);
+}
+
+.tool-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-select-caret {
+  flex-shrink: 0;
+  opacity: 0.7;
+  font-size: 0.75rem;
+}
+
+.tool-select-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-elevated, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.tool-select-search {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-select-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-md) - 2px);
+  color: var(--text);
+  font: inherit;
+}
+
+.tool-select-search input:focus {
+  outline: none;
+  border-color: var(--accent, #3b82f6);
+}
+
+.tool-select-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.tool-select-empty {
+  padding: 0.75rem 0.875rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.tool-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.55rem 0.875rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-select-option:hover,
+.tool-select-option.is-selected {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent);
+}
+
+.tool-select-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-select-option-type {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.tool-select-footer {
+  padding: 0.4rem 0.75rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+}

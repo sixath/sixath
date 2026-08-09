@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package cron.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "common/common.proto";
+
+option go_package = "backend/api/cron/v1;v1";
+
+// 定时任务服务
+service Cron {
+  // 创建定时任务
+  rpc CreateCronTask (CreateCronTaskRequest) returns (CronTaskReply) {
+    option (google.api.http) = {
+      post: "/api/v1/cron/tasks"
+      body: "*"
+    };
+  }
+  // 任务列表（分页、筛选）
+  rpc ListCronTasks (ListCronTasksRequest) returns (ListCronTasksReply) {
+    option (google.api.http) = {
+      get: "/api/v1/cron/tasks"
+    };
+  }
+  // 获取单个任务
+  rpc GetCronTask (GetCronTaskRequest) returns (CronTaskReply) {
+    option (google.api.http) = {
+      get: "/api/v1/cron/tasks/{id}"
+    };
+  }
+  // 更新任务
+  rpc UpdateCronTask (UpdateCronTaskRequest) returns (CronTaskReply) {
+    option (google.api.http) = {
+      put: "/api/v1/cron/tasks/{id}"
+      body: "*"
+    };
+  }
+  // 删除任务
+  rpc DeleteCronTask (DeleteCronTaskRequest) returns (DeleteCronTaskReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/cron/tasks/{id}"
+    };
+  }
+  // 立即执行
+  rpc RunCronTask (RunCronTaskRequest) returns (RunCronTaskReply) {
+    option (google.api.http) = {
+      post: "/api/v1/cron/tasks/{id}/run"
+    };
+  }
+  // 执行历史
+  rpc ListCronRuns (ListCronRunsRequest) returns (ListCronRunsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/cron/tasks/{id}/runs"
+    };
+  }
+}
+
+message CreateCronTaskRequest {
+  string name = 1;
+  string agent_id = 2;
+  string schedule_kind = 3;  // cron | every | at
+  string schedule_expr = 4;
+  string timezone = 5;
+  int32 stagger_sec = 6;
+  string payload_kind = 7;    // agent_turn | skill_execute
+  string payload_content = 8;
+  int32 timeout_sec = 9;
+  int32 retry_count = 10;
+  int32 retry_interval_sec = 11;
+  string delivery_mode = 12;  // none | webhook | session | channel
+  string delivery_webhook_url = 13;
+  string delivery_secret = 14;
+  bool delivery_best_effort = 15;
+  string delivery_session_id = 16;
+  string delivery_channel_id = 17;
+  bool enabled = 18;
+}
+
+message ListCronTasksRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string agent_id = 3;
+  optional bool enabled = 4;
+}
+
+message ListCronTasksReply {
+  api.common.BaseResponse ret = 1;
+  repeated CronTaskReply items = 2;
+  int32 total = 3;
+}
+
+message GetCronTaskRequest {
+  string id = 1;
+}
+
+message UpdateCronTaskRequest {
+  string id = 1;
+  google.protobuf.Struct updates = 2;
+}
+
+message DeleteCronTaskRequest {
+  string id = 1;
+}
+
+message DeleteCronTaskReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message RunCronTaskRequest {
+  string id = 1;
+}
+
+message RunCronTaskReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message ListCronRunsRequest {
+  string id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message ListCronRunsReply {
+  api.common.BaseResponse ret = 1;
+  repeated CronRunReply items = 2;
+  int32 total = 3;
+}
+
+message CronTaskReply {
+  api.common.BaseResponse ret = 1;
+  string id = 2;
+  string name = 3;
+  string agent_id = 4;
+  string schedule_kind = 5;
+  string schedule_expr = 6;
+  string timezone = 7;
+  int32 stagger_sec = 8;
+  string payload_kind = 9;
+  string payload_content = 10;
+  int32 timeout_sec = 11;
+  int32 retry_count = 12;
+  int32 retry_interval_sec = 13;
+  string delivery_mode = 14;
+  string delivery_webhook_url = 15;
+  string delivery_session_id = 16;
+  string delivery_channel_id = 17;
+  bool enabled = 18;
+  string next_run_at = 19;
+  string created_at = 20;
+  string updated_at = 21;
+}
+
+message CronRunReply {
+  string id = 1;
+  string task_id = 2;
+  string triggered_at = 3;
+  string started_at = 4;
+  string finished_at = 5;
+  string status = 6;
+  string output_summary = 7;
+  string error = 8;
+  optional bool delivery_ok = 9;
+}

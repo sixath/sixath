@@ -1,0 +1,17 @@
+{
+  "id": "archive.report.traceid.basic",
+  "skill": "archive-move-ops",
+  "type": "build_investigation_report",
+  "description": "根据 traceId 和 fixture 生成 investigation report",
+  "input": {
+    "traceId": "trace-demo-123",
+    "dispatchLogFile": "..\\..\\tests\\fixtures\\dispatch-log-sample.txt"
+  },
+  "expect": {
+    "judges": [
+      { "kind": "exit_code", "equals": 0 },
+      { "kind": "contains_text", "target": "stdout", "value": "Dispatch hit:" },
+      { "kind": "contains_text", "target": "stdout", "value": "Conclusion:" }
+    ]
+  }
+}

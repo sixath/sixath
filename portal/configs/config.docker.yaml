@@ -1,0 +1,37 @@
+server:
+  http:
+    addr: 0.0.0.0:8000
+    # 流式对话需较长时间；经 nginx 反代时一并拉长 proxy_read_timeout
+    timeout: 600s
+  grpc:
+    addr: 0.0.0.0:9000
+    timeout: 30s
+skills:
+  allow_script_execution: true
+  auto_route_enabled: true
+  route_min_score: 5
+  route_max_body_runes: 12000
+growth:
+  llm_review_enabled: true
+  worker_enabled: true
+  worker_poll_interval: 45s
+  idle_sweep_interval: 600s
+  idle_check_interval: 600s
+  combined_review_enabled: false
+  session_end_memory_review_enabled: false
+  session_end_skill_review_enabled: true
+  max_retry: 5
+  curator_enabled: false
+  learnings_review_enabled: true
+  learnings_max_runes: 6000
+  review_patch_file: "growth_review_patch.example.json"
+runtime:
+  # Gateway → Portal Runtime service token（可用 SATH_RUNTIME_TOKEN 覆盖）。
+  service_token: "dev-runtime-token"
+chat:
+  # 对外 Chat 入站默认关闭；生产路径 Gateway → /runtime/v1。
+  public_inbound_enabled: false
+data:
+  database:
+    driver: mysql
+    source: root:root@tcp(mysql:3306)/sath?parseTime=True&loc=Local&charset=utf8mb4

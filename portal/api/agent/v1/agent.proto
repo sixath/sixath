@@ -1,0 +1,281 @@
+syntax = "proto3";
+
+package agent.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "common/common.proto";
+
+option go_package = "backend/api/agent/v1;v1";
+
+// Agent 管理服务
+service Agent {
+  // 创建 Agent
+  rpc CreateAgent (CreateAgentRequest) returns (AgentReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents"
+      body: "*"
+    };
+  }
+  // 获取单个 Agent
+  rpc GetAgent (GetAgentRequest) returns (AgentReply) {
+    option (google.api.http) = {
+      get: "/api/v1/agents/{id}"
+    };
+  }
+  // Agent 列表（分页）
+  rpc ListAgents (ListAgentsRequest) returns (ListAgentsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/agents"
+    };
+  }
+  // 更新 Agent
+  rpc UpdateAgent (UpdateAgentRequest) returns (AgentReply) {
+    option (google.api.http) = {
+      put: "/api/v1/agents/{id}"
+      body: "*"
+    };
+  }
+  // 删除 Agent
+  rpc DeleteAgent (DeleteAgentRequest) returns (DeleteAgentReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/agents/{id}"
+    };
+  }
+  // 绑定工具
+  rpc BindTools (BindToolsRequest) returns (BindToolsReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents/{id}/tools"
+      body: "*"
+    };
+  }
+  // 解绑工具
+  rpc UnbindTools (UnbindToolsRequest) returns (UnbindToolsReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/agents/{id}/tools"
+    };
+  }
+  // 与 Agent 对话
+  rpc Chat (ChatRequest) returns (ChatReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents/{id}/chat"
+      body: "*"
+    };
+  }
+  // 校验技能包（仅校验不解压）
+  rpc ValidateSkillPackage (ValidateSkillPackageRequest) returns (ValidateSkillPackageReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents/{id}/skills/validate"
+      body: "*"
+    };
+  }
+  // 上传技能包（校验通过后解压到 workspace/skills）
+  rpc UploadSkillPackage (UploadSkillPackageRequest) returns (UploadSkillPackageReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents/{id}/skills/upload"
+      body: "*"
+    };
+  }
+  // 执行技能脚本（调试用）
+  rpc ExecuteSkill (ExecuteSkillRequest) returns (ExecuteSkillReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents/{id}/skills/execute"
+      body: "*"
+    };
+  }
+  // 列出该 Agent 下所有技能（扫描 workspace/skills 子目录，含 SKILL.md 视为有效）
+  rpc ListSkills (ListSkillsRequest) returns (ListSkillsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/agents/{id}/skills"
+    };
+  }
+  // 删除指定技能，移除 workspace/skills/{skill_name}/ 目录及其下所有文件
+  rpc DeleteSkill (DeleteSkillRequest) returns (DeleteSkillReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/agents/{id}/skills/{skill_name}"
+    };
+  }
+}
+
+// 模型配置
+message ModelConfig {
+  string provider = 1;  // openai|claude|qwen|...
+  string model = 2;
+  string api_key = 3;   // 加密存储
+  string base_url = 4;
+  // max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（8192）。
+  int32 max_output_tokens = 5;
+}
+
+// Hermes P0 运行时工具开关（与全局 env OR 合并）
+message RuntimeToolsConfig {
+  bool memory_write_enabled = 1;
+  bool skill_runtime_manage_enabled = 2;
+  bool todo_enabled = 3;
+  bool workspace_files_enabled = 4;
+  bool web_tools_enabled = 5;
+  bool terminal_local_enabled = 6;
+  bool cronjob_tool_enabled = 7;
+  bool browser_enabled = 8;
+  // unset = on（默认开启混合召回）；presence 全链路保留
+  optional bool hybrid_recall = 9;
+  // Memory Hub provider overrides（空/unset = 用进程 defaults；非空 = Catalog name）
+  optional string hub_governance = 10;
+  optional string hub_knowledge = 11;
+  // §3.5.1 读路径运输错误时是否回落到 defaults 治理面
+  optional bool hub_fallback_to_default_on_read_error = 12;
+}
+
+message CreateAgentRequest {
+  string name = 1;
+  string description = 2;
+  string system_prompt = 3;
+  ModelConfig model_config = 4;
+  string workspace = 5;  // 工作空间路径，技能解压到 workspace/skills
+  repeated string tool_ids = 6;
+  bool debug_run = 7;   // 是否启用调试运行（详细日志、request_id 等）
+  RuntimeToolsConfig runtime_tools = 8;
+  string wecom_channel_id = 12;  // optional; bound WeCom channel (channels.id, type=wecom)
+}
+
+message GetAgentRequest {
+  string id = 1;
+}
+
+message ListAgentsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListAgentsReply {
+  api.common.BaseResponse ret = 1;
+  repeated AgentReply items = 2;
+  int32 total = 3;
+}
+
+message UpdateAgentRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string system_prompt = 4;
+  optional ModelConfig model_config = 5;
+  optional string workspace = 6;
+  optional bool debug_run = 7;
+  optional RuntimeToolsConfig runtime_tools = 8;
+  optional string wecom_channel_id = 12;
+}
+
+message DeleteAgentRequest {
+  string id = 1;
+}
+
+message DeleteAgentReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message BindToolsRequest {
+  string id = 1;  // agent_id，从 path 注入
+  repeated string tool_ids = 2;
+}
+
+message BindToolsReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message UnbindToolsRequest {
+  string id = 1;  // agent_id
+  repeated string tool_ids = 2;  // query: tool_ids=id1,id2
+}
+
+message UnbindToolsReply {
+  api.common.BaseResponse ret = 1;
+}
+
+// 快捷对话（无会话）：单轮对话，不持久化
+message ChatRequest {
+  string id = 1;    // agent_id，从 path 注入
+  string content = 2;  // 用户消息内容
+}
+
+message ChatReply {
+  api.common.BaseResponse ret = 1;
+  string content = 2;  // assistant 回复内容
+  google.protobuf.Struct metadata = 3;
+}
+
+// 技能包校验：file 为 zip 文件字节（base64 或通过 multipart 单独处理时可为空）
+message ValidateSkillPackageRequest {
+  string id = 1;  // agent_id
+  bytes file = 2; // 压缩包内容，multipart 上传时由 HTTP 层解析
+}
+
+message ValidateSkillPackageReply {
+  api.common.BaseResponse ret = 1;
+  bool valid = 2;
+  string message = 3;
+  repeated string errors = 4;
+}
+
+message UploadSkillPackageRequest {
+  string id = 1;
+  bytes file = 2;
+}
+
+message UploadSkillPackageReply {
+  api.common.BaseResponse ret = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+message ExecuteSkillRequest {
+  string id = 1;   // agent_id
+  string path = 2; // 脚本相对路径，如 scripts/run.sh
+  string input = 3; // 可选，传入脚本的 stdin
+}
+
+message ExecuteSkillReply {
+  api.common.BaseResponse ret = 1;
+  string output = 2;
+}
+
+// 技能元数据（用于列表返回）
+message SkillMeta {
+  string name = 1;
+  string description = 2;
+  string path = 3;  // 技能目录绝对路径
+}
+
+message ListSkillsRequest {
+  string id = 1;  // agent_id，从 path 注入
+}
+
+message ListSkillsReply {
+  api.common.BaseResponse ret = 1;
+  repeated SkillMeta items = 2;
+}
+
+message DeleteSkillRequest {
+  string id = 1;         // agent_id，从 path 注入
+  string skill_name = 2; // 技能名称（目录名），从 path 注入
+}
+
+message DeleteSkillReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message AgentReply {
+  api.common.BaseResponse ret = 1;
+  string id = 2;
+  string name = 3;
+  string description = 4;
+  string system_prompt = 5;
+  ModelConfig model_config = 6;
+  string workspace = 7;
+  repeated string tool_ids = 8;
+  string created_at = 9;
+  string updated_at = 10;
+  bool debug_run = 11;
+  string wecom_channel_id = 12;
+  RuntimeToolsConfig runtime_tools = 13;
+  repeated string mcp_server_ids = 14;
+}

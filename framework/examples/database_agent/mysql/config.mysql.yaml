@@ -1,0 +1,21 @@
+model: "openai/gpt-3.5-turbo"
+max_history: 10
+middlewares: ["logging", "metrics"]
+
+# 配置一个 MySQL 数据源供 database_agent 使用。
+data_sources:
+  - id: "main"
+    type: "mysql"
+    host: "172.26.50.161"
+    port: 23306
+    user: "viu_root"
+    password: "myviu_4359"
+    dbname: "testdb"
+    max_open_conns: 5
+    max_idle_conns: 2
+    conn_max_lifetime_sec: 600
+    read_only: false
+
+default_datasource_id: "main"
+data_allow_write: true
+

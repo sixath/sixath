@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package channel.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "common/common.proto";
+
+option go_package = "backend/api/channel/v1;v1";
+
+// 渠道管理服务
+service Channel {
+  // 创建渠道
+  rpc CreateChannel (CreateChannelRequest) returns (ChannelReply) {
+    option (google.api.http) = {
+      post: "/api/v1/channels"
+      body: "*"
+    };
+  }
+  // 渠道列表（分页、筛选）
+  rpc ListChannels (ListChannelsRequest) returns (ListChannelsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/channels"
+    };
+  }
+  // 获取单个渠道
+  rpc GetChannel (GetChannelRequest) returns (ChannelReply) {
+    option (google.api.http) = {
+      get: "/api/v1/channels/{id}"
+    };
+  }
+  // 更新渠道
+  rpc UpdateChannel (UpdateChannelRequest) returns (ChannelReply) {
+    option (google.api.http) = {
+      put: "/api/v1/channels/{id}"
+      body: "*"
+    };
+  }
+  // 删除渠道
+  rpc DeleteChannel (DeleteChannelRequest) returns (DeleteChannelReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/channels/{id}"
+    };
+  }
+  // 向 WxPusher 渠道发送消息
+  rpc SendChannel (SendChannelRequest) returns (SendChannelReply) {
+    option (google.api.http) = {
+      post: "/api/v1/channels/{id}/send"
+      body: "*"
+    };
+  }
+  // Webhook 入站
+  rpc WebhookInbound (WebhookInboundRequest) returns (WebhookInboundReply) {
+    option (google.api.http) = {
+      post: "/api/v1/webhooks/{channel_id}"
+      body: "*"
+    };
+  }
+}
+
+message CreateChannelRequest {
+  string channel_id = 1;
+  string type = 2;  // web | api | webhook | wxpusher | wecom
+  string default_agent = 3;
+  bool enabled = 4;
+  string webhook_path = 5;
+  string webhook_secret = 6;
+  repeated string ip_whitelist = 7;
+  string app_token = 8;
+  repeated string default_uids = 9;
+  string webhook_url = 10;
+}
+
+message ListChannelsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string type = 3;
+  optional bool enabled = 4;
+}
+
+message ListChannelsReply {
+  api.common.BaseResponse ret = 1;
+  repeated ChannelReply items = 2;
+  int32 total = 3;
+}
+
+message GetChannelRequest {
+  string id = 1;
+}
+
+message UpdateChannelRequest {
+  string id = 1;
+  google.protobuf.Struct updates = 2;
+}
+
+message DeleteChannelRequest {
+  string id = 1;
+}
+
+message DeleteChannelReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message SendChannelRequest {
+  string id = 1;
+  string content = 2;
+  string summary = 3;
+  repeated string uids = 4;
+}
+
+message SendChannelReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message WebhookInboundRequest {
+  string channel_id = 1;
+  string content = 2;
+  string agent_id = 3;
+  string reply_url = 4;
+}
+
+message WebhookInboundReply {
+  api.common.BaseResponse ret = 1;
+  bool async = 2;
+  string content = 3;
+}
+
+message ChannelReply {
+  api.common.BaseResponse ret = 1;
+  string id = 2;
+  string channel_id = 3;
+  string type = 4;
+  string default_agent = 5;
+  bool enabled = 6;
+  string webhook_path = 7;
+  repeated string ip_whitelist = 8;
+  repeated string default_uids = 9;
+  string created_at = 10;
+  string updated_at = 11;
+  string webhook_url_masked = 12;  // wecom only; masked display, never full URL
+}

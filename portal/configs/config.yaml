@@ -1,0 +1,68 @@
+server:
+  http:
+    addr: 0.0.0.0:8000
+    # 流式对话需较长时间，1s 会导致 context deadline exceeded
+    timeout: 120s
+  grpc:
+    addr: 0.0.0.0:9000
+    timeout: 30s
+skills:
+  allow_script_execution: true
+  auto_route_enabled: true       # 用户消息关键词匹配 Top-1 Skill 并预注入 SKILL.md
+  route_min_score: 5
+  route_max_body_runes: 12000
+growth:
+  llm_review_enabled: true
+  worker_enabled: true
+  worker_poll_interval: 10s      # 本地验收缩短轮询；生产可改回 45s
+  idle_sweep_interval: 10m
+  idle_check_interval: 10m
+  combined_review_enabled: false
+  session_end_memory_review_enabled: false
+  session_end_skill_review_enabled: true   # C2s: 每轮 assistant 落库后若有未达阈值的工具/回合活动则触发技能复盘
+  max_retry: 5
+  curator_enabled: false
+  learnings_review_enabled: true   # 复盘 prompt 注入 .learnings（workspace 及上级目录）
+  learnings_max_runes: 6000
+  # 无 llm.model 时回退假补丁；配置 LLM 或 SATH_GROWTH_LLM_MODEL 后优先真 LLM
+  review_patch_file: "growth_review_patch.example.json"
+  # 真 LLM 复盘（二选一：YAML 或环境变量，见 docs/growth-llm-learnings.md）：
+  # llm:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   api_key: "your-key"
+  #   base_url: "https://api.openai.com/v1"
+  #   max_transcript_runes: 24000
+# 环境变量：SATH_GROWTH_LLM_MODEL、SATH_GROWTH_LLM_PROVIDER、SATH_GROWTH_LLM_API_KEY、SATH_GROWTH_LLM_BASE_URL
+#           SATH_LEARNINGS_DIR（额外 .learnings 目录）、SATH_GROWTH_REVIEW_PATCH_FILE
+data:
+  data_root: "./data"
+  database:
+    driver: mysql
+    # 需先创建数据库，或执行 scripts/init_mysql.sql
+    source: root:root@tcp(localhost:3306)/sath?parseTime=True&loc=Local&charset=utf8mb4
+runtime:
+  # Gateway → Portal Runtime service token（可用 SATH_RUNTIME_TOKEN 覆盖）。
+  service_token: "dev-runtime-token"
+chat:
+  # 对外 Chat 入站（create session / send message / SSE）默认关闭；走 Gateway → /runtime/v1。
+  # 本地直连调试可设 true，或用 SATH_CHAT_PUBLIC_INBOUND_ENABLED=true。
+  public_inbound_enabled: false
+auth:
+  # 仅用于本地默认 ACL 锚点；生产环境请替换 token。
+  bootstrap_user_id: "bootstrap"
+  bootstrap_org_id: "default"
+  bootstrap_token: "dev-bootstrap-token"
+  service_principal_user_id: "bootstrap"
+  # Optional: set email/password on the bootstrap user for login (idempotent on restart).
+  # bootstrap_email: "admin@example.com"
+  # bootstrap_password: "change-me"
+  # Optional SMTP — when smtp_host is set, registration sends verify-email links.
+  # smtp_host: "smtp.example.com"
+  # smtp_port: 587
+  # smtp_user: ""
+  # smtp_password: ""
+  # smtp_from: "noreply@example.com"
+  # Optional public origin for absolute verify-email links in outbound mail.
+  # When unset, links are relative (/verify-email?token=...) for same-origin frontends.
+  # public_base_url: "https://app.example.com"

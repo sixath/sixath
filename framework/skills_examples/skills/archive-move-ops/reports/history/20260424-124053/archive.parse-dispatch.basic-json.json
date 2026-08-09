@@ -1,0 +1,33 @@
+﻿{
+    "CaseId":  "archive.parse-dispatch.basic-json",
+    "Verdict":  "failed",
+    "Classification":  "assertion_failed",
+    "Execution":  {
+                      "Command":  "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\workspace\\skills\\archive-move-ops\\harness\\adapters\\..\\..\\scripts\\parse-dispatch-log.ps1 -LogLine Worker.startSyncDispatch(). flow_id(301_rqkkw0snhnmt) uuid(154880308) ugid(1189) src_area_type(400) dst_area_type(301) done_union_version(27) -AsJson",
+                      "ExitCode":  0,
+                      "StdOut":  "{\r\n    \"FlowId\":  \"301_rqkkw0snhnmt\",\r\n    \"SourceArea\":  \"400\",\r\n    \"DestinationArea\":  \"301\",\r\n    \"Route\":  \"400 -\\u003e 301\",\r\n    \"Uuid\":  \"154880308\",\r\n    \"Ugid\":  \"1189\",\r\n    \"DoneUnionVersion\":  \"27\"\r\n}\r\n",
+                      "StdErr":  "",
+                      "DurationMs":  367,
+                      "Succeeded":  true
+                  },
+    "Judges":  [
+                   {
+                       "CaseId":  "archive.parse-dispatch.basic-json",
+                       "Kind":  "exit_code",
+                       "Passed":  true,
+                       "Message":  "expected exit code 0, actual 0"
+                   },
+                   {
+                       "CaseId":  "archive.parse-dispatch.basic-json",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain 301_rqkkw0snhnmt"
+                   },
+                   {
+                       "CaseId":  "archive.parse-dispatch.basic-json",
+                       "Kind":  "json_field_equals",
+                       "Passed":  false,
+                       "Message":  "expected json field dst_area_type to equal 301, actual "
+                   }
+               ]
+}

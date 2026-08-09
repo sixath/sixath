@@ -1,0 +1,29 @@
+# 使用 mysql-employees-analysis Skill 分析 MySQL employees 示例库
+# 请将 data_sources 中的连接信息改为你的 MySQL employees 库地址
+model: "openai/gpt-4o-mini"
+max_history: 10
+middlewares: ["logging", "metrics"]
+
+data_sources:
+  - id: "main"
+    type: "mysql"
+    host: "127.0.0.1"
+    port: 3306
+    user: "root"
+    password: "your_password"
+    dbname: "employees"
+    max_open_conns: 5
+    max_idle_conns: 2
+    conn_max_lifetime_sec: 600
+    read_only: true
+
+default_datasource_id: "main"
+data_allow_write: false
+
+# Skills 目录：指向仓库中的示例 Skills（含 mysql-employees-analysis）
+# 从仓库根目录运行时使用 skills_examples；从本目录运行时请改为 ["../../../skills_examples"]
+skills:
+  skills_dirs: ["skills_examples"]
+  enabled_skills: []
+  disabled_skills: []
+  enforce_write_allowed_from_skills: false

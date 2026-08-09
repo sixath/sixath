@@ -1,8 +1,3 @@
-# Nested app repos (tracked separately)
-/framework/
-/portal/
-/web/
-
 # Local / IDE
 .idea/
 .claude/
@@ -14,14 +9,25 @@
 # Build / OS
 **/bin/
 **/node_modules/
+**/dist/
 **/.DS_Store
 
 __pycache__/
 *.pyc
 
+# Nested git metadata (should not exist after monorepo absorb; keep ignored if re-cloned)
+framework/.git/
+portal/.git/
+web/.git/
+
 # Local secrets / debug artifacts
 tool.json
 .playwright-cli/
+**/.playwright-cli/
 scripts/deploy_remote.py
 
 .worktrees/
+
+# Large / local-only data dumps under portal
+portal/internal/chat/data/
+portal/internal/service/data/

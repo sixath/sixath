@@ -1,0 +1,16 @@
+{
+  "id": "archive.entry.traceid.basic",
+  "skill": "archive-move-ops",
+  "type": "build_entry_commands",
+  "description": "根据 traceId 生成 dispatch 搜索命令",
+  "input": {
+    "traceId": "trace-demo-123"
+  },
+  "expect": {
+    "judges": [
+      { "kind": "exit_code", "equals": 0 },
+      { "kind": "contains_text", "target": "stdout", "value": "union-archiver-dispatch" },
+      { "kind": "contains_text", "target": "stdout", "value": "trace-demo-123" }
+    ]
+  }
+}

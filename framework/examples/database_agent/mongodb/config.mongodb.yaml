@@ -1,0 +1,26 @@
+# MongoDB 数据源示例配置（database_agent）
+# 运行前设置 OPENAI_API_KEY；可选 OPENAI_BASE_URL
+#
+# 在 framework 目录下：
+#   go run ./examples/database_agent/mongodb -config ./examples/database_agent/mongodb/config.mongodb.yaml
+#
+# MongoDB 要求配置 dbname（数据库名）；可用 dsn，或用 host/port/user/password 组装。
+model: "openai/gpt-3.5-turbo"
+max_history: 10
+middlewares: ["logging", "metrics"]
+
+data_sources:
+  - id: "main"
+    type: "mongodb"
+    host: "10.19.240.106"
+    port: 27017
+    user: "admin"
+    password: "AdminPass456!"
+    dbname: "Migu@2233"
+    # 若使用完整连接串，可注释 host/port/user/password/dbname，仅保留：
+    # dsn: "mongodb://user:pass@127.0.0.1:27017/test"
+    max_open_conns: 10
+    read_only: true
+
+default_datasource_id: "main"
+data_allow_write: false

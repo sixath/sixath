@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package tool.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "common/common.proto";
+
+option go_package = "backend/api/tool/v1;v1";
+
+// 工具管理服务
+service Tool {
+  // 创建工具
+  rpc CreateTool (CreateToolRequest) returns (ToolReply) {
+    option (google.api.http) = {
+      post: "/api/v1/tools"
+      body: "*"
+    };
+  }
+  // 获取单个工具
+  rpc GetTool (GetToolRequest) returns (ToolReply) {
+    option (google.api.http) = {
+      get: "/api/v1/tools/{id}"
+    };
+  }
+  // 工具列表（分页、筛选）
+  rpc ListTools (ListToolsRequest) returns (ListToolsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/tools"
+    };
+  }
+  // 更新工具
+  rpc UpdateTool (UpdateToolRequest) returns (ToolReply) {
+    option (google.api.http) = {
+      put: "/api/v1/tools/{id}"
+      body: "*"
+    };
+  }
+  // 删除工具（若被绑定返回 409）
+  rpc DeleteTool (DeleteToolRequest) returns (DeleteToolReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/tools/{id}"
+    };
+  }
+}
+
+// McpConfig MCP 工具运行时配置，与 framework/tool.McpConfig 对齐
+message McpConfig {
+  string endpoint = 1;  // MCP 服务端点（HTTP/SSE 等）
+  string id = 2;        // MCP 服务 ID，用于日志/指标区分
+  string backend = 3;   // metoro | mark3labs
+}
+
+// DatasourceConfig 数据源配置，与 framework/datasource.Config 对齐
+message DatasourceConfig {
+  string id = 1;        // 数据源 ID
+  string type = 2;      // 类型：mysql、mongodb、elasticsearch 等
+  string dsn = 3;       // 完整 DSN，与 host/port/user/password/dbname 二选一
+  string host = 4;
+  int32 port = 5;
+  string user = 6;
+  string password = 7;
+  string dbname = 8;
+  bool read_only = 9;
+}
+
+// RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
+message RCAConfig {
+  string func_path = 1;          // rca_code | jaeger_trace | es_log_query
+  repeated string roots = 2;     // rca_code: 仓库根路径白名单
+  string query_url = 3;          // jaeger_trace: Jaeger Query URL
+  string datasource_id = 4;      // es_log_query: 依赖的 datasource 工具 id
+  string default_index = 5;      // es_log_query: 默认索引
+  string trace_id_field = 6;     // es_log_query: trace 关联字段名
+}
+
+// 工具配置：内置用 func_path/parameters，MCP 用 mcp 或 mcp_* 字段，数据源用 datasource
+message ToolConfig {
+  string func_path = 1;      // 内置：函数/方法路径
+  google.protobuf.Struct parameters = 2;  // 内置：参数 JSON Schema
+  bool async = 3;            // 内置：是否异步
+  // MCP 配置（兼容旧字段，优先使用 mcp 嵌套）
+  string mcp_server_id = 4;   // MCP：服务 ID，等同 McpConfig.id
+  string mcp_endpoint = 5;    // MCP：连接地址，等同 McpConfig.endpoint
+  string mcp_backend = 6;     // MCP：metoro|mark3labs，等同 McpConfig.backend
+  int32 timeout_sec = 7;      // MCP：超时秒数
+  McpConfig mcp = 8;          // MCP 结构化配置（endpoint/id/backend）
+  DatasourceConfig datasource = 9;  // 数据源配置
+  RCAConfig rca = 10;  // RCA 工具配置
+}
+
+message CreateToolRequest {
+  string name = 1;
+  string description = 2;
+  string type = 3;  // builtin | mcp | datasource
+  ToolConfig config = 4;
+}
+
+message GetToolRequest {
+  string id = 1;
+}
+
+message ListToolsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string name = 3;
+  string type = 4;
+}
+
+message ListToolsReply {
+  api.common.BaseResponse ret = 1;
+  repeated ToolReply items = 2;
+  int32 total = 3;
+}
+
+message UpdateToolRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string type = 4;  // builtin | mcp | datasource
+  optional ToolConfig config = 5;
+}
+
+message DeleteToolRequest {
+  string id = 1;
+}
+
+message DeleteToolReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message ToolReply {
+  api.common.BaseResponse ret = 1;
+  string id = 2;
+  string name = 3;
+  string description = 4;
+  string type = 5;
+  ToolConfig config = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package api.common;
+option go_package = "backend/api/common;common";
+
+import "errors/errors.proto";
+
+
+enum ErrorReason {
+  option (errors.default_code) = 500;
+  /////////////////////////////通用错误码(1-100///////////////////////////////
+
+  Success = 0;
+  ParamValidate = 1 [(errors.code) = 400];
+  DataInsert = 2;
+  DataDelete = 3;
+  DataUpdate = 4;
+  DataQuery = 5;
+  DataRecordNotFound = 6;
+  Rpc = 7;
+  BizDuplicateOp = 8;
+  NotFoundHostNetwork = 9;
+  Acl = 10;
+}

@@ -1,0 +1,12 @@
+{
+  "id": "fixture.valid-minimal",
+  "skill": "archive-move-ops",
+  "type": "parse_dispatch_log",
+  "description": "minimal valid fixture",
+  "input": {
+    "logLine": "Worker.startSyncDispatch(). flow_id(301_rqkkw0snhnmt) uuid(154880308) ugid(1189) src_area_type(400) dst_area_type(301) done_union_version(27)"
+  },
+  "expect": {
+    "judges": []
+  }
+}

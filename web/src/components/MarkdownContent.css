@@ -1,0 +1,134 @@
+.markdown-content {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text, #334155);
+  color-scheme: light;
+  forced-color-adjust: none;
+}
+
+/* 流式：仅纯文本，避免 react-markdown + rehype-highlight 每帧全量解析 */
+.markdown-content-streaming {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-stream-fallback {
+  white-space: inherit;
+  word-break: inherit;
+}
+
+.markdown-content-huge {
+  min-width: 0;
+}
+
+.markdown-huge-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted, #64748b);
+  background: var(--bg-accent, #f8fafc);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.markdown-huge-retry {
+  margin: 0 0 0.75rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: 1px solid var(--border-strong, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg, #fff);
+  color: var(--text-strong, #0f172a);
+}
+
+.markdown-huge-retry:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.markdown-huge-plain {
+  margin-top: 0.5rem;
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+}
+
+.markdown-content p {
+  margin: 0 0 0.5rem;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content pre {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+
+.markdown-content pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown-content code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+.markdown-content :not(pre) > code {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.markdown-content ul, .markdown-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.markdown-content th, .markdown-content td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.markdown-content th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+}
+
+.markdown-content blockquote {
+  margin: 0.75rem 0;
+  padding-left: 1rem;
+  border-left: 4px solid var(--accent);
+  color: var(--muted);
+}
+
+.markdown-content a {
+  color: var(--primary, #2563eb);
+}
+
+.markdown-cursor {
+  display: inline-block;
+  width: 0.35em;
+  height: 1.1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}

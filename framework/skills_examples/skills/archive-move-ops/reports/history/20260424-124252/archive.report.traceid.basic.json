@@ -1,0 +1,33 @@
+﻿{
+    "CaseId":  "archive.report.traceid.basic",
+    "Verdict":  "passed",
+    "Classification":  "ok",
+    "Execution":  {
+                      "Command":  "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\workspace\\skills\\archive-move-ops\\harness\\adapters\\..\\..\\scripts\\build-investigation-report.ps1 -TraceId trace-demo-123 -DispatchLogFile D:\\workspace\\skills\\archive-move-ops\\tests\\fixtures\\dispatch-log-sample.txt",
+                      "ExitCode":  0,
+                      "StdOut":  "TraceId: trace-demo-123\r\n\r\nDispatch hit:\r\ndispatch log file: D:\\workspace\\skills\\archive-move-ops\\tests\\fixtures\\dispatch-log-sample.txt\r\nmatched log: 2026-04-22 11:59:12 INFO [traceId=trace-demo-123] Worker.startSyncDispatch(). flow_id(301_rqkkw0snhnmt) uuid(154880308) ugid(1189) src_area_type(400) dst_area_type(301) done_union_version(27)\r\nflow_id: 301_rqkkw0snhnmt\r\nroute: 400 -\u003e 301\r\nuuid: 154880308\r\nugid: 1189\r\n\r\nSource area manager:\r\narea: 400\r\nhosts searched: 10.77.240.104, 10.77.240.105, 10.77.240.106\r\ncommands:\r\n# area: 400\r\n# host: 10.77.240.104\r\nssh vrviu@10.77.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.104\r\nssh vrviu@10.77.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.105\r\nssh vrviu@10.77.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.105\r\nssh vrviu@10.77.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.106\r\nssh vrviu@10.77.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.106\r\nssh vrviu@10.77.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\nfindings: [TODO] summarize source area findings\r\n\r\nDestination area manager:\r\narea: 301\r\nhosts searched: 10.11.240.104, 10.11.240.105, 10.11.240.106\r\ncommands:\r\n# area: 301\r\n# host: 10.11.240.104\r\nssh vrviu@10.11.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.104\r\nssh vrviu@10.11.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.105\r\nssh vrviu@10.11.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.105\r\nssh vrviu@10.11.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.106\r\nssh vrviu@10.11.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.106\r\nssh vrviu@10.11.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\nfindings: [TODO] summarize destination area findings\r\n\r\nConclusion:\r\n[TODO] summarize current status\r\n[TODO] propose next step\r\n",
+                      "StdErr":  "",
+                      "DurationMs":  390,
+                      "Succeeded":  true
+                  },
+    "Judges":  [
+                   {
+                       "CaseId":  "archive.report.traceid.basic",
+                       "Kind":  "exit_code",
+                       "Passed":  true,
+                       "Message":  "expected exit code 0, actual 0"
+                   },
+                   {
+                       "CaseId":  "archive.report.traceid.basic",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain Dispatch hit:"
+                   },
+                   {
+                       "CaseId":  "archive.report.traceid.basic",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain Conclusion:"
+                   }
+               ]
+}

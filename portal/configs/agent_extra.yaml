@@ -1,0 +1,136 @@
+# 可选：与 Bootstrap（config.yaml）同目录；启动时由 main 自动加载。
+# 见 framework/config.PortalAgentExtra 与 design-memory-tools §6.3。
+# P2-G：优先使用 memory_store: 嵌套块；与顶层 memory_* 并存时以 memory_store 为准。
+
+tool_guardrails:
+  enabled: false
+  warnings_only: true
+  same_args_failure_warn: 2
+  same_args_failure_halt: 0
+  same_tool_failure_warn: 3
+  same_tool_failure_halt: 0
+  # idempotent_tools: []   # 省略则用框架默认名单
+  # mutating_tools: []
+
+# 推荐（P2-G）：统一 memory_store 外壳
+# memory_store:
+#   agent_workspace:
+#     write_enabled: false          # 进程默认；也可用 SATH_AGENT_MEMORY_WRITE_ENABLED=true
+#                                   # Agent runtime_tools.memory_write_enabled 仍可按 Agent OR 覆盖
+#   prefetch:                       # 原 memory_orchestrator_prefetch
+#     enabled: true
+#     prefetch_timeout_ms: 2000
+#     prefetch_fail_closed: false
+#     fence_tag: ""
+#     stream_scrub: true
+#     max_snippets: 5
+#     max_total: 8
+#   extraction:                     # 原 memory_extraction
+#     enabled: false
+#     max_facts_per_turn: 5
+#     # auxiliary:
+#     #   provider: openai
+#     #   model: gpt-4o-mini
+#   conflict:                       # 原 memory_conflict
+#     enabled: false
+#     k: 8
+#   vector:                         # 原 memory_vector
+#     enabled: false
+#     provider: sqlite              # none | sqlite | qdrant
+#     store_dir: data/memory_units_vectors
+#     # qdrant:                     # provider=qdrant 时必填 url
+#     #   url: http://localhost:6333
+#     #   collection: sixath_memory_units
+#     #   api_key: ""
+#     #   grpc_port: 0              # 0 → REST 6333 则 gRPC 用 6334
+#     # embedding:
+#     #   provider: openai
+#     #   model: text-embedding-3-small
+#   graph:                          # P2-I Neo4j 图 Sidecar
+#     enabled: false
+#     provider: neo4j               # none | neo4j
+#     min_relation_confidence: 0.7
+#     max_hops: 1
+#     rrf_k: 60
+#     # neo4j:
+#     #   uri: bolt://localhost:7687
+#     #   username: neo4j
+#     #   password: ""
+#     #   database: ""
+#     # auxiliary:                  # 可选；缺省复用 extraction.auxiliary
+#     #   provider: openai
+#     #   model: gpt-4o-mini
+#   procedural_repair:              # P3-A…E；默认关；试点 zone-4100-agent
+#     enabled: false
+#     auto_commit: false            # 仅 pilot_agents 可写 kind=procedural
+#     min_support: 2
+#     max_procedural: 3
+#     mode: suggest
+#     pilot_agents: ["zone-4100-agent"]
+#     inject:
+#       prefetch: true
+#       skill_router: true
+#     bindings:
+#       - trigger_code: tool_failed
+#         action_kind: skill
+#         skill_id: escalation      # 须为该 Agent 已有 Skill
+#         mode: suggest
+
+# —— 以下顶层键仍可读（无 memory_store 覆盖时）；文档视为 deprecated ——
+
+# memory_orchestrator_prefetch:
+#   enabled: true
+#   prefetch_timeout_ms: 2000
+#   max_snippets: 5
+#   max_total: 8
+
+# memory_extraction:
+#   enabled: false
+
+# memory_conflict:
+#   enabled: false
+#   k: 8
+
+# memory_vector:
+#   enabled: false
+#   provider: sqlite
+#   store_dir: data/memory_units_vectors
+#   # qdrant:
+#   #   url: http://localhost:6333
+#   #   collection: sixath_memory_units
+
+# 可选：units 向量 sidecar（P2-E1）。仅在语义冲突会跑且 Embed 可用时生效。
+# memory_vector:
+#   provider: sqlite   # sqlite | none
+#   path: ""           # 相对 data_root；空则 memory_unit_vectors.db
+
+# 联网搜索（Bocha / Tavily）；与 config.yaml 中 growth.llm.web 或顶层 web 节同形。
+# web:
+#   search_backend: bocha
+#   bocha_api_key: "your-bocha-key"
+#   tools_enabled: true
+
+# Memory Hub（P0）：进程启动注册 local Governance/Knowledge；改 defaults 需重启。
+# Agent 覆盖正式字段见 RuntimeToolsConfig（P1）；此处仅文档占位。
+# Prefetch 行为不因 Hub Catalog 改变（Loadout 默认不含 bulk units）。
+# memory_hub:
+#   enabled: true
+#   defaults:
+#     governance: local
+#     knowledge: local
+#   # loadout_include_visible_units: false
+#   # knowledge_search 默认源：transcript + workspace + graph（若可用）；不含 units
+#   # P2a：外部 Adapter 骨架（fake）；真实 Tencent 客户端未交付。
+#   # adapters:
+#   #   - fake   # 或设环境变量 SATH_HUB_FAKE_ADAPTER=true
+#   # skills:
+#   #   require_manual_approve_unsigned_hub_skill: true
+#   #   rematerialize_on_version_change: true
+#   # cache:  # 或 SATH_HUB_SKILLS_CACHE
+#   #   root: data/hub-skills
+
+portal:
+  guardrail_halt:
+    # 展示：none（仅错误码）| banner（默认一句说明）| brief | full（与 trace 注入全文一致）
+    display: banner
+    persist_system_message: false

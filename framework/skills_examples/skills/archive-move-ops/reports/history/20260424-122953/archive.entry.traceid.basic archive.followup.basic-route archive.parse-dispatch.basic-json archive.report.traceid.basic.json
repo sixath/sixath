@@ -1,0 +1,19 @@
+﻿{
+    "CaseId":  [
+                   "archive.entry.traceid.basic",
+                   "archive.followup.basic-route",
+                   "archive.parse-dispatch.basic-json",
+                   "archive.report.traceid.basic"
+               ],
+    "Verdict":  "passed",
+    "Classification":  "ok",
+    "Execution":  {
+                      "Command":  "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\workspace\\skills\\archive-move-ops\\harness\\adapters\\..\\..\\scripts\\build-entry-commands.ps1 -TraceId trace-demo-123   trace-demo-123",
+                      "ExitCode":  0,
+                      "StdOut":  "# mode: traceId\r\n# traceId: trace-demo-123   trace-demo-123\r\n# next: run these union-archiver-dispatch commands first\r\n\r\n# host: 10.19.240.104\r\nssh vrviu@10.19.240.104 \"grep -nH -C 2 -- \u0027trace-demo-123   trace-demo-123\u0027 /data/union/logs/union_archiver_dispatch/union-archiver-dispatch.log 2\u003e/dev/null\"\r\nssh vrviu@10.19.240.104 \"zgrep -nH -C 2 -- \u0027trace-demo-123   trace-demo-123\u0027 /data/union/logs/union_archiver_dispatch/union-archiver-dispatch-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.19.240.105\r\nssh vrviu@10.19.240.105 \"grep -nH -C 2 -- \u0027trace-demo-123   trace-demo-123\u0027 /data/union/logs/union_archiver_dispatch/union-archiver-dispatch.log 2\u003e/dev/null\"\r\nssh vrviu@10.19.240.105 \"zgrep -nH -C 2 -- \u0027trace-demo-123   trace-demo-123\u0027 /data/union/logs/union_archiver_dispatch/union-archiver-dispatch-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.19.240.106\r\nssh vrviu@10.19.240.106 \"grep -nH -C 2 -- \u0027trace-demo-123   trace-demo-123\u0027 /data/union/logs/union_archiver_dispatch/union-archiver-dispatch.log 2\u003e/dev/null\"\r\nssh vrviu@10.19.240.106 \"zgrep -nH -C 2 -- \u0027trace-demo-123   trace-demo-123\u0027 /data/union/logs/union_archiver_dispatch/union-archiver-dispatch-*.log.gz 2\u003e/dev/null\"\r\n\r\n",
+                      "StdErr":  "",
+                      "DurationMs":  372,
+                      "Succeeded":  true
+                  },
+    "Judges":  null
+}

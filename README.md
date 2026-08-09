@@ -1,6 +1,6 @@
 # Sixath
 
-Go AI Agent 平台工作区：可嵌入的 Agent 运行时、后端 Portal、Web 管理台、入站 Gateway。应用代码分别在独立 Git 仓库中；本仓库放置 Docker Compose、Gateway、共享文档与部署编排。
+Go AI Agent 平台工作区：可嵌入的 Agent 运行时（framework）、后端 Portal、Web 管理台、入站 Gateway。代码均在本 monorepo 中；另含 Docker Compose、共享文档与部署编排。
 
 ## 架构总览
 
@@ -32,16 +32,18 @@ Go AI Agent 平台工作区：可嵌入的 Agent 运行时、后端 Portal、Web
 
 ## 仓库布局
 
-| 目录 | 仓库 | 说明 |
-|------|------|------|
-| [`framework/`](https://github.com/sixath/framework) | sixath/framework | Agent 运行时（ReAct、Tools、Skills、MCP、上下文压缩） |
-| [`portal/`](https://github.com/sixath/portal) | sixath/portal | Kratos 后端（Agent/工具/会话/渠道/Growth） |
-| [`web/`](https://github.com/sixath/web) | sixath/web | React + Vite 管理 UI |
-| `gateway/` | （本仓库） | Inbound Gateway（Web / Webhook / 企微长连接） |
-| `deploy/` | （本仓库） | MySQL 初始化等部署资产 |
-| `docs/` | （本仓库） | 跨仓设计与实施计划 |
+| 目录 | 说明 |
+|------|------|
+| `framework/` | Agent 运行时（ReAct、Tools、Skills、MCP、上下文压缩） |
+| `portal/` | Kratos 后端（Agent/工具/会话/渠道/Growth） |
+| `web/` | React + Vite 管理 UI |
+| `gateway/` | Inbound Gateway（Web / Webhook / 企微长连接） |
+| `deploy/` | MySQL 初始化等部署资产 |
+| `docs/` | 设计与实施计划 |
 
 `portal/go.mod` 通过 `replace github.com/sixath/framework => ../framework` 引用本地 framework，因此 **构建 portal 镜像时须在本仓库根目录** 作为 Docker build context。
+
+历史独立仓库（`sixath/framework`、`sixath/portal`、`sixath/web`）已吸收进本仓；日常开发与提交以本仓库为准。
 
 ## 快速开始（Docker Compose）
 
@@ -136,5 +138,6 @@ powershell -File _neo4j_q/verify_inbound_gateway.ps1
 
 ## 说明
 
-- 本仓忽略 `framework/`、`portal/`、`web/` 的嵌套 `.git` 内容（见 `.gitignore`），日常改代码请在对应子仓提交并 push。
-- `tool.json`、含明文口令的部署脚本、本地 `channels.yaml` 真实凭证等密钥文件不会入库。
+- `node_modules/`、`bin/`、本地凭证与调试产物不入库（见 `.gitignore`）。
+- `tool.json`、含明文口令的部署脚本、本地 `gateway/configs/channels.yaml` 真实凭证等密钥文件不要提交。
+- 旧独立仓 remote 可归档；新改动请在本仓库 `main` 上提交与推送。

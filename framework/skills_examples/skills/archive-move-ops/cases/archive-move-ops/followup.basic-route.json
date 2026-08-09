@@ -1,0 +1,16 @@
+{
+  "id": "archive.followup.basic-route",
+  "skill": "archive-move-ops",
+  "type": "build_followup_commands",
+  "description": "根据 dispatch 行构建 follow-up 命令",
+  "input": {
+    "logLine": "Worker.startSyncDispatch(). flow_id(301_rqkkw0snhnmt) uuid(154880308) ugid(1189) src_area_type(400) dst_area_type(301) done_union_version(27)"
+  },
+  "expect": {
+    "judges": [
+      { "kind": "exit_code", "equals": 0 },
+      { "kind": "contains_text", "target": "stdout", "value": "# route: 400 -> 301" },
+      { "kind": "contains_text", "target": "stdout", "value": "archiver-manager.log" }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+.sources-panel {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-accent, #f8fafc);
+  font-size: 0.85rem;
+}
+
+.sources-panel-toggle {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted, #64748b);
+  font: inherit;
+}
+
+.sources-panel-list {
+  margin: 0;
+  padding: 0 0.75rem 0.5rem;
+  list-style: none;
+}
+
+.sources-panel-link {
+  color: var(--primary, #2563eb);
+  text-decoration: none;
+}
+
+.sources-panel-link:hover {
+  text-decoration: underline;
+}
+
+.sources-panel-ext {
+  margin-right: 0.25rem;
+}
+
+.sources-panel-site {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted, #94a3b8);
+}

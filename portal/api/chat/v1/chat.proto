@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package chat.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "common/common.proto";
+
+option go_package = "backend/api/chat/v1;v1";
+
+// 对话服务：会话管理、消息发送与历史
+service Chat {
+  // 新建会话
+  rpc CreateSession (CreateSessionRequest) returns (SessionReply) {
+    option (google.api.http) = {
+      post: "/api/v1/agents/{agent_id}/sessions"
+      body: "*"
+    };
+  }
+  // 获取该 Agent 的会话列表（分页）
+  rpc ListSessions (ListSessionsRequest) returns (ListSessionsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/agents/{agent_id}/sessions"
+    };
+  }
+  // 跨 Agent 分页列出会话（全局历史）
+  rpc ListAllSessions (ListAllSessionsRequest) returns (ListAllSessionsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions"
+    };
+  }
+  // 跨 Agent FTS 搜索会话
+  rpc SearchSessions (SearchSessionsRequest) returns (SearchSessionsReply) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/search"
+    };
+  }
+  // 获取会话详情
+  rpc GetSession (GetSessionRequest) returns (SessionReply) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{id}"
+    };
+  }
+  // 更新会话（如标题）
+  rpc UpdateSession (UpdateSessionRequest) returns (SessionReply) {
+    option (google.api.http) = {
+      put: "/api/v1/sessions/{id}"
+      body: "*"
+    };
+  }
+  // 删除会话（级联删除消息）
+  rpc DeleteSession (DeleteSessionRequest) returns (DeleteSessionReply) {
+    option (google.api.http) = {
+      delete: "/api/v1/sessions/{id}"
+    };
+  }
+  // 发送用户消息，触发 Agent 回复（支持流式 SSE，Accept: text/event-stream）
+  rpc SendMessage (SendMessageRequest) returns (MessageReply) {
+    option (google.api.http) = {
+      post: "/api/v1/sessions/{session_id}/messages"
+      body: "*"
+    };
+  }
+  // 获取会话内消息历史（按时间升序）
+  rpc ListMessages (ListMessagesRequest) returns (ListMessagesReply) {
+    option (google.api.http) = {
+      get: "/api/v1/sessions/{session_id}/messages"
+    };
+  }
+}
+
+// 会话
+message CreateSessionRequest {
+  string agent_id = 1;  // 从 path 注入
+  string title = 2;     // 可选，默认 "新对话"
+  optional string parent_session_id = 3;
+}
+
+message ListSessionsRequest {
+  string agent_id = 1;  // 从 path 注入
+  int32 page = 2;
+  int32 page_size = 3;
+  optional string q = 4;
+  optional bool include_preview = 5;
+}
+
+message ListAllSessionsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  optional bool include_preview = 3;
+}
+
+message ListAllSessionsReply {
+  api.common.BaseResponse ret = 1;
+  repeated SessionReply items = 2;
+  int32 total = 3;
+}
+
+message SearchSessionsRequest {
+  string query = 1;
+  optional string agent_id = 2;
+  int32 limit = 3;
+}
+
+message SearchHitReply {
+  string session_id = 1;
+  string root_session_id = 2;
+  string agent_id = 3;
+  string agent_name = 4;
+  string title = 5;
+  string preview = 6;
+  repeated string matched_snippets = 7;
+  string updated_at = 8;
+}
+
+message SearchSessionsReply {
+  api.common.BaseResponse ret = 1;
+  repeated SearchHitReply items = 2;
+}
+
+message ListSessionsReply {
+  api.common.BaseResponse ret = 1;
+  repeated SessionReply items = 2;
+  int32 total = 3;
+}
+
+message GetSessionRequest {
+  string id = 1;
+}
+
+message UpdateSessionRequest {
+  string id = 1;
+  optional string title = 2;
+}
+
+message DeleteSessionRequest {
+  string id = 1;
+}
+
+message DeleteSessionReply {
+  api.common.BaseResponse ret = 1;
+}
+
+message SessionReply {
+  api.common.BaseResponse ret = 1;
+  string id = 2;
+  string agent_id = 3;
+  string title = 4;
+  string created_at = 5;
+  string updated_at = 6;
+  optional string parent_session_id = 7;
+  optional string preview = 8;
+  optional string agent_name = 9;
+}
+
+// 消息
+message SendMessageRequest {
+  string session_id = 1;  // 从 path 注入
+  string content = 2;     // 用户消息内容
+}
+
+message ListMessagesRequest {
+  string session_id = 1;  // 从 path 注入
+}
+
+message ListMessagesReply {
+  api.common.BaseResponse ret = 1;
+  repeated MessageReply items = 2;
+}
+
+message MessageReply {
+  api.common.BaseResponse ret = 1;
+  string id = 2;
+  string session_id = 3;
+  string role = 4;       // user | assistant | system
+  string content = 5;
+  string created_at = 6;
+  // Optional JSON bag (e.g. timeline for tool/model call replay after refresh).
+  google.protobuf.Struct metadata = 7;
+}

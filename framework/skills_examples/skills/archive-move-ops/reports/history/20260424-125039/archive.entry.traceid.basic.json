@@ -1,0 +1,33 @@
+﻿{
+    "CaseId":  "archive.entry.traceid.basic",
+    "Verdict":  "passed",
+    "Classification":  "ok",
+    "Execution":  {
+                      "Command":  "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\workspace\\skills\\archive-move-ops\\harness\\adapters\\..\\..\\scripts\\build-entry-commands.ps1 -TraceId trace-demo-123",
+                      "ExitCode":  0,
+                      "StdOut":  "# mode: traceId\r\n# traceId: trace-demo-123\r\n# next: run these union-archiver-dispatch commands first\r\n\r\n\r\n",
+                      "StdErr":  "Join-Path : \r\n�ܵ�Ԫ���еġ�\u0026������ı��ʽ������Ч�Ķ��󡣸ñ��ʽ���������������ơ��ű���� CommandInfo ����\r\n����λ�� D:\\workspace\\skills\\archive-move-ops\\scripts\\build-entry-commands.ps1:53 �ַ�: 23\r\n+         $commands = \u0026 $searchScriptPath `\r\n+                       ~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidOperation: (:) []��RuntimeException\r\n    + FullyQualifiedErrorId : BadExpression\r\n \r\n",
+                      "DurationMs":  435,
+                      "Succeeded":  true
+                  },
+    "Judges":  [
+                   {
+                       "CaseId":  "archive.entry.traceid.basic",
+                       "Kind":  "exit_code",
+                       "Passed":  true,
+                       "Message":  "expected exit code 0, actual 0"
+                   },
+                   {
+                       "CaseId":  "archive.entry.traceid.basic",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain union-archiver-dispatch"
+                   },
+                   {
+                       "CaseId":  "archive.entry.traceid.basic",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain trace-demo-123"
+                   }
+               ]
+}

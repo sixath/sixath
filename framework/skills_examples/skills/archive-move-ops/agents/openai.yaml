@@ -1,0 +1,4 @@
+interface:
+  display_name: "Archive Move Ops"
+  short_description: "通过 SSH 排查 archive 迁移链路日志并定位源/目标区域。"
+  default_prompt: "Use $archive-move-ops to investigate archive migration logs by traceId or flow_id."

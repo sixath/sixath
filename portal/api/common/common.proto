@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package api.common;
+option go_package = "backend/api/common;common";
+
+// 统一响应基类，所有 Response/Reply 需嵌入
+message BaseResponse {
+  int32 code = 1;     // 0=成功
+  string message = 2;
+  string reason = 3;
+}
+message Response{
+  BaseResponse ret = 1;
+}

@@ -1,0 +1,33 @@
+﻿{
+    "CaseId":  "archive.followup.basic-route",
+    "Verdict":  "passed",
+    "Classification":  "ok",
+    "Execution":  {
+                      "Command":  "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\workspace\\skills\\archive-move-ops\\harness\\adapters\\..\\..\\scripts\\build-followup-commands.ps1 -LogLine Worker.startSyncDispatch(). flow_id(301_rqkkw0snhnmt) uuid(154880308) ugid(1189) src_area_type(400) dst_area_type(301) done_union_version(27)",
+                      "ExitCode":  0,
+                      "StdOut":  "# flow_id: 301_rqkkw0snhnmt\r\n# route: 400 -\u003e 301\r\n# next: search archiver-manager in both source and destination areas\r\n\r\n# area: 400\r\n# host: 10.77.240.104\r\nssh vrviu@10.77.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.104\r\nssh vrviu@10.77.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.105\r\nssh vrviu@10.77.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.105\r\nssh vrviu@10.77.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.106\r\nssh vrviu@10.77.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.77.240.106\r\nssh vrviu@10.77.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.77.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# area: 301\r\n# host: 10.11.240.104\r\nssh vrviu@10.11.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.104\r\nssh vrviu@10.11.240.104 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.104 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.105\r\nssh vrviu@10.11.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.105\r\nssh vrviu@10.11.240.105 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.105 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.106\r\nssh vrviu@10.11.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n# host: 10.11.240.106\r\nssh vrviu@10.11.240.106 \"grep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager.log 2\u003e/dev/null\"\r\nssh vrviu@10.11.240.106 \"zgrep -nH -C 2 -- \u0027301_rqkkw0snhnmt\u0027 /data/area/logs/archiver_manager/archiver-manager-*.log.gz 2\u003e/dev/null\"\r\n\r\n",
+                      "StdErr":  "",
+                      "DurationMs":  378,
+                      "Succeeded":  true
+                  },
+    "Judges":  [
+                   {
+                       "CaseId":  "archive.followup.basic-route",
+                       "Kind":  "exit_code",
+                       "Passed":  true,
+                       "Message":  "expected exit code 0, actual 0"
+                   },
+                   {
+                       "CaseId":  "archive.followup.basic-route",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain # route: 400 -\u003e 301"
+                   },
+                   {
+                       "CaseId":  "archive.followup.basic-route",
+                       "Kind":  "contains_text",
+                       "Passed":  true,
+                       "Message":  "expected stdout to contain archiver-manager.log"
+                   }
+               ]
+}

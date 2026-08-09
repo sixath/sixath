@@ -1,0 +1,9 @@
+{
+  "id": "fixture.invalid-missing-type",
+  "skill": "archive-move-ops",
+  "description": "invalid fixture",
+  "input": {},
+  "expect": {
+    "judges": []
+  }
+}

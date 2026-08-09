@@ -1,0 +1,33 @@
+﻿{
+    "CaseId":  "archive.entry.traceid.basic",
+    "Verdict":  "failed",
+    "Classification":  "execution_failed",
+    "Execution":  {
+                      "Command":  "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\workspace\\skills\\archive-move-ops\\harness\\adapters\\..\\..\\scripts\\build-entry-commands.ps1 -TraceId trace-demo-123",
+                      "ExitCode":  -65536,
+                      "StdOut":  "",
+                      "StdErr":  "�޷������ shell����ʼ�������г��ֹ���:\r\nδ�ܼ����ļ�����򼯡�System.Data, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089��������ĳһ�������ҳ���ļ�̫С���޷���ɲ����� (�쳣���� HRESULT:0x800705AF)\r\n",
+                      "DurationMs":  138,
+                      "Succeeded":  false
+                  },
+    "Judges":  [
+                   {
+                       "CaseId":  "archive.entry.traceid.basic",
+                       "Kind":  "exit_code",
+                       "Passed":  false,
+                       "Message":  "expected exit code 0, actual -65536"
+                   },
+                   {
+                       "CaseId":  "archive.entry.traceid.basic",
+                       "Kind":  "contains_text",
+                       "Passed":  false,
+                       "Message":  "expected stdout to contain union-archiver-dispatch"
+                   },
+                   {
+                       "CaseId":  "archive.entry.traceid.basic",
+                       "Kind":  "contains_text",
+                       "Passed":  false,
+                       "Message":  "expected stdout to contain trace-demo-123"
+                   }
+               ]
+}
