@@ -33,6 +33,7 @@ func (r *channelRepo) Create(ctx context.Context, ch *biz.ChannelCreate) (*biz.C
 		ChannelID:     ch.ChannelID,
 		Type:          ch.Type,
 		DefaultAgent:  ch.DefaultAgent,
+		AllowedAgents: model.StringSlice(ch.AllowedAgents),
 		Enabled:       ch.Enabled,
 		WebhookPath:   ch.WebhookPath,
 		WebhookSecret: ch.WebhookSecret,
@@ -129,7 +130,7 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 		return nil, err
 	}
 	allowed := map[string]bool{
-		"channel_id": true, "type": true, "default_agent": true, "enabled": true,
+		"channel_id": true, "type": true, "default_agent": true, "allowed_agents": true, "enabled": true,
 		"webhook_path": true, "webhook_secret": true, "ip_whitelist": true,
 		"app_token": true, "default_uids": true,
 		"webhook_url": true,
@@ -137,7 +138,7 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 	upd := make(map[string]interface{})
 	for k, v := range updates {
 		if allowed[k] {
-			if k == "ip_whitelist" || k == "default_uids" {
+			if k == "ip_whitelist" || k == "default_uids" || k == "allowed_agents" {
 				if sl, ok := v.([]string); ok {
 					upd[k] = model.StringSlice(sl)
 				}
@@ -178,11 +179,16 @@ func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {
 	if uids == nil {
 		uids = []string{}
 	}
+	allowedAgents := []string(m.AllowedAgents)
+	if allowedAgents == nil {
+		allowedAgents = []string{}
+	}
 	return &biz.ChannelMeta{
 		ID:            m.ID,
 		ChannelID:     m.ChannelID,
 		Type:          m.Type,
 		DefaultAgent:  m.DefaultAgent,
+		AllowedAgents: allowedAgents,
 		Enabled:       m.Enabled,
 		WebhookPath:   m.WebhookPath,
 		WebhookSecret: m.WebhookSecret,

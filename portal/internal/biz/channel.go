@@ -10,6 +10,7 @@ type ChannelCreate struct {
 	ChannelID     string
 	Type          string // web, api, webhook, wxpusher, wecom
 	DefaultAgent  string
+	AllowedAgents []string
 	Enabled       bool
 	WebhookPath   string
 	WebhookSecret string
@@ -27,6 +28,7 @@ type ChannelMeta struct {
 	ChannelID     string
 	Type          string
 	DefaultAgent  string
+	AllowedAgents []string
 	Enabled       bool
 	WebhookPath   string
 	WebhookSecret string
