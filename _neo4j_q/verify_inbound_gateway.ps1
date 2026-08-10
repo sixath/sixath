@@ -81,19 +81,22 @@ function Invoke-Http {
   $req.Method = $Method
   $req.Timeout = $TimeoutSec * 1000
   $req.ReadWriteTimeout = $TimeoutSec * 1000
-  $req.ContentType = $ContentType
   foreach ($k in $Headers.Keys) {
     if ($k -eq 'Content-Type') { continue }
     $req.Headers.Add([string]$k, [string]$Headers[$k])
   }
-  if ($null -ne $Body) {
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
+  $methodUpper = $Method.ToUpperInvariant()
+  $canBody = $methodUpper -in @('POST', 'PUT', 'PATCH')
+  if ($canBody) {
+    $req.ContentType = $ContentType
+    $payload = if ($null -ne $Body) { $Body } else { '' }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
     $req.ContentLength = $bytes.Length
-    $stream = $req.GetRequestStream()
-    $stream.Write($bytes, 0, $bytes.Length)
-    $stream.Close()
-  } else {
-    $req.ContentLength = 0
+    if ($bytes.Length -gt 0) {
+      $stream = $req.GetRequestStream()
+      $stream.Write($bytes, 0, $bytes.Length)
+      $stream.Close()
+    }
   }
   try {
     $resp = $req.GetResponse()

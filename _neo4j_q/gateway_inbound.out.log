@@ -1,0 +1,2 @@
+sixath-gateway version=dev listen=:8088
+portal_base_url=http://127.0.0.1:8000 turn_timeout_sec=120 channels_file=./configs/channels.yaml

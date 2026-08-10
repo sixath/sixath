@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "surface": "business UI",
+  "agent": "zone-4100-agent",
+  "base": "http://localhost:5173",
+  "governance": {
+    "hub_governance": "local",
+    "hub_knowledge": "local",
+    "bind_skill": "scheduling-flow-trace -> Binding status=active",
+    "unbind": "解绑后 Binding 为空 (API total=0)",
+    "loadout": "本机 3 skills 始终可见"
+  },
+  "knowledge": {
+    "wiki": {
+      "session": "9f84e6dd-4fdc-41ca-9ab4-ce792a2e541d",
+      "hit": "hub-e2e.md / MEMORY_HUB_WIKI_MARKER"
+    },
+    "codegraph": {
+      "session": "2dc82462-2168-4e4c-b974-a9dd32750ad5",
+      "hit": "memory/neo4j_graph_store.go / NewNeo4jGraphStore"
+    },
+    "graph": {
+      "session": "3d5cc77d-8dcd-4891-af9d-9926f3a22c15",
+      "hit": "KnowledgeE2E* via Neo4j"
+    }
+  }
+}

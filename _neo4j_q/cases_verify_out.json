@@ -1,0 +1,139 @@
+{
+  "passed": 7,
+  "total": 7,
+  "results": [
+    {
+      "name": "C1_min_support_2",
+      "ok": true,
+      "detail": "fail1=2 n_after1=0; fail2=2 n_after2=1; unit=50d9bea9-7218-457c-88df-09ec6d390de8",
+      "extras": {
+        "session": "2bf5d9a5-da35-418b-9577-a679fbd652e2",
+        "unit": {
+          "id": "50d9bea9-7218-457c-88df-09ec6d390de8",
+          "content": "【过程修复 建议】条件 `tool_failed` → 建议 使用 工具序列 [ask_user]",
+          "metadata": {
+            "kind": "procedural",
+            "source": "procedural_repair",
+            "task_family": "zone-4100-agent",
+            "binding_mode": "suggest",
+            "failure_code": "tool_failed",
+            "support_count": 2,
+            "binding_skill_id": "",
+            "procedural_status": "active",
+            "binding_tool_names": [
+              "ask_user"
+            ],
+            "binding_action_kind": "tool_sequence",
+            "procedural_entry_id": "87bdb0862ac95028",
+            "binding_trigger_code": "tool_failed",
+            "binding_trigger_query": "ssh"
+          }
+        },
+        "log": [
+          "procedural_auto_commit",
+          "procedural_entry_activated"
+        ]
+      }
+    },
+    {
+      "name": "C7_metadata_shape",
+      "ok": true,
+      "detail": "missing=[] support=2 content_ok=True",
+      "extras": {
+        "unit": {
+          "id": "50d9bea9-7218-457c-88df-09ec6d390de8",
+          "content": "【过程修复 建议】条件 `tool_failed` → 建议 使用 工具序列 [ask_user]",
+          "metadata": {
+            "kind": "procedural",
+            "source": "procedural_repair",
+            "task_family": "zone-4100-agent",
+            "binding_mode": "suggest",
+            "failure_code": "tool_failed",
+            "support_count": 2,
+            "binding_skill_id": "",
+            "procedural_status": "active",
+            "binding_tool_names": [
+              "ask_user"
+            ],
+            "binding_action_kind": "tool_sequence",
+            "procedural_entry_id": "87bdb0862ac95028",
+            "binding_trigger_code": "tool_failed",
+            "binding_trigger_query": "ssh"
+          }
+        }
+      }
+    },
+    {
+      "name": "C6_log_auto_commit",
+      "ok": true,
+      "detail": "found=['procedural_auto_commit', 'procedural_entry_activated', 'failure_signal']",
+      "extras": {
+        "log": "D:\\workspace\\github\\sixath\\_neo4j_q\\portal_reverify.log"
+      }
+    },
+    {
+      "name": "C3_fact_lane_exclude",
+      "ok": true,
+      "detail": "memory_recall hit_count=0 leaked=False; procedural_still_in_db=True",
+      "extras": {
+        "session": "2bf5d9a5-da35-418b-9577-a679fbd652e2",
+        "memory_hits": [
+          {
+            "hits": []
+          }
+        ],
+        "tools": [
+          "memory_recall:started",
+          "memory_recall:completed",
+          "todo:started",
+          "todo:completed"
+        ]
+      }
+    },
+    {
+      "name": "C5_ssh_inject_or_ask_user",
+      "ok": true,
+      "detail": "ask_user_events=2 log_hit=True",
+      "extras": {
+        "session": "2bf5d9a5-da35-418b-9577-a679fbd652e2",
+        "tools": [
+          "ask_user:started",
+          "ask_user:completed",
+          "send_to_wecom:started",
+          "send_to_wecom:completed"
+        ],
+        "log_delta_has_hit": true
+      }
+    },
+    {
+      "name": "C2_terminal_soft_fail_no_commit",
+      "ok": true,
+      "detail": "soft1=2 soft2=2 failed1=0 failed2=0 n=0",
+      "extras": {
+        "session": "53944073-079d-4873-b4b0-6a5f264c006b",
+        "tools": [
+          "terminal:started",
+          "terminal:completed",
+          "jaeger_trace:started",
+          "jaeger_trace:completed",
+          "terminal:started",
+          "terminal:completed",
+          "load_skill:started",
+          "load_skill:completed"
+        ]
+      }
+    },
+    {
+      "name": "C4_non_pilot_no_commit",
+      "ok": true,
+      "detail": "tool_failed_events>=2, procedural_count=0 (want 0) | log shows activate+reject (good)",
+      "extras": {
+        "session": "b5313614-ab5f-4a31-9526-4b78c48656ee",
+        "failed_events": 2,
+        "log_rejected": true,
+        "log_activated": true,
+        "log_committed": false
+      }
+    }
+  ]
+}

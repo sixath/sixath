@@ -1,0 +1,19 @@
+﻿{
+    "session":  "5f800590-ea9b-4b93-84f0-879447a415bc",
+    "agent":  "e8107fb3-e40a-4207-9d9a-6768847aaf79",
+    "turn1_failed":  0,
+    "turn2_failed":  0,
+    "turn1_tools":  [
+
+                    ],
+    "turn2_tools":  [
+
+                    ],
+    "turn3_text":  "",
+    "turn3_debug":  [
+
+                    ],
+    "turn1_types":  [
+
+                    ]
+}

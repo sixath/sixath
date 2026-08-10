@@ -1,0 +1,12 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help
+ npmrc` for supported config options.
+所在位置 D:\Program Files\nodejs\npx.ps1:29 字符: 3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+### Error
+Error: Tool "browser_snapshot" does not handle the modal state.
+### Modal state
+- ["confirm" dialog with message "娓呯┖鍏ㄩ儴鏄惧紡 Hub Binding锛熷垏鎹㈡不鐞嗛潰鍚庢棫 Loadout 鍙兘澶辨晥銆?]: can be handled by dialog-accept or dialog-dismiss

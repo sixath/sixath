@@ -1,0 +1,975 @@
+﻿event: debug
+data: {"content":"agent.run.started[{\"message_count\":2,\"stream\":true}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":3}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":3,\"mode\":\"tools_stream\",\"step\":0}]\r\n"}
+
+event: chunk
+data: {"content":"##"}
+
+event: chunk
+data: {"content":" Cloud Gaming"}
+
+event: chunk
+data: {"content":" Summary\n\n"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"Cloud gaming"}
+
+event: chunk
+data: {"content":"** ("}
+
+event: chunk
+data: {"content":"云游戏"}
+
+event: chunk
+data: {"content":") is"}
+
+event: chunk
+data: {"content":" a"}
+
+event: chunk
+data: {"content":" technology that"}
+
+event: chunk
+data: {"content":" streams video"}
+
+event: chunk
+data: {"content":" games from"}
+
+event: chunk
+data: {"content":" remote servers"}
+
+event: chunk
+data: {"content":" directly to"}
+
+event: chunk
+data: {"content":" a"}
+
+event: chunk
+data: {"content":" user's"}
+
+event: chunk
+data: {"content":" device,"}
+
+event: chunk
+data: {"content":" eliminating the"}
+
+event: chunk
+data: {"content":" need for"}
+
+event: chunk
+data: {"content":" high-end"}
+
+event: chunk
+data: {"content":" local hardware"}
+
+event: chunk
+data: {"content":" —"}
+
+event: chunk
+data: {"content":" the heavy"}
+
+event: chunk
+data: {"content":" computation and"}
+
+event: chunk
+data: {"content":" rendering happen"}
+
+event: chunk
+data: {"content":" in the"}
+
+event: chunk
+data: {"content":" cloud,"}
+
+event: chunk
+data: {"content":" and"}
+
+event: chunk
+data: {"content":" the player"}
+
+event: chunk
+data: {"content":" receives only"}
+
+event: chunk
+data: {"content":" the video"}
+
+event: chunk
+data: {"content":"/audio"}
+
+event: chunk
+data: {"content":" stream while"}
+
+event: chunk
+data: {"content":" sending back"}
+
+event: chunk
+data: {"content":" input commands"}
+
+event: chunk
+data: {"content":"."}
+
+event: chunk
+data: {"content":" It enables"}
+
+event: chunk
+data: {"content":" instant play"}
+
+event: chunk
+data: {"content":" across"}
+
+event: chunk
+data: {"content":" devices ("}
+
+event: chunk
+data: {"content":"phones,"}
+
+event: chunk
+data: {"content":" TVs,"}
+
+event: chunk
+data: {"content":" low"}
+
+event: chunk
+data: {"content":"-spec"}
+
+event: chunk
+data: {"content":" PCs)"}
+
+event: chunk
+data: {"content":" but"}
+
+event: chunk
+data: {"content":" requires a"}
+
+event: chunk
+data: {"content":" stable,"}
+
+event: chunk
+data: {"content":" low-l"}
+
+event: chunk
+data: {"content":"at"}
+
+event: chunk
+data: {"content":"ency internet"}
+
+event: chunk
+data: {"content":" connection.\n\n"}
+
+event: chunk
+data: {"content":"---\n\n"}
+
+event: chunk
+data: {"content":"## Regarding"}
+
+event: chunk
+data: {"content":" `web"}
+
+event: chunk
+data: {"content":"_search`\n\n"}
+
+event: chunk
+data: {"content":"I don"}
+
+event: chunk
+data: {"content":"'t have"}
+
+event: chunk
+data: {"content":" a `"}
+
+event: chunk
+data: {"content":"web_search"}
+
+event: chunk
+data: {"content":"` tool"}
+
+event: chunk
+data: {"content":" available in"}
+
+event: chunk
+data: {"content":" my current"}
+
+event: chunk
+data: {"content":" tool set"}
+
+event: chunk
+data: {"content":". The"}
+
+event: chunk
+data: {"content":" closest"}
+
+event: chunk
+data: {"content":" alternatives I"}
+
+event: chunk
+data: {"content":" can offer"}
+
+event: chunk
+data: {"content":" are:\n\n"}
+
+event: chunk
+data: {"content":"- **"}
+
+event: chunk
+data: {"content":"`knowledge"}
+
+event: chunk
+data: {"content":"_search`"}
+
+event: chunk
+data: {"content":"** —"}
+
+event: chunk
+data: {"content":" searches local"}
+
+event: chunk
+data: {"content":" knowledge bases"}
+
+event: chunk
+data: {"content":" (trans"}
+
+event: chunk
+data: {"content":"cripts,"}
+
+event: chunk
+data: {"content":" workspace,"}
+
+event: chunk
+data: {"content":" wiki"}
+
+event: chunk
+data: {"content":", code"}
+
+event: chunk
+data: {"content":"graph),"}
+
+event: chunk
+data: {"content":" but not"}
+
+event: chunk
+data: {"content":" the live"}
+
+event: chunk
+data: {"content":" web.\n"}
+
+event: chunk
+data: {"content":"- **"}
+
+event: chunk
+data: {"content":"`http"}
+
+event: chunk
+data: {"content":"_request`"}
+
+event: chunk
+data: {"content":"** —"}
+
+event: chunk
+data: {"content":" can make"}
+
+event: chunk
+data: {"content":" HTTP requests"}
+
+event: chunk
+data: {"content":" to"}
+
+event: chunk
+data: {"content":" specific URLs"}
+
+event: chunk
+data: {"content":", so"}
+
+event: chunk
+data: {"content":" if you"}
+
+event: chunk
+data: {"content":" provide a"}
+
+event: chunk
+data: {"content":" target"}
+
+event: chunk
+data: {"content":" URL,"}
+
+event: chunk
+data: {"content":" I can"}
+
+event: chunk
+data: {"content":" fetch it"}
+
+event: chunk
+data: {"content":".\n\nWould"}
+
+event: chunk
+data: {"content":" you like"}
+
+event: chunk
+data: {"content":" me to"}
+
+event: chunk
+data: {"content":" try"}
+
+event: chunk
+data: {"content":" one of"}
+
+event: chunk
+data: {"content":" these alternatives"}
+
+event: chunk
+data: {"content":"? For"}
+
+event: chunk
+data: {"content":" example"}
+
+event: chunk
+data: {"content":", I"}
+
+event: chunk
+data: {"content":" could use"}
+
+event: chunk
+data: {"content":" `http"}
+
+event: chunk
+data: {"content":"_request`"}
+
+event: chunk
+data: {"content":" to fetch"}
+
+event: chunk
+data: {"content":" from a"}
+
+event: chunk
+data: {"content":" known legal"}
+
+event: chunk
+data: {"content":" database"}
+
+event: chunk
+data: {"content":" URL if"}
+
+event: chunk
+data: {"content":" you have"}
+
+event: chunk
+data: {"content":" one"}
+
+event: chunk
+data: {"content":" in mind"}
+
+event: chunk
+data: {"content":", or"}
+
+event: chunk
+data: {"content":" I can"}
+
+event: chunk
+data: {"content":" try `"}
+
+event: chunk
+data: {"content":"knowledge"}
+
+event: chunk
+data: {"content":"_search`"}
+
+event: chunk
+data: {"content":" to see"}
+
+event: chunk
+data: {"content":" if the"}
+
+event: chunk
+data: {"content":" relevant legal"}
+
+event: chunk
+data: {"content":" text is"}
+
+event: chunk
+data: {"content":" already"}
+
+event: chunk
+data: {"content":" in the"}
+
+event: chunk
+data: {"content":" local knowledge"}
+
+event: chunk
+data: {"content":" base"}
+
+event: chunk
+data: {"content":"."}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":0,\"text_length\":1110}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":1,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":5}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":5,\"mode\":\"tools_stream\",\"step\":1}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":1,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":1,\"text_length\":0}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_a4783a94805c4f2c8bc690d9","step":1,"phase":"started","tool_name":"knowledge_search","arguments":{"query":"Consumer Rights Law Article 25 seven-day no-reason return original text 消费者权益保护法 第二十五条 七天无理由退货","source":"transcript,workspace,graph,wiki,codegraph"},"allowed":false}}
+
+event: debug
+data: {"content":"agent.tool.started[{\"input\":{\"query\":\"Consumer Rights Law Article 25 seven-day no-reason return original text 消费者权益保护法 第二十五条 七天无理由退货\",\"source\":\"transcript,workspace,graph,wiki,codegraph\"},\"step\":1,\"tool\":\"knowledge_search\",\"tool_call_id\":\"call_a4783a94805c4f2c8bc690d9\"}]\r\n"}
+
+event: debug
+data: {"content":"agent.tool.completed[{\"output\":null,\"step\":1,\"tool\":\"knowledge_search\",\"tool_call_id\":\"call_a4783a94805c4f2c8bc690d9\"}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":2,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":7}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":7,\"mode\":\"tools_stream\",\"step\":2}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_a4783a94805c4f2c8bc690d9","step":1,"phase":"completed","tool_name":"knowledge_search","arguments":{"query":"Consumer Rights Law Article 25 seven-day no-reason return original text 消费者权益保护法 第二十五条 七天无理由退货","source":"transcript,workspace,graph,wiki,codegraph"},"result":null,"allowed":true,"decision":"allowed","duration_ms":284}}
+
+event: chunk
+data: {"content":"##"}
+
+event: chunk
+data: {"content":" 结果"}
+
+event: chunk
+data: {"content":"\n\n`"}
+
+event: chunk
+data: {"content":"knowledge_search"}
+
+event: chunk
+data: {"content":"` "}
+
+event: chunk
+data: {"content":"在所有"}
+
+event: chunk
+data: {"content":"本地知识"}
+
+event: chunk
+data: {"content":"源（"}
+
+event: chunk
+data: {"content":"transcript"}
+
+event: chunk
+data: {"content":" /"}
+
+event: chunk
+data: {"content":" workspace /"}
+
+event: chunk
+data: {"content":" graph /"}
+
+event: chunk
+data: {"content":" wiki /"}
+
+event: chunk
+data: {"content":" codegraph"}
+
+event: chunk
+data: {"content":"）中"}
+
+event: chunk
+data: {"content":"均未"}
+
+event: chunk
+data: {"content":"命中"}
+
+event: chunk
+data: {"content":"相关结果"}
+
+event: chunk
+data: {"content":"，返回"}
+
+event: chunk
+data: {"content":"为空。\n\n"}
+
+event: chunk
+data: {"content":"---\n\n##"}
+
+event: chunk
+data: {"content":" 可"}
+
+event: chunk
+data: {"content":"用的替代"}
+
+event: chunk
+data: {"content":"方案\n\n"}
+
+event: chunk
+data: {"content":"我"}
+
+event: chunk
+data: {"content":"当前没有"}
+
+event: chunk
+data: {"content":" `web"}
+
+event: chunk
+data: {"content":"_search`"}
+
+event: chunk
+data: {"content":" 工具"}
+
+event: chunk
+data: {"content":"，但"}
+
+event: chunk
+data: {"content":"如果你能"}
+
+event: chunk
+data: {"content":"提供一个目标"}
+
+event: chunk
+data: {"content":" URL（"}
+
+event: chunk
+data: {"content":"例如全国"}
+
+event: chunk
+data: {"content":"人大网"}
+
+event: chunk
+data: {"content":"、"}
+
+event: chunk
+data: {"content":"中国政府网"}
+
+event: chunk
+data: {"content":"等官方"}
+
+event: chunk
+data: {"content":"法律文本"}
+
+event: chunk
+data: {"content":"页面），"}
+
+event: chunk
+data: {"content":"我可以"}
+
+event: chunk
+data: {"content":"使用 `"}
+
+event: chunk
+data: {"content":"http_request"}
+
+event: chunk
+data: {"content":"` "}
+
+event: chunk
+data: {"content":"直接抓"}
+
+event: chunk
+data: {"content":"取并"}
+
+event: chunk
+data: {"content":"返回原文"}
+
+event: chunk
+data: {"content":"。或者"}
+
+event: chunk
+data: {"content":"你也可以"}
+
+event: chunk
+data: {"content":"在 Agent"}
+
+event: chunk
+data: {"content":" 绑定"}
+
+event: chunk
+data: {"content":"一个联网"}
+
+event: chunk
+data: {"content":"搜索工具"}
+
+event: chunk
+data: {"content":"后我再"}
+
+event: chunk
+data: {"content":"执行。"}
+
+event: model_call
+data: {"model_call":{"step":2,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":2,\"text_length\":474}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":3,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":9}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":9,\"mode\":\"tools_stream\",\"step\":3}]\r\n"}
+
+event: chunk
+data: {"content":"明白"}
+
+event: chunk
+data: {"content":"。"}
+
+event: chunk
+data: {"content":"这是一个重要的"}
+
+event: chunk
+data: {"content":"排障"}
+
+event: chunk
+data: {"content":"纪律"}
+
+event: chunk
+data: {"content":"，我已"}
+
+event: chunk
+data: {"content":"记录：\n\n"}
+
+event: chunk
+data: {"content":"---\n\n##"}
+
+event: chunk
+data: {"content":" 理解"}
+
+event: chunk
+data: {"content":"确认\n\n"}
+
+event: chunk
+data: {"content":"以后在"}
+
+event: chunk
+data: {"content":"排查调度"}
+
+event: chunk
+data: {"content":"失败、"}
+
+event: chunk
+data: {"content":"VM "}
+
+event: chunk
+data: {"content":"分配、"}
+
+event: chunk
+data: {"content":"资源占用"}
+
+event: chunk
+data: {"content":"、启动"}
+
+event: chunk
+data: {"content":"异常等问题"}
+
+event: chunk
+data: {"content":"时，"}
+
+event: chunk
+data: {"content":"我的"}
+
+event: chunk
+data: {"content":"工作流"}
+
+event: chunk
+data: {"content":"是：\n\n"}
+
+event: chunk
+data: {"content":"1."}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"先取证"}
+
+event: chunk
+data: {"content":"**："}
+
+event: chunk
+data: {"content":"优先调用"}
+
+event: chunk
+data: {"content":" `ja"}
+
+event: chunk
+data: {"content":"eger_t"}
+
+event: chunk
+data: {"content":"race`"}
+
+event: chunk
+data: {"content":"（获取"}
+
+event: chunk
+data: {"content":" trace "}
+
+event: chunk
+data: {"content":"链路）"}
+
+event: chunk
+data: {"content":"和 `"}
+
+event: chunk
+data: {"content":"execute_read"}
+
+event: chunk
+data: {"content":"`（"}
+
+event: chunk
+data: {"content":"查询 ES"}
+
+event: chunk
+data: {"content":" 日志"}
+
+event: chunk
+data: {"content":"索引）"}
+
+event: chunk
+data: {"content":"收集"}
+
+event: chunk
+data: {"content":"运行时证据"}
+
+event: chunk
+data: {"content":"；\n2"}
+
+event: chunk
+data: {"content":". **"}
+
+event: chunk
+data: {"content":"再下"}
+
+event: chunk
+data: {"content":"结论**"}
+
+event: chunk
+data: {"content":"：基于"}
+
+event: chunk
+data: {"content":"证据做"}
+
+event: chunk
+data: {"content":"判断，"}
+
+event: chunk
+data: {"content":"不凭空"}
+
+event: chunk
+data: {"content":"推断；\n"}
+
+event: chunk
+data: {"content":"3."}
+
+event: chunk
+data: {"content":" **证据"}
+
+event: chunk
+data: {"content":"不足时"}
+
+event: chunk
+data: {"content":"明确声明"}
+
+event: chunk
+data: {"content":"**："}
+
+event: chunk
+data: {"content":"若上述"}
+
+event: chunk
+data: {"content":"工具均"}
+
+event: chunk
+data: {"content":"无法取得"}
+
+event: chunk
+data: {"content":"有效证据"}
+
+event: chunk
+data: {"content":"，必须在"}
+
+event: chunk
+data: {"content":"答复中"}
+
+event: chunk
+data: {"content":"明确写出"}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"「证据"}
+
+event: chunk
+data: {"content":"不足」"}
+
+event: chunk
+data: {"content":"** "}
+
+event: chunk
+data: {"content":"或 **"}
+
+event: chunk
+data: {"content":"\"ins"}
+
+event: chunk
+data: {"content":"ufficient evidence"}
+
+event: chunk
+data: {"content":"\"**"}
+
+event: chunk
+data: {"content":"，不"}
+
+event: chunk
+data: {"content":"编造"}
+
+event: chunk
+data: {"content":"结果。\n\n"}
+
+event: chunk
+data: {"content":"---\n\n##"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"关于上一"}
+
+event: chunk
+data: {"content":"轮的法律"}
+
+event: chunk
+data: {"content":"文本查询"}
+
+event: chunk
+data: {"content":"\n\n`"}
+
+event: chunk
+data: {"content":"knowledge_search"}
+
+event: chunk
+data: {"content":"` "}
+
+event: chunk
+data: {"content":"属本地"}
+
+event: chunk
+data: {"content":"知识"}
+
+event: chunk
+data: {"content":"库检索"}
+
+event: chunk
+data: {"content":"，非"}
+
+event: chunk
+data: {"content":"运行时排"}
+
+event: chunk
+data: {"content":"障证据"}
+
+event: chunk
+data: {"content":"，且"}
+
+event: chunk
+data: {"content":"返回为空"}
+
+event: chunk
+data: {"content":"——结论"}
+
+event: chunk
+data: {"content":"是："}
+
+event: chunk
+data: {"content":"**证据"}
+
+event: chunk
+data: {"content":"不足**"}
+
+event: chunk
+data: {"content":"，无法"}
+
+event: chunk
+data: {"content":"从本地"}
+
+event: chunk
+data: {"content":"知识源"}
+
+event: chunk
+data: {"content":"确认"}
+
+event: chunk
+data: {"content":"该法"}
+
+event: chunk
+data: {"content":"条原文"}
+
+event: chunk
+data: {"content":"。如需"}
+
+event: chunk
+data: {"content":"获取，"}
+
+event: chunk
+data: {"content":"建议通过"}
+
+event: chunk
+data: {"content":" `http"}
+
+event: chunk
+data: {"content":"_request"}
+
+event: chunk
+data: {"content":"` "}
+
+event: chunk
+data: {"content":"指定官方"}
+
+event: chunk
+data: {"content":" URL"}
+
+event: chunk
+data: {"content":" 抓"}
+
+event: chunk
+data: {"content":"取，"}
+
+event: chunk
+data: {"content":"或"}
+
+event: chunk
+data: {"content":"为 Agent"}
+
+event: chunk
+data: {"content":" 绑定"}
+
+event: chunk
+data: {"content":"联网搜索"}
+
+event: chunk
+data: {"content":"工具。"}
+
+event: model_call
+data: {"model_call":{"step":3,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":3,\"text_length\":916}]\r\n"}
+
+event: debug
+data: {"content":"agent.run.completed[{\"stream\":true,\"text_length\":916}]\r\n"}
+
+event: done
+data: {"content":"","done":true}
+

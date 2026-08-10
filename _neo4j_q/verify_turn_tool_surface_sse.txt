@@ -1,0 +1,2082 @@
+﻿event: debug
+data: {"content":"agent.run.started[{\"message_count\":2,\"stream\":true}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":3}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":3,\"mode\":\"tools_stream\",\"step\":0}]\r\n"}
+
+event: chunk
+data: {"content":"Let"}
+
+event: chunk
+data: {"content":" me"}
+
+event: chunk
+data: {"content":" call"}
+
+event: chunk
+data: {"content":" both"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" tools"}
+
+event: chunk
+data: {"content":" to"}
+
+event: chunk
+data: {"content":" verify"}
+
+event: chunk
+data: {"content":" authentication"}
+
+event: chunk
+data: {"content":" and"}
+
+event: chunk
+data: {"content":" list"}
+
+event: chunk
+data: {"content":" projects"}
+
+event: chunk
+data: {"content":"."}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":0,\"text_length\":0}]\r\n"}
+
+event: debug
+data: {"content":"agent.tool.started[{\"input\":{},\"step\":0,\"tool\":\"whoami\",\"tool_call_id\":\"call_00_9mAs1bTVdU7nrrPTRPOp0633\"}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_00_9mAs1bTVdU7nrrPTRPOp0633","step":0,"phase":"started","tool_name":"tool_call","arguments":{"arguments":{},"name":"whoami"},"allowed":false}}
+
+event: tool_call
+data: {"tool_call":{"id":"call_01_2VYxCfCeSKVZ3Co3mXRe2891","step":0,"phase":"started","tool_name":"tool_call","arguments":{"arguments":{},"name":"list_projects"},"allowed":false}}
+
+event: debug
+data: {"content":"agent.tool.failed[{\"error\":\"failed to call MCP tool whoami: internal error: GitLab API error: 401 Unauthorized\\n{\\\"message\\\":\\\"401 Unauthorized\\\"}\",\"step\":0,\"tool\":\"whoami\",\"tool_call_id\":\"call_00_9mAs1bTVdU7nrrPTRPOp0633\"}]\r\n"}
+
+event: debug
+data: {"content":"agent.tool.started[{\"input\":{},\"step\":0,\"tool\":\"list_projects\",\"tool_call_id\":\"call_01_2VYxCfCeSKVZ3Co3mXRe2891\"}]\r\n"}
+
+event: debug
+data: {"content":"agent.tool.failed[{\"error\":\"failed to call MCP tool list_projects: internal error: GitLab API error: 401 Unauthorized\\n{\\\"message\\\":\\\"401 Unauthorized\\\"}\",\"step\":0,\"tool\":\"list_projects\",\"tool_call_id\":\"call_01_2VYxCfCeSKVZ3Co3mXRe2891\"}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":1,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":6}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":6,\"mode\":\"tools_stream\",\"step\":1}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_00_9mAs1bTVdU7nrrPTRPOp0633","step":0,"phase":"failed","tool_name":"whoami","arguments":{},"result":"","error":"failed to call MCP tool whoami: internal error: GitLab API error: 401 Unauthorized\n{\"message\":\"401 Unauthorized\"}","allowed":true,"decision":"allowed","duration_ms":71}}
+
+event: tool_call
+data: {"tool_call":{"id":"call_01_2VYxCfCeSKVZ3Co3mXRe2891","step":0,"phase":"failed","tool_name":"list_projects","arguments":{},"result":"","error":"failed to call MCP tool list_projects: internal error: GitLab API error: 401 Unauthorized\n{\"message\":\"401 Unauthorized\"}","allowed":true,"decision":"allowed","duration_ms":45}}
+
+event: chunk
+data: {"content":"##"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"认证"}
+
+event: chunk
+data: {"content":"失败"}
+
+event: chunk
+data: {"content":"\n\n"}
+
+event: chunk
+data: {"content":"两个"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"工具"}
+
+event: chunk
+data: {"content":"均"}
+
+event: chunk
+data: {"content":"返回"}
+
+event: chunk
+data: {"content":"了"}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"：\n\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"工具"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"错误"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"------"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"------"}
+
+event: chunk
+data: {"content":"|\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"who"}
+
+event: chunk
+data: {"content":"ami"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" error"}
+
+event: chunk
+data: {"content":":"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"list"}
+
+event: chunk
+data: {"content":"_pro"}
+
+event: chunk
+data: {"content":"jects"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" error"}
+
+event: chunk
+data: {"content":":"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |\n\n"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"原因"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"："}
+
+event: chunk
+data: {"content":"当前"}
+
+event: chunk
+data: {"content":"绑"}
+
+event: chunk
+data: {"content":"定的"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"凭"}
+
+event: chunk
+data: {"content":"据"}
+
+event: chunk
+data: {"content":"（"}
+
+event: chunk
+data: {"content":"token"}
+
+event: chunk
+data: {"content":"/"}
+
+event: chunk
+data: {"content":"密钥"}
+
+event: chunk
+data: {"content":"）"}
+
+event: chunk
+data: {"content":"无效"}
+
+event: chunk
+data: {"content":"或"}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"过期"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"无法"}
+
+event: chunk
+data: {"content":"通过"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"的身份"}
+
+event: chunk
+data: {"content":"验证"}
+
+event: chunk
+data: {"content":"。\n\n"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"需要"}
+
+event: chunk
+data: {"content":"做的"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"："}
+
+event: chunk
+data: {"content":"请在"}
+
+event: chunk
+data: {"content":" Agent"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"绑定"}
+
+event: chunk
+data: {"content":"配置"}
+
+event: chunk
+data: {"content":"中"}
+
+event: chunk
+data: {"content":"更新"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"的"}
+
+event: chunk
+data: {"content":"访问"}
+
+event: chunk
+data: {"content":"凭"}
+
+event: chunk
+data: {"content":"据"}
+
+event: chunk
+data: {"content":"（"}
+
+event: chunk
+data: {"content":"Personal"}
+
+event: chunk
+data: {"content":" Access"}
+
+event: chunk
+data: {"content":" Token"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"或"}
+
+event: chunk
+data: {"content":" O"}
+
+event: chunk
+data: {"content":"Auth"}
+
+event: chunk
+data: {"content":" Token"}
+
+event: chunk
+data: {"content":"），"}
+
+event: chunk
+data: {"content":"确保"}
+
+event: chunk
+data: {"content":"该"}
+
+event: chunk
+data: {"content":" token"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"具有"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"read"}
+
+event: chunk
+data: {"content":"_api"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"或"}
+
+event: chunk
+data: {"content":"更"}
+
+event: chunk
+data: {"content":"广泛的"}
+
+event: chunk
+data: {"content":" scope"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"且"}
+
+event: chunk
+data: {"content":"未"}
+
+event: chunk
+data: {"content":"过期"}
+
+event: chunk
+data: {"content":"。"}
+
+event: chunk
+data: {"content":"更新"}
+
+event: chunk
+data: {"content":"后"}
+
+event: chunk
+data: {"content":"重新"}
+
+event: chunk
+data: {"content":"调用"}
+
+event: chunk
+data: {"content":"即可"}
+
+event: chunk
+data: {"content":"。"}
+
+event: model_call
+data: {"model_call":{"step":1,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":1,\"text_length\":580}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":2,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":8}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":8,\"mode\":\"tools_stream\",\"step\":2}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":2,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":2,\"text_length\":0}]\r\n"}
+
+event: debug
+data: {"content":"agent.tool.started[{\"input\":{},\"step\":2,\"tool\":\"search_repositories\",\"tool_call_id\":\"call_00_s8NEit1pvPJnQ8FwQX9X4733\"}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_00_s8NEit1pvPJnQ8FwQX9X4733","step":2,"phase":"started","tool_name":"tool_call","arguments":{"arguments":{},"name":"search_repositories"},"allowed":false}}
+
+event: debug
+data: {"content":"agent.tool.failed[{\"error\":\"failed to call MCP tool search_repositories: internal error: Either 'search' or 'query' must be provided\",\"step\":2,\"tool\":\"search_repositories\",\"tool_call_id\":\"call_00_s8NEit1pvPJnQ8FwQX9X4733\"}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":3,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":10}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":10,\"mode\":\"tools_stream\",\"step\":3}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_00_s8NEit1pvPJnQ8FwQX9X4733","step":2,"phase":"failed","tool_name":"search_repositories","arguments":{},"result":"","error":"failed to call MCP tool search_repositories: internal error: Either 'search' or 'query' must be provided","allowed":true,"decision":"allowed","duration_ms":1}}
+
+event: chunk
+data: {"content":"需要"}
+
+event: chunk
+data: {"content":"提供"}
+
+event: chunk
+data: {"content":"搜索"}
+
+event: chunk
+data: {"content":"关键词"}
+
+event: chunk
+data: {"content":"。"}
+
+event: chunk
+data: {"content":"让我"}
+
+event: chunk
+data: {"content":"用一个"}
+
+event: chunk
+data: {"content":"通用"}
+
+event: chunk
+data: {"content":"搜索"}
+
+event: chunk
+data: {"content":"来"}
+
+event: chunk
+data: {"content":"列出"}
+
+event: chunk
+data: {"content":"仓库"}
+
+event: chunk
+data: {"content":"："}
+
+event: model_call
+data: {"model_call":{"step":3,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":3,\"text_length\":0}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_00_4H36ujQd52da423XslND6436","step":3,"phase":"started","tool_name":"tool_call","arguments":{"arguments":{"search":"game"},"name":"search_repositories"},"allowed":false}}
+
+event: debug
+data: {"content":"agent.tool.started[{\"input\":{\"search\":\"game\"},\"step\":3,\"tool\":\"search_repositories\",\"tool_call_id\":\"call_00_4H36ujQd52da423XslND6436\"}]\r\n"}
+
+event: debug
+data: {"content":"agent.tool.failed[{\"error\":\"failed to call MCP tool search_repositories: internal error: GitLab API error: 401 Unauthorized\\n{\\\"message\\\":\\\"401 Unauthorized\\\"}\",\"step\":3,\"tool\":\"search_repositories\",\"tool_call_id\":\"call_00_4H36ujQd52da423XslND6436\"}]\r\n"}
+
+event: tool_call
+data: {"tool_call":{"id":"call_00_4H36ujQd52da423XslND6436","step":3,"phase":"failed","tool_name":"search_repositories","arguments":{"search":"game"},"result":"","error":"failed to call MCP tool search_repositories: internal error: GitLab API error: 401 Unauthorized\n{\"message\":\"401 Unauthorized\"}","allowed":true,"decision":"allowed","duration_ms":47}}
+
+event: model_call
+data: {"model_call":{"step":4,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":12}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":12,\"mode\":\"tools_stream\",\"step\":4}]\r\n"}
+
+event: chunk
+data: {"content":"##"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"结果"}
+
+event: chunk
+data: {"content":"："}
+
+event: chunk
+data: {"content":"Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"认证"}
+
+event: chunk
+data: {"content":"仍然"}
+
+event: chunk
+data: {"content":"失败"}
+
+event: chunk
+data: {"content":"\n\n"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":"search"}
+
+event: chunk
+data: {"content":"_re"}
+
+event: chunk
+data: {"content":"positories"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"同样"}
+
+event: chunk
+data: {"content":"返回"}
+
+event: chunk
+data: {"content":"了"}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"：\n\n"}
+
+event: chunk
+data: {"content":"```\n"}
+
+event: chunk
+data: {"content":"Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" error"}
+
+event: chunk
+data: {"content":":"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"\n"}
+
+event: chunk
+data: {"content":"{\""}
+
+event: chunk
+data: {"content":"message"}
+
+event: chunk
+data: {"content":"\":\""}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"\"}\n"}
+
+event: chunk
+data: {"content":"```\n\n"}
+
+event: chunk
+data: {"content":"汇总"}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"尝试"}
+
+event: chunk
+data: {"content":"的全部"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"工具"}
+
+event: chunk
+data: {"content":"：\n\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"工具"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"结果"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"------"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"------"}
+
+event: chunk
+data: {"content":"|\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"who"}
+
+event: chunk
+data: {"content":"ami"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"list"}
+
+event: chunk
+data: {"content":"_pro"}
+
+event: chunk
+data: {"content":"jects"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"search"}
+
+event: chunk
+data: {"content":"_re"}
+
+event: chunk
+data: {"content":"positories"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":" |\n\n"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"结论"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"："}
+
+event: chunk
+data: {"content":"当前"}
+
+event: chunk
+data: {"content":" Agent"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"绑"}
+
+event: chunk
+data: {"content":"定的"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"凭"}
+
+event: chunk
+data: {"content":"据"}
+
+event: chunk
+data: {"content":"无效"}
+
+event: chunk
+data: {"content":"或"}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"过期"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"所有"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"调用"}
+
+event: chunk
+data: {"content":"均"}
+
+event: chunk
+data: {"content":"被"}
+
+event: chunk
+data: {"content":"拒绝"}
+
+event: chunk
+data: {"content":"。"}
+
+event: chunk
+data: {"content":"需要"}
+
+event: chunk
+data: {"content":"更新"}
+
+event: chunk
+data: {"content":"绑"}
+
+event: chunk
+data: {"content":"定的"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"访问"}
+
+event: chunk
+data: {"content":"凭"}
+
+event: chunk
+data: {"content":"据"}
+
+event: chunk
+data: {"content":"后"}
+
+event: chunk
+data: {"content":"重"}
+
+event: chunk
+data: {"content":"试"}
+
+event: chunk
+data: {"content":"。"}
+
+event: model_call
+data: {"model_call":{"step":4,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":4,\"text_length\":535}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":5,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":14}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":14,\"mode\":\"tools_stream\",\"step\":5}]\r\n"}
+
+event: chunk
+data: {"content":"##"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"证据"}
+
+event: chunk
+data: {"content":"评估"}
+
+event: chunk
+data: {"content":"\n\n"}
+
+event: chunk
+data: {"content":"本"}
+
+event: chunk
+data: {"content":"场景"}
+
+event: chunk
+data: {"content":"中"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"运行时"}
+
+event: chunk
+data: {"content":"证据"}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"足够"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"无需"}
+
+event: chunk
+data: {"content":" Ja"}
+
+event: chunk
+data: {"content":"eger"}
+
+event: chunk
+data: {"content":"/"}
+
+event: chunk
+data: {"content":"ES"}
+
+event: chunk
+data: {"content":"（"}
+
+event: chunk
+data: {"content":"两者"}
+
+event: chunk
+data: {"content":"面向"}
+
+event: chunk
+data: {"content":"调度"}
+
+event: chunk
+data: {"content":"链路"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"与"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"认证"}
+
+event: chunk
+data: {"content":"无关"}
+
+event: chunk
+data: {"content":"）。"}
+
+event: chunk
+data: {"content":"以下是"}
+
+event: chunk
+data: {"content":"直接"}
+
+event: chunk
+data: {"content":"来自"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"服务"}
+
+event: chunk
+data: {"content":"端的"}
+
+event: chunk
+data: {"content":"运行时"}
+
+event: chunk
+data: {"content":"证据"}
+
+event: chunk
+data: {"content":"：\n\n"}
+
+event: chunk
+data: {"content":"###"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"收集"}
+
+event: chunk
+data: {"content":"的"}
+
+event: chunk
+data: {"content":"运行时"}
+
+event: chunk
+data: {"content":"证据"}
+
+event: chunk
+data: {"content":"\n\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"工具"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"请求"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"服务"}
+
+event: chunk
+data: {"content":"端"}
+
+event: chunk
+data: {"content":"响应"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"------"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"------"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":"----------------"}
+
+event: chunk
+data: {"content":"---"}
+
+event: chunk
+data: {"content":"|\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"who"}
+
+event: chunk
+data: {"content":"ami"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"GET"}
+
+event: chunk
+data: {"content":" /"}
+
+event: chunk
+data: {"content":"api"}
+
+event: chunk
+data: {"content":"/v"}
+
+event: chunk
+data: {"content":"4"}
+
+event: chunk
+data: {"content":"/user"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" —"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"{\""}
+
+event: chunk
+data: {"content":"message"}
+
+event: chunk
+data: {"content":"\":\""}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"\""}
+
+event: chunk
+data: {"content":"}`"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"list"}
+
+event: chunk
+data: {"content":"_pro"}
+
+event: chunk
+data: {"content":"jects"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"GET"}
+
+event: chunk
+data: {"content":" /"}
+
+event: chunk
+data: {"content":"api"}
+
+event: chunk
+data: {"content":"/v"}
+
+event: chunk
+data: {"content":"4"}
+
+event: chunk
+data: {"content":"/pro"}
+
+event: chunk
+data: {"content":"jects"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" —"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"{\""}
+
+event: chunk
+data: {"content":"message"}
+
+event: chunk
+data: {"content":"\":\""}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"\""}
+
+event: chunk
+data: {"content":"}`"}
+
+event: chunk
+data: {"content":" |\n"}
+
+event: chunk
+data: {"content":"|"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"search"}
+
+event: chunk
+data: {"content":"_re"}
+
+event: chunk
+data: {"content":"positories"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"GET"}
+
+event: chunk
+data: {"content":" /"}
+
+event: chunk
+data: {"content":"api"}
+
+event: chunk
+data: {"content":"/v"}
+
+event: chunk
+data: {"content":"4"}
+
+event: chunk
+data: {"content":"/search"}
+
+event: chunk
+data: {"content":"?"}
+
+event: chunk
+data: {"content":"scope"}
+
+event: chunk
+data: {"content":"="}
+
+event: chunk
+data: {"content":"projects"}
+
+event: chunk
+data: {"content":"\u0026"}
+
+event: chunk
+data: {"content":"search"}
+
+event: chunk
+data: {"content":"="}
+
+event: chunk
+data: {"content":"game"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" |"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" —"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"{\""}
+
+event: chunk
+data: {"content":"message"}
+
+event: chunk
+data: {"content":"\":\""}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":" Un"}
+
+event: chunk
+data: {"content":"author"}
+
+event: chunk
+data: {"content":"ized"}
+
+event: chunk
+data: {"content":"\""}
+
+event: chunk
+data: {"content":"}`"}
+
+event: chunk
+data: {"content":" |\n\n"}
+
+event: chunk
+data: {"content":"三次"}
+
+event: chunk
+data: {"content":"独立"}
+
+event: chunk
+data: {"content":"调用"}
+
+event: chunk
+data: {"content":"、"}
+
+event: chunk
+data: {"content":"三个"}
+
+event: chunk
+data: {"content":"不同"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"端点"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"服务"}
+
+event: chunk
+data: {"content":"端"}
+
+event: chunk
+data: {"content":"一致"}
+
+event: chunk
+data: {"content":"返回"}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"HTTP"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"401"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"。"}
+
+event: chunk
+data: {"content":"这说明"}
+
+event: chunk
+data: {"content":"：\n\n"}
+
+event: chunk
+data: {"content":"-"}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"不是"}
+
+event: chunk
+data: {"content":"**"}
+
+event: chunk
+data: {"content":"某个"}
+
+event: chunk
+data: {"content":"端点"}
+
+event: chunk
+data: {"content":"权限"}
+
+event: chunk
+data: {"content":"不足"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"而是"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"实例"}
+
+event: chunk
+data: {"content":"在"}
+
+event: chunk
+data: {"content":"认证"}
+
+event: chunk
+data: {"content":"层面"}
+
+event: chunk
+data: {"content":"拒绝了"}
+
+event: chunk
+data: {"content":"所有"}
+
+event: chunk
+data: {"content":"请求"}
+
+event: chunk
+data: {"content":"\n"}
+
+event: chunk
+data: {"content":"-"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"根本"}
+
+event: chunk
+data: {"content":"原因"}
+
+event: chunk
+data: {"content":"："}
+
+event: chunk
+data: {"content":"Agent"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"绑定"}
+
+event: chunk
+data: {"content":"中"}
+
+event: chunk
+data: {"content":"配置"}
+
+event: chunk
+data: {"content":"的"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" token"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"无效"}
+
+event: chunk
+data: {"content":"、"}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"过期"}
+
+event: chunk
+data: {"content":"或被"}
+
+event: chunk
+data: {"content":"吊销"}
+
+event: chunk
+data: {"content":"\n"}
+
+event: chunk
+data: {"content":"-"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"这不是"}
+
+event: chunk
+data: {"content":"推断"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"是"}
+
+event: chunk
+data: {"content":" Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"自身"}
+
+event: chunk
+data: {"content":"返回"}
+
+event: chunk
+data: {"content":"的"}
+
+event: chunk
+data: {"content":"认证"}
+
+event: chunk
+data: {"content":"失败"}
+
+event: chunk
+data: {"content":"响应"}
+
+event: chunk
+data: {"content":"（"}
+
+event: chunk
+data: {"content":"直接"}
+
+event: chunk
+data: {"content":"证据"}
+
+event: chunk
+data: {"content":"）\n\n"}
+
+event: chunk
+data: {"content":"###"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"结论"}
+
+event: chunk
+data: {"content":"\n\n"}
+
+event: chunk
+data: {"content":"Git"}
+
+event: chunk
+data: {"content":"Lab"}
+
+event: chunk
+data: {"content":" API"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"认证"}
+
+event: chunk
+data: {"content":"已"}
+
+event: chunk
+data: {"content":"失效"}
+
+event: chunk
+data: {"content":"。"}
+
+event: chunk
+data: {"content":"需要在"}
+
+event: chunk
+data: {"content":" Agent"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"绑"}
+
+event: chunk
+data: {"content":"定的"}
+
+event: chunk
+data: {"content":" `"}
+
+event: chunk
+data: {"content":"m"}
+
+event: chunk
+data: {"content":"cp"}
+
+event: chunk
+data: {"content":"_server"}
+
+event: chunk
+data: {"content":"="}
+
+event: chunk
+data: {"content":"git"}
+
+event: chunk
+data: {"content":"lab"}
+
+event: chunk
+data: {"content":"`"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"中"}
+
+event: chunk
+data: {"content":"更新"}
+
+event: chunk
+data: {"content":"有效的"}
+
+event: chunk
+data: {"content":" Personal"}
+
+event: chunk
+data: {"content":" Access"}
+
+event: chunk
+data: {"content":" Token"}
+
+event: chunk
+data: {"content":"，"}
+
+event: chunk
+data: {"content":"无需"}
+
+event: chunk
+data: {"content":" Ja"}
+
+event: chunk
+data: {"content":"eger"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"或"}
+
+event: chunk
+data: {"content":" ES"}
+
+event: chunk
+data: {"content":" "}
+
+event: chunk
+data: {"content":"介入"}
+
+event: chunk
+data: {"content":"。"}
+
+event: model_call
+data: {"model_call":{"step":5,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":5,\"text_length\":1178}]\r\n"}
+
+event: debug
+data: {"content":"agent.evidence.incomplete[{\"evidence_nudges\":1,\"reason\":\"missing required evidence refs (need one of: jaeger_trace, es_log_query)\"}]\r\n"}
+
+event: debug
+data: {"content":"agent.run.completed[{\"stream\":true,\"text_length\":1178}]\r\n"}
+
+event: done
+data: {"content":"","done":true}
+

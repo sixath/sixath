@@ -1,0 +1,15 @@
+﻿{
+    "ok":  true,
+    "session":  "a7e10bbd-317b-4ef1-9c91-eea520b673d0",
+    "tools":  [
+                  "knowledge_search"
+              ],
+    "reply_excerpt":  "## Cloud Gaming Summary\n\n**Cloud gaming** (äºæ¸¸æ) is a technology that streams video games from remote servers directly to a user\u0027s device, eliminating the need for high-end local hardware â the heavy computation and rendering happen in the cloud, and the player receives only the video/audio stream while sending back input commands. It enables instant play across devices (phones, TVs, low-spec PCs) but requires a stable, low-latency internet connection.\n\n---\n\n## Regarding `web_search`\n\nI d",
+    "checks":  [
+                   "agent webToolsEnabled=false",
+                   "session created: a7e10bbd-317b-4ef1-9c91-eea520b673d0",
+                   "timeline has no web_search",
+                   "timeline has no web_extract",
+                   "assistant reply non-empty"
+               ]
+}

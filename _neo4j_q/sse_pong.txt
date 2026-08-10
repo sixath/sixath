@@ -1,0 +1,279 @@
+event: debug
+data: {"content":"agent.run.started[{\"message_count\":2,\"stream\":true}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":3}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":3,\"mode\":\"tools_stream\",\"step\":0}]\r\n"}
+
+event: chunk
+data: {"content":"p"}
+
+event: chunk
+data: {"content":"ong"}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":0,\"text_length\":4}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":1,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":5}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":5,\"mode\":\"tools_stream\",\"step\":1}]\r\n"}
+
+event: chunk
+data: {"content":"明白"}
+
+event: chunk
+data: {"content":"。之后"}
+
+event: chunk
+data: {"content":"在排查"}
+
+event: chunk
+data: {"content":"问题"}
+
+event: chunk
+data: {"content":"或下"}
+
+event: chunk
+data: {"content":"结论前"}
+
+event: chunk
+data: {"content":"，我会"}
+
+event: chunk
+data: {"content":"先用 `"}
+
+event: chunk
+data: {"content":"jaeger"}
+
+event: chunk
+data: {"content":"_t"}
+
+event: chunk
+data: {"content":"race`"}
+
+event: chunk
+data: {"content":" 或"}
+
+event: chunk
+data: {"content":" ES"}
+
+event: chunk
+data: {"content":" 日志"}
+
+event: chunk
+data: {"content":"查询收集"}
+
+event: chunk
+data: {"content":"运行时证据"}
+
+event: chunk
+data: {"content":"；如果"}
+
+event: chunk
+data: {"content":"确实无法"}
+
+event: chunk
+data: {"content":"获取证据"}
+
+event: chunk
+data: {"content":"，我会"}
+
+event: chunk
+data: {"content":"在答复"}
+
+event: chunk
+data: {"content":"中明确"}
+
+event: chunk
+data: {"content":"标注「"}
+
+event: chunk
+data: {"content":"**证据"}
+
+event: chunk
+data: {"content":"不足**"}
+
+event: chunk
+data: {"content":"」/"}
+
+event: chunk
+data: {"content":"「**"}
+
+event: chunk
+data: {"content":"insufficient"}
+
+event: chunk
+data: {"content":" evidence"}
+
+event: chunk
+data: {"content":"**」。"}
+
+event: model_call
+data: {"model_call":{"step":1,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":1,\"text_length\":239}]\r\n"}
+
+event: model_call
+data: {"model_call":{"step":2,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":7}}
+
+event: debug
+data: {"content":"agent.model.invoked[{\"message_count\":7,\"mode\":\"tools_stream\",\"step\":2}]\r\n"}
+
+event: chunk
+data: {"content":"我需要一个"}
+
+event: chunk
+data: {"content":"具体的参数"}
+
+event: chunk
+data: {"content":"才能调用"}
+
+event: chunk
+data: {"content":" `ja"}
+
+event: chunk
+data: {"content":"eger_t"}
+
+event: chunk
+data: {"content":"race`"}
+
+event: chunk
+data: {"content":"。该"}
+
+event: chunk
+data: {"content":"工具至少"}
+
+event: chunk
+data: {"content":"需要以下"}
+
+event: chunk
+data: {"content":"三者之一"}
+
+event: chunk
+data: {"content":"：\n\n-"}
+
+event: chunk
+data: {"content":" **"}
+
+event: chunk
+data: {"content":"trace_id"}
+
+event: chunk
+data: {"content":"** —"}
+
+event: chunk
+data: {"content":" 精确"}
+
+event: chunk
+data: {"content":"的 trace"}
+
+event: chunk
+data: {"content":" ID\n"}
+
+event: chunk
+data: {"content":"- **"}
+
+event: chunk
+data: {"content":"service**"}
+
+event: chunk
+data: {"content":" — "}
+
+event: chunk
+data: {"content":"服务"}
+
+event: chunk
+data: {"content":"名（"}
+
+event: chunk
+data: {"content":"如 `"}
+
+event: chunk
+data: {"content":"union-access"}
+
+event: chunk
+data: {"content":"`、"}
+
+event: chunk
+data: {"content":"`s"}
+
+event: chunk
+data: {"content":"ched-h"}
+
+event: chunk
+data: {"content":"ub`"}
+
+event: chunk
+data: {"content":"、"}
+
+event: chunk
+data: {"content":"`cg"}
+
+event: chunk
+data: {"content":"vmagent"}
+
+event: chunk
+data: {"content":"` "}
+
+event: chunk
+data: {"content":"等）\n"}
+
+event: chunk
+data: {"content":"- **"}
+
+event: chunk
+data: {"content":"operation**"}
+
+event: chunk
+data: {"content":" — "}
+
+event: chunk
+data: {"content":"操作名"}
+
+event: chunk
+data: {"content":"\n\n请问"}
+
+event: chunk
+data: {"content":"你要查询"}
+
+event: chunk
+data: {"content":"哪个 trace"}
+
+event: chunk
+data: {"content":"_id"}
+
+event: chunk
+data: {"content":" / "}
+
+event: chunk
+data: {"content":"服务 /"}
+
+event: chunk
+data: {"content":" 操作"}
+
+event: chunk
+data: {"content":"？"}
+
+event: model_call
+data: {"model_call":{"step":2,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: debug
+data: {"content":"agent.model.responded[{\"step\":2,\"text_length\":311}]\r\n"}
+
+event: debug
+data: {"content":"agent.evidence.incomplete[{\"evidence_nudges\":1,\"reason\":\"missing required evidence refs (need one of: jaeger_trace, es_log_query)\"}]\r\n"}
+
+event: debug
+data: {"content":"agent.run.completed[{\"stream\":true,\"text_length\":311}]\r\n"}
+
+event: error
+data: {"error":"error: code = 404 reason = SESSION_NOT_FOUND message = session not found metadata = map[] cause = \u003cnil\u003e"}
+

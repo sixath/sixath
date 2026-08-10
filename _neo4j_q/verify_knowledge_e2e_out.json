@@ -1,0 +1,135 @@
+﻿{
+    "ok":  true,
+    "checks":  [
+                   "catalog defaults.knowledge=local",
+                   "agent hubKnowledge=local",
+                   "wiki knowledge_search hit (hub-e2e\\.md)",
+                   "codegraph knowledge_search hit (NewNeo4jGraphStore)",
+                   "neo4j graph seeded",
+                   "graph knowledge_search hit (KnowledgeE2E)"
+               ],
+    "catalog":  {
+                    "defaults":  {
+                                     "governance":  "local",
+                                     "knowledge":  "local"
+                                 },
+                    "governance":  [
+                                       "local"
+                                   ],
+                    "knowledge":  [
+                                      "local"
+                                  ]
+                },
+    "wiki_session":  "a271a19d-bbf9-4c32-9976-a89cffcc577b",
+    "wiki_timeline":  [
+                          {
+                              "tool":  "knowledge_search",
+                              "args":  {
+                                           "limit":  3,
+                                           "query":  "MEMORY_HUB_WIKI_MARKER",
+                                           "source":  "wiki"
+                                       },
+                              "result":  [
+                                             {
+                                                 "content":  "# Hub E2E\nToken MEMORY_HUB_WIKI_MARKER for search.",
+                                                 "id":  "hub-e2e.md",
+                                                 "score":  0.7,
+                                                 "source":  "wiki"
+                                             }
+                                         ],
+                              "phase":  "completed"
+                          },
+                          {
+                              "tool":  "knowledge_search",
+                              "args":  {
+                                           "limit":  3,
+                                           "query":  "MEMORY_HUB_WIKI_MARKER",
+                                           "source":  "wiki"
+                                       },
+                              "result":  [
+                                             {
+                                                 "content":  "# Hub E2E\nToken MEMORY_HUB_WIKI_MARKER for search.",
+                                                 "id":  "hub-e2e.md",
+                                                 "score":  0.7,
+                                                 "source":  "wiki"
+                                             }
+                                         ],
+                              "phase":  "completed"
+                          }
+                      ],
+    "codegraph_session":  "ae66bfe1-ab3d-4843-90d6-391e94aa15e9",
+    "codegraph_timeline":  [
+                               {
+                                   "tool":  "knowledge_search",
+                                   "args":  {
+                                                "limit":  3,
+                                                "query":  "NewNeo4jGraphStore",
+                                                "source":  "codegraph"
+                                            },
+                                   "result":  [
+                                                  {
+                                                      "content":  "memory/neo4j_graph_store.go\nsymbols: NewNeo4jGraphStore",
+                                                      "id":  "memory/neo4j_graph_store.go",
+                                                      "score":  0.7,
+                                                      "source":  "codegraph"
+                                                  }
+                                              ],
+                                   "phase":  "completed"
+                               },
+                               {
+                                   "tool":  "knowledge_search",
+                                   "args":  {
+                                                "limit":  3,
+                                                "query":  "NewNeo4jGraphStore",
+                                                "source":  "codegraph"
+                                            },
+                                   "result":  [
+                                                  {
+                                                      "content":  "memory/neo4j_graph_store.go\nsymbols: NewNeo4jGraphStore",
+                                                      "id":  "memory/neo4j_graph_store.go",
+                                                      "score":  0.7,
+                                                      "source":  "codegraph"
+                                                  }
+                                              ],
+                                   "phase":  "completed"
+                               }
+                           ],
+    "graph_session":  "226571f4-7136-440e-8b8e-909b82c1512c",
+    "graph_seed":  "SEEDED session=226571f4-7136-440e-8b8e-909b82c1512c alpha=860ad2f7a8f7769fcad9b17b8ec31dfb beta=d7284940809ac44edfeb45ea1a4ea43e",
+    "graph_timeline":  [
+                           {
+                               "tool":  "knowledge_search",
+                               "args":  {
+                                            "limit":  5,
+                                            "query":  "KnowledgeE2EAlpha",
+                                            "source":  "graph"
+                                        },
+                               "result":  [
+                                              {
+                                                  "content":  "KnowledgeE2EBeta (unit=know-e2e-beta) [scope=session/226571f4-7136-440e-8b8e-909b82c1512c]",
+                                                  "id":  "d7284940809ac44edfeb45ea1a4ea43e",
+                                                  "score":  0.5,
+                                                  "source":  "graph"
+                                              }
+                                          ],
+                               "phase":  "completed"
+                           },
+                           {
+                               "tool":  "knowledge_search",
+                               "args":  {
+                                            "limit":  5,
+                                            "query":  "KnowledgeE2EAlpha",
+                                            "source":  "graph"
+                                        },
+                               "result":  [
+                                              {
+                                                  "content":  "KnowledgeE2EBeta (unit=know-e2e-beta) [scope=session/226571f4-7136-440e-8b8e-909b82c1512c]",
+                                                  "id":  "d7284940809ac44edfeb45ea1a4ea43e",
+                                                  "score":  0.5,
+                                                  "source":  "graph"
+                                              }
+                                          ],
+                               "phase":  "completed"
+                           }
+                       ]
+}

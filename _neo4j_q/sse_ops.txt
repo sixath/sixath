@@ -1,0 +1,12 @@
+event: model_call
+data: {"model_call":{"step":0,"phase":"invoked","mode":"tools_stream","model":"deepseek-v4-pro","message_count":3}}
+
+event: chunk
+data: {"content":"pong"}
+
+event: model_call
+data: {"model_call":{"step":0,"phase":"responded","model":"deepseek-v4-pro"}}
+
+event: done
+data: {"content":"","done":true}
+

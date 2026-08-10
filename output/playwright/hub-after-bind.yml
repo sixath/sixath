@@ -1,0 +1,212 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help
+ npmrc` for supported config options.
+所在位置 D:\Program Files\nodejs\npx.ps1:29 字符: 3
++   & $NODE_EXE $NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+### Page
+- Page URL: http://localhost:5173/agents/e8107fb3-e40a-4207-9d9a-6768847aaf79
+- Page Title: Agent 骞冲彴
+### Snapshot
+```yaml
+- generic [ref=f3e3]:
+  - complementary [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - generic [ref=f3e7]: SIXATH
+      - button "鏀惰捣瀵艰埅鏍? [ref=f3e8] [cursor=pointer]: 鈼€
+    - navigation [ref=f3e9]:
+      - generic [ref=f3e10]:
+        - link "馃挰 瀵硅瘽" [ref=f3e11] [cursor=pointer]:
+          - /url: /
+          - generic [ref=f3e12]: 馃挰
+          - text: 瀵硅瘽
+        - link "馃搵 浼氳瘽鍘嗗彶" [ref=f3e13] [cursor=pointer]:
+          - /url: /sessions
+          - generic [ref=f3e14]: 馃搵
+          - text: 浼氳瘽鍘嗗彶
+        - link "馃敡 宸ュ叿绠＄悊" [ref=f3e15] [cursor=pointer]:
+          - /url: /tools
+          - generic [ref=f3e16]: 馃敡
+          - text: 宸ュ叿绠＄悊
+        - link "馃 Agent 绠＄悊" [ref=f3e17] [cursor=pointer]:
+          - /url: /agents
+          - generic [ref=f3e18]: 馃
+          - text: Agent 绠＄悊
+        - link "馃摗 娓犻亾绠＄悊" [ref=f3e19] [cursor=pointer]:
+          - /url: /channels
+          - generic [ref=f3e20]: 馃摗
+          - text: 娓犻亾绠＄悊
+        - link "鈴?瀹氭椂浠诲姟" [ref=f3e21] [cursor=pointer]:
+          - /url: /cron
+          - generic [ref=f3e22]: 鈴?          - text: 瀹氭椂浠诲姟
+        - link "馃彚 缁勭粐" [ref=f3e23] [cursor=pointer]:
+          - /url: /orgs
+          - generic [ref=f3e24]: 馃彚
+          - text: 缁勭粐
+        - link "鈿欙笍 璁剧疆 路宸茬櫥褰? [ref=f3e25] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=f3e26]: 鈿欙笍
+          - text: 璁剧疆 路宸茬櫥褰?        - button "鈳?閫€鍑? [ref=f3e27] [cursor=pointer]:
+          - generic [ref=f3e28]: 鈳?          - text: 閫€鍑?  - banner [ref=f3e29]:
+    - generic [ref=f3e30]:
+      - generic [ref=f3e31]: 馃
+      - generic [ref=f3e32]: Agent 璇︽儏
+  - main [ref=f3e33]:
+    - generic [ref=f3e35]:
+      - generic [ref=f3e36]:
+        - heading "zone-4100-agent" [level=1] [ref=f3e38]
+        - generic [ref=f3e39]:
+          - link "杩斿洖鍒楄〃" [ref=f3e40] [cursor=pointer]:
+            - /url: /agents
+          - link "瀵硅瘽" [ref=f3e41] [cursor=pointer]:
+            - /url: /agents/e8107fb3-e40a-4207-9d9a-6768847aaf79/chat
+          - link "Insights" [ref=f3e42] [cursor=pointer]:
+            - /url: /agents/e8107fb3-e40a-4207-9d9a-6768847aaf79/insights
+          - link "缂栬緫" [ref=f3e43] [cursor=pointer]:
+            - /url: /agents/e8107fb3-e40a-4207-9d9a-6768847aaf79/edit
+      - generic [ref=f3e44]:
+        - heading "鍩烘湰淇℃伅" [level=2] [ref=f3e45]
+        - generic [ref=f3e47]:
+          - paragraph [ref=f3e48]:
+            - strong [ref=f3e49]: 鎻忚堪锛?            - text: 鑷缓鍖哄煙agent
+          - paragraph [ref=f3e50]:
+            - strong [ref=f3e51]: Workspace锛?            - code [ref=f3e52]: E://sixath/workspace/zijian
+          - paragraph [ref=f3e53]:
+            - strong [ref=f3e54]: 妯″瀷锛?            - text: openai/deepseek-v4-pro
+          - paragraph [ref=f3e55]:
+            - strong [ref=f3e56]: 鏈€澶ц緭鍑?Token锛?            - text: 8192锛堥粯璁わ級
+          - paragraph [ref=f3e57]:
+            - strong [ref=f3e58]: 璋冭瘯杩愯锛?            - text: 鏄?          - generic [ref=f3e59]:
+            - strong [ref=f3e60]: 杩愯鏃跺伐鍏凤細
+            - generic [ref=f3e61]:
+              - generic [ref=f3e62]: 璁板繂鍐欏叆 (memory)
+              - generic [ref=f3e63]: 鎶€鑳界鐞?(skills_list/view/manage)
+              - generic [ref=f3e64]: 浠诲姟鍒楄〃 (todo)
+              - generic [ref=f3e65]: 宸ヤ綔鍖烘枃浠?(read/write/patch/search)
+              - generic [ref=f3e66]: 鏈湴缁堢 (terminal)
+          - paragraph [ref=f3e67]:
+            - strong [ref=f3e68]: Hub 娌荤悊锛?            - text: local
+          - paragraph [ref=f3e69]:
+            - strong [ref=f3e70]: Hub 鐭ヨ瘑锛?            - text: local
+          - paragraph [ref=f3e71]:
+            - strong [ref=f3e72]: Hub 璇诲洖钀斤細
+            - text: 鍏?璺熼殢
+      - generic [ref=f3e73]:
+        - heading "Memory Hub 閰嶈" [level=2] [ref=f3e74]
+        - generic [ref=f3e75]:
+          - paragraph [ref=f3e76]: "Loadout = 鏈満 skills + 鏄惧紡 Binding锛坧rovider: local锛夈€傚垏鎹㈡不鐞嗛潰鍚庤娓呯┖鏃?Binding銆?
+          - paragraph [ref=f3e175]: 宸茬粦瀹?          - heading "褰撳墠 Loadout锛?锛? [level=3] [ref=f3e77]
+          - list [ref=f3e78]:
+            - listitem [ref=f3e79]:
+              - code [ref=f3e80]: skill
+              - text: scheduling-flow-trace
+              - generic [ref=f3e81]: (local)
+            - listitem [ref=f3e82]:
+              - code [ref=f3e83]: skill
+              - text: vm-prelaunch-failure-investigator
+              - generic [ref=f3e84]: (local)
+            - listitem [ref=f3e85]:
+              - code [ref=f3e86]: skill
+              - text: vm-xagent-log-search
+              - generic [ref=f3e87]: (local)
+          - heading "鏄惧紡 Binding锛?锛? [level=3] [ref=f3e176]
+          - table [ref=f3e178]:
+            - rowgroup [ref=f3e179]:
+              - row [ref=f3e180]:
+                - columnheader "Kind" [ref=f3e181]
+                - columnheader "ID" [ref=f3e182]
+                - columnheader "Hub" [ref=f3e183]
+                - columnheader "Status" [ref=f3e184]
+                - columnheader "鎿嶄綔" [ref=f3e185]
+            - rowgroup [ref=f3e186]:
+              - row [ref=f3e187]:
+                - cell "skill" [ref=f3e188]
+                - cell [ref=f3e189]:
+                  - code [ref=f3e190]: scheduling-flow-trace
+                - cell "local" [ref=f3e191]
+                - cell "active" [ref=f3e192]
+                - cell [ref=f3e193]:
+                  - button "瑙ｇ粦" [ref=f3e194] [cursor=pointer]
+          - generic [ref=f3e90]:
+            - combobox [ref=f3e91]:
+              - option "浠庢湰鏈烘妧鑳界粦瀹氣€? [selected]
+              - option "scheduling-flow-trace"
+              - option "vm-prelaunch-failure-investigator"
+              - option "vm-xagent-log-search"
+            - button "缁戝畾 Skill" [disabled] [ref=f3e92]
+            - button "娓呯┖ Binding" [ref=f3e93] [cursor=pointer]
+      - generic [ref=f3e94]:
+        - heading "缁戝畾宸ュ叿" [level=2] [ref=f3e95]
+        - generic [ref=f3e96]:
+          - table [ref=f3e98]:
+            - rowgroup [ref=f3e99]:
+              - row [ref=f3e100]:
+                - columnheader "鍚嶇О" [ref=f3e101]
+                - columnheader "绫诲瀷" [ref=f3e102]
+                - columnheader "鎿嶄綔" [ref=f3e103]
+            - rowgroup [ref=f3e104]:
+              - row [ref=f3e105]:
+                - cell "pro_mysql_vm_tool" [ref=f3e106]
+                - cell "datasource" [ref=f3e107]
+                - cell [ref=f3e109]:
+                  - button "瑙ｇ粦" [ref=f3e110] [cursor=pointer]
+              - row [ref=f3e111]:
+                - cell "cgarchive" [ref=f3e112]
+                - cell "datasource" [ref=f3e113]
+                - cell [ref=f3e115]:
+                  - button "瑙ｇ粦" [ref=f3e116] [cursor=pointer]
+              - row [ref=f3e117]:
+                - cell "zj-jaeger" [ref=f3e118]
+                - cell "rca" [ref=f3e119]
+                - cell [ref=f3e121]:
+                  - button "瑙ｇ粦" [ref=f3e122] [cursor=pointer]
+              - row [ref=f3e123]:
+                - cell "zj-elk" [ref=f3e124]
+                - cell "rca" [ref=f3e125]
+                - cell [ref=f3e127]:
+                  - button "瑙ｇ粦" [ref=f3e128] [cursor=pointer]
+              - row [ref=f3e129]:
+                - cell "zj-rca-code-search" [ref=f3e130]
+                - cell "rca" [ref=f3e131]
+                - cell [ref=f3e133]:
+                  - button "瑙ｇ粦" [ref=f3e134] [cursor=pointer]
+          - generic [ref=f3e135]:
+            - button "閫夋嫨宸ュ叿..." [ref=f3e137] [cursor=pointer]:
+              - generic [ref=f3e139]: 鈻?            - button "缁戝畾" [disabled] [ref=f3e140]
+      - generic [ref=f3e141]:
+        - heading "鎶€鑳界鐞? [level=2] [ref=f3e142]
+        - generic [ref=f3e143]:
+          - table [ref=f3e145]:
+            - rowgroup [ref=f3e146]:
+              - row [ref=f3e147]:
+                - columnheader "鍚嶇О" [ref=f3e148]
+                - columnheader "鎻忚堪" [ref=f3e149]
+                - columnheader "鎿嶄綔" [ref=f3e150]
+            - rowgroup [ref=f3e151]:
+              - row [ref=f3e152]:
+                - cell [ref=f3e153]:
+                  - code [ref=f3e154]: scheduling-flow-trace
+                - cell "閫氳繃 ES 鏃ュ織銆丣aeger 閾捐矾杩借釜鍜屾暟鎹簱锛岀鍒扮鎺掓煡涓ゅ璋冨害绯荤粺鐨勫け璐ュ師鍥犮€傝€佺郴缁燂細union-access 鈫?union-resource 鈫?vm-manager锛堣祫婧愬垎閰嶏級锛涙柊绯荤粺锛歝gsession 鈫?sched-hub 鈫?cgvmagent锛堟父鎴忚皟搴︼級銆傚綋鐢ㄦ埛鎻愪緵 trace_id / flow_id 骞惰闂皟搴﹀け璐ャ€佸垎閰?VM 澶辫触銆佽祫婧愬崰鐢ㄣ€侀攣瀹氳秴鏃剁瓑闂鏃朵娇鐢ㄣ€? [ref=f3e155]
+                - cell [ref=f3e156]:
+                  - button "鍒犻櫎" [ref=f3e157] [cursor=pointer]
+              - row [ref=f3e158]:
+                - cell [ref=f3e159]:
+                  - code [ref=f3e160]: vm-prelaunch-failure-investigator
+                - cell "閫氳繃鏌ヨ Elasticsearch 鏃ュ織锛屽垎鏋愭寚瀹氳櫄鎷熸満锛圴M锛夐鍚姩澶辫触鐨勫師鍥犮€傚綋鐢ㄦ埛璇㈤棶 VM 棰勫惎鍔ㄥけ璐ャ€佸惎鍔ㄥ崱浣忔垨闇€瑕佹帓鏌ョ浉鍏虫棩蹇楁椂浣跨敤銆? [ref=f3e161]
+                - cell [ref=f3e162]:
+                  - button "鍒犻櫎" [ref=f3e163] [cursor=pointer]
+              - row [ref=f3e164]:
+                - cell [ref=f3e165]:
+                  - code [ref=f3e166]: vm-xagent-log-search
+                - cell "閫氳繃鏌ヨ鏁版嵁搴撹幏鍙?VM 淇℃伅锛屽苟璋冪敤 xagent 鎺ュ彛鎼滅储鎸囧畾 trace_id 鐨勬棩蹇椼€傚綋鐢ㄦ埛闇€瑕佸湪铏氭嫙鏈烘棩蹇椾腑鎼滅储鐗瑰畾 trace_id 鏃朵娇鐢ㄣ€備紭鍏堜娇鐢?trace_id 鎼滅储锛屽敖閲忚鐩?startGame 鍜?endGame 涓や釜鍏抽敭鎿嶄綔銆? [ref=f3e167]
+                - cell [ref=f3e168]:
+                  - button "鍒犻櫎" [ref=f3e169] [cursor=pointer]
+          - paragraph [ref=f3e170]:
+            - text: 涓婁紶 .zip 鍘嬬缉鍖咃紝鏍￠獙閫氳繃鍚庤В鍘嬪埌
+            - code [ref=f3e171]: E://sixath/workspace/zijian/skills/
+          - generic [ref=f3e172]:
+            - button "Choose File" [ref=f3e173]
+            - button "涓婁紶" [disabled] [ref=f3e174]
+```

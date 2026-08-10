@@ -1,0 +1,11 @@
+## Summary  鍦ㄥ璇濅腑瀹屾垚 `cloudgame` 浠撳簱妯″潡璋冪敤鍏崇郴鍒嗘瀽鍚庯紝鍚屼竴鏉?assistant 鍥炲鏈熬纭帴銆?澶╂棤鐞嗙敱閫€璐ф斂绛栥€嶆硶寰嬫潯鏂囦笌妗堜緥銆傛牴鍥犱笉鏄?Memory Hub / wiki / Neo4j 姹℃煋锛岃€屾槸 **Agent 寰幆鍦ㄦ棰樻敹鏉熷悗缁х画璺?*锛屽苟璋冪敤浜?`web_search`锛涘悓鏃?Agent `webToolsEnabled=false` 鏃惰繘绋嬬骇浠嶅彲鑳藉洜 Bocha key 鑷姩娉ㄥ唽鑱旂綉宸ュ叿銆? ## Evidence  - Session: `fb9f9c75-dddd-4824-a571-bc0127e9764a`锛坅gent `e8107fb3-e40a-4207-9d9a-6768847aaf79` / zone-4100-agent锛?- UI: `http://localhost:5173/?agent=e8107fb3-e40a-4207-9d9a-6768847aaf79&session=fb9f9c75-dddd-4824-a571-bc0127e9764a` - Timeline 宸ュ叿璁℃暟锛堢害锛夛細`rca_read`脳18銆乣rca_glob`脳12銆乣web_search`脳6锛?*鏃?* `knowledge_search` / `memory_recall` - 姝ｆ枃琛旀帴锛歚鈥﹁鍛婅瘔鎴戙€? 7澶╂棤鐞嗙敱閫€璐ф斂绛?鈥?娉曞緥鏉℃枃銆佸畼鏂硅В璇讳笌鍏稿瀷妗堜緥` - 绗竴娆?`web_search` query锛歚娑堣垂鑰呮潈鐩婁繚鎶ゆ硶 绗簩鍗佷簲鏉?涓冩棩鏃犵悊鐢遍€€璐?鍘熸枃`锛堟鍓嶆鏂囨棤銆岄€€璐?娑堣垂鑰呫€嶇瓑瀛楁牱锛?- Agent `runtime_tools.webToolsEnabled=false`锛屼絾杩涚▼浠嶆敞鍐屼簡 `web_search`  ## Root cause (current understanding)  1. **璇濋婕傜Щ**锛氶暱 RCA 宸ュ叿閾惧悗妯″瀷鍐欏畬姝ｉ锛孉gent loop 鏈‖鍋滐紝涓嬩竴杞嚜琛屽紑鏂伴骞剁敤 `web_search` 濉厖銆屽彲鏌ヨ瘉銆嶆硶寰嬬珷鑺傘€?2. **娉ㄥ唽鏃佽矾**锛歚internal/chat/runtime_tools.go` 鍦?`WebToolsEnabled` 涓?false 鏃朵粛鍙兘璧?`WebToolsShouldRegister()`锛堟湁 Bocha/Tavily key 鍗?true锛夛細  ```go if flags.WebToolsEnabled {     registerWebTools(reg, true) } else if WebToolsShouldRegister() {     RegisterWebTools(reg) } ```  3. `web_prompt.go` 涓€屽娆?web_search 瑕佹寜绔犺妭鍐欏畬鏁淬€嶄細鏀惧ぇ璺戦鍚庣殑闀挎枃杈撳嚭銆? ## Expected  - Agent `webToolsEnabled=false` 鏃讹細**缁濅笉**娉ㄥ唽 `web_search` / `web_extract`銆?- 鐢ㄦ埛鏈姹傝仈缃?鎹㈤鏃讹紝姝ｉ鏀舵潫鍚庝笉搴旀搮鑷?`web_search` 鏃犲叧 topic銆? ## Proposed fix  - [ ] `runtime_tools`锛欰gent 鏄惧紡鍏抽棴 web 鏃?fail-closed锛屼笉鍐?fallback 鍒拌繘绋嬬骇 `WebToolsShouldRegister()` - [ ] 锛堝彲閫夛級绯荤粺鎻愮ず锛氭湭瑕佹眰鏃剁姝㈡崲棰?/ 绂佹鎿呰嚜 web_search - [ ] 锛堝彲閫夛級Agent loop锛氭娴嬪埌銆屼换鍔″凡瀹屾暣鏀舵潫 + 鏃犵敤鎴锋柊鎰忓浘銆嶆椂鎶戝埗鍚庣画鏃犲叧 tool_call  ## Acceptance  - [ ] `webToolsEnabled=false` 鐨?Agent锛宺egistry 涓棤 `web_search` - [ ] 澶嶇幇鍚岀被鍨嬮暱 RCA 浼氳瘽鏃讹紝涓嶅簲鍐嶅嚭鐜版棤鍏虫硶寰?鏀跨瓥 web_search 娈佃惤锛堣嚦灏戝伐鍏峰眰涓嶅彲鐢級  
+ 
+## Screenshots
+
+代码分析收束后硬接「7天无理由退货」：
+
+![topic drift full](https://github.com/sixath/portal/releases/download/untagged-edd8f1089578a956e957/topic-drift-full.png)
+
+拼接处特写：
+
+![topic drift splice](https://github.com/sixath/portal/releases/download/untagged-edd8f1089578a956e957/topic-drift-splice.png)

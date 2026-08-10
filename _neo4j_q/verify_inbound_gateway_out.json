@@ -1,0 +1,66 @@
+﻿{
+    "ok":  true,
+    "started_at":  "2026-08-09T06:34:44.3940849Z",
+    "gateway_url":  "http://127.0.0.1:8088",
+    "portal_url":  "http://127.0.0.1:8000",
+    "checks":  [
+                   {
+                       "name":  "gateway_healthz",
+                       "status":  "pass",
+                       "detail":  "status=200"
+                   },
+                   {
+                       "name":  "webhook_bad_secret",
+                       "status":  "pass",
+                       "detail":  "status=401 (non-2xx)"
+                   },
+                   {
+                       "name":  "webhook_disabled_410",
+                       "status":  "pass",
+                       "detail":  "status=410"
+                   },
+                   {
+                       "name":  "webhook_good_secret",
+                       "status":  "pass",
+                       "detail":  "status=202 body={\"correlation_id\":\"55de655c367c3967c7f564dd46ee4e39\"}\n"
+                   },
+                   {
+                       "name":  "webhook_same_peer_session",
+                       "status":  "pass",
+                       "detail":  "session_id=ebcd3c4c-f246-49ef-8e36-41714e9273f2 (two rounds)"
+                   },
+                   {
+                       "name":  "webhook_diff_peer_session",
+                       "status":  "pass",
+                       "detail":  "sidA=ebcd3c4c-f246-49ef-8e36-41714e9273f2 sidB=71cdd07a-0064-43f5-8b29-fc927008946f"
+                   },
+                   {
+                       "name":  "web_two_sessions",
+                       "status":  "pass",
+                       "detail":  "id1=55f91683-0bf6-4bfe-8c31-524ac1206566 id2=e084cb1b-f087-43a8-ad2b-e0155a745a44"
+                   },
+                   {
+                       "name":  "portal_public_inbound_rejected",
+                       "status":  "pass",
+                       "detail":  "status=403 public chat inbound disabled"
+                   },
+                   {
+                       "name":  "gateway_turn_success",
+                       "status":  "pass",
+                       "detail":  "SSE stream ok session=55f91683-0bf6-4bfe-8c31-524ac1206566 bytes=317"
+                   },
+                   {
+                       "name":  "portal_channels_get",
+                       "status":  "pass",
+                       "detail":  "status=200"
+                   }
+               ],
+    "skip_reason":  null,
+    "peer_a_session_id":  "ebcd3c4c-f246-49ef-8e36-41714e9273f2",
+    "peer_b_session_id":  "71cdd07a-0064-43f5-8b29-fc927008946f",
+    "web_session_ids":  [
+                            "55f91683-0bf6-4bfe-8c31-524ac1206566",
+                            "e084cb1b-f087-43a8-ad2b-e0155a745a44"
+                        ],
+    "finished_at":  "2026-08-09T06:34:58.0412095Z"
+}

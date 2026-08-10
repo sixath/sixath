@@ -1,0 +1,120 @@
+﻿{
+    "catalog":  {
+                    "defaults":  {
+                                     "governance":  "local",
+                                     "knowledge":  "local"
+                                 },
+                    "governance":  [
+                                       "fake",
+                                       "local"
+                                   ],
+                    "knowledge":  [
+                                      "fake",
+                                      "local"
+                                  ]
+                },
+    "agent_rt_before":  {
+                            "browserEnabled":  false,
+                            "terminalLocalEnabled":  true,
+                            "workspaceFilesEnabled":  true,
+                            "webToolsEnabled":  false,
+                            "hubGovernance":  "local",
+                            "cronjobToolEnabled":  false,
+                            "todoEnabled":  true,
+                            "hubKnowledge":  "local",
+                            "memoryWriteEnabled":  true,
+                            "skillRuntimeManageEnabled":  true
+                        },
+    "loadout_before":  {
+                           "provider":  "local",
+                           "items":  [
+                                         {
+                                             "kind":  "skill",
+                                             "id":  "scheduling-flow-trace",
+                                             "hub":  "local",
+                                             "name":  "scheduling-flow-trace",
+                                             "status":  "active"
+                                         },
+                                         {
+                                             "kind":  "skill",
+                                             "id":  "vm-prelaunch-failure-investigator",
+                                             "hub":  "local",
+                                             "name":  "vm-prelaunch-failure-investigator",
+                                             "status":  "active"
+                                         },
+                                         {
+                                             "kind":  "skill",
+                                             "id":  "vm-xagent-log-search",
+                                             "hub":  "local",
+                                             "name":  "vm-xagent-log-search",
+                                             "status":  "active"
+                                         }
+                                     ],
+                           "total":  3
+                       },
+    "bindings_draft":  {
+                           "provider":  "local",
+                           "items":  [
+                                         {
+                                             "kind":  "skill",
+                                             "id":  "e2e-local-draft-skill",
+                                             "hub":  "local",
+                                             "name":  "e2e-local-draft-skill",
+                                             "status":  "draft"
+                                         }
+                                     ],
+                           "total":  1
+                       },
+    "loadout_after_approve":  {
+                                  "provider":  "local",
+                                  "items":  [
+                                                {
+                                                    "kind":  "skill",
+                                                    "id":  "e2e-local-draft-skill",
+                                                    "hub":  "local",
+                                                    "name":  "e2e-local-draft-skill",
+                                                    "status":  "active"
+                                                },
+                                                {
+                                                    "kind":  "skill",
+                                                    "id":  "scheduling-flow-trace",
+                                                    "hub":  "local",
+                                                    "name":  "scheduling-flow-trace",
+                                                    "status":  "active"
+                                                },
+                                                {
+                                                    "kind":  "skill",
+                                                    "id":  "vm-prelaunch-failure-investigator",
+                                                    "hub":  "local",
+                                                    "name":  "vm-prelaunch-failure-investigator",
+                                                    "status":  "active"
+                                                },
+                                                {
+                                                    "kind":  "skill",
+                                                    "id":  "vm-xagent-log-search",
+                                                    "hub":  "local",
+                                                    "name":  "vm-xagent-log-search",
+                                                    "status":  "active"
+                                                }
+                                            ],
+                                  "total":  4
+                              },
+    "wiki_root_hint":  "d:\\workspace\\github\\sixath\\_neo4j_q\\hub_wiki_fixture",
+    "codegraph_root_hint":  "d:\\workspace\\github\\sixath\\framework",
+    "session_id":  "5a14f4ca-6d89-4dc1-a2a8-b499219ada4a",
+    "chat_text":  "",
+    "chat_tools":  [
+                       "{\"tool_call\":{\"id\":\"call_a9d7e58221e748c3896f4bbc\",\"step\":0,\"phase\":\"started\",\"tool_name\":\"knowledge_search\",\"arguments\":{\"limit\":3,\"query\":\"MEMORY_HUB_WIKI_MARKER\",\"source\":\"wiki\"},\"allowed\":false}}",
+                       "{\"content\":\"agent.tool.started[{\\\"input\\\":{\\\"limit\\\":3,\\\"query\\\":\\\"MEMORY_HUB_WIKI_MARKER\\\",\\\"source\\\":\\\"wiki\\\"},\\\"step\\\":0,\\\"tool\\\":\\\"knowledge_search\\\",\\\"tool_call_id\\\":\\\"call_a9d7e58221e748c3896f4bbc\\\"}]\\r\\n\"}",
+                       "{\"content\":\"agent.tool.completed[{\\\"output\\\":[{\\\"id\\\":\\\"hub-e2e.md\\\",\\\"source\\\":\\\"wiki\\\",\\\"content\\\":\\\"# Hub E2E\\\\nToken MEMORY_HUB_WIKI_MARKER for search.\\\",\\\"score\\\":0.7}],\\\"step\\\":0,\\\"tool\\\":\\\"knowledge_search\\\",\\\"tool_call_id\\\":\\\"call_a9d7e58221e748c3896f4bbc\\\"}]\\r\\n\"}",
+                       "{\"tool_call\":{\"id\":\"call_a9d7e58221e748c3896f4bbc\",\"step\":0,\"phase\":\"completed\",\"tool_name\":\"knowledge_search\",\"arguments\":{\"limit\":3,\"query\":\"MEMORY_HUB_WIKI_MARKER\",\"source\":\"wiki\"},\"result\":[{\"id\":\"hub-e2e.md\",\"source\":\"wiki\",\"content\":\"# Hub E2E\\nToken MEMORY_HUB_WIKI_MARKER for search.\",\"score\"",
+                       "{\"content\":\"knowledge_search\"}",
+                       "{\"content\":\"agent.tool.started[{\\\"input\\\":{\\\"limit\\\":3,\\\"query\\\":\\\"MEMORY_HUB_WIKI_MARKER\\\",\\\"source\\\":\\\"wiki\\\"},\\\"step\\\":2,\\\"tool\\\":\\\"knowledge_search\\\",\\\"tool_call_id\\\":\\\"call_1c4b42c5b8af44c2bef5f299\\\"}]\\r\\n\"}",
+                       "{\"tool_call\":{\"id\":\"call_1c4b42c5b8af44c2bef5f299\",\"step\":2,\"phase\":\"started\",\"tool_name\":\"knowledge_search\",\"arguments\":{\"limit\":3,\"query\":\"MEMORY_HUB_WIKI_MARKER\",\"source\":\"wiki\"},\"allowed\":false}}",
+                       "{\"content\":\"agent.tool.completed[{\\\"output\\\":[{\\\"id\\\":\\\"hub-e2e.md\\\",\\\"source\\\":\\\"wiki\\\",\\\"content\\\":\\\"# Hub E2E\\\\nToken MEMORY_HUB_WIKI_MARKER for search.\\\",\\\"score\\\":0.7}],\\\"step\\\":2,\\\"tool\\\":\\\"knowledge_search\\\",\\\"tool_call_id\\\":\\\"call_1c4b42c5b8af44c2bef5f299\\\"}]\\r\\n\"}",
+                       "{\"tool_call\":{\"id\":\"call_1c4b42c5b8af44c2bef5f299\",\"step\":2,\"phase\":\"completed\",\"tool_name\":\"knowledge_search\",\"arguments\":{\"limit\":3,\"query\":\"MEMORY_HUB_WIKI_MARKER\",\"source\":\"wiki\"},\"result\":[{\"id\":\"hub-e2e.md\",\"source\":\"wiki\",\"content\":\"# Hub E2E\\nToken MEMORY_HUB_WIKI_MARKER for search.\",\"score\""
+                   ],
+    "wiki_hit":  true,
+    "used_knowledge_tool":  true,
+    "ok":  true
+}

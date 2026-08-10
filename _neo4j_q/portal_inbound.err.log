@@ -1,0 +1,12 @@
+2026/08/09 14:32:34 maxprocs: Leaving GOMAXPROCS=28: CPU quota undefined
+DEBUG msg=config loaded: agent_extra.yaml format: yaml
+DEBUG msg=config loaded: config.yaml format: yaml
+2026/08/09 14:32:43 memory: unit vector backfill embed tripped (stats={Scanned:50 Missing:1 Upserted:0 Skipped:0 Failed:0 Tripped:true})
+2026/08/09 14:34:31 memory graph done session_id=b6578942-1c84-421e-8d47-7951b2b8d934 agent_id=1583f45b-d5c3-41ab-b1f7-1aa5539126d4 result=success cand_ent=0 cand_rel=0 written_ent=0 written_rel=0 drops=- dur_ms=5955 err=""
+2026/08/09 14:34:32 memory extract done session_id=b6578942-1c84-421e-8d47-7951b2b8d934 agent_id=1583f45b-d5c3-41ab-b1f7-1aa5539126d4 result=success candidates=0 written=0 drops=- parse_fail=false dur_ms=6543 err=""
+2026/08/09 14:35:06 memory graph done session_id=55f91683-0bf6-4bfe-8c31-524ac1206566 agent_id=1583f45b-d5c3-41ab-b1f7-1aa5539126d4 result=success cand_ent=0 cand_rel=0 written_ent=0 written_rel=0 drops=- dur_ms=8194 err=""
+2026/08/09 14:35:17 memory extract done session_id=55f91683-0bf6-4bfe-8c31-524ac1206566 agent_id=1583f45b-d5c3-41ab-b1f7-1aa5539126d4 result=success candidates=0 written=0 drops=- parse_fail=false dur_ms=19842 err=""
+[mysql] 2026/08/09 14:43:13 packets.go:58 unexpected EOF
+[mysql] 2026/08/09 15:43:13 packets.go:58 unexpected EOF
+[mysql] 2026/08/09 16:23:13 packets.go:58 unexpected EOF
+[mysql] 2026/08/09 17:03:13 packets.go:58 unexpected EOF

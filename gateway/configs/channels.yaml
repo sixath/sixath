@@ -3,7 +3,7 @@
 channels:
   - id: demo-webhook
     type: webhook
-    default_agent: "00000000-0000-0000-0000-000000000001"
+    default_agent: "1583f45b-d5c3-41ab-b1f7-1aa5539126d4"
     webhook_secret: "dev-webhook-secret"
     ip_whitelist: []
     enabled: true
@@ -11,19 +11,22 @@ channels:
   # Used by E2E to assert disabled channel → HTTP 410
   - id: demo-webhook-disabled
     type: webhook
-    default_agent: "00000000-0000-0000-0000-000000000001"
+    default_agent: "1583f45b-d5c3-41ab-b1f7-1aa5539126d4"
     webhook_secret: "dev-webhook-secret"
     ip_whitelist: []
     enabled: false
     default_reply_mode: async
-  # WeCom smart-bot long connection (placeholder — set bot_id/secret then enabled: true)
-  # Console: 智能机器人 AI+ → API →「使用长连接」→ BotID + Secret（≠ Portal wecom Webhook）
-  # Same bot_id must not be enabled on multiple Gateway instances (one active WSS per bot).
-  - id: wecom-bot-placeholder
+  # WeCom smart-bot long connection — DO NOT commit real bot_id/secret
+  # Console: 智能机器人 AI+ → API →「使用长连接」
+  # Same bot_id must not be enabled on multiple Gateway instances.
+  - id: sixath4
     type: wecom_bot
-    default_agent: "00000000-0000-0000-0000-000000000001"
-    enabled: false
-    bot_id: "" # 控制台 BotID
-    secret: "" # 长连接 Secret（勿提交真实值）
-    bot_names: [] # 可选，如 ["小天才"]，用于剥离 @提及
-    ws_url: "wss://openws.work.weixin.qq.com" # 可选，默认官方端点
+    default_agent: "e8107fb3-e40a-4207-9d9a-6768847aaf79"
+    enabled: true
+    bot_id: "aibY6-AgsLf2heYuUTeRkNZFhfd38KM3X7a"
+    secret: "vsVCIvMGoyRThFRZ71N75PrRT9XrVBKkCLFJRevG8HN"
+    bot_names: ["sixath"]
+    ws_url: "wss://openws.work.weixin.qq.com"
+    # Optional: resolve 发起人 to WeCom display name (contacts API). Do NOT commit secrets.
+    # corp_id: "<企业 CorpID>"
+    # corp_secret: "<自建应用 Secret，需通讯录/成员读取>"

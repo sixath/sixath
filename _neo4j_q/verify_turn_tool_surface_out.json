@@ -1,0 +1,22 @@
+﻿{
+    "ok":  true,
+    "session":  "e00f53f8-ecba-4408-ba80-b843b08a06b4",
+    "prompt":  "Please answer using GitLab tools only: call whoami and/or list_projects.\nDo NOT call jaeger_trace, es_log_query, rca_grep, rca_glob, rca_read, rca_symbol, or any observability tools.\nIf GitLab auth fails, explain the failure and stop.",
+    "tool_names":  [
+                       "whoami",
+                       "list_projects",
+                       "search_repositories",
+                       "search_repositories"
+                   ],
+    "forbidden":  [
+
+                  ],
+    "reply_excerpt":  "Let me call both GitLab tools to verify authentication and list projects.## GitLab è®¤è¯å¤±è´¥\n\nä¸¤ä¸ª GitLab å·¥å\u0085·åè¿åäº **401 Unauthorized**ï¼\n\n| å·¥å\u0085· | éè¯¯ |\n|------|------|\n| `whoami` | `GitLab API error: 401 Unauthorized` |\n| `list_projects` | `GitLab API error: 401 Unauthorized` |\n\n**åå **ï¼å½åç»å®ç GitLab å­æ®ï¼token/å¯é¥ï¼æ ææå·²è¿æï¼æ æ³éè¿ Git",
+    "checks":  [
+                   "API reachable",
+                   "session created",
+                   "assistant message present",
+                   "no RCA/forbidden tools; forbidden=[] tools=[whoami,list_projects,search_repositories,search_repositories]",
+                   "at least one GitLab-related tool invoked"
+               ]
+}

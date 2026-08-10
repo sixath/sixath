@@ -1,0 +1,3 @@
+﻿event: error
+data: {"error":"yaml: line 6: did not find expected key"}
+
