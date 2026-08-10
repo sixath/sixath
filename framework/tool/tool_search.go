@@ -177,9 +177,8 @@ func RegisterToolSearchTools(reg *Registry, cfg ToolSearchRegisterConfig) error 
 	})
 }
 
-func buildToolSearchExecute(cat ToolCatalog) ExecuteFunc {
+func buildToolSearchExecute(fallback ToolCatalog) ExecuteFunc {
 	return func(ctx context.Context, params map[string]any) (any, error) {
-		_ = ctx
 		query, _ := params["query"].(string)
 		query = strings.TrimSpace(query)
 		if query == "" {
@@ -196,8 +195,25 @@ func buildToolSearchExecute(cat ToolCatalog) ExecuteFunc {
 			limit = 20
 		}
 
-		deferred := filterDeferredAvailable(cat.Entries)
-		ranked := rankCatalog(ToolCatalog{Entries: deferred}, query)
+		cat := fallback
+		if live, ok := CatalogFromContext(ctx); ok {
+			cat = live
+		}
+
+		rankDeferred := func(c ToolCatalog) []scoredEntry {
+			deferred := filterDeferredAvailable(c.Entries)
+			return rankCatalog(ToolCatalog{Entries: deferred}, query)
+		}
+
+		ranked := rankDeferred(cat)
+		if len(ranked) == 0 {
+			if exp := DiscoveryExpandFromContext(ctx); exp != nil {
+				if expanded, err := exp.ExpandOnMiss(ctx, query); err == nil && len(expanded) > 0 {
+					cat = exp.CurrentCatalog()
+					ranked = rankDeferred(cat)
+				}
+			}
+		}
 		if limit > len(ranked) {
 			limit = len(ranked)
 		}

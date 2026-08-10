@@ -63,8 +63,7 @@ func RegisterListToolsTool(reg *Registry, cfg *ListToolsConfig) error {
 func buildListToolsExecute(cfg *ListToolsConfig) ExecuteFunc {
 	_ = cfg
 	return func(ctx context.Context, params map[string]any) (any, error) {
-		raw := ctx.Value(ContextKeyToolCatalog)
-		cat, ok := raw.(ToolCatalog)
+		cat, ok := CatalogFromContext(ctx)
 		if !ok {
 			return "list_tools: no catalog in context", nil
 		}
@@ -80,15 +79,31 @@ func buildListToolsExecute(cfg *ListToolsConfig) ExecuteFunc {
 		query, _ := params["query"].(string)
 		query = strings.TrimSpace(query)
 
-		entries := filterCatalogEntries(cat.Entries, availableOnly, toolsetFilter)
-
-		if query != "" {
-			filtered := ToolCatalog{Entries: entries, GeneratedAt: cat.GeneratedAt}
-			results := SearchCatalog(filtered, query, 20)
-			return marshalListToolsFlat(results)
+		// 无 query：先尝试装载尚未进入目录的绑定 MCP，再返回完整分组列表。
+		if query == "" {
+			if exp := DiscoveryExpandFromContext(ctx); exp != nil {
+				if _, err := exp.ExpandOnMiss(ctx, ""); err == nil {
+					cat = exp.CurrentCatalog()
+				}
+			}
+			entries := filterCatalogEntries(cat.Entries, availableOnly, toolsetFilter)
+			return marshalListToolsGrouped(entries)
 		}
 
-		return marshalListToolsGrouped(entries)
+		entries := filterCatalogEntries(cat.Entries, availableOnly, toolsetFilter)
+		filtered := ToolCatalog{Entries: entries, GeneratedAt: cat.GeneratedAt}
+		results := SearchCatalog(filtered, query, 20)
+		if len(results) == 0 {
+			if exp := DiscoveryExpandFromContext(ctx); exp != nil {
+				if expanded, err := exp.ExpandOnMiss(ctx, query); err == nil && len(expanded) > 0 {
+					cat = exp.CurrentCatalog()
+					entries = filterCatalogEntries(cat.Entries, availableOnly, toolsetFilter)
+					filtered = ToolCatalog{Entries: entries, GeneratedAt: cat.GeneratedAt}
+					results = SearchCatalog(filtered, query, 20)
+				}
+			}
+		}
+		return marshalListToolsFlat(results)
 	}
 }
 

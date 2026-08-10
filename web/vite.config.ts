@@ -7,23 +7,19 @@ export default defineConfig({
     host: true, // 0.0.0.0 — allow LAN access
     port: 5173,
     proxy: {
+      // Chat / SSE must hit Gateway (Portal public inbound is disabled by default).
+      // Prefer path regex over `router` — Vite/http-proxy router is easy to miss-match.
+      '^/api/v1/agents/[^/]+/sessions': {
+        target: 'http://127.0.0.1:8088',
+        changeOrigin: true,
+      },
       '/api/v1/sessions': {
-        target: 'http://localhost:8088',
+        target: 'http://127.0.0.1:8088',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        router(req) {
-          const u = req.url || ''
-          if (/^\/api\/v1\/agents\/[^/]+\/sessions/.test(u)) {
-            return 'http://localhost:8088'
-          }
-          if (u.startsWith('/api/v1/sessions')) {
-            return 'http://localhost:8088'
-          }
-          return 'http://localhost:8000'
-        },
       },
     },
   },

@@ -5,9 +5,9 @@ import { normalizeTimeline } from '../pages/timelineReducer'
 
 const API_BASE = '/api/v1'
 
-/** 统一响应基类 */
+/** 统一响应基类（proto3 JSON 常省略默认 code=0） */
 export interface BaseResponse {
-  code: number
+  code?: number
   message?: string
   reason?: string
 }
@@ -73,14 +73,17 @@ async function request<T>(
 
 export { hasApiToken }
 
-/** 检查 ret.code，非 0 时抛出 */
+/** 检查 ret.code，非 0 时抛出。proto3 JSON 省略 code 时视为 0（成功）。 */
 function checkRet<T extends { ret?: BaseResponse }>(data: T): T {
-  if (data?.ret && data.ret.code !== 0) {
-    const body = JSON.stringify({ ret: data.ret })
-    if (maybeUnauthorized(data.ret.code, body)) {
-      handleUnauthorized()
+  if (data?.ret) {
+    const code = data.ret.code ?? 0
+    if (code !== 0) {
+      const body = JSON.stringify({ ret: data.ret })
+      if (maybeUnauthorized(code, body)) {
+        handleUnauthorized()
+      }
+      throw new Error(httpErrorMessage(code, body))
     }
-    throw new Error(httpErrorMessage(data.ret.code, body))
   }
   return data
 }

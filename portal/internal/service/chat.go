@@ -424,6 +424,14 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	}
 
 	toolFamily := chat.BuildToolFamilyIndex(reg)
+	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
+		Reg:            reg,
+		BoundServers:   mcpServerMetas,
+		ActiveFamilies: active,
+		ToolFamily:     toolFamily,
+		Wiring:         catalogInput,
+		Catalog:        catalog,
+	})
 	// 构建 ReActAgent（含成长工具成功钩子，见 growth_chat.go）
 	maxHistory := 20
 	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
@@ -476,6 +484,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		runCtx = context.WithValue(runCtx, tool.ContextKeyUserID, userID)
 	}
 	runCtx = context.WithValue(runCtx, tool.ContextKeyToolCatalog, catalog)
+	runCtx = chat.WithDiscoveryExpand(runCtx, mcpExpand)
 	if toolSearchActive {
 		runCtx = context.WithValue(runCtx, tool.ContextKeyToolSearchActive, true)
 	}
@@ -711,6 +720,14 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 
 	toolFamily := chat.BuildToolFamilyIndex(reg)
+	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
+		Reg:            reg,
+		BoundServers:   mcpServerMetas,
+		ActiveFamilies: active,
+		ToolFamily:     toolFamily,
+		Wiring:         catalogInput,
+		Catalog:        catalog,
+	})
 	maxHistory := 20
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。
@@ -810,6 +827,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		runCtx = context.WithValue(runCtx, tool.ContextKeyUserID, userID)
 	}
 	runCtx = context.WithValue(runCtx, tool.ContextKeyToolCatalog, catalog)
+	runCtx = chat.WithDiscoveryExpand(runCtx, mcpExpand)
 	if toolSearchActive {
 		runCtx = context.WithValue(runCtx, tool.ContextKeyToolSearchActive, true)
 	}
