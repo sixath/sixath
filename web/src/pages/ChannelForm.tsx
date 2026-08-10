@@ -14,6 +14,13 @@ function joinList(value?: string[]): string {
   return value?.join('\n') || ''
 }
 
+/** When allowlist is non-empty, default agent must be included (Portal validation). */
+function withDefaultInAllowed(list: string[], defaultId: string): string[] {
+  const trimmed = defaultId.trim()
+  if (!list.length || !trimmed || list.includes(trimmed)) return list
+  return [...list, trimmed]
+}
+
 export default function ChannelForm() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -23,6 +30,7 @@ export default function ChannelForm() {
   const [channelId, setChannelId] = useState('')
   const [type, setType] = useState<CreateChannelRequest['type']>('web')
   const [defaultAgent, setDefaultAgent] = useState('')
+  const [allowedAgents, setAllowedAgents] = useState<string[]>([])
   const [enabled, setEnabled] = useState(true)
   const [webhookPath, setWebhookPath] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
@@ -47,6 +55,7 @@ export default function ChannelForm() {
         setChannelId(channel.channel_id)
         setType((channel.type || 'web') as CreateChannelRequest['type'])
         setDefaultAgent(channel.default_agent || '')
+        setAllowedAgents(channel.allowed_agents ?? [])
         setEnabled(channel.enabled)
         setWebhookPath(channel.webhook_path || '')
         setIpWhitelist(joinList(channel.ip_whitelist))
@@ -55,6 +64,25 @@ export default function ChannelForm() {
       })
       .catch((e) => setError(e.message))
   }, [id, isEdit])
+
+  useEffect(() => {
+    if (!defaultAgent.trim() || !allowedAgents.length) return
+    setAllowedAgents((prev) => withDefaultInAllowed(prev, defaultAgent))
+  }, [defaultAgent, allowedAgents.length])
+
+  const toggleAllowedAgent = (agentId: string) => {
+    setAllowedAgents((prev) => {
+      const next = prev.includes(agentId)
+        ? prev.filter((id) => id !== agentId)
+        : [...prev, agentId]
+      return withDefaultInAllowed(next, defaultAgent)
+    })
+  }
+
+  const resolveAllowedAgentsForSubmit = (): string[] | undefined => {
+    const normalized = withDefaultInAllowed(allowedAgents, defaultAgent)
+    return normalized.length ? normalized : undefined
+  }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -67,6 +95,11 @@ export default function ChannelForm() {
       setError('Webhook URL is required for WeCom channels.')
       return
     }
+    const allowedForSubmit = resolveAllowedAgentsForSubmit()
+    if (allowedForSubmit?.length && !defaultAgent.trim()) {
+      setError('Default Agent is required when Allowed Agents is set.')
+      return
+    }
 
     setLoading(true)
     try {
@@ -76,6 +109,7 @@ export default function ChannelForm() {
           type,
           default_agent: defaultAgent || undefined,
           enabled,
+          allowed_agents: allowedForSubmit ?? [],
         }
         if (type === 'webhook' || type === 'api') {
           updates.webhook_path = webhookPath.trim() || undefined
@@ -95,6 +129,7 @@ export default function ChannelForm() {
           channel_id: channelId.trim(),
           type,
           default_agent: defaultAgent || undefined,
+          allowed_agents: allowedForSubmit,
           enabled,
           webhook_path: webhookPath.trim() || undefined,
           webhook_secret: webhookSecret.trim() || undefined,
@@ -140,7 +175,10 @@ export default function ChannelForm() {
             </div>
             <div className="form-group">
               <label>Default Agent</label>
-              <select value={defaultAgent} onChange={(e) => setDefaultAgent(e.target.value)}>
+              <select
+                value={defaultAgent}
+                onChange={(e) => setDefaultAgent(e.target.value)}
+              >
                 <option value="">None</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>{agent.name}</option>
@@ -150,6 +188,41 @@ export default function ChannelForm() {
                 <small style={{ display: 'block', marginTop: '0.35rem', color: 'var(--muted, #64748b)' }}>
                   WeCom 渠道：选择 Default Agent 后，该 Agent 对话中将自动启用 send_to_wecom 工具。
                 </small>
+              )}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <div className="form-panel">
+              <label>Allowed Agents</label>
+              <p className="form-panel__desc">
+                留空表示仅允许 Default Agent；勾选后用户只能绑定列表中的 Agent，且 Default Agent 必须在列表内。
+              </p>
+              {agents.length > 0 ? (
+                <div className="checkbox-list">
+                  {agents.map((agent) => {
+                    const isDefault = agent.id === defaultAgent
+                    const checked = allowedAgents.includes(agent.id)
+                    return (
+                      <div key={agent.id} className="checkbox-list__item">
+                        <label className="checkbox-field">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={isDefault && checked && allowedAgents.length > 0}
+                            onChange={() => toggleAllowedAgent(agent.id)}
+                          />
+                          <span>{agent.name}</span>
+                          {isDefault ? (
+                            <span style={{ color: 'var(--muted)', fontSize: '0.85em' }}>(default)</span>
+                          ) : null}
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p style={{ color: 'var(--muted)', margin: 0 }}>暂无 Agent，请先创建 Agent。</p>
               )}
             </div>
           </div>

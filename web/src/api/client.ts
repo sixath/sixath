@@ -1220,6 +1220,7 @@ export interface Channel {
   channel_id: string
   type: string
   default_agent: string
+  allowed_agents?: string[]
   enabled: boolean
   webhook_path?: string
   webhook_url_masked?: string
@@ -1239,6 +1240,7 @@ export interface CreateChannelRequest {
   channel_id: string
   type: 'web' | 'api' | 'webhook' | 'wxpusher' | 'wecom'
   default_agent?: string
+  allowed_agents?: string[]
   enabled?: boolean
   webhook_path?: string
   webhook_secret?: string
@@ -1254,6 +1256,8 @@ function normalizeChannel(raw: Channel & Record<string, unknown>): Channel {
     channel_id: (raw.channel_id as string) ?? (raw.channelId as string) ?? '',
     type: (raw.type as string) ?? '',
     default_agent: (raw.default_agent as string) ?? (raw.defaultAgent as string) ?? '',
+    allowed_agents:
+      (raw.allowed_agents as string[] | undefined) ?? (raw.allowedAgents as string[] | undefined),
     enabled: (raw.enabled as boolean) ?? false,
     webhook_path: (raw.webhook_path as string) ?? (raw.webhookPath as string),
     webhook_url_masked: (raw.webhook_url_masked as string) ?? (raw.webhookUrlMasked as string),
