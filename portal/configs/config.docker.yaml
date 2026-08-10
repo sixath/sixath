@@ -31,6 +31,10 @@ runtime:
 chat:
   # 对外 Chat 入站默认关闭；生产路径 Gateway → /runtime/v1。
   public_inbound_enabled: false
+auth:
+  bootstrap_user_id: "bootstrap"
+  bootstrap_org_id: "default"
+  # email/password/token 由 SATH_BOOTSTRAP_* / secrets 注入
 data:
   database:
     driver: mysql

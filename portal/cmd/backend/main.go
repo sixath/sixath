@@ -138,6 +138,8 @@ func main() {
 		panic(err)
 	}
 
+	bc.Auth = conf.EnrichAuthFromEnv(bc.Auth)
+	conf.EnrichDataFromEnv(bc.Data)
 	conf.EnrichGrowthFromEnv(bc.Growth)
 	chat.EnrichFailureCaptureFromEnv()
 
