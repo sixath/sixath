@@ -69,6 +69,7 @@ message CreateChannelRequest {
   string app_token = 8;
   repeated string default_uids = 9;
   string webhook_url = 10;
+  repeated string allowed_agents = 11;
 }
 
 message ListChannelsRequest {
@@ -138,4 +139,5 @@ message ChannelReply {
   string created_at = 10;
   string updated_at = 11;
   string webhook_url_masked = 12;  // wecom only; masked display, never full URL
+  repeated string allowed_agents = 13;
 }

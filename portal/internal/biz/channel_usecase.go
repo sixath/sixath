@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"errors"
+	"strings"
 
 	pkgErrors "backend/internal/pkg/errors"
 
@@ -28,8 +29,94 @@ func NewChannelUsecase(repo ChannelRepo, agentRepo AgentRepo, logger log.Logger)
 	return &ChannelUsecase{repo: repo, agentRepo: agentRepo, log: log.NewHelper(logger)}
 }
 
+func normalizeAllowedAgents(defaultAgent string, allowed []string) ([]string, error) {
+	defaultAgent = strings.TrimSpace(defaultAgent)
+	out := uniqueTrimmedStrings(allowed)
+	if len(out) == 0 {
+		return out, nil
+	}
+	if defaultAgent == "" {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "default_agent required when allowed_agents is set")
+	}
+	if !stringSliceContains(out, defaultAgent) {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "default_agent must be in allowed_agents")
+	}
+	return out, nil
+}
+
+func uniqueTrimmedStrings(ss []string) []string {
+	seen := make(map[string]struct{}, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func stringSliceContains(ss []string, v string) bool {
+	for _, s := range ss {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+func coerceStringSlice(v any) ([]string, bool) {
+	if v == nil {
+		return nil, true
+	}
+	switch x := v.(type) {
+	case []string:
+		return x, true
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func effectiveChannelAgents(current *ChannelMeta, updates map[string]any) (defaultAgent string, allowed []string, allowedPresent bool, err error) {
+	defaultAgent = current.DefaultAgent
+	if v, ok := updates["default_agent"].(string); ok {
+		defaultAgent = v
+	}
+	if raw, ok := updates["allowed_agents"]; ok {
+		allowedPresent = true
+		sl, ok := coerceStringSlice(raw)
+		if !ok {
+			return "", nil, false, kratosErrors.BadRequest("INVALID_ARGUMENT", "allowed_agents must be a string array")
+		}
+		allowed = sl
+	} else {
+		allowed = current.AllowedAgents
+	}
+	return defaultAgent, allowed, allowedPresent, nil
+}
+
 // Create 创建渠道
 func (uc *ChannelUsecase) Create(ctx context.Context, ch *ChannelCreate) (*ChannelMeta, error) {
+	normalized, err := normalizeAllowedAgents(ch.DefaultAgent, ch.AllowedAgents)
+	if err != nil {
+		return nil, err
+	}
+	ch.AllowedAgents = normalized
 	meta, err := uc.repo.Create(ctx, ch)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
 		return nil, ErrChannelDuplicateID
@@ -71,6 +158,24 @@ func (uc *ChannelUsecase) List(ctx context.Context, page, pageSize int32, typ st
 
 // Update 更新
 func (uc *ChannelUsecase) Update(ctx context.Context, id string, updates map[string]any) (*ChannelMeta, error) {
+	current, err := uc.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) {
+			return nil, ErrChannelNotFound
+		}
+		return nil, err
+	}
+	defaultAgent, allowed, allowedPresent, err := effectiveChannelAgents(current, updates)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeAllowedAgents(defaultAgent, allowed)
+	if err != nil {
+		return nil, err
+	}
+	if allowedPresent {
+		updates["allowed_agents"] = normalized
+	}
 	ch, err := uc.repo.Update(ctx, id, updates)
 	if err != nil && errors.Is(err, pkgErrors.ErrNotFound) {
 		return nil, ErrChannelNotFound
