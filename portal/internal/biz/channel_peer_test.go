@@ -41,6 +41,31 @@ func (f *fakeChannelPeerSessionRepo) Create(_ context.Context, row *ChannelPeerS
 	return nil
 }
 
+func (f *fakeChannelPeerSessionRepo) Upsert(_ context.Context, row *ChannelPeerSession) error {
+	if f.rows == nil {
+		f.rows = map[string]*ChannelPeerSession{}
+	}
+	key := peerKey(row.ChannelID, row.PeerID)
+	cp := *row
+	if existing, ok := f.rows[key]; ok {
+		cp.CreatedAt = existing.CreatedAt
+	}
+	f.rows[key] = &cp
+	return nil
+}
+
+func (f *fakeChannelPeerSessionRepo) Delete(_ context.Context, channelID, peerID string) error {
+	if f.rows == nil {
+		return pkgErrors.ErrNotFound
+	}
+	key := peerKey(channelID, peerID)
+	if _, ok := f.rows[key]; !ok {
+		return pkgErrors.ErrNotFound
+	}
+	delete(f.rows, key)
+	return nil
+}
+
 type fakeChatSessionRepoForPeer struct {
 	sessions map[string]*ChatSession
 	seq      int
@@ -210,6 +235,27 @@ func (f *conflictCreatePeerRepo) Create(_ context.Context, _ *ChannelPeerSession
 	cp := *f.winner
 	f.rows[peerKey(f.winner.ChannelID, f.winner.PeerID)] = &cp
 	return pkgErrors.ErrConflict
+}
+
+func (f *conflictCreatePeerRepo) Upsert(_ context.Context, row *ChannelPeerSession) error {
+	if f.rows == nil {
+		f.rows = map[string]*ChannelPeerSession{}
+	}
+	cp := *row
+	f.rows[peerKey(row.ChannelID, row.PeerID)] = &cp
+	return nil
+}
+
+func (f *conflictCreatePeerRepo) Delete(_ context.Context, channelID, peerID string) error {
+	if f.rows == nil {
+		return pkgErrors.ErrNotFound
+	}
+	key := peerKey(channelID, peerID)
+	if _, ok := f.rows[key]; !ok {
+		return pkgErrors.ErrNotFound
+	}
+	delete(f.rows, key)
+	return nil
 }
 
 func TestChannelPeerResolve_LongPeerUserIDFitsColumn(t *testing.T) {

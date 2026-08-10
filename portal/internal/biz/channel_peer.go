@@ -28,6 +28,8 @@ type ChannelPeerSession struct {
 type ChannelPeerSessionRepo interface {
 	Get(ctx context.Context, channelID, peerID string) (*ChannelPeerSession, error)
 	Create(ctx context.Context, row *ChannelPeerSession) error
+	Upsert(ctx context.Context, row *ChannelPeerSession) error
+	Delete(ctx context.Context, channelID, peerID string) error
 }
 
 // ChannelPeerResolveResult is the outcome of Resolve.
