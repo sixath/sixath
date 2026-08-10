@@ -1,0 +1,12 @@
+memory_store:
+  graph:
+    enabled: true
+    provider: neo4j
+    min_relation_confidence: 0.7
+    max_hops: 1
+    rrf_k: 60
+    neo4j:
+      uri: bolt://neo4j:7687
+      username: neo4j
+      password: "REPLACE_ME"
+      database: ""

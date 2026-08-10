@@ -47,10 +47,39 @@ Go AI Agent 平台工作区：可嵌入的 Agent 运行时（framework）、后�
 
 ## 快速开始（Docker Compose）
 
-前置：Docker / Docker Compose、磁盘空间足以构建 Go 与 Node 镜像。
+前置：Docker / **Docker Compose ≥ 2.20**、磁盘空间足以构建 Go 与 Node 镜像。
+
+### 一键部署（推荐）
 
 ```bash
-# 在本仓库根目录
+# Linux / macOS
+./deploy/deploy.sh --build
+
+# Windows PowerShell
+.\deploy\deploy.ps1 -Build
+```
+
+脚本会：补齐 `.env` 与 `secrets/*.txt`（来自 example，并打印警告）→ `compose up` → 等待 healthy → smoke。
+
+| 场景 | 命令 |
+|------|------|
+| 默认 HTTP | `./deploy/deploy.sh --build` / `.\deploy\deploy.ps1 -Build` |
+| + Neo4j | 加 `--with-neo4j` / `-WithNeo4j` |
+| + TLS（Caddy） | 加 `--with-tls` / `-WithTls`（`.env` 中 `DOMAIN` 必填且非 localhost） |
+| 停栈保留卷 | `--down` / `-Down` |
+| 仅验活 | `--smoke-only` / `-SmokeOnly` |
+
+设计说明：[`docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md`](docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md)。  
+密钥：见 [`secrets/README.md`](secrets/README.md)。登录用 `BOOTSTRAP_ADMIN_EMAIL` + `secrets/bootstrap_password.txt`。
+
+裸 `docker compose up` 前须具备 `.env`（含 `COMPOSE_PATH_SEPARATOR=\|` 与三文件 `COMPOSE_FILE`）和 `secrets/*.txt`。
+
+TLS profile **只**终结 Web UI（Caddy→web）；Gateway / 企微仍走映射的 HTTP 端口。
+
+### 手动 Compose
+
+```bash
+# 在本仓库根目录（先 cp .env.example .env 与 secrets examples）
 docker compose up --build -d
 ```
 

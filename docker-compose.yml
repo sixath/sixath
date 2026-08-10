@@ -1,59 +1,106 @@
+secrets:
+  mysql_root_password:
+    file: ./secrets/mysql_root_password.txt
+  runtime_token:
+    file: ./secrets/runtime_token.txt
+  bootstrap_password:
+    file: ./secrets/bootstrap_password.txt
+  bootstrap_token:
+    file: ./secrets/bootstrap_token.txt
+
 services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    secrets:
+      - mysql_root_password
     ports:
-      # host 3306 often taken; expose on 13306
-      - "13306:3306"
+      - "${MYSQL_HOST_PORT:-13306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$(cat /run/secrets/mysql_root_password) || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 20s
+      start_period: 25s
+    restart: unless-stopped
+    mem_limit: 1g
 
   portal:
     build:
       context: .
       dockerfile: portal/Dockerfile
     ports:
-      # host 8000 taken by moya-aiops; use 18000/19000
-      - "18000:8000"
-      - "19000:9000"
+      - "${PORTAL_HTTP_HOST_PORT:-18000}:8000"
+      - "${PORTAL_GRPC_HOST_PORT:-19000}:9000"
+    environment:
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+    secrets:
+      - mysql_root_password
+      - runtime_token
+      - bootstrap_password
+      - bootstrap_token
     volumes:
-      - ./portal/configs/config.docker.yaml:/data/conf/config.yaml:ro
+      - ./portal/configs/config.docker.yaml:/data/conf-ro/config.yaml:ro
+    tmpfs:
+      - /data/conf:mode=1777
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/readyz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: unless-stopped
+    mem_limit: 1g
 
   gateway:
     build:
       context: .
       dockerfile: gateway/Dockerfile
     ports:
-      - "18088:8088"
-    environment:
-      SATH_RUNTIME_TOKEN: dev-runtime-token
+      - "${GATEWAY_HOST_PORT:-18088}:8088"
+    secrets:
+      - runtime_token
     volumes:
       - ./gateway/configs/config.docker.yaml:/app/configs/config.docker.yaml:ro
       - ./gateway/configs/channels.yaml:/app/configs/channels.yaml:ro
     depends_on:
-      - portal
+      portal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8088/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+    mem_limit: 512m
 
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
     ports:
-      # host 8080 taken by http-server; use 18080
-      - "18080:80"
+      - "${WEB_HOST_PORT:-18080}:80"
     depends_on:
-      - portal
-      - gateway
+      portal:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 128m
 
 volumes:
   mysql_data:
