@@ -32,6 +32,15 @@ type chatBackend interface {
 
 type peerBackend interface {
 	Resolve(ctx context.Context, in biz.ChannelPeerResolveInput) (*biz.ChannelPeerResolveResult, error)
+	DeleteBinding(ctx context.Context, channelID, peerID string) error
+}
+
+type channelReader interface {
+	GetByChannelID(ctx context.Context, channelID string) (*biz.ChannelMeta, error)
+}
+
+type agentReader interface {
+	GetForSession(ctx context.Context, id string) (*biz.AgentMeta, error)
 }
 
 type sessionBackend interface {
@@ -54,16 +63,20 @@ type TurnBackend interface {
 type Service struct {
 	chat     chatBackend
 	peer     peerBackend
+	channels channelReader
+	agents   agentReader
 	sessions sessionBackend
 	rewinder RewindBackend
 	turns    TurnBackend
 }
 
-// NewService wires ChatUsecase + ChannelPeerUsecase (+ session repo ACL + rewind/turn backends).
-func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend) *Service {
+// NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
+func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend) *Service {
 	return &Service{
 		chat:     chatUC,
 		peer:     peerUC,
+		channels: channelUC,
+		agents:   agentUC,
 		sessions: sessions,
 		rewinder: rewinder,
 		turns:    turns,
@@ -74,6 +87,8 @@ type resolveRequest struct {
 	ChannelID string `json:"channel_id"`
 	PeerID    string `json:"peer_id"`
 	AgentID   string `json:"agent_id"`
+	ForceNew  bool   `json:"force_new"`
+	Reason    string `json:"reason"`
 }
 
 type resolveReply struct {
@@ -116,6 +131,16 @@ type turnFinalReply struct {
 	Error         string `json:"error,omitempty"`
 }
 
+type channelAgentItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type channelAgentsReply struct {
+	DefaultAgent string             `json:"default_agent"`
+	Agents       []channelAgentItem `json:"agents"`
+}
+
 // turnFinalTimeout caps reply_mode=final; overridable in tests.
 var turnFinalTimeout = 120 * time.Second
 
@@ -124,6 +149,8 @@ func (s *Service) resolve(ctx context.Context, req resolveRequest) (*resolveRepl
 		ChannelID: req.ChannelID,
 		PeerID:    req.PeerID,
 		AgentID:   req.AgentID,
+		ForceNew:  req.ForceNew,
+		Reason:    req.Reason,
 	})
 	if err != nil {
 		return nil, err
@@ -133,6 +160,68 @@ func (s *Service) resolve(ctx context.Context, req resolveRequest) (*resolveRepl
 		AgentID:   out.AgentID,
 		UserID:    biz.PeerUserID(req.ChannelID, req.PeerID),
 		Created:   out.Created,
+	}, nil
+}
+
+func (s *Service) deleteBinding(ctx context.Context, channelID, peerID string) error {
+	channelID = strings.TrimSpace(channelID)
+	peerID = strings.TrimSpace(peerID)
+	if channelID == "" || peerID == "" {
+		return errors.BadRequest("INVALID_ARGUMENT", "channel_id and peer_id are required")
+	}
+	if s.peer == nil {
+		return errors.InternalServer("UNAVAILABLE", "peer resolver unavailable")
+	}
+	err := s.peer.DeleteBinding(ctx, channelID, peerID)
+	if err != nil && stderrors.Is(err, pkgErrors.ErrNotFound) {
+		return nil // idempotent unbind
+	}
+	return err
+}
+
+func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*channelAgentsReply, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", "channel_id is required")
+	}
+	if s.channels == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "channel store unavailable")
+	}
+	ch, err := s.channels.GetByChannelID(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	ids := ch.AllowedAgents
+	if len(ids) == 0 {
+		if def := strings.TrimSpace(ch.DefaultAgent); def != "" {
+			ids = []string{def}
+		}
+	}
+	agents := make([]channelAgentItem, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		name := ""
+		if s.agents != nil {
+			meta, getErr := s.agents.GetForSession(ctx, id)
+			if getErr != nil {
+				// Skip missing agents; surface unexpected store errors.
+				if stderrors.Is(getErr, biz.ErrAgentNotFound) || stderrors.Is(getErr, pkgErrors.ErrNotFound) || errors.IsNotFound(getErr) {
+					continue
+				}
+				return nil, getErr
+			}
+			if meta != nil {
+				name = meta.Name
+			}
+		}
+		agents = append(agents, channelAgentItem{ID: id, Name: name})
+	}
+	return &channelAgentsReply{
+		DefaultAgent: ch.DefaultAgent,
+		Agents:       agents,
 	}, nil
 }
 

@@ -22,11 +22,13 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 		return
 	}
 	r := srv.Route("/")
-	// Register static paths before /sessions/{id} so "search" / "resolve" are not captured.
+	// Register static paths before /sessions/{id} so "search" / "resolve" / "binding" are not captured.
 	r.POST("/runtime/v1/sessions/resolve", svc.wrap(svc.handleResolve))
+	r.DELETE("/runtime/v1/sessions/binding", svc.wrap(svc.handleDeleteBinding))
 	r.GET("/runtime/v1/sessions/search", svc.wrap(svc.handleSearch))
 	r.POST("/runtime/v1/sessions", svc.wrap(svc.handleCreate))
 	r.GET("/runtime/v1/sessions", svc.wrap(svc.handleListAll))
+	r.GET("/runtime/v1/channels/{channel_id}/agents", svc.wrap(svc.handleListChannelAgents))
 	r.GET("/runtime/v1/agents/{agent_id}/sessions", svc.wrap(svc.handleListByAgent))
 	r.GET("/runtime/v1/sessions/{id}", svc.wrap(svc.handleGet))
 	r.PUT("/runtime/v1/sessions/{id}", svc.wrap(svc.handleUpdate))
@@ -91,6 +93,24 @@ func (s *Service) handleResolve(ctx context.Context, hctx khttp.Context) error {
 		return err
 	}
 	out, err := s.resolve(ctx, req)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
+}
+
+func (s *Service) handleDeleteBinding(ctx context.Context, hctx khttp.Context) error {
+	channelID := strings.TrimSpace(hctx.Query().Get("channel_id"))
+	peerID := strings.TrimSpace(hctx.Query().Get("peer_id"))
+	if err := s.deleteBinding(ctx, channelID, peerID); err != nil {
+		return err
+	}
+	return hctx.JSON(200, map[string]any{"ok": true})
+}
+
+func (s *Service) handleListChannelAgents(ctx context.Context, hctx khttp.Context) error {
+	channelID := strings.TrimSpace(hctx.Vars().Get("channel_id"))
+	out, err := s.listChannelAgents(ctx, channelID)
 	if err != nil {
 		return err
 	}
