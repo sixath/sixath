@@ -1,7 +1,7 @@
 # Gateway / Portal 入站 Agent 路由与改绑
 
 **日期**: 2026-08-10  
-**状态**: 设计已确认；待实现规划  
+**状态**: 实现中（Gateway 指令 + Portal Resolve/白名单；文档与 yaml 迁移说明已对齐）  
 **目标**: 打破「渠道 default_agent + channel+peer 映射后永不换绑」的僵硬模型；一期交付多 Agent 白名单与显式改绑（新开 session），配置权威在 Portal。
 
 **关联**:
