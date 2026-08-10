@@ -34,6 +34,7 @@ func wireApp(*conf.Server, *conf.Data, *conf.Auth, llmReviewEnabledInput, growth
 		runtime.NewService,
 		wire.Bind(new(runtime.RewindBackend), new(*service.ChatService)),
 		wire.Bind(new(runtime.TurnBackend), new(*service.ChatService)),
+		wire.Bind(new(server.DBPinger), new(*data.Data)),
 		provideGrowthWorker,
 		provideCuratorWorker,
 		newApp,

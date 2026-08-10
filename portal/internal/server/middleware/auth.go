@@ -32,7 +32,7 @@ func Auth(lookup TokenLookup, orgChecker OrgMembership) middleware.Middleware {
 				return nil, errors.Unauthorized("UNAUTHORIZED", "HTTP request required")
 			}
 			path := request.URL.Path
-			if path == "/metrics" ||
+			if path == "/metrics" || path == "/healthz" || path == "/readyz" ||
 				strings.HasPrefix(path, webhookPrefix) ||
 				strings.HasPrefix(path, authPublicPrefix) ||
 				isRuntimePath(path) {

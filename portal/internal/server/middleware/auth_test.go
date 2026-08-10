@@ -186,6 +186,26 @@ func TestAuthSkipsMetricsPath(t *testing.T) {
 	}
 }
 
+func TestAuthSkipsHealthzAndReadyz(t *testing.T) {
+	for _, path := range []string{"/healthz", "/readyz"} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			called := false
+			handler := Auth(fakeTokenLookup{}, fakeOrgMembership{})(func(context.Context, interface{}) (interface{}, error) {
+				called = true
+				return "ok", nil
+			})
+			ctx := transport.NewServerContext(context.Background(), fakeHTTPTransport{request: request})
+			if _, err := handler(ctx, nil); err != nil {
+				t.Fatalf("handler returned error: %v", err)
+			}
+			if !called {
+				t.Fatalf("handler was not called for %s", path)
+			}
+		})
+	}
+}
+
 func TestAuthSkipsRuntimeV1Paths(t *testing.T) {
 	for _, path := range []string{"/runtime/v1", "/runtime/v1/_auth_ping", "/runtime/v1/sessions"} {
 		t.Run(path, func(t *testing.T) {

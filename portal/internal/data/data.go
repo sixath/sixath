@@ -81,3 +81,15 @@ func (d *Data) DB() *gorm.DB {
 	}
 	return d.db
 }
+
+// Ping checks the underlying SQL connection (used by /readyz).
+func (d *Data) Ping(ctx context.Context) error {
+	if d == nil || d.db == nil {
+		return errors.New("database not initialized")
+	}
+	sqlDB, err := d.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
+}

@@ -67,7 +67,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, main
 	channelPeerSessionRepo := data.NewChannelPeerSessionRepo(dataData, logger)
 	channelPeerUsecase := biz.NewChannelPeerUsecase(channelPeerSessionRepo, chatSessionRepo)
 	runtimeService := runtime.NewService(chatUsecase, channelPeerUsecase, chatSessionRepo, chatService, chatService)
-	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, runtimeService, logger)
+	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, runtimeService, dataData, logger)
 	duration := cron.ProvideSchedulerInterval()
 	scheduler := cron.NewScheduler(cronUsecase, executor, duration, logger)
 	cronServer := cron.NewServer(scheduler)
