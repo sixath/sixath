@@ -140,14 +140,20 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
 	}
 
-	agentID := ch.DefaultAgent
+	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, ch.ID, n.PeerID, n.QuestionText); isCmd {
+		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, cmdReply)
+		_ = conn.RespondStream(ctx, reqID, streamID, card, true)
+		deps.Idempotency.Complete(n.MsgID, card)
+		return
+	}
+
+	// Portal owns default/allowlist; do not send yaml default_agent.
 	resolved, err := deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
 		ChannelID: ch.ID,
 		PeerID:    n.PeerID,
-		AgentID:   agentID,
 	})
 	if err != nil {
-		failMsg := err.Error()
+		failMsg := mapRuntimeUserError(err)
 		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
@@ -162,7 +168,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		IdempotencyKey: n.MsgID,
 	})
 	if err != nil {
-		failMsg := err.Error()
+		failMsg := mapRuntimeUserError(err)
 		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return

@@ -28,6 +28,7 @@ type webhookBody struct {
 	Content        string `json:"content"`
 	PeerID         string `json:"peer_id"`
 	AgentID        string `json:"agent_id"`
+	ForceNew       bool   `json:"force_new"`
 	ReplyURL       string `json:"reply_url"`
 	IdempotencyKey string `json:"idempotency_key"`
 	ReplyMode      string `json:"reply_mode"`
@@ -120,19 +121,6 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := r.Context()
-	resolved, err := h.deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
-		ChannelID: ev.ChannelID,
-		PeerID:    ev.PeerID,
-		AgentID:   ev.AgentID,
-	})
-	if err != nil {
-		log.Printf("webhook resolve: %v", err)
-		http.Error(w, "resolve failed", http.StatusBadGateway)
-		return
-	}
-	userID := resolved.UserID
-
 	corr := newCorrelationID()
 	ev.CorrelationID = corr
 	if _, ok := h.deps.Idempotency.Begin(ev.IdempotencyKey, corr); !ok {
@@ -143,6 +131,51 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	ctx := r.Context()
+	if cmdReply, isCmd := runSlashCommand(ctx, h.deps.Runtime, h.deps.Sessions, ev.ChannelID, ev.PeerID, ev.Content); isCmd {
+		payload := reply.FinalPayload{
+			CorrelationID: corr,
+			Status:        "ok",
+			Content:       cmdReply,
+		}
+		h.finishCommand(w, ev, payload)
+		return
+	}
+
+	resolved, err := h.deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
+		ChannelID: ev.ChannelID,
+		PeerID:    ev.PeerID,
+		AgentID:   ev.AgentID,
+		ForceNew:  ev.ForceNew,
+	})
+	if err != nil {
+		log.Printf("webhook resolve: %v", err)
+		msg := mapRuntimeUserError(err)
+		payload := reply.FinalPayload{
+			CorrelationID: corr,
+			Status:        "failed",
+			Error:         msg,
+		}
+		h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+		if ev.ReplyMode == "sync" {
+			writeJSON(w, http.StatusOK, payload)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": corr})
+		if ev.ReplyURL != "" {
+			go func() {
+				rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = h.deps.Reply.PostReplyURL(rctx, ev.ReplyURL, payload)
+			}()
+		}
+		return
+	}
+	if ev.ForceNew {
+		h.deps.Sessions.Invalidate(ev.ChannelID, ev.PeerID)
+	}
+	userID := resolved.UserID
+
 	if ev.ReplyMode == "sync" {
 		h.handleSync(w, ev, resolved.SessionID, userID)
 		return
@@ -150,6 +183,27 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": corr})
 	go h.runAsync(ev, resolved.SessionID, userID)
+}
+
+func (h *WebhookHandler) finishCommand(w http.ResponseWriter, ev InboundEvent, payload reply.FinalPayload) {
+	h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+	if ev.ReplyMode == "sync" {
+		if ev.ReplyURL != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_ = h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload)
+		}
+		writeJSON(w, http.StatusOK, payload)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": payload.CorrelationID})
+	if ev.ReplyURL != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_ = h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload)
+		}()
+	}
 }
 
 func (h *WebhookHandler) handleSync(w http.ResponseWriter, ev InboundEvent, sessionID, userID string) {
@@ -191,7 +245,7 @@ func (h *WebhookHandler) runTurn(ctx context.Context, ev InboundEvent, sessionID
 		return reply.FinalPayload{
 			CorrelationID: ev.CorrelationID,
 			Status:        "failed",
-			Error:         err.Error(),
+			Error:         mapRuntimeUserError(err),
 		}
 	}
 	status := out.Status
@@ -220,10 +274,8 @@ func normalizeWebhook(channelID string, ch channel.Channel, raw []byte) (Inbound
 	if body.PeerID == "" {
 		return InboundEvent{}, errBadRequest("peer_id is required")
 	}
+	// Do not fall back to yaml default_agent — Portal is the routing source of truth.
 	agentID := strings.TrimSpace(body.AgentID)
-	if agentID == "" {
-		agentID = ch.DefaultAgent
-	}
 	mode := strings.ToLower(strings.TrimSpace(body.ReplyMode))
 	if mode == "" {
 		mode = strings.ToLower(strings.TrimSpace(ch.DefaultReplyMode))
@@ -243,6 +295,7 @@ func normalizeWebhook(channelID string, ch channel.Channel, raw []byte) (Inbound
 		PeerID:         body.PeerID,
 		Content:        body.Content,
 		AgentID:        agentID,
+		ForceNew:       body.ForceNew,
 		ReplyURL:       replyURL,
 		IdempotencyKey: strings.TrimSpace(body.IdempotencyKey),
 		ReplyMode:      mode,

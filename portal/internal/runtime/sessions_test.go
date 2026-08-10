@@ -148,12 +148,19 @@ func (f *fakeSessions) GetByID(_ context.Context, id string) (*biz.ChatSession, 
 
 type fakePeer struct {
 	lastChannel, lastPeer, lastAgent string
+	lastForceNew                     bool
+	lastReason                       string
 	result                           *biz.ChannelPeerResolveResult
 	err                              error
+	deletedChannel, deletedPeer      string
+	deleteErr                        error
+	deleteCalls                      int
 }
 
-func (f *fakePeer) Resolve(_ context.Context, channelID, peerID, agentID string) (*biz.ChannelPeerResolveResult, error) {
-	f.lastChannel, f.lastPeer, f.lastAgent = channelID, peerID, agentID
+func (f *fakePeer) Resolve(_ context.Context, in biz.ChannelPeerResolveInput) (*biz.ChannelPeerResolveResult, error) {
+	f.lastChannel, f.lastPeer, f.lastAgent = in.ChannelID, in.PeerID, in.AgentID
+	f.lastForceNew = in.ForceNew
+	f.lastReason = in.Reason
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -162,9 +169,43 @@ func (f *fakePeer) Resolve(_ context.Context, channelID, peerID, agentID string)
 	}
 	return &biz.ChannelPeerResolveResult{
 		SessionID: "resolved-sess",
-		AgentID:   agentID,
+		AgentID:   in.AgentID,
 		Created:   true,
 	}, nil
+}
+
+func (f *fakePeer) DeleteBinding(_ context.Context, channelID, peerID string) error {
+	f.deleteCalls++
+	f.deletedChannel, f.deletedPeer = channelID, peerID
+	return f.deleteErr
+}
+
+type fakeChannelReader struct {
+	byID map[string]*biz.ChannelMeta
+	err  error
+}
+
+func (f *fakeChannelReader) GetByChannelID(_ context.Context, channelID string) (*biz.ChannelMeta, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	ch, ok := f.byID[channelID]
+	if !ok {
+		return nil, biz.ErrChannelNotFound
+	}
+	return ch, nil
+}
+
+type fakeAgentReader struct {
+	byID map[string]*biz.AgentMeta
+}
+
+func (f *fakeAgentReader) GetForSession(_ context.Context, id string) (*biz.AgentMeta, error) {
+	a, ok := f.byID[id]
+	if !ok {
+		return nil, biz.ErrAgentNotFound
+	}
+	return a, nil
 }
 
 type fakeRewind struct{}
@@ -192,6 +233,13 @@ func newTestService(chat *fakeChat, peer *fakePeer, sessions *fakeSessions) *Ser
 		sessions = &fakeSessions{byID: chat.sessions}
 	}
 	return &Service{chat: chat, peer: peer, sessions: sessions, rewinder: fakeRewind{}}
+}
+
+func newTestServiceFull(chat *fakeChat, peer *fakePeer, sessions *fakeSessions, channels *fakeChannelReader, agents *fakeAgentReader) *Service {
+	svc := newTestService(chat, peer, sessions)
+	svc.channels = channels
+	svc.agents = agents
+	return svc
 }
 
 func runtimeReq(method, path, body string, userID string, withToken bool) *http.Request {
@@ -247,6 +295,125 @@ func TestRuntimeSessions_Resolve(t *testing.T) {
 	wantUser := biz.PeerUserID("ch1", "p1")
 	if body.SessionID != "resolved-sess" || body.AgentID != "agent-1" || !body.Created || body.UserID != wantUser {
 		t.Fatalf("unexpected resolve body: %+v want user_id=%q", body, wantUser)
+	}
+}
+
+func TestRuntimeSessions_ResolveForceNew(t *testing.T) {
+	peer := &fakePeer{}
+	srv := testRuntimeServer(t, newTestService(nil, peer, nil))
+	req := runtimeReq(http.MethodPost, "/runtime/v1/sessions/resolve",
+		`{"channel_id":"ch1","peer_id":"p1","agent_id":"agent-2","force_new":true,"reason":"slash_agent"}`, "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !peer.lastForceNew {
+		t.Fatal("expected ForceNew=true forwarded to peer resolver")
+	}
+	if peer.lastAgent != "agent-2" || peer.lastReason != "slash_agent" {
+		t.Fatalf("resolve force_new args agent=%q reason=%q", peer.lastAgent, peer.lastReason)
+	}
+}
+
+func TestRuntimeSessions_ResolveAgentBound(t *testing.T) {
+	peer := &fakePeer{err: biz.ErrAgentBound}
+	srv := testRuntimeServer(t, newTestService(nil, peer, nil))
+	req := runtimeReq(http.MethodPost, "/runtime/v1/sessions/resolve",
+		`{"channel_id":"ch1","peer_id":"p1","agent_id":"agent-other"}`, "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Reason string `json:"reason"`
+		Code   int    `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if body.Reason != "AGENT_BOUND" && !strings.Contains(rec.Body.String(), "AGENT_BOUND") {
+		t.Fatalf("expected AGENT_BOUND in body, got %s", rec.Body.String())
+	}
+}
+
+func TestRuntimeSessions_DeleteBinding(t *testing.T) {
+	peer := &fakePeer{}
+	srv := testRuntimeServer(t, newTestService(nil, peer, nil))
+	req := runtimeReq(http.MethodDelete, "/runtime/v1/sessions/binding?channel_id=ch1&peer_id=p1", "", "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if peer.deletedChannel != "ch1" || peer.deletedPeer != "p1" || peer.deleteCalls != 1 {
+		t.Fatalf("delete args = (%q,%q) calls=%d", peer.deletedChannel, peer.deletedPeer, peer.deleteCalls)
+	}
+}
+
+func TestRuntimeSessions_DeleteBindingIdempotent(t *testing.T) {
+	peer := &fakePeer{deleteErr: pkgErrors.ErrNotFound}
+	srv := testRuntimeServer(t, newTestService(nil, peer, nil))
+	req := runtimeReq(http.MethodDelete, "/runtime/v1/sessions/binding?channel_id=ch1&peer_id=missing", "", "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for already-gone binding; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRuntimeSessions_ListChannelAgents(t *testing.T) {
+	channels := &fakeChannelReader{byID: map[string]*biz.ChannelMeta{
+		"ch1": {
+			ChannelID:     "ch1",
+			DefaultAgent:  "agent-a",
+			AllowedAgents: []string{"agent-a", "agent-b", "missing"},
+		},
+	}}
+	agents := &fakeAgentReader{byID: map[string]*biz.AgentMeta{
+		"agent-a": {ID: "agent-a", Name: "Alpha"},
+		"agent-b": {ID: "agent-b", Name: "Beta"},
+	}}
+	srv := testRuntimeServer(t, newTestServiceFull(nil, nil, nil, channels, agents))
+	req := runtimeReq(http.MethodGet, "/runtime/v1/channels/ch1/agents", "", "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var body channelAgentsReply
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if body.DefaultAgent != "agent-a" {
+		t.Fatalf("default_agent = %q", body.DefaultAgent)
+	}
+	if len(body.Agents) != 2 || body.Agents[0] != (channelAgentItem{ID: "agent-a", Name: "Alpha"}) || body.Agents[1] != (channelAgentItem{ID: "agent-b", Name: "Beta"}) {
+		t.Fatalf("agents = %+v", body.Agents)
+	}
+}
+
+func TestRuntimeSessions_ListChannelAgentsEmptyAllowlist(t *testing.T) {
+	channels := &fakeChannelReader{byID: map[string]*biz.ChannelMeta{
+		"ch1": {ChannelID: "ch1", DefaultAgent: "agent-only"},
+	}}
+	agents := &fakeAgentReader{byID: map[string]*biz.AgentMeta{
+		"agent-only": {ID: "agent-only", Name: "Only"},
+	}}
+	srv := testRuntimeServer(t, newTestServiceFull(nil, nil, nil, channels, agents))
+	req := runtimeReq(http.MethodGet, "/runtime/v1/channels/ch1/agents", "", "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var body channelAgentsReply
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if body.DefaultAgent != "agent-only" || len(body.Agents) != 1 || body.Agents[0].ID != "agent-only" || body.Agents[0].Name != "Only" {
+		t.Fatalf("body = %+v", body)
 	}
 }
 

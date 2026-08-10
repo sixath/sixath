@@ -1,5 +1,9 @@
 # Gateway ChannelRegistry (compose mounts this file).
 # E2E: see _neo4j_q/verify_inbound_gateway.ps1
+#
+# Agent routing: Portal owns default_agent + allowed_agents per channel_id (yaml id).
+# default_agent below is optional/deprecated — NOT used for Resolve; register each id in Portal.
+# Protocol secrets (webhook_secret, bot_id, secret, …) stay here; restart Gateway after edits.
 channels:
   - id: demo-webhook
     type: webhook

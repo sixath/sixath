@@ -286,6 +286,111 @@ func TestWebhook_Sync_200(t *testing.T) {
 	}
 }
 
+func TestWebhook_AgentSwitchCommand_NoTurn_ForceNew(t *testing.T) {
+	var turns int32
+	var gotResolve map[string]any
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/channels/demo-webhook/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "agent-1",
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/sessions/resolve":
+			_ = json.NewDecoder(r.Body).Decode(&gotResolve)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-switch-99",
+				"agent_id":   "agent-2",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case r.URL.Path == "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "should-not-run"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer portal.Close()
+
+	h, _, cleanup := newWebhookFixtureWithPortal(t, channelYAML(true, nil), portal.URL)
+	defer cleanup()
+
+	rr := postHook(t, h, "demo-webhook", "dev-webhook-secret", "127.0.0.1:1", map[string]any{
+		"content":    "/agent Ops Bot",
+		"peer_id":    "p1",
+		"reply_mode": "sync",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("body=%v", body)
+	}
+	content, _ := body["content"].(string)
+	if !strings.Contains(content, "已切换到") || !strings.Contains(content, "Ops Bot") {
+		t.Fatalf("content=%q", content)
+	}
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("expected 0 turns, got %d", turns)
+	}
+	if gotResolve == nil {
+		t.Fatal("expected resolve call")
+	}
+	if gotResolve["force_new"] != true {
+		t.Fatalf("force_new=%v want true", gotResolve["force_new"])
+	}
+	if gotResolve["agent_id"] != "agent-2" {
+		t.Fatalf("agent_id=%v want agent-2", gotResolve["agent_id"])
+	}
+}
+
+func TestWebhook_NonCommand_OmitsYamlDefaultAgent(t *testing.T) {
+	var gotResolve map[string]any
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/runtime/v1/sessions/resolve":
+			_ = json.NewDecoder(r.Body).Decode(&gotResolve)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "portal-default",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case r.URL.Path == "/runtime/v1/turns":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer portal.Close()
+
+	h, _, cleanup := newWebhookFixtureWithPortal(t, channelYAML(true, nil), portal.URL)
+	defer cleanup()
+
+	rr := postHook(t, h, "demo-webhook", "dev-webhook-secret", "127.0.0.1:1", map[string]any{
+		"content":    "hi",
+		"peer_id":    "p1",
+		"reply_mode": "sync",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, ok := gotResolve["agent_id"]; ok {
+		t.Fatalf("expected agent_id omitted, got %v", gotResolve["agent_id"])
+	}
+	if gotResolve["force_new"] == true {
+		t.Fatalf("unexpected force_new=%v", gotResolve["force_new"])
+	}
+}
+
 func TestWebhook_PortalFailed_ReplyURLFailed(t *testing.T) {
 	t.Setenv("GATEWAY_ALLOW_LOOPBACK_REPLY", "1")
 	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

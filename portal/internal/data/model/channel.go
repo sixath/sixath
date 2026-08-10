@@ -35,6 +35,7 @@ type Channel struct {
 	ChannelID     string      `gorm:"column:channel_id;uniqueIndex;size:64;not null"`
 	Type          string      `gorm:"column:type;size:16;not null"` // web, api, webhook, wxpusher, wecom
 	DefaultAgent  string      `gorm:"column:default_agent;size:36"`
+	AllowedAgents StringSlice `gorm:"column:allowed_agents;type:json"`
 	Enabled       bool        `gorm:"column:enabled;not null;default:true"`
 	WebhookPath   string      `gorm:"column:webhook_path;size:256"`
 	WebhookSecret string      `gorm:"column:webhook_secret;size:256"`

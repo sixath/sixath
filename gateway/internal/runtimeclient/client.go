@@ -56,7 +56,21 @@ func New(baseURL, token string) *Client {
 type ResolveRequest struct {
 	ChannelID string `json:"channel_id"`
 	PeerID    string `json:"peer_id"`
-	AgentID   string `json:"agent_id"`
+	AgentID   string `json:"agent_id,omitempty"`
+	ForceNew  bool   `json:"force_new,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ChannelAgentItem is one agent in a channel allowlist response.
+type ChannelAgentItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ChannelAgentsReply is GET /runtime/v1/channels/{channel_id}/agents.
+type ChannelAgentsReply struct {
+	DefaultAgent string             `json:"default_agent"`
+	Agents       []ChannelAgentItem `json:"agents"`
 }
 
 // ResolveReply is the resolve response.
@@ -124,6 +138,24 @@ type TurnFinalReply struct {
 func (c *Client) ResolveSession(ctx context.Context, userID string, req ResolveRequest) (*ResolveReply, error) {
 	var out ResolveReply
 	if err := c.doJSON(ctx, http.MethodPost, "/runtime/v1/sessions/resolve", userID, nil, req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteBinding removes the channel+peer session mapping on Portal (idempotent).
+func (c *Client) DeleteBinding(ctx context.Context, channelID, peerID string) error {
+	vals := url.Values{}
+	vals.Set("channel_id", strings.TrimSpace(channelID))
+	vals.Set("peer_id", strings.TrimSpace(peerID))
+	return c.doJSON(ctx, http.MethodDelete, "/runtime/v1/sessions/binding", "", vals, nil, nil)
+}
+
+// ListChannelAgents returns default and allowlisted agents for a channel.
+func (c *Client) ListChannelAgents(ctx context.Context, channelID string) (*ChannelAgentsReply, error) {
+	path := "/runtime/v1/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/agents"
+	var out ChannelAgentsReply
+	if err := c.doJSON(ctx, http.MethodGet, path, "", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

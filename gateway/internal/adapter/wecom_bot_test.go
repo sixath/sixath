@@ -222,6 +222,105 @@ func TestWecomBot_TurnFailure_FailureCard(t *testing.T) {
 	}
 }
 
+func TestWecomBot_AgentListCommand_NoTurn(t *testing.T) {
+	var turns int32
+	var resolveCalls int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "agent-1",
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/resolve":
+			atomic.AddInt32(&resolveCalls, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case r.URL.Path == "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "nope"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-agents","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/agents"}}`)
+
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-agents", ch, n, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("expected 0 turns, got %d", turns)
+	}
+	if atomic.LoadInt32(&resolveCalls) != 0 {
+		t.Fatalf("list command should not resolve, got %d", resolveCalls)
+	}
+	calls := conn.snapshot()
+	if len(calls) != 2 || !calls[1].finish {
+		t.Fatalf("respond calls=%+v", calls)
+	}
+	if !strings.Contains(calls[1].content, "可用 Agent") || !strings.Contains(calls[1].content, "Ops") {
+		t.Fatalf("list reply=%q", calls[1].content)
+	}
+}
+
+func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
+	var turns int32
+	var gotResolve map[string]any
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "agent-1",
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/resolve":
+			_ = json.NewDecoder(r.Body).Decode(&gotResolve)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-new",
+				"agent_id":   "agent-2",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case r.URL.Path == "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "nope"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-switch","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"@小天才 /agent agent-2"}}`)
+
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-switch", ch, n, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("expected 0 turns, got %d", turns)
+	}
+	if gotResolve["force_new"] != true || gotResolve["agent_id"] != "agent-2" {
+		t.Fatalf("resolve=%v", gotResolve)
+	}
+	calls := conn.snapshot()
+	if len(calls) != 2 || !strings.Contains(calls[1].content, "已切换到") {
+		t.Fatalf("respond=%+v", calls)
+	}
+}
+
 func TestWecomBot_ReqIDPassthrough(t *testing.T) {
 	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

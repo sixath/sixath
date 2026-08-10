@@ -5,6 +5,7 @@
 **目标**: 引入独立 Gateway 进程，作为 Web 与外部渠道（一期通用 Webhook；后续微信/企微等）的统一入站对话入口；Portal 专注 Agent Runtime 执行。
 
 **关联**:
+- [Gateway / Portal 入站 Agent 路由与改绑](./2026-08-10-gateway-portal-agent-routing-design.md)（default/白名单权威在 Portal；slash 改绑）
 - [Portal 架构设计 · Channel](../../../portal/docs/architecture_design.md)（§6.6 渠道路由草图；本稿取代「Webhook 直接挂 Portal」为权威入站路径）
 - [Harness Engineering 差距](./2026-07-11-harness-engineering-gap-design.md)（S4 Gateway / 多 IM 原标近季不做；本稿重启为可分期交付的入站脊柱）
 - [企微群机器人](../../../portal/docs/superpowers/specs/2026-06-04-wecom-bot-design.md)（现有**出站**能力；一期不迁入 Gateway）

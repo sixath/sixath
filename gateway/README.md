@@ -8,10 +8,13 @@ Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→sessi
 |------|------|
 | 本 README | 架构 + 本地用法 + 企微长连接配置 |
 | [入站 Gateway 设计](../docs/superpowers/specs/2026-08-09-inbound-gateway-design.md) | Web / Webhook 契约 |
+| [Portal 入站 Agent 路由](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md) | default/白名单、改绑、指令 |
 | [企微智能机器人设计](../docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md) | 长连接 Adapter |
 | 官方 | [智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463) |
 
 进程配置：`configs/config.example.yaml`。渠道列表：`configs/channels.yaml`（**勿提交**真实 `bot_id` / `secret` / `corp_secret`）。
+
+**Agent 路由权威在 Portal**，不在 `channels.yaml`：见下文 [Agent 路由与改绑](#agent-路由与改绑)。
 
 ---
 
@@ -47,7 +50,7 @@ Portal Channel type=wecom (群 Webhook URL)  ──▶  send_to_wecom / Cron（�
 
 | 组件 | 做什么 | 不做什么 |
 |------|--------|----------|
-| **Gateway** | 渠道配置、协议适配、入站鉴权、`channel+peer→session`、回复形态（SSE / ack / 企微 stream 卡片） | 不跑 Agent、不注册业务工具 |
+| **Gateway** | 协议/密钥配置（yaml）、协议适配、入站鉴权、`channel+peer→session` 缓存、slash 指令翻译、回复形态（SSE / ack / 企微 stream 卡片） | 不跑 Agent、不持有 default/白名单真相、不注册业务工具 |
 | **Portal Runtime** | 会话持久化、Turn 执行、工具/记忆/HITL | 不直接对接企微长连接入站 |
 | **Portal `type=wecom`** | Agent 工具 / Cron **单向推群** | 不负责 @续聊入站 |
 
@@ -74,6 +77,33 @@ aibot_msg_callback
 - **final** 出站只含助手正文，**不含** Web 调试时间线 / `debugRun` 工具过程。
 - HITL（确认卡等）在企微面 fail-closed，提示去 Web。
 - 同一 `bot_id` **同时只能一条**有效长连接（多副本勿重复 `enabled`）。
+
+---
+
+## Agent 路由与改绑
+
+入站 **`channel_id`（yaml 里的 `id`）必须在 Portal `channels` 表中有对应行**。Gateway Resolve 只认 Portal 上的 `default_agent` 与 `allowed_agents`；Portal 无该渠道时 **fail-closed**（`CHANNEL_NOT_FOUND`）。改 default / 白名单走 Portal 管理 API 或 UI，**下一请求即生效**，无需重启 Gateway。
+
+| 配置项 | 权威 | 说明 |
+|--------|------|------|
+| `bot_id`、`secret`、webhook_secret、IP 白名单等 | `channels.yaml` | 变更通常需 **重启** Gateway |
+| `default_agent`、`allowed_agents` | **Portal `channels`** | 即时生效；Gateway 经 `GET /runtime/v1/channels/{id}/agents` 与 Resolve 使用 |
+| `channel+peer → session` | Portal `channel_peer_sessions` | 改绑时 upsert；Gateway SessionRouter 为短缓存 |
+
+`channels.yaml` 里的 **`default_agent` 可选、已废弃为路由真相**（仅遗留字段/本地示例；Resolve **不会**回退到 yaml）。新环境请在 Portal 为每个入站 `channel_id` 配置 default 与白名单，勿依赖改 yaml 换 Agent。
+
+### Slash 指令（Webhook / 企微等真人渠道）
+
+在业务 turn 之前拦截；成功时返回短确认，**本条不跑 Agent turn**。
+
+| 指令 | 行为 |
+|------|------|
+| `/agent <id\|name>` | `force_new=true`，切到白名单内 Agent 并新开 session |
+| `/agent` 或 `/agents` | 列出本渠道 default + allowed（Portal） |
+| `/new` | `force_new=true`，沿用当前映射 Agent 或 default，新开 session |
+| `/unbind` | 清除 `channel+peer` 映射；下一条普通消息按 default 新建 |
+
+Webhook body 可选 `agent_id` / `force_new`（与指令等价；白名单仍由 Portal 校验）。详见 [Agent 路由设计](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md)。
 
 ---
 
@@ -117,10 +147,10 @@ go build -o ./bin/gateway.exe ./cmd/gateway
 
 | 字段 | 说明 |
 |------|------|
-| `id` | Gateway 内渠道唯一标识（换 Agent 时可 bump，避免旧 peer 映射绑死旧 agent）。 |
+| `id` | 入站 **`channel_id`**；须与 Portal `channels.channel_id` **一致**（见 [Agent 路由与改绑](#agent-路由与改绑)）。 |
 | `type` | 固定 `wecom_bot`。 |
 | `enabled` | `true` 时启动 WS 并 `aibot_subscribe`。 |
-| `default_agent` | 会话绑定的 Agent UUID。 |
+| `default_agent` | **可选、非路由真相**；Agent 绑定以 Portal 为准。保留仅作迁移参考或旧示例。 |
 | `bot_id` / `secret` | 控制台 BotID + 长连接 Secret（`enabled: true` 时必填）。 |
 | `bot_names` | 可选。群内显示名，用于剥离 `@提及`。 |
 | `ws_url` | 可选。默认 `wss://openws.work.weixin.qq.com`。 |
@@ -131,7 +161,7 @@ channels:
   - id: xiaotiancai
     type: wecom_bot
     enabled: true
-    default_agent: "<agent-uuid>"
+    # default_agent: 勿依赖；在 Portal 配置该 channel_id 的 default_agent / allowed_agents
     bot_id: "<控制台 BotID>"
     secret: "<长连接 Secret>"
     bot_names: ["小天才"]
