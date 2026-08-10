@@ -26,6 +26,12 @@ tool.json
 **/.playwright-cli/
 scripts/deploy_remote.py
 
+.env
+secrets/*.txt
+!secrets/*.txt.example
+!secrets/README.md
+deploy/last-smoke.json
+
 .worktrees/
 
 # Large / local-only data dumps under portal

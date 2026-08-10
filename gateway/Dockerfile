@@ -20,14 +20,17 @@ FROM debian:stable-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
 		ca-certificates \
 		netbase \
+		curl \
 		&& rm -rf /var/lib/apt/lists/* \
 		&& apt-get autoremove -y && apt-get autoclean -y
 
 COPY --from=builder /out/gateway /app/gateway
 COPY gateway/configs /app/configs
+COPY deploy/gateway/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 WORKDIR /app
 
 EXPOSE 8088
 
-CMD ["./gateway", "-config", "/app/configs/config.docker.yaml"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
