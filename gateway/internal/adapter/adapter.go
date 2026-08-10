@@ -5,7 +5,8 @@ type InboundEvent struct {
 	ChannelID      string
 	PeerID         string
 	Content        string
-	AgentID        string
+	AgentID        string // optional; omit to let Portal pick default / binding
+	ForceNew       bool   // optional webhook override for non-command messages
 	ReplyURL       string
 	IdempotencyKey string
 	ReplyMode      string // async|sync
