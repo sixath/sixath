@@ -20,7 +20,7 @@ type DatasourceCatalogProvider struct {
 func (p *DatasourceCatalogProvider) Enrich(_ context.Context, entries []tool.ToolCatalogEntry) []tool.ToolCatalogEntry {
 	available := make([]DatasourceBinding, 0, len(p.Bindings))
 	for _, b := range p.Bindings {
-		if b.Available {
+		if b.Available && !b.SkipDataTools && !isElasticsearchType(b.Type) {
 			available = append(available, b)
 		}
 	}

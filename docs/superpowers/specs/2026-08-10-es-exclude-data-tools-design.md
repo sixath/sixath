@@ -1,7 +1,7 @@
 # ES 不进入 Data 三件套（保留 datasource 连接 + es_log_query / http_request）
 
 **日期**: 2026-08-10  
-**状态**: 设计已确认；待实现  
+**状态**: 已落地（Portal 过滤 + data 三件套拒绝 ES；正路 es_log_query / http_request）  
 **目标**: Elasticsearch 不再通过 `list_tables` / `describe_table` / `execute_read` 查询；ES 日志正路保留 `es_log_query` 与 `http_request`；`framework/datasource` 仍注册 elasticsearch，供 RCA 等按工具 id 引用 DSN（禁止把集群 URL 写死在技能或框架逻辑里）。
 
 **背景**:

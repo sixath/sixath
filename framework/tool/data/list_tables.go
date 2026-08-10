@@ -66,6 +66,10 @@ func buildListTablesExecute(cfg *ListTablesConfig) tool.ExecuteFunc {
 			status = "error"
 			return nil, errors.New("list_tables: datasource_id is required (or set default)")
 		}
+		if err := RejectElasticsearchDatasource(cfg.Registry, datasourceID, "list_tables"); err != nil {
+			status = "error"
+			return nil, err
+		}
 
 		schema, err := metadata.EnsureSchemaForDatasource(ctx, cfg.Registry, cfg.Store, datasourceID)
 		if err != nil {

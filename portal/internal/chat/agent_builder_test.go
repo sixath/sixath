@@ -80,6 +80,85 @@ func TestBuildRegistry_AllDatasourcesFailIncludesDetail(t *testing.T) {
 	}
 }
 
+func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
+	cfg, err := structpb.NewStruct(map[string]interface{}{
+		"datasource": map[string]interface{}{
+			"id":   "zj-es",
+			"type": "elasticsearch",
+			"dsn":  "http://127.0.0.1:9200",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewStruct: %v", err)
+	}
+	reg := tool.NewRegistry()
+	res, err := BuildRegistry([]*biz.ToolMeta{{
+		ID:     "es-1",
+		Name:   "zj-es",
+		Type:   biz.ToolTypeDatasource,
+		Config: cfg,
+	}}, nil, reg)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	for _, name := range []string{"list_tables", "describe_table", "execute_read"} {
+		if _, ok := reg.Get(name); ok {
+			t.Fatalf("ES-only agent must not register %s", name)
+		}
+	}
+	if res == nil || !strings.Contains(res.DatasourcePrompt, "es_log_query") {
+		t.Fatalf("prompt=%q", res.DatasourcePrompt)
+	}
+	if len(res.DsBindings) != 1 || !res.DsBindings[0].SkipDataTools {
+		t.Fatalf("bindings=%+v", res.DsBindings)
+	}
+}
+
+func TestBuildRegistry_MySQLPlusES_RegistersDataTrioForMySQLOnly(t *testing.T) {
+	mysqlCfg, err := structpb.NewStruct(map[string]interface{}{
+		"datasource": map[string]interface{}{
+			"id":     "cgarchive",
+			"type":   "mysql",
+			"dsn":    "user:pass@tcp(127.0.0.1:3306)/db",
+			"dbname": "db",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	esCfg, err := structpb.NewStruct(map[string]interface{}{
+		"datasource": map[string]interface{}{
+			"id":   "zj-es",
+			"type": "elasticsearch",
+			"dsn":  "http://127.0.0.1:9200",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	res, err := BuildRegistry([]*biz.ToolMeta{
+		{ID: "m1", Name: "cgarchive", Type: biz.ToolTypeDatasource, Config: mysqlCfg},
+		{ID: "e1", Name: "zj-es", Type: biz.ToolTypeDatasource, Config: esCfg},
+	}, nil, reg)
+	if err != nil {
+		// MySQL DSN may fail ping/register depending on factory — if so skip trio assert
+		if strings.Contains(err.Error(), "所有数据源均注册失败") {
+			t.Skipf("mysql register failed in env: %v", err)
+		}
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	if _, ok := reg.Get("execute_read"); !ok {
+		t.Fatal("expected execute_read when mysql registers")
+	}
+	if strings.Contains(res.DatasourcePrompt, "**zj-es**") {
+		t.Fatalf("ES must not be in data prompt list: %s", res.DatasourcePrompt)
+	}
+	if !strings.Contains(res.DatasourcePrompt, "es_log_query") {
+		t.Fatalf("missing ES hint: %s", res.DatasourcePrompt)
+	}
+}
+
 func containsAll(s string, parts ...string) bool {
 	for _, p := range parts {
 		if !strings.Contains(s, p) {

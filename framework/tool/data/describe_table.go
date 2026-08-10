@@ -66,6 +66,10 @@ func buildDescribeTableExecute(cfg *DescribeTableConfig) tool.ExecuteFunc {
 			status = "error"
 			return nil, errors.New("describe_table: datasource_id is required (or set default)")
 		}
+		if err := RejectElasticsearchDatasource(cfg.Registry, datasourceID, "describe_table"); err != nil {
+			status = "error"
+			return nil, err
+		}
 
 		rawName, ok := params["table_name"]
 		if !ok {

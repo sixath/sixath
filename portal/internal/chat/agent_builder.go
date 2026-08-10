@@ -218,7 +218,8 @@ func canonicalDatasourceConfig(toolName string, cfg datasource.Config) datasourc
 }
 
 // registerDatasourceTools 注册 list_tables、describe_table、execute_read。
-// 单个数据源注册失败时降级为不可用（其余仍可用）；全部失败才返回错误。
+// Elasticsearch 绑定不进入 data 三件套（仍可作为 RCA es_log_query 的连接配置存在于工具列表）。
+// 单个非 ES 数据源注册失败时降级为不可用（其余仍可用）；全部非 ES 均失败才返回错误。
 func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bindings []DatasourceBinding) ([]DatasourceBinding, string, error) {
 	dsReg := datasource.NewRegistry()
 	datasource.RegisterMySQL(dsReg)
@@ -228,8 +229,17 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 
 	var registered []datasource.Config
 	outBindings := make([]DatasourceBinding, 0, len(bindings))
+	nonESAttempts := 0
 	for i, cfg := range configs {
 		b := bindings[i]
+		if isElasticsearchType(cfg.Type) {
+			b.SkipDataTools = true
+			b.Available = false
+			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query 或 http_request"
+			outBindings = append(outBindings, b)
+			continue
+		}
+		nonESAttempts++
 		if _, err := dsReg.Register(cfg); err != nil {
 			b.Available = false
 			b.Err = err.Error()
@@ -238,12 +248,16 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 		}
 		b.Available = true
 		b.Err = ""
+		b.SkipDataTools = false
 		outBindings = append(outBindings, b)
 		registered = append(registered, cfg)
 	}
-	if len(registered) == 0 && len(configs) > 0 {
+	if len(registered) == 0 && nonESAttempts > 0 {
 		var parts []string
 		for _, b := range outBindings {
+			if b.SkipDataTools {
+				continue
+			}
 			name := b.ID
 			if name == "" {
 				name = b.ToolName
@@ -254,7 +268,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 				parts = append(parts, name+": unknown error")
 			}
 		}
-		return outBindings, "", fmt.Errorf("所有数据源均注册失败（请检查连接与账号）: %s", strings.Join(parts, "; "))
+		return outBindings, FormatDatasourcePrompt(outBindings, ""), fmt.Errorf("所有数据源均注册失败（请检查连接与账号）: %s", strings.Join(parts, "; "))
 	}
 
 	defaultDSID := ""
@@ -262,9 +276,15 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 		defaultDSID = registered[0].ID
 	}
 
+	prompt := FormatDatasourcePrompt(outBindings, defaultDSID)
+	if len(registered) == 0 {
+		// ES-only（或无可注册 data 源）：不注册三件套，仍返回路由提示。
+		return outBindings, prompt, nil
+	}
+
 	store := metadata.NewInMemoryStore(nil)
 	desc := templates.GetDescriptor("mysql")
-	if len(registered) > 0 && registered[0].Type != "" {
+	if registered[0].Type != "" {
 		desc = templates.GetDescriptor(registered[0].Type)
 	}
 
@@ -299,11 +319,12 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 		case templates.ToolExecuteRead:
 			_ = tooldata.RegisterExecuteReadTool(reg, &tooldata.ExecuteReadConfig{
 				Exec:                exec,
+				Registry:            dsReg,
 				DefaultDatasourceID: defaultDSID,
 			}, opts)
 		}
 	}
-	return outBindings, FormatDatasourcePrompt(outBindings, defaultDSID), nil
+	return outBindings, prompt, nil
 }
 
 func toolConfigToMap(s interface{}) map[string]interface{} {
