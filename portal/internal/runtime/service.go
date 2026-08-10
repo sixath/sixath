@@ -31,7 +31,7 @@ type chatBackend interface {
 }
 
 type peerBackend interface {
-	Resolve(ctx context.Context, channelID, peerID, agentID string) (*biz.ChannelPeerResolveResult, error)
+	Resolve(ctx context.Context, in biz.ChannelPeerResolveInput) (*biz.ChannelPeerResolveResult, error)
 }
 
 type sessionBackend interface {
@@ -120,7 +120,11 @@ type turnFinalReply struct {
 var turnFinalTimeout = 120 * time.Second
 
 func (s *Service) resolve(ctx context.Context, req resolveRequest) (*resolveReply, error) {
-	out, err := s.peer.Resolve(ctx, req.ChannelID, req.PeerID, req.AgentID)
+	out, err := s.peer.Resolve(ctx, biz.ChannelPeerResolveInput{
+		ChannelID: req.ChannelID,
+		PeerID:    req.PeerID,
+		AgentID:   req.AgentID,
+	})
 	if err != nil {
 		return nil, err
 	}

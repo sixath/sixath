@@ -148,12 +148,14 @@ func (f *fakeSessions) GetByID(_ context.Context, id string) (*biz.ChatSession, 
 
 type fakePeer struct {
 	lastChannel, lastPeer, lastAgent string
+	lastForceNew                     bool
 	result                           *biz.ChannelPeerResolveResult
 	err                              error
 }
 
-func (f *fakePeer) Resolve(_ context.Context, channelID, peerID, agentID string) (*biz.ChannelPeerResolveResult, error) {
-	f.lastChannel, f.lastPeer, f.lastAgent = channelID, peerID, agentID
+func (f *fakePeer) Resolve(_ context.Context, in biz.ChannelPeerResolveInput) (*biz.ChannelPeerResolveResult, error) {
+	f.lastChannel, f.lastPeer, f.lastAgent = in.ChannelID, in.PeerID, in.AgentID
+	f.lastForceNew = in.ForceNew
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -162,7 +164,7 @@ func (f *fakePeer) Resolve(_ context.Context, channelID, peerID, agentID string)
 	}
 	return &biz.ChannelPeerResolveResult{
 		SessionID: "resolved-sess",
-		AgentID:   agentID,
+		AgentID:   in.AgentID,
 		Created:   true,
 	}, nil
 }

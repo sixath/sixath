@@ -14,6 +14,11 @@ import (
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 )
 
+var (
+	ErrAgentNotAllowed = kratosErrors.Forbidden("AGENT_NOT_ALLOWED", "agent not allowed for channel")
+	ErrAgentBound      = kratosErrors.Conflict("AGENT_BOUND", "peer already bound to another agent; use force_new")
+)
+
 // ChannelPeerSession is the domain mapping of channel+peer → chat session.
 type ChannelPeerSession struct {
 	ChannelID string
@@ -32,6 +37,15 @@ type ChannelPeerSessionRepo interface {
 	Delete(ctx context.Context, channelID, peerID string) error
 }
 
+// ChannelPeerResolveInput is the input for Resolve.
+type ChannelPeerResolveInput struct {
+	ChannelID string
+	PeerID    string
+	AgentID   string // optional; empty uses channel.DefaultAgent
+	ForceNew  bool
+	Reason    string
+}
+
 // ChannelPeerResolveResult is the outcome of Resolve.
 type ChannelPeerResolveResult struct {
 	SessionID string
@@ -43,37 +57,54 @@ type ChannelPeerResolveResult struct {
 type ChannelPeerUsecase struct {
 	peerRepo    ChannelPeerSessionRepo
 	sessionRepo ChatSessionRepo
+	channelRepo ChannelRepo
 }
 
 // NewChannelPeerUsecase creates a ChannelPeerUsecase.
-func NewChannelPeerUsecase(peerRepo ChannelPeerSessionRepo, sessionRepo ChatSessionRepo) *ChannelPeerUsecase {
-	return &ChannelPeerUsecase{peerRepo: peerRepo, sessionRepo: sessionRepo}
+func NewChannelPeerUsecase(peerRepo ChannelPeerSessionRepo, sessionRepo ChatSessionRepo, channelRepo ChannelRepo) *ChannelPeerUsecase {
+	return &ChannelPeerUsecase{peerRepo: peerRepo, sessionRepo: sessionRepo, channelRepo: channelRepo}
 }
 
-// Resolve returns the session for channel_id+peer_id.
-// If a mapping exists, it is returned as-is (new agentID is ignored).
-// Otherwise a chat session is created and the mapping is inserted.
-func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, channelID, peerID, agentID string) (*ChannelPeerResolveResult, error) {
-	channelID = strings.TrimSpace(channelID)
-	peerID = strings.TrimSpace(peerID)
-	agentID = strings.TrimSpace(agentID)
+// Resolve returns the session for channel_id+peer_id using the agent allowlist / force_new decision table.
+func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, in ChannelPeerResolveInput) (*ChannelPeerResolveResult, error) {
+	channelID := strings.TrimSpace(in.ChannelID)
+	peerID := strings.TrimSpace(in.PeerID)
 	if channelID == "" || peerID == "" {
 		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "channel_id and peer_id are required")
+	}
+
+	ch, err := uc.channelRepo.GetByChannelID(ctx, channelID)
+	if err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) {
+			return nil, ErrChannelNotFound
+		}
+		return nil, err
+	}
+
+	agentID := strings.TrimSpace(in.AgentID)
+	if agentID == "" {
+		agentID = strings.TrimSpace(ch.DefaultAgent)
 	}
 	if agentID == "" {
 		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "agent_id is required")
 	}
+	if !agentAllowed(ch, agentID) {
+		return nil, ErrAgentNotAllowed
+	}
 
 	existing, err := uc.peerRepo.Get(ctx, channelID, peerID)
-	if err == nil && existing != nil {
-		return &ChannelPeerResolveResult{
-			SessionID: existing.SessionID,
-			AgentID:   existing.AgentID,
-			Created:   false,
-		}, nil
-	}
 	if err != nil && !errors.Is(err, pkgErrors.ErrNotFound) {
 		return nil, err
+	}
+	if err == nil && existing != nil && !in.ForceNew {
+		if existing.AgentID == agentID {
+			return &ChannelPeerResolveResult{
+				SessionID: existing.SessionID,
+				AgentID:   existing.AgentID,
+				Created:   false,
+			}, nil
+		}
+		return nil, ErrAgentBound
 	}
 
 	title := fmt.Sprintf("channel:%s peer:%s", channelID, peerID)
@@ -91,6 +122,18 @@ func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, channelID, peerID, ag
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+
+	if existing != nil {
+		if err := uc.peerRepo.Upsert(ctx, row); err != nil {
+			return nil, err
+		}
+		return &ChannelPeerResolveResult{
+			SessionID: session.ID,
+			AgentID:   agentID,
+			Created:   true,
+		}, nil
+	}
+
 	if err := uc.peerRepo.Create(ctx, row); err != nil {
 		if !errors.Is(err, pkgErrors.ErrConflict) {
 			return nil, err
@@ -115,6 +158,23 @@ func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, channelID, peerID, ag
 		AgentID:   agentID,
 		Created:   true,
 	}, nil
+}
+
+// DeleteBinding removes the channel+peer session mapping (does not delete the chat session).
+func (uc *ChannelPeerUsecase) DeleteBinding(ctx context.Context, channelID, peerID string) error {
+	return uc.peerRepo.Delete(ctx, strings.TrimSpace(channelID), strings.TrimSpace(peerID))
+}
+
+func agentAllowed(ch *ChannelMeta, agentID string) bool {
+	if len(ch.AllowedAgents) == 0 {
+		return agentID == ch.DefaultAgent
+	}
+	for _, id := range ch.AllowedAgents {
+		if id == agentID {
+			return true
+		}
+	}
+	return false
 }
 
 // PeerUserID derives a stable chat_sessions.user_id (≤36 chars) for webhook peers.
