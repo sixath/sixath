@@ -189,6 +189,92 @@ func TestClient_HTTPErrorIncludesStatusAndBody(t *testing.T) {
 	}
 }
 
+func TestClient_ResolveForceNewAndReasonInBody(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session_id": "s2",
+			"agent_id":   "a2",
+			"user_id":    "u2",
+			"created":    true,
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	_, err := c.ResolveSession(context.Background(), "", ResolveRequest{
+		ChannelID: "ch1",
+		PeerID:    "peer1",
+		AgentID:   "a2",
+		ForceNew:  true,
+		Reason:    "slash_new",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, `"force_new":true`) {
+		t.Fatalf("body=%s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"reason":"slash_new"`) {
+		t.Fatalf("body=%s", gotBody)
+	}
+}
+
+func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
+	var last callSeen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		last = callSeen{
+			method:   r.Method,
+			path:     r.URL.Path,
+			auth:     r.Header.Get("Authorization"),
+			user:     r.Header.Get("X-Sath-User-Id"),
+			rawQuery: r.URL.RawQuery,
+			body:     string(body),
+		}
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/runtime/v1/sessions/binding":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/channels/ch1/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "a-def",
+				"agents": []map[string]string{
+					{"id": "a-def", "name": "Default"},
+					{"id": "a2", "name": "Other"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "rt")
+	ctx := context.Background()
+
+	if err := c.DeleteBinding(ctx, "ch1", "peer9"); err != nil {
+		t.Fatalf("DeleteBinding: %v", err)
+	}
+	assertCall(t, last, http.MethodDelete, "/runtime/v1/sessions/binding", "Bearer rt", "")
+	if !strings.Contains(last.rawQuery, "channel_id=ch1") || !strings.Contains(last.rawQuery, "peer_id=peer9") {
+		t.Fatalf("query=%s", last.rawQuery)
+	}
+
+	out, err := c.ListChannelAgents(ctx, "ch1")
+	if err != nil {
+		t.Fatalf("ListChannelAgents: %v", err)
+	}
+	assertCall(t, last, http.MethodGet, "/runtime/v1/channels/ch1/agents", "Bearer rt", "")
+	if out.DefaultAgent != "a-def" || len(out.Agents) != 2 {
+		t.Fatalf("out=%+v", out)
+	}
+	if out.Agents[0].ID != "a-def" || out.Agents[0].Name != "Default" {
+		t.Fatalf("agents[0]=%+v", out.Agents[0])
+	}
+}
+
 func TestClient_TurnsFinalAndStream(t *testing.T) {
 	var lastAuth, lastUser, lastPath, lastMode string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

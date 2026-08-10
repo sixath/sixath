@@ -63,3 +63,10 @@ func (r *Router) Resolve(ctx context.Context, userID string, req runtimeclient.R
 	r.mu.Unlock()
 	return reply, nil
 }
+
+// Invalidate drops the cached resolve result for channel+peer.
+func (r *Router) Invalidate(channelID, peerID string) {
+	r.mu.Lock()
+	delete(r.cache, cacheKey{channelID: channelID, peerID: peerID})
+	r.mu.Unlock()
+}
