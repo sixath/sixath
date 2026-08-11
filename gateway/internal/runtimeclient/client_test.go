@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClient_SendsBearerAndOptionalUserHeader(t *testing.T) {
@@ -380,6 +381,39 @@ func TestClient_TurnsFinalAndStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), "data:") {
+		t.Fatalf("stream body=%q", raw)
+	}
+}
+
+func TestClient_TurnsStream_SurvivesBeyondJSONClientTimeout(t *testing.T) {
+	// Reproduce the Web chat bug: JSON Client.Timeout must not apply to SSE proxying.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte("data: {\"type\":\"done\"}\n\n"))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL:          srv.URL,
+		token:            "rt",
+		httpClient:       &http.Client{Timeout: 50 * time.Millisecond},
+		streamHTTPClient: &http.Client{}, // no Timeout
+	}
+	rc, _, err := c.TurnsStream(context.Background(), "u1", TurnRequest{SessionID: "s1", Content: "hi"})
+	if err != nil {
+		t.Fatalf("TurnsStream: %v", err)
+	}
+	defer rc.Close()
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"done"`) {
 		t.Fatalf("stream body=%q", raw)
 	}
 }

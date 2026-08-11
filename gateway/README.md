@@ -159,7 +159,9 @@ go build -o ./bin/gateway.exe ./cmd/gateway
 | Portal | `http://127.0.0.1:8000` |
 | Runtime token | `dev-runtime-token`（须与 Portal `runtime.service_token` 一致） |
 | 渠道文件 | `./configs/channels.yaml` |
-| Turn 超时 | 120s |
+| Turn 超时 | 600s（企微/webhook `reply_mode=final` 的 context 截止；**不含** Web SSE） |
+
+Web 聊天经 Gateway 代理 `/api/v1/sessions/.../messages/stream` 时，Runtime 流式客户端**不设** `http.Client.Timeout`，仅随浏览器断开取消；否则长工具链会在约 120s 被掐断，时间线显示「模型推理 · 已中断」。
 
 依赖：Portal 已启动且 `/runtime/v1` 可用；Web 对话还需 Vite / 鉴权对齐（见仓库根 README）。
 

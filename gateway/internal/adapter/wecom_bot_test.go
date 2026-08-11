@@ -41,6 +41,19 @@ func (f *fakeWecomConn) RespondStream(_ context.Context, reqID, streamID, conten
 	return nil
 }
 
+// ctxStrictWecomConn rejects RespondStream when ctx is already canceled
+// (mirrors real wecom.Client.writeFrame behavior).
+type ctxStrictWecomConn struct {
+	fakeWecomConn
+}
+
+func (f *ctxStrictWecomConn) RespondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.fakeWecomConn.RespondStream(ctx, reqID, streamID, content, finish)
+}
+
 func (f *fakeWecomConn) snapshot() []respondCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -228,6 +241,60 @@ func TestWecomBot_GroupPeer(t *testing.T) {
 
 	if gotPeer != "chat:C1" {
 		t.Fatalf("peer_id=%q want chat:C1", gotPeer)
+	}
+}
+
+func TestWecomBot_TurnTimeout_StillFinishesStream(t *testing.T) {
+	// After turn ctx deadline, finish=true must still be delivered (otherwise UI sticks on 处理中…).
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/sessions/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case "/runtime/v1/turns":
+			select {
+			case <-r.Context().Done():
+			case <-time.After(2 * time.Second):
+			}
+			return
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	deps.TurnTimeout = 80 * time.Millisecond
+	conn := &ctxStrictWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-timeout","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"慢查询"}}`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		adapter.HandleWecomMsgCallback(ctx, conn, "req-timeout", ch, n, deps)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("HandleWecomMsgCallback hung")
+	}
+
+	calls := conn.snapshot()
+	if len(calls) < 2 {
+		t.Fatalf("respond calls=%d want >=2: %+v", len(calls), calls)
+	}
+	last := calls[len(calls)-1]
+	if !last.finish {
+		t.Fatalf("last respond must finish=true, got %+v", last)
+	}
+	if !strings.Contains(last.content, "处理超时") && !strings.Contains(last.content, "操作失败") {
+		t.Fatalf("expected timeout/failure card content, got %q", last.content)
 	}
 }
 

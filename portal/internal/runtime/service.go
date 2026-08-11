@@ -166,7 +166,8 @@ func truncateRunes(s string, max int) string {
 }
 
 // turnFinalTimeout caps reply_mode=final; overridable in tests.
-var turnFinalTimeout = 120 * time.Second
+// Keep aligned with Gateway turn_timeout_sec / Portal HTTP timeout (long tool loops).
+var turnFinalTimeout = 600 * time.Second
 
 func (s *Service) resolve(ctx context.Context, req resolveRequest) (*resolveReply, error) {
 	out, err := s.peer.Resolve(ctx, biz.ChannelPeerResolveInput{
@@ -478,7 +479,11 @@ func (s *Service) runFinalTurn(ctx context.Context, req turnRequest) (*turnFinal
 	// Timeout/cancel must fail even when partial chunks arrived and stream error was suppressed.
 	if err := runCtx.Err(); err != nil {
 		out.Status = "failed"
-		out.Error = err.Error()
+		if stderrors.Is(err, context.DeadlineExceeded) {
+			out.Error = "turn timed out"
+		} else {
+			out.Error = err.Error()
+		}
 		if agg.Content != "" {
 			out.Content = agg.Content
 		}

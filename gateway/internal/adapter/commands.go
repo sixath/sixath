@@ -184,6 +184,10 @@ func mapRuntimeUserError(err error) string {
 	if errors.As(err, &notFound) {
 		return "Agent 不存在或名称无法解析（仅本渠道白名单）"
 	}
+	msg := err.Error()
+	if isTimeoutErr(err) {
+		return "处理超时，请稍后重试或缩小问题范围"
+	}
 	var he *runtimeclient.HTTPError
 	if errors.As(err, &he) && he != nil {
 		body := string(he.Body)
@@ -201,8 +205,45 @@ func mapRuntimeUserError(err error) string {
 		case 409:
 			return "已绑定其它 Agent，请使用 /agent <name> 或 /new"
 		}
+		if isTimeoutText(body) {
+			return "处理超时，请稍后重试或缩小问题范围"
+		}
+	}
+	if isTimeoutText(msg) {
+		return "处理超时，请稍后重试或缩小问题范围"
 	}
 	return "操作失败，请稍后重试"
+}
+
+func isTimeoutErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	return isTimeoutText(err.Error())
+}
+
+func isTimeoutText(s string) bool {
+	s = strings.ToLower(s)
+	return strings.Contains(s, "deadline exceeded") ||
+		strings.Contains(s, "timed out") ||
+		strings.Contains(s, "turn timed out") ||
+		strings.Contains(s, "context canceled")
+}
+
+func mapTurnFailureMessage(errText, content string) string {
+	if isTimeoutText(errText) || isTimeoutText(content) {
+		return "处理超时，请稍后重试或缩小问题范围"
+	}
+	if strings.TrimSpace(errText) != "" {
+		return errText
+	}
+	if strings.TrimSpace(content) != "" {
+		return content
+	}
+	return "turn failed"
 }
 
 func shortID(id string) string {

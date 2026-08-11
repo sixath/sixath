@@ -52,7 +52,7 @@ type WebhookHandler struct {
 // NewWebhookHandler builds an HTTP handler for webhook inbound.
 func NewWebhookHandler(deps WebhookDeps) http.Handler {
 	if deps.TurnTimeout <= 0 {
-		deps.TurnTimeout = 120 * time.Second
+		deps.TurnTimeout = 600 * time.Second
 	}
 	if deps.Idempotency == nil {
 		deps.Idempotency = idempotency.NewStore(0)
