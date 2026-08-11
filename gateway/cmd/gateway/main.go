@@ -15,6 +15,7 @@ import (
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/config"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/pendingswitch"
 	"github.com/sixath/gateway/internal/reply"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
@@ -43,15 +44,17 @@ func main() {
 	// Shared with webhook + wecom_bot so peer sessions and msgid idempotency align.
 	sessions := session.NewRouter(rt, 30*time.Second)
 	idem := idempotency.NewStore(10 * time.Minute)
+	pendingSwitch := pendingswitch.New()
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /hooks/{channel_id}", adapter.NewWebhookHandler(adapter.WebhookDeps{
-		Registry:    reg,
-		Runtime:     rt,
-		Sessions:    sessions,
-		Idempotency: idem,
-		Reply:       reply.NewDispatcher(nil),
-		TurnTimeout: turnTimeout,
+		Registry:      reg,
+		Runtime:       rt,
+		Sessions:      sessions,
+		Idempotency:   idem,
+		PendingSwitch: pendingSwitch,
+		Reply:         reply.NewDispatcher(nil),
+		TurnTimeout:   turnTimeout,
 	}))
 	adapter.MountWeb(mux, adapter.WebDeps{
 		PortalBaseURL: cfg.PortalBaseURL,
@@ -65,11 +68,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	adapter.StartWecomBots(ctx, adapter.WecomBotDeps{
-		Registry:    reg,
-		Runtime:     rt,
-		Sessions:    sessions,
-		Idempotency: idem,
-		TurnTimeout: turnTimeout,
+		Registry:      reg,
+		Runtime:       rt,
+		Sessions:      sessions,
+		Idempotency:   idem,
+		PendingSwitch: pendingSwitch,
+		TurnTimeout:   turnTimeout,
 	})
 
 	fmt.Printf("sixath-gateway version=%s listen=%s\n", Version, cfg.Listen)

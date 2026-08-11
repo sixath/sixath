@@ -16,6 +16,7 @@ import (
 
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/pendingswitch"
 	"github.com/sixath/gateway/internal/reply"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
@@ -36,12 +37,13 @@ type webhookBody struct {
 
 // WebhookDeps wires webhook handler dependencies.
 type WebhookDeps struct {
-	Registry    *channel.Registry
-	Runtime     *runtimeclient.Client
-	Sessions    *session.Router
-	Idempotency *idempotency.Store
-	Reply       *reply.Dispatcher
-	TurnTimeout time.Duration
+	Registry      *channel.Registry
+	Runtime       *runtimeclient.Client
+	Sessions      *session.Router
+	Idempotency   *idempotency.Store
+	PendingSwitch *pendingswitch.Store
+	Reply         *reply.Dispatcher
+	TurnTimeout   time.Duration
 }
 
 // WebhookHandler serves POST /hooks/{channel_id}.
@@ -132,7 +134,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if cmdReply, isCmd := runSlashCommand(ctx, h.deps.Runtime, h.deps.Sessions, ev.ChannelID, ev.PeerID, ev.Content); isCmd {
+	if cmdReply, isCmd := runSlashCommand(ctx, h.deps.Runtime, h.deps.Sessions, h.deps.PendingSwitch, ev.ChannelID, ev.PeerID, ev.Content); isCmd {
 		payload := reply.FinalPayload{
 			CorrelationID: corr,
 			Status:        "ok",

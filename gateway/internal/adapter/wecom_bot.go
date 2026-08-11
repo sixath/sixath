@@ -10,6 +10,7 @@ import (
 
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/pendingswitch"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
 	"github.com/sixath/gateway/internal/wecom"
@@ -22,11 +23,12 @@ type WecomConn interface {
 
 // WecomBotDeps wires long-connection runners.
 type WecomBotDeps struct {
-	Registry    *channel.Registry
-	Runtime     *runtimeclient.Client
-	Sessions    *session.Router
-	Idempotency *idempotency.Store
-	TurnTimeout time.Duration
+	Registry      *channel.Registry
+	Runtime       *runtimeclient.Client
+	Sessions      *session.Router
+	Idempotency   *idempotency.Store
+	PendingSwitch *pendingswitch.Store
+	TurnTimeout   time.Duration
 }
 
 const (
@@ -140,7 +142,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
 	}
 
-	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, ch.ID, n.PeerID, n.QuestionText); isCmd {
+	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, deps.PendingSwitch, ch.ID, n.PeerID, n.QuestionText); isCmd {
 		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, cmdReply)
 		_ = conn.RespondStream(ctx, reqID, streamID, card, true)
 		deps.Idempotency.Complete(n.MsgID, card)
