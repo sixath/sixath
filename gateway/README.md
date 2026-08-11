@@ -9,6 +9,7 @@ Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→sessi
 | 本 README | 架构 + 本地用法 + 企微长连接配置 |
 | [入站 Gateway 设计](../docs/superpowers/specs/2026-08-09-inbound-gateway-design.md) | Web / Webhook 契约 |
 | [Portal 入站 Agent 路由](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md) | default/白名单、改绑、指令 |
+| [消息级自动路由](../docs/superpowers/specs/2026-08-10-gateway-message-auto-route-design.md) | `@Agent` + Portal 分类器 |
 | [企微智能机器人设计](../docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md) | 长连接 Adapter |
 | 官方 | [智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463) |
 
@@ -104,6 +105,39 @@ aibot_msg_callback
 | `/unbind` | 清除 `channel+peer` 映射；下一条普通消息按 default 新建 |
 
 Webhook body 可选 `agent_id` / `force_new`（与指令等价；白名单仍由 Portal 校验）。详见 [Agent 路由设计](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md)。
+
+### 消息级自动路由（@Agent + 分类器）
+
+非 slash 普通消息在 Resolve 之前走 `prepareAutoRoute`（Webhook / 企微）：
+
+```text
+slash 指令？ → 现有行为（本条不 Turn）
+→ ListChannelAgents（flags + 候选）
+→ @Agent 命中白名单 name/id？ → strip mention → Resolve（冲突则 force_new）→ Turn(stripped)
+→ 否则 POST /runtime/v1/channels/{id}/route → confidence=high 换人则 force_new → Turn(原文)
+→ 否则普通 Resolve → Turn
+```
+
+| Portal 渠道字段 | 默认 | 含义 |
+|-----------------|------|------|
+| `auto_route_enabled` | true | 总开关 |
+| `auto_route_mention` | true | 允许 `@Agent` |
+| `auto_route_classifier` | true | 无合法 @ 时调用分类器 |
+
+- `@` 仅匹配本渠道白名单（支持带空格的 name；最长优先）；未知 `@foo` 视为未命中，可落入分类器。
+- 分类器 / `route` 超时或 5xx：**fail-open**（不强制换人，继续当前或 default）。
+- `channels.yaml` **不是**自动路由真相；开关与白名单在 Portal。
+
+本地冒烟：
+
+1. 应用 Portal migration `015_channel_auto_route_flags.sql`
+2. 渠道 ≥2 个 `allowed_agents`，三开关开启
+3. Webhook/企微：`@<name> ping` → 切到该 Agent 新 session，Turn 正文无 `@`
+4. 无 `@` 且分类器返回 high → 换人 Turn
+5. 关掉 LLM / 坏 key → 仍在当前 Agent 回复
+6. `auto_route_enabled=false` → 不自动换人
+
+设计全文：[消息级自动路由](../docs/superpowers/specs/2026-08-10-gateway-message-auto-route-design.md)。
 
 ---
 
