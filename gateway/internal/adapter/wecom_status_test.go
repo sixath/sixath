@@ -65,6 +65,52 @@ func waitStatus(t *testing.T, r *recordingReporter, pred func([]statusCall) bool
 	}
 }
 
+func TestRunWecomBotLoop_ReportsReconnectingBeforeDial(t *testing.T) {
+	rep := &recordingReporter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sawDial := make(chan struct{})
+	ch := channel.Channel{ID: "bot1", Type: "wecom_bot", Enabled: true, BotID: "B", Secret: "S"}
+	deps := WecomBotDeps{
+		Reporter: rep,
+		RunOnce: func(runCtx context.Context, _ channel.Channel, _ WecomBotDeps) error {
+			close(sawDial)
+			<-runCtx.Done()
+			return runCtx.Err()
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runWecomBotLoop(ctx, ch, deps)
+	}()
+
+	select {
+	case <-sawDial:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial never started")
+	}
+
+	calls := waitStatus(t, rep, func(calls []statusCall) bool {
+		return len(calls) >= 1 && calls[0].body.State == "reconnecting"
+	})
+	if calls[0].body.ReconnectAttempt == nil || *calls[0].body.ReconnectAttempt != 0 {
+		t.Fatalf("pre-dial attempt=%v want 0", calls[0].body.ReconnectAttempt)
+	}
+	if calls[0].body.ReconnectInMs == nil || *calls[0].body.ReconnectInMs != 0 {
+		t.Fatalf("pre-dial reconnect_in_ms=%v want 0", calls[0].body.ReconnectInMs)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("loop did not exit")
+	}
+}
+
 func TestRunWecomBotLoop_ReportsDisconnectedThenReconnecting(t *testing.T) {
 	rep := &recordingReporter{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,20 +131,22 @@ func TestRunWecomBotLoop_ReportsDisconnectedThenReconnecting(t *testing.T) {
 	}()
 
 	calls := waitStatus(t, rep, func(calls []statusCall) bool {
-		if len(calls) < 2 {
+		if len(calls) < 3 {
 			return false
 		}
-		return calls[0].body.State == "disconnected" && calls[1].body.State == "reconnecting"
+		return calls[0].body.State == "reconnecting" &&
+			calls[1].body.State == "disconnected" &&
+			calls[2].body.State == "reconnecting"
 	})
 
-	if calls[0].body.LastError == nil || *calls[0].body.LastError == "" {
-		t.Fatalf("disconnected missing last_error: %+v", calls[0].body)
+	if calls[1].body.LastError == nil || *calls[1].body.LastError == "" {
+		t.Fatalf("disconnected missing last_error: %+v", calls[1].body)
 	}
-	if calls[1].body.ReconnectAttempt == nil || *calls[1].body.ReconnectAttempt != 1 {
-		t.Fatalf("reconnecting attempt=%v want 1", calls[1].body.ReconnectAttempt)
+	if calls[2].body.ReconnectAttempt == nil || *calls[2].body.ReconnectAttempt != 1 {
+		t.Fatalf("reconnecting attempt=%v want 1", calls[2].body.ReconnectAttempt)
 	}
-	if calls[1].body.ReconnectInMs == nil || *calls[1].body.ReconnectInMs <= 0 {
-		t.Fatalf("reconnecting reconnect_in_ms=%v", calls[1].body.ReconnectInMs)
+	if calls[2].body.ReconnectInMs == nil || *calls[2].body.ReconnectInMs <= 0 {
+		t.Fatalf("reconnecting reconnect_in_ms=%v", calls[2].body.ReconnectInMs)
 	}
 
 	cancel()
@@ -153,7 +201,10 @@ func TestRunWecomBotOnce_OnConnectedReportsConnected(t *testing.T) {
 	}()
 
 	waitStatus(t, rep, func(calls []statusCall) bool {
-		return len(calls) == 1 && calls[0].body.State == "connected"
+		if len(calls) < 2 {
+			return false
+		}
+		return calls[0].body.State == "reconnecting" && calls[1].body.State == "connected"
 	})
 	cancel()
 	select {
@@ -161,11 +212,15 @@ func TestRunWecomBotOnce_OnConnectedReportsConnected(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("loop did not exit")
 	}
-	// cancel during connected should not emit disconnected/reconnecting
+	// cancel during connected should not emit disconnected or a post-cancel reconnecting
 	time.Sleep(20 * time.Millisecond)
-	for _, c := range rep.snapshot() {
-		if c.body.State == "disconnected" || c.body.State == "reconnecting" {
-			t.Fatalf("unexpected status after cancel: %+v", c.body)
+	calls := rep.snapshot()
+	for i, c := range calls {
+		if c.body.State == "disconnected" {
+			t.Fatalf("unexpected disconnected after cancel: %+v", c.body)
+		}
+		if i > 0 && c.body.State == "reconnecting" {
+			t.Fatalf("unexpected reconnecting after connected: %+v", c.body)
 		}
 	}
 }

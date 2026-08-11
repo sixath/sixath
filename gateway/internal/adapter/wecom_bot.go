@@ -77,6 +77,13 @@ func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 		if ctx.Err() != nil {
 			return
 		}
+		// Report before dial so UI never keeps stale disabled/connected across start/restart.
+		dialingMs := 0
+		reportChannelStatus(deps, ch.ID, runtimeclient.StatusBody{
+			State:            "reconnecting",
+			ReconnectAttempt: &attempt,
+			ReconnectInMs:    &dialingMs,
+		})
 		started := time.Now()
 		err := once(ctx, ch, deps)
 		if ctx.Err() != nil {

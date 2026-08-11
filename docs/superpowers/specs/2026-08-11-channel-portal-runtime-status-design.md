@@ -1,7 +1,7 @@
 # Portal 渠道配置真相源 + wecom_bot Runtime Status
 
 **日期**: 2026-08-11  
-**状态**: 设计已确认；待实现规划  
+**状态**: 已在分支 `feat/channel-portal-runtime-status` 实现；待手工 E2E（spec §8）与合并  
 **目标**: 废弃 Gateway `channels.yaml` 作为运行时真相源；Portal/UI 可创建与管理入站渠道（含 `wecom_bot`）；Gateway 定时拉取配置并热更新；`wecom_bot` 上报运行连接态，Web Channels 列表展示 Runtime Status，编辑页展示运维细节。
 
 **关联**:
@@ -228,10 +228,10 @@ Gateway **不上报** `unknown`；由 Portal 读出时派生。
 
 | 变化 | 行为 |
 |------|------|
-| 新增且 `enabled` 的 `wecom_bot` | 启动 runner |
+| 新增且 `enabled` 的 `wecom_bot` | 启动 runner；**dial 前**立即上报 `reconnecting`（避免 UI 短暂显示 stale `disabled`/`unknown`） |
 | `wecom_bot`：`enabled` true→false | **停止** runner；上报 `disabled`；条目仍留在 Registry |
-| `wecom_bot`：`enabled` false→true | 启动 runner |
-| `bot_id` / `secret` / `ws_url` / `corp_*` / `bot_names` 等影响连接的字段变更（仍为 enabled） | **先停再启** |
+| `wecom_bot`：`enabled` false→true | 启动 runner；**dial 前**立即上报 `reconnecting` |
+| `bot_id` / `secret` / `ws_url` / `corp_*` / `bot_names` 等影响连接的字段变更（仍为 enabled） | **先停再启**；新 runner **dial 前**上报 `reconnecting`（避免短暂显示 stale `connected`） |
 | 本次拉取中 **消失**（Portal 已删） | 停止 runner（若有）；从 Registry **移除**；不再上报 status |
 | `webhook`：仍在列表（含 disabled） | 更新 Registry 条目（disabled 保留以支持 **410**） |
 | `webhook`：从列表消失 | 从 Registry 移除（未知 id → 既有 404 行为） |
