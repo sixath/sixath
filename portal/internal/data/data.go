@@ -14,7 +14,7 @@ import (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChannelRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewGrowthRepo, NewCuratorRepo)
+var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewGrowthRepo, NewCuratorRepo)
 
 // Data .
 type Data struct {
@@ -44,7 +44,7 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 	// AutoMigrate 创建/更新表结构（按架构设计 docs/architecture_design.md）
 	if err := db.AutoMigrate(
 		&model.Tool{}, &model.Agent{}, &model.AgentTool{}, &model.ChatSession{}, &model.ChatMessage{},
-		&model.Channel{}, &model.ChannelPeerSession{}, &model.CronTask{}, &model.CronRun{},
+		&model.Channel{}, &model.ChannelRuntimeStatus{}, &model.ChannelPeerSession{}, &model.CronTask{}, &model.CronRun{},
 		&model.ChatGrowthState{}, &model.GrowthWorkspaceLease{},
 		&model.GrowthCuratorState{},
 		&model.User{}, &model.Org{}, &model.OrgMember{}, &model.UserToken{},
