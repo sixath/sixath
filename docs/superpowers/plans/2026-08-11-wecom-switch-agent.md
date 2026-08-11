@@ -208,11 +208,16 @@ git commit -m "feat(gateway): parse /switch slash command"
 ```text
 list := ListChannelAgents
 若空/失败 → 返回错误文案，不 Put
-current := GetBinding；404 → current=""
+binding, err := GetBinding
+  · 404 → currentID=""，当前文案「未绑定（下一条将使用 default）」
+  · 其它错误 → currentID=""，当前文案「未知」（仍继续列名单）
+  · 成功 → currentID=binding.AgentID，当前文案用名单匹配到的 Name
 build agents snapshot from list.Agents
 Put pending TTL=2*time.Minute
-return formatSwitchPrompt(...)
+return formatSwitchPrompt(agents, currentID, currentLabelMode)
 ```
+
+`formatSwitchPrompt` 测试须覆盖：已绑定标「← 当前」、未绑定、未知 三种头文案。
 
 - [ ] **Step 3: `runSlashCommand`**
 
@@ -240,8 +245,10 @@ git commit -m "feat(gateway): /switch lists agents and arms pending store"
 1. `/switch` → 卡片含序号；turns=0；随后 resolve 改绑仅在回 `2` 时发生  
 2. 回 `2` → force_new + 确认 + turns=0  
 3. 回 `hello`（窗口内）→ 提示序号；turns=0  
-4. Put 过期 entry 后发业务句 → 走 Turn（可 404 agents/route）
-
+4. Put 过期 entry 后发业务句 → 走 Turn（可 404 agents/route）  
+5. mock `GET /runtime/v1/sessions/binding`（有/无映射）以断言「当前」标记  
+6. pending 中 `/unbind` → 清 pending 并解绑  
+7. 连续两次 `/switch` → TTL/名单刷新 
 - [ ] **Step 2: 在 `HandleWecomMsgCallback` 中，slash 之前：**
 
 ```go
