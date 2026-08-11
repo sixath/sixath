@@ -8,7 +8,7 @@ import (
 // ChannelCreate 创建渠道参数
 type ChannelCreate struct {
 	ChannelID     string
-	Type          string // web, api, webhook, wxpusher, wecom
+	Type          string // web, api, webhook, wxpusher, wecom, wecom_bot
 	DefaultAgent  string
 	AllowedAgents []string
 	Enabled       bool
@@ -20,6 +20,14 @@ type ChannelCreate struct {
 	DefaultUids []string
 	// WeCom
 	WebhookURL string
+	// WeCom Bot / webhook gateway
+	BotID            string
+	BotSecret        string
+	BotNames         []string
+	WSURL            string
+	CorpID           string
+	CorpSecret       string
+	DefaultReplyMode string // async|sync（webhook）
 }
 
 // ChannelMeta 渠道元数据
@@ -36,8 +44,16 @@ type ChannelMeta struct {
 	AppToken      string
 	DefaultUids   []string
 	WebhookURL    string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// WeCom Bot / webhook gateway
+	BotID            string
+	BotSecret        string
+	BotNames         []string
+	WSURL            string
+	CorpID           string
+	CorpSecret       string
+	DefaultReplyMode string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // ChannelRepo 渠道存储接口
@@ -47,6 +63,7 @@ type ChannelRepo interface {
 	GetByChannelID(ctx context.Context, channelID string) (*ChannelMeta, error)
 	GetWecomByDefaultAgent(ctx context.Context, agentID string) (*ChannelMeta, error)
 	List(ctx context.Context, page, pageSize int32, typ string, enabled *bool) ([]*ChannelMeta, int, error)
+	ListGatewayChannels(ctx context.Context) ([]*ChannelMeta, error)
 	Update(ctx context.Context, id string, updates map[string]any) (*ChannelMeta, error)
 	Delete(ctx context.Context, id string) error
 }

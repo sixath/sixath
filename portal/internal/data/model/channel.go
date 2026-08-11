@@ -24,7 +24,11 @@ func (s *StringSlice) Scan(value interface{}) error {
 	}
 	bytes, ok := value.([]byte)
 	if !ok {
-		return errors.New("failed to unmarshal StringSlice")
+		str, ok := value.(string)
+		if !ok {
+			return errors.New("failed to unmarshal StringSlice")
+		}
+		bytes = []byte(str)
 	}
 	return json.Unmarshal(bytes, s)
 }

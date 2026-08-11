@@ -29,24 +29,38 @@ func NewChannelRepo(data *Data, logger log.Logger) biz.ChannelRepo {
 func (r *channelRepo) Create(ctx context.Context, ch *biz.ChannelCreate) (*biz.ChannelMeta, error) {
 	id := uuid.New().String()
 	m := &model.Channel{
-		ID:            id,
-		ChannelID:     ch.ChannelID,
-		Type:          ch.Type,
-		DefaultAgent:  ch.DefaultAgent,
-		AllowedAgents: model.StringSlice(ch.AllowedAgents),
-		Enabled:       ch.Enabled,
-		WebhookPath:   ch.WebhookPath,
-		WebhookSecret: ch.WebhookSecret,
-		IPWhitelist:   model.StringSlice(ch.IPWhitelist),
-		AppToken:      ch.AppToken,
-		DefaultUids:   model.StringSlice(ch.DefaultUids),
-		WebhookURL:    ch.WebhookURL,
+		ID:               id,
+		ChannelID:        ch.ChannelID,
+		Type:             ch.Type,
+		DefaultAgent:     ch.DefaultAgent,
+		AllowedAgents:    model.StringSlice(ch.AllowedAgents),
+		Enabled:          ch.Enabled,
+		WebhookPath:      ch.WebhookPath,
+		WebhookSecret:    ch.WebhookSecret,
+		IPWhitelist:      model.StringSlice(ch.IPWhitelist),
+		AppToken:         ch.AppToken,
+		DefaultUids:      model.StringSlice(ch.DefaultUids),
+		WebhookURL:       ch.WebhookURL,
+		BotID:            ch.BotID,
+		BotSecret:        ch.BotSecret,
+		BotNames:         model.StringSlice(ch.BotNames),
+		WSURL:            ch.WSURL,
+		CorpID:           ch.CorpID,
+		CorpSecret:       ch.CorpSecret,
+		DefaultReplyMode: ch.DefaultReplyMode,
 	}
 	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
 		if isDuplicateKey(err) {
 			return nil, ErrDuplicateName
 		}
 		return nil, err
+	}
+	// GORM skips zero-value fields that have DB defaults; force-write enabled=false.
+	if !ch.Enabled {
+		if err := r.db.WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", false).Error; err != nil {
+			return nil, err
+		}
+		m.Enabled = false
 	}
 	return channelModelToBiz(m), nil
 }
@@ -121,6 +135,22 @@ func (r *channelRepo) List(ctx context.Context, page, pageSize int32, typ string
 	return out, int(total), nil
 }
 
+// ListGatewayChannels returns webhook/wecom_bot channels including disabled, with plaintext secrets.
+func (r *channelRepo) ListGatewayChannels(ctx context.Context) ([]*biz.ChannelMeta, error) {
+	var list []model.Channel
+	if err := r.db.WithContext(ctx).
+		Where("type IN ?", []string{"webhook", "wecom_bot"}).
+		Order("created_at DESC").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*biz.ChannelMeta, len(list))
+	for i := range list {
+		out[i] = channelModelToBiz(&list[i])
+	}
+	return out, nil
+}
+
 func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]any) (*biz.ChannelMeta, error) {
 	var m model.Channel
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&m).Error; err != nil {
@@ -134,11 +164,13 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 		"webhook_path": true, "webhook_secret": true, "ip_whitelist": true,
 		"app_token": true, "default_uids": true,
 		"webhook_url": true,
+		"bot_id": true, "bot_secret": true, "bot_names": true, "ws_url": true,
+		"corp_id": true, "corp_secret": true, "default_reply_mode": true,
 	}
 	upd := make(map[string]interface{})
 	for k, v := range updates {
 		if allowed[k] {
-			if k == "ip_whitelist" || k == "default_uids" || k == "allowed_agents" {
+			if k == "ip_whitelist" || k == "default_uids" || k == "allowed_agents" || k == "bot_names" {
 				if sl, ok := v.([]string); ok {
 					upd[k] = model.StringSlice(sl)
 				}
@@ -183,20 +215,31 @@ func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {
 	if allowedAgents == nil {
 		allowedAgents = []string{}
 	}
+	botNames := []string(m.BotNames)
+	if botNames == nil {
+		botNames = []string{}
+	}
 	return &biz.ChannelMeta{
-		ID:            m.ID,
-		ChannelID:     m.ChannelID,
-		Type:          m.Type,
-		DefaultAgent:  m.DefaultAgent,
-		AllowedAgents: allowedAgents,
-		Enabled:       m.Enabled,
-		WebhookPath:   m.WebhookPath,
-		WebhookSecret: m.WebhookSecret,
-		IPWhitelist:   ipList,
-		AppToken:      m.AppToken,
-		DefaultUids:   uids,
-		WebhookURL:    m.WebhookURL,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
+		ID:               m.ID,
+		ChannelID:        m.ChannelID,
+		Type:             m.Type,
+		DefaultAgent:     m.DefaultAgent,
+		AllowedAgents:    allowedAgents,
+		Enabled:          m.Enabled,
+		WebhookPath:      m.WebhookPath,
+		WebhookSecret:    m.WebhookSecret,
+		IPWhitelist:      ipList,
+		AppToken:         m.AppToken,
+		DefaultUids:      uids,
+		WebhookURL:       m.WebhookURL,
+		BotID:            m.BotID,
+		BotSecret:        m.BotSecret,
+		BotNames:         botNames,
+		WSURL:            m.WSURL,
+		CorpID:           m.CorpID,
+		CorpSecret:       m.CorpSecret,
+		DefaultReplyMode: m.DefaultReplyMode,
+		CreatedAt:        m.CreatedAt,
+		UpdatedAt:        m.UpdatedAt,
 	}
 }

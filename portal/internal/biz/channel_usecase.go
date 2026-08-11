@@ -110,6 +110,54 @@ func effectiveChannelAgents(current *ChannelMeta, updates map[string]any) (defau
 	return defaultAgent, allowed, allowedPresent, nil
 }
 
+func validateChannelProtocol(typ string, enabled bool, botID, botSecret, mode string) error {
+	if typ == "wecom_bot" && enabled {
+		if strings.TrimSpace(botID) == "" || strings.TrimSpace(botSecret) == "" {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "wecom_bot requires bot_id and secret when enabled")
+		}
+	}
+	if typ == "webhook" && mode != "" && mode != "async" && mode != "sync" {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "default_reply_mode must be async or sync")
+	}
+	return nil
+}
+
+func stripEmptySecretUpdates(updates map[string]any) {
+	for _, key := range []string{"secret", "bot_secret", "corp_secret"} {
+		if v, ok := updates[key].(string); ok && v == "" {
+			delete(updates, key)
+		}
+	}
+	if v, ok := updates["secret"]; ok {
+		updates["bot_secret"] = v
+		delete(updates, "secret")
+	}
+}
+
+func effectiveChannelProtocol(current *ChannelMeta, updates map[string]any) (typ string, enabled bool, botID, botSecret, mode string) {
+	typ = current.Type
+	if v, ok := updates["type"].(string); ok {
+		typ = v
+	}
+	enabled = current.Enabled
+	if v, ok := updates["enabled"].(bool); ok {
+		enabled = v
+	}
+	botID = current.BotID
+	if v, ok := updates["bot_id"].(string); ok {
+		botID = v
+	}
+	botSecret = current.BotSecret
+	if v, ok := updates["bot_secret"].(string); ok {
+		botSecret = v
+	}
+	mode = current.DefaultReplyMode
+	if v, ok := updates["default_reply_mode"].(string); ok {
+		mode = v
+	}
+	return typ, enabled, botID, botSecret, mode
+}
+
 // Create 创建渠道
 func (uc *ChannelUsecase) Create(ctx context.Context, ch *ChannelCreate) (*ChannelMeta, error) {
 	normalized, err := normalizeAllowedAgents(ch.DefaultAgent, ch.AllowedAgents)
@@ -117,6 +165,9 @@ func (uc *ChannelUsecase) Create(ctx context.Context, ch *ChannelCreate) (*Chann
 		return nil, err
 	}
 	ch.AllowedAgents = normalized
+	if err := validateChannelProtocol(ch.Type, ch.Enabled, ch.BotID, ch.BotSecret, ch.DefaultReplyMode); err != nil {
+		return nil, err
+	}
 	meta, err := uc.repo.Create(ctx, ch)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
 		return nil, ErrChannelDuplicateID
@@ -156,6 +207,11 @@ func (uc *ChannelUsecase) List(ctx context.Context, page, pageSize int32, typ st
 	return uc.repo.List(ctx, page, pageSize, typ, enabled)
 }
 
+// ListGatewayChannels 列出 Gateway 所需渠道（webhook/wecom_bot，含 disabled，含明文 secrets）
+func (uc *ChannelUsecase) ListGatewayChannels(ctx context.Context) ([]*ChannelMeta, error) {
+	return uc.repo.ListGatewayChannels(ctx)
+}
+
 // Update 更新
 func (uc *ChannelUsecase) Update(ctx context.Context, id string, updates map[string]any) (*ChannelMeta, error) {
 	current, err := uc.repo.GetByID(ctx, id)
@@ -163,6 +219,11 @@ func (uc *ChannelUsecase) Update(ctx context.Context, id string, updates map[str
 		if errors.Is(err, pkgErrors.ErrNotFound) {
 			return nil, ErrChannelNotFound
 		}
+		return nil, err
+	}
+	stripEmptySecretUpdates(updates)
+	typ, enabled, botID, botSecret, mode := effectiveChannelProtocol(current, updates)
+	if err := validateChannelProtocol(typ, enabled, botID, botSecret, mode); err != nil {
 		return nil, err
 	}
 	defaultAgent, allowed, allowedPresent, err := effectiveChannelAgents(current, updates)

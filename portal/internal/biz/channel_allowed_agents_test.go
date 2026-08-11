@@ -31,15 +31,32 @@ func (f *fakeChannelRepo) Create(_ context.Context, ch *ChannelCreate) (*Channel
 	if allowed == nil {
 		allowed = []string{}
 	}
+	botNames := ch.BotNames
+	if botNames == nil {
+		botNames = []string{}
+	}
 	meta := &ChannelMeta{
-		ID:            id,
-		ChannelID:     ch.ChannelID,
-		Type:          ch.Type,
-		DefaultAgent:  ch.DefaultAgent,
-		AllowedAgents: append([]string(nil), allowed...),
-		Enabled:       ch.Enabled,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		ID:               id,
+		ChannelID:        ch.ChannelID,
+		Type:             ch.Type,
+		DefaultAgent:     ch.DefaultAgent,
+		AllowedAgents:    append([]string(nil), allowed...),
+		Enabled:          ch.Enabled,
+		WebhookPath:      ch.WebhookPath,
+		WebhookSecret:    ch.WebhookSecret,
+		IPWhitelist:      append([]string(nil), ch.IPWhitelist...),
+		AppToken:         ch.AppToken,
+		DefaultUids:      append([]string(nil), ch.DefaultUids...),
+		WebhookURL:       ch.WebhookURL,
+		BotID:            ch.BotID,
+		BotSecret:        ch.BotSecret,
+		BotNames:         append([]string(nil), botNames...),
+		WSURL:            ch.WSURL,
+		CorpID:           ch.CorpID,
+		CorpSecret:       ch.CorpSecret,
+		DefaultReplyMode: ch.DefaultReplyMode,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 	f.byID[id] = meta
 	cp := *meta
@@ -73,6 +90,18 @@ func (f *fakeChannelRepo) List(context.Context, int32, int32, string, *bool) ([]
 	return nil, 0, nil
 }
 
+func (f *fakeChannelRepo) ListGatewayChannels(context.Context) ([]*ChannelMeta, error) {
+	out := make([]*ChannelMeta, 0, len(f.byID))
+	for _, ch := range f.byID {
+		if ch.Type != "webhook" && ch.Type != "wecom_bot" {
+			continue
+		}
+		cp := *ch
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
 func (f *fakeChannelRepo) Update(_ context.Context, id string, updates map[string]any) (*ChannelMeta, error) {
 	ch, ok := f.byID[id]
 	if !ok {
@@ -84,6 +113,33 @@ func (f *fakeChannelRepo) Update(_ context.Context, id string, updates map[strin
 	}
 	if v, ok := updates["allowed_agents"].([]string); ok {
 		cp.AllowedAgents = append([]string(nil), v...)
+	}
+	if v, ok := updates["type"].(string); ok {
+		cp.Type = v
+	}
+	if v, ok := updates["enabled"].(bool); ok {
+		cp.Enabled = v
+	}
+	if v, ok := updates["bot_id"].(string); ok {
+		cp.BotID = v
+	}
+	if v, ok := updates["bot_secret"].(string); ok {
+		cp.BotSecret = v
+	}
+	if v, ok := updates["bot_names"].([]string); ok {
+		cp.BotNames = append([]string(nil), v...)
+	}
+	if v, ok := updates["ws_url"].(string); ok {
+		cp.WSURL = v
+	}
+	if v, ok := updates["corp_id"].(string); ok {
+		cp.CorpID = v
+	}
+	if v, ok := updates["corp_secret"].(string); ok {
+		cp.CorpSecret = v
+	}
+	if v, ok := updates["default_reply_mode"].(string); ok {
+		cp.DefaultReplyMode = v
 	}
 	cp.UpdatedAt = time.Now()
 	f.byID[id] = &cp
