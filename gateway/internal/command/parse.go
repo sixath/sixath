@@ -12,6 +12,7 @@ const (
 	KindAgentList
 	KindNew
 	KindUnbind
+	KindSwitch
 	KindUnknown
 )
 
@@ -42,6 +43,8 @@ func Parse(text string) (Command, bool) {
 		return Command{Kind: KindNew}, true
 	case "unbind":
 		return Command{Kind: KindUnbind}, true
+	case "switch":
+		return Command{Kind: KindSwitch}, true
 	case "agent", "agents":
 		if rest == "" || strings.EqualFold(rest, "list") {
 			return Command{Kind: KindAgentList}, true

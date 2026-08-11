@@ -55,6 +55,29 @@ func TestParse_New(t *testing.T) {
 	}
 }
 
+func TestParse_Switch(t *testing.T) {
+	c, ok := Parse("/switch")
+	if !ok {
+		t.Fatal("expected slash command")
+	}
+	if c.Kind != KindSwitch {
+		t.Fatalf("Kind=%v want KindSwitch", c.Kind)
+	}
+	if c.Target != "" {
+		t.Fatalf("Target=%q want empty", c.Target)
+	}
+
+	c, ok = Parse("/SWITCH")
+	if !ok || c.Kind != KindSwitch || c.Target != "" {
+		t.Fatalf("/SWITCH: ok=%v cmd=%+v", ok, c)
+	}
+
+	c, ok = Parse("/switch extra-arg")
+	if !ok || c.Kind != KindSwitch || c.Target != "" {
+		t.Fatalf("/switch with rest ignored: ok=%v cmd=%+v", ok, c)
+	}
+}
+
 func TestParse_Unbind(t *testing.T) {
 	c, ok := Parse("/unbind")
 	if !ok {
