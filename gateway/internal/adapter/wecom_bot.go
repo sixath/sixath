@@ -147,11 +147,27 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		return
 	}
 
-	// Portal owns default/allowlist; do not send yaml default_agent.
-	resolved, err := deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
-		ChannelID: ch.ID,
-		PeerID:    n.PeerID,
-	})
+	plan := prepareAutoRoute(ctx, deps.Runtime, ch.ID, n.PeerID, n.QuestionText)
+	turnQuestion := n.QuestionText
+	if plan.TurnText != "" {
+		turnQuestion = plan.TurnText
+	}
+	runtimeContent := n.RuntimeContent
+	if plan.Source == "mention" && turnQuestion != n.QuestionText {
+		runtimeContent = wecom.FormatRuntimeContent(n.AskerName, n.AskerID, turnQuestion)
+	}
+
+	var resolved *runtimeclient.ResolveReply
+	var err error
+	if plan.AgentID != "" {
+		resolved, err = resolveMaybeRebind(ctx, deps.Sessions, ch.ID, n.PeerID, plan.AgentID, plan.Reason)
+	} else {
+		// Portal owns default/allowlist; do not send yaml default_agent.
+		resolved, err = deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
+			ChannelID: ch.ID,
+			PeerID:    n.PeerID,
+		})
+	}
 	if err != nil {
 		failMsg := mapRuntimeUserError(err)
 		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
@@ -161,7 +177,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 
 	out, err := deps.Runtime.TurnsFinal(ctx, resolved.UserID, runtimeclient.TurnRequest{
 		SessionID:      resolved.SessionID,
-		Content:        n.RuntimeContent,
+		Content:        runtimeContent,
 		ChannelID:      ch.ID,
 		PeerID:         n.PeerID,
 		CorrelationID:  corr,

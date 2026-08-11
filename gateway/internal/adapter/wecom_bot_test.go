@@ -3,6 +3,7 @@ package adapter_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,6 +103,59 @@ func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 	}
 	if atomic.LoadInt32(&turns) != 1 {
 		t.Fatalf("turns=%d", turns)
+	}
+}
+
+func TestWecomBot_MentionAutoRoute(t *testing.T) {
+	var gotTurn map[string]any
+	var gotResolve map[string]any
+	var resolveN int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent":         "agent-1",
+				"auto_route_enabled":    true,
+				"auto_route_mention":    true,
+				"auto_route_classifier": false,
+				"agents": []map[string]string{
+					{"id": "agent-1", "name": "Alpha"},
+					{"id": "agent-2", "name": "Ops"},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/sessions/resolve":
+			n := atomic.AddInt32(&resolveN, 1)
+			_ = json.Unmarshal(body, &gotResolve)
+			if n == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"reason":"AGENT_BOUND"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-2", "agent_id": "agent-2", "user_id": "u1", "created": true,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/turns":
+			_ = json.Unmarshal(body, &gotTurn)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-ar","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"@小天才 @Ops hello"}}`)
+
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-ar", ch, n, deps)
+
+	if gotResolve["agent_id"] != "agent-2" || gotResolve["force_new"] != true {
+		t.Fatalf("resolve=%v", gotResolve)
+	}
+	wantContent := wecom.FormatRuntimeContent("alice", "alice", "hello")
+	if gotTurn["content"] != wantContent {
+		t.Fatalf("turn content=%v want %q", gotTurn["content"], wantContent)
 	}
 }
 

@@ -15,6 +15,17 @@ func TestParse_LongestNameFirst(t *testing.T) {
 	}
 }
 
+func TestParse_SpacedName(t *testing.T) {
+	cands := []Candidate{
+		{ID: "id-ops", Name: "Ops"},
+		{ID: "id-ops-bot", Name: "Ops Bot"},
+	}
+	got := Parse("@Ops Bot hello world", cands)
+	if !got.Hit || got.AgentID != "id-ops-bot" || got.Stripped != "hello world" {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
 func TestParse_UUID(t *testing.T) {
 	id := "e8107fb3-e40a-4207-9d9a-6768847aaf79"
 	cands := []Candidate{{ID: id, Name: "zone"}}

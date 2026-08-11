@@ -19,82 +19,89 @@ type Result struct {
 }
 
 // Parse finds the first allowlisted @Agent mention and strips it from text.
-// Matching is case-insensitive on name; id matches exactly (trimmed).
-// When multiple names could match at the same @, the longest name wins.
+// Matching is case-insensitive on name (names may contain spaces); id matches
+// as a contiguous token. When multiple names could match at the same @, the
+// longest name wins. The first @ that hits any candidate wins overall.
 func Parse(text string, cands []Candidate) Result {
 	if text == "" || len(cands) == 0 {
 		return Result{Stripped: text}
 	}
-
-	type match struct {
-		agentID string
-		start   int
-		end     int // exclusive end of @token
-		nameLen int
-	}
-	var best *match
 
 	runes := []rune(text)
 	for i := 0; i < len(runes); i++ {
 		if runes[i] != '@' {
 			continue
 		}
-		// Require start of string or whitespace before @.
 		if i > 0 && !unicode.IsSpace(runes[i-1]) {
 			continue
 		}
-		tokenStart := i + 1
-		tokenEnd := tokenStart
-		for tokenEnd < len(runes) && !unicode.IsSpace(runes[tokenEnd]) {
-			tokenEnd++
-		}
-		if tokenEnd == tokenStart {
+		rest := string(runes[i+1:])
+		agentID, consumed := matchCandidate(rest, cands)
+		if consumed <= 0 {
 			continue
 		}
-		token := string(runes[tokenStart:tokenEnd])
+		end := i + 1 + consumed
+		return Result{
+			Hit:      true,
+			AgentID:  agentID,
+			Stripped: stripMention(runes, i, end),
+		}
+	}
+	return Result{Stripped: text}
+}
 
-		var local *match
-		for _, c := range cands {
-			id := strings.TrimSpace(c.ID)
-			name := strings.TrimSpace(c.Name)
-			if id != "" && token == id {
-				m := match{agentID: id, start: i, end: tokenEnd, nameLen: len([]rune(id))}
-				if local == nil || m.nameLen > local.nameLen {
-					cp := m
-					local = &cp
-				}
-				continue
-			}
-			if name != "" && strings.EqualFold(token, name) {
-				m := match{agentID: id, start: i, end: tokenEnd, nameLen: len([]rune(name))}
-				if local == nil || m.nameLen > local.nameLen {
-					cp := m
-					local = &cp
+// matchCandidate returns agent id and rune length consumed after '@'.
+func matchCandidate(rest string, cands []Candidate) (agentID string, consumedRunes int) {
+	restRunes := []rune(rest)
+	bestLen := 0
+	bestID := ""
+
+	for _, c := range cands {
+		id := strings.TrimSpace(c.ID)
+		name := strings.TrimSpace(c.Name)
+
+		if id != "" {
+			idRunes := []rune(id)
+			if hasPrefixFold(restRunes, idRunes) && boundaryAfter(restRunes, len(idRunes)) {
+				if len(idRunes) > bestLen {
+					bestLen = len(idRunes)
+					bestID = id
 				}
 			}
 		}
-		if local == nil {
-			continue
+		if name != "" {
+			nameRunes := []rune(name)
+			if hasPrefixFold(restRunes, nameRunes) && boundaryAfter(restRunes, len(nameRunes)) {
+				if len(nameRunes) > bestLen {
+					bestLen = len(nameRunes)
+					bestID = id
+				}
+			}
 		}
-		// First @ that hits wins (even if a later @ has a longer name).
-		best = local
-		break
 	}
+	return bestID, bestLen
+}
 
-	if best == nil {
-		return Result{Stripped: text}
+func hasPrefixFold(haystack, prefix []rune) bool {
+	if len(prefix) > len(haystack) {
+		return false
 	}
+	for i := range prefix {
+		if unicode.ToLower(haystack[i]) != unicode.ToLower(prefix[i]) {
+			return false
+		}
+	}
+	return true
+}
 
-	stripped := stripMention(runes, best.start, best.end)
-	return Result{
-		Hit:      true,
-		AgentID:  best.agentID,
-		Stripped: stripped,
+func boundaryAfter(runes []rune, n int) bool {
+	if n >= len(runes) {
+		return true
 	}
+	return unicode.IsSpace(runes[n])
 }
 
 func stripMention(runes []rune, start, end int) string {
-	// Expand to adjacent spaces so "hi @bot there" → "hi there".
 	left := start
 	for left > 0 && unicode.IsSpace(runes[left-1]) {
 		left--
