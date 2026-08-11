@@ -212,6 +212,17 @@ func (f *fakeChannelReader) GetByChannelID(_ context.Context, channelID string) 
 	return ch, nil
 }
 
+func (f *fakeChannelReader) ListGatewayChannels(context.Context) ([]*biz.ChannelMeta, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]*biz.ChannelMeta, 0, len(f.byID))
+	for _, ch := range f.byID {
+		out = append(out, ch)
+	}
+	return out, nil
+}
+
 type fakeAgentReader struct {
 	byID map[string]*biz.AgentMeta
 }

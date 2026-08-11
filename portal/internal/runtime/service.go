@@ -38,6 +38,7 @@ type peerBackend interface {
 
 type channelReader interface {
 	GetByChannelID(ctx context.Context, channelID string) (*biz.ChannelMeta, error)
+	ListGatewayChannels(ctx context.Context) ([]*biz.ChannelMeta, error)
 }
 
 type agentReader interface {
@@ -62,25 +63,27 @@ type TurnBackend interface {
 
 // Service exposes Portal Runtime session operations for the inbound Gateway.
 type Service struct {
-	chat     chatBackend
-	peer     peerBackend
-	channels channelReader
-	agents   agentReader
-	sessions sessionBackend
-	rewinder RewindBackend
-	turns    TurnBackend
+	chat          chatBackend
+	peer          peerBackend
+	channels      channelReader
+	agents        agentReader
+	sessions      sessionBackend
+	runtimeStatus biz.ChannelRuntimeRepo
+	rewinder      RewindBackend
+	turns         TurnBackend
 }
 
 // NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
-func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend) *Service {
+func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, runtimeStatus biz.ChannelRuntimeRepo, rewinder RewindBackend, turns TurnBackend) *Service {
 	return &Service{
-		chat:     chatUC,
-		peer:     peerUC,
-		channels: channelUC,
-		agents:   agentUC,
-		sessions: sessions,
-		rewinder: rewinder,
-		turns:    turns,
+		chat:          chatUC,
+		peer:          peerUC,
+		channels:      channelUC,
+		agents:        agentUC,
+		sessions:      sessions,
+		runtimeStatus: runtimeStatus,
+		rewinder:      rewinder,
+		turns:         turns,
 	}
 }
 
@@ -140,6 +143,34 @@ type channelAgentItem struct {
 type channelAgentsReply struct {
 	DefaultAgent string             `json:"default_agent"`
 	Agents       []channelAgentItem `json:"agents"`
+}
+
+type gatewayChannelItem struct {
+	ID               string   `json:"id"`
+	Type             string   `json:"type"`
+	Enabled          bool     `json:"enabled"`
+	WebhookSecret    string   `json:"webhook_secret,omitempty"`
+	IPWhitelist      []string `json:"ip_whitelist,omitempty"`
+	DefaultReplyMode string   `json:"default_reply_mode,omitempty"`
+	BotID            string   `json:"bot_id,omitempty"`
+	Secret           string   `json:"secret,omitempty"`
+	BotNames         []string `json:"bot_names,omitempty"`
+	WSURL            string   `json:"ws_url,omitempty"`
+	CorpID           string   `json:"corp_id,omitempty"`
+	CorpSecret       string   `json:"corp_secret,omitempty"`
+	UpdatedAt        string   `json:"updated_at,omitempty"`
+}
+
+type gatewayChannelsReply struct {
+	Channels []gatewayChannelItem `json:"channels"`
+}
+
+type postChannelStatusRequest struct {
+	State             string  `json:"state"`
+	LastError         *string `json:"last_error"`
+	ReconnectAttempt  *int    `json:"reconnect_attempt"`
+	ReconnectInMs     *int    `json:"reconnect_in_ms"`
+	GatewayInstanceID *string `json:"gateway_instance_id"`
 }
 
 type bindingReply struct {
@@ -209,6 +240,68 @@ func (s *Service) getBinding(ctx context.Context, channelID, peerID string) (*bi
 		SessionID: row.SessionID,
 		AgentID:   row.AgentID,
 	}, nil
+}
+
+func (s *Service) listGatewayChannels(ctx context.Context) (*gatewayChannelsReply, error) {
+	if s.channels == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "channel store unavailable")
+	}
+	list, err := s.channels.ListGatewayChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gatewayChannelItem, 0, len(list))
+	for _, ch := range list {
+		if ch == nil {
+			continue
+		}
+		item := gatewayChannelItem{
+			ID:               ch.ChannelID,
+			Type:             ch.Type,
+			Enabled:          ch.Enabled,
+			WebhookSecret:    ch.WebhookSecret,
+			IPWhitelist:      ch.IPWhitelist,
+			DefaultReplyMode: ch.DefaultReplyMode,
+			BotID:            ch.BotID,
+			Secret:           ch.BotSecret,
+			BotNames:         ch.BotNames,
+			WSURL:            ch.WSURL,
+			CorpID:           ch.CorpID,
+			CorpSecret:       ch.CorpSecret,
+		}
+		if !ch.UpdatedAt.IsZero() {
+			item.UpdatedAt = ch.UpdatedAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, item)
+	}
+	return &gatewayChannelsReply{Channels: out}, nil
+}
+
+func (s *Service) postChannelStatus(ctx context.Context, channelID string, req postChannelStatusRequest) error {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return errors.BadRequest("INVALID_ARGUMENT", "channel_id is required")
+	}
+	state := strings.TrimSpace(req.State)
+	if state == "" {
+		return errors.BadRequest("INVALID_ARGUMENT", "state is required")
+	}
+	if s.channels == nil {
+		return errors.InternalServer("UNAVAILABLE", "channel store unavailable")
+	}
+	if _, err := s.channels.GetByChannelID(ctx, channelID); err != nil {
+		return err
+	}
+	if s.runtimeStatus == nil {
+		return errors.InternalServer("UNAVAILABLE", "runtime status store unavailable")
+	}
+	return s.runtimeStatus.Upsert(ctx, channelID, biz.RuntimeStatusPatch{
+		State:             state,
+		LastError:         req.LastError,
+		ReconnectAttempt:  req.ReconnectAttempt,
+		ReconnectInMs:     req.ReconnectInMs,
+		GatewayInstanceID: req.GatewayInstanceID,
+	})
 }
 
 func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*channelAgentsReply, error) {

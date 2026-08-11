@@ -30,6 +30,8 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 	r.POST("/runtime/v1/sessions", svc.wrap(svc.handleCreate))
 	r.GET("/runtime/v1/sessions", svc.wrap(svc.handleListAll))
 	r.GET("/runtime/v1/channels/{channel_id}/agents", svc.wrap(svc.handleListChannelAgents))
+	r.GET("/runtime/v1/gateway/channels", svc.wrap(svc.handleListGatewayChannels))
+	r.POST("/runtime/v1/gateway/channels/{channel_id}/status", svc.wrap(svc.handlePostChannelStatus))
 	r.GET("/runtime/v1/agents/{agent_id}/sessions", svc.wrap(svc.handleListByAgent))
 	r.GET("/runtime/v1/sessions/{id}", svc.wrap(svc.handleGet))
 	r.PUT("/runtime/v1/sessions/{id}", svc.wrap(svc.handleUpdate))
@@ -126,6 +128,26 @@ func (s *Service) handleListChannelAgents(ctx context.Context, hctx khttp.Contex
 		return err
 	}
 	return hctx.JSON(200, out)
+}
+
+func (s *Service) handleListGatewayChannels(ctx context.Context, hctx khttp.Context) error {
+	out, err := s.listGatewayChannels(ctx)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
+}
+
+func (s *Service) handlePostChannelStatus(ctx context.Context, hctx khttp.Context) error {
+	channelID := strings.TrimSpace(hctx.Vars().Get("channel_id"))
+	var req postChannelStatusRequest
+	if err := decodeJSON(hctx, &req); err != nil {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "invalid body")
+	}
+	if err := s.postChannelStatus(ctx, channelID, req); err != nil {
+		return err
+	}
+	return hctx.JSON(200, map[string]any{"ok": true})
 }
 
 func (s *Service) handleCreate(ctx context.Context, hctx khttp.Context) error {
