@@ -27,6 +27,8 @@ type ClientConfig struct {
 	Secret       string
 	PingInterval time.Duration
 	OnMessage    MessageHandler
+	// OnConnected is invoked once after subscribe succeeds (before the read/ping loop).
+	OnConnected func()
 }
 
 // Client is a WeCom aibot WebSocket long-connection client.
@@ -101,6 +103,10 @@ func (c *Client) Run(ctx context.Context) error {
 		if err := json.Unmarshal(ack.Body, &ackBody); err == nil && ackBody.ErrCode != 0 {
 			return fmt.Errorf("wecom subscribe rejected: errcode=%d errmsg=%s", ackBody.ErrCode, ackBody.ErrMsg)
 		}
+	}
+
+	if c.cfg.OnConnected != nil {
+		c.cfg.OnConnected()
 	}
 
 	pingTicker := time.NewTicker(c.cfg.PingInterval)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/sixath/gateway/internal/adapter"
 	"github.com/sixath/gateway/internal/channel"
+	"github.com/sixath/gateway/internal/channelsync"
 	"github.com/sixath/gateway/internal/config"
 	"github.com/sixath/gateway/internal/idempotency"
 	"github.com/sixath/gateway/internal/pendingswitch"
@@ -33,10 +34,7 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	reg, err := channel.Load(cfg.ChannelsFile)
-	if err != nil {
-		log.Fatalf("load channels: %v", err)
-	}
+	reg := channel.NewRegistry()
 
 	rt := runtimeclient.New(cfg.PortalBaseURL, cfg.RuntimeToken)
 	turnTimeout := time.Duration(cfg.TurnTimeoutSec) * time.Second
@@ -67,18 +65,27 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	adapter.StartWecomBots(ctx, adapter.WecomBotDeps{
+
+	botDeps := adapter.WecomBotDeps{
 		Registry:      reg,
 		Runtime:       rt,
 		Sessions:      sessions,
 		Idempotency:   idem,
 		PendingSwitch: pendingSwitch,
 		TurnTimeout:   turnTimeout,
+	}
+	mgr := adapter.NewWecomBotManager(ctx, botDeps)
+	syncer := channelsync.NewRunner(channelsync.Config{
+		Registry: reg,
+		Lister:   rt,
+		Manager:  mgr,
+		Interval: 15 * time.Second,
 	})
+	go syncer.Run(ctx)
 
 	fmt.Printf("sixath-gateway version=%s listen=%s\n", Version, cfg.Listen)
-	fmt.Printf("portal_base_url=%s turn_timeout_sec=%d channels_file=%s\n",
-		cfg.PortalBaseURL, cfg.TurnTimeoutSec, cfg.ChannelsFile)
+	fmt.Printf("portal_base_url=%s turn_timeout_sec=%d channels_source=portal\n",
+		cfg.PortalBaseURL, cfg.TurnTimeoutSec)
 
 	srv := &http.Server{Addr: cfg.Listen, Handler: mux}
 	go func() {

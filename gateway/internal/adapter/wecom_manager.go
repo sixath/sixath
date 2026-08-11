@@ -1,0 +1,178 @@
+package adapter
+
+import (
+	"context"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/sixath/gateway/internal/channel"
+	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/runtimeclient"
+)
+
+// StatusReporter posts wecom_bot runtime status to Portal.
+type StatusReporter interface {
+	ReportChannelStatus(ctx context.Context, channelID string, body runtimeclient.StatusBody) error
+}
+
+type wecomLoopFunc func(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
+
+// WecomBotManager starts/stops per-channel wecom_bot runners based on config diffs.
+type WecomBotManager struct {
+	parent context.Context
+	deps   WecomBotDeps
+
+	mu     sync.Mutex
+	active map[string]context.CancelFunc
+	loopFn wecomLoopFunc
+}
+
+// NewWecomBotManager builds a manager bound to parent ctx (process lifetime).
+func NewWecomBotManager(parent context.Context, deps WecomBotDeps) *WecomBotManager {
+	deps = normalizeWecomBotDeps(deps)
+	return &WecomBotManager{
+		parent: parent,
+		deps:   deps,
+		active: make(map[string]context.CancelFunc),
+		loopFn: runWecomBotLoop,
+	}
+}
+
+// SetLoopForTest replaces the runner loop (tests only).
+func (m *WecomBotManager) SetLoopForTest(fn func(ctx context.Context, ch channel.Channel, deps WecomBotDeps)) {
+	if m == nil || fn == nil {
+		return
+	}
+	m.mu.Lock()
+	m.loopFn = fn
+	m.mu.Unlock()
+}
+
+// Reconcile applies spec §5.2 wecom_bot start/stop/restart against prev vs next snapshots.
+func (m *WecomBotManager) Reconcile(prev, next []channel.Channel) {
+	if m == nil {
+		return
+	}
+	prevMap := indexChannels(prev)
+	nextMap := indexChannels(next)
+
+	for id, pch := range prevMap {
+		if pch.Type != "wecom_bot" {
+			continue
+		}
+		nch, ok := nextMap[id]
+		if !ok || nch.Type != "wecom_bot" {
+			m.stop(id, false)
+			continue
+		}
+		if !nch.Enabled {
+			if pch.Enabled || m.isRunning(id) {
+				m.stop(id, true)
+			}
+			continue
+		}
+		// enabled in next
+		if !pch.Enabled || !m.isRunning(id) {
+			m.start(nch)
+			continue
+		}
+		if ConnectionConfigChanged(pch, nch) {
+			m.restart(nch)
+		}
+	}
+
+	for id, nch := range nextMap {
+		if nch.Type != "wecom_bot" || !nch.Enabled {
+			continue
+		}
+		if _, ok := prevMap[id]; ok {
+			continue
+		}
+		m.start(nch)
+	}
+}
+
+// ConnectionConfigChanged reports whether connection-affecting fields differ.
+func ConnectionConfigChanged(a, b channel.Channel) bool {
+	if a.BotID != b.BotID || a.Secret != b.Secret || a.WSURL != b.WSURL ||
+		a.CorpID != b.CorpID || a.CorpSecret != b.CorpSecret {
+		return true
+	}
+	if len(a.BotNames) != len(b.BotNames) {
+		return true
+	}
+	for i := range a.BotNames {
+		if a.BotNames[i] != b.BotNames[i] {
+			return true
+		}
+	}
+	return false
+}
+
+func indexChannels(chs []channel.Channel) map[string]channel.Channel {
+	out := make(map[string]channel.Channel, len(chs))
+	for _, ch := range chs {
+		if ch.ID == "" {
+			continue
+		}
+		out[ch.ID] = ch
+	}
+	return out
+}
+
+func (m *WecomBotManager) isRunning(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.active[id]
+	return ok
+}
+
+func (m *WecomBotManager) start(ch channel.Channel) {
+	m.mu.Lock()
+	if cancel, ok := m.active[ch.ID]; ok {
+		cancel()
+		delete(m.active, ch.ID)
+	}
+	ctx, cancel := context.WithCancel(m.parent)
+	m.active[ch.ID] = cancel
+	loop := m.loopFn
+	deps := m.deps
+	m.mu.Unlock()
+
+	log.Printf("wecom_bot %s: starting runner bot_id=%s", ch.ID, ch.BotID)
+	go loop(ctx, ch, deps)
+}
+
+func (m *WecomBotManager) stop(id string, reportDisabled bool) {
+	m.mu.Lock()
+	cancel, ok := m.active[id]
+	if ok {
+		cancel()
+		delete(m.active, id)
+	}
+	deps := m.deps
+	m.mu.Unlock()
+
+	if ok {
+		log.Printf("wecom_bot %s: stopping runner", id)
+	}
+	if reportDisabled {
+		reportChannelStatus(deps, id, runtimeclient.StatusBody{State: "disabled"})
+	}
+}
+
+func (m *WecomBotManager) restart(ch channel.Channel) {
+	m.stop(ch.ID, false)
+	m.start(ch)
+}
+
+func normalizeWecomBotDeps(deps WecomBotDeps) WecomBotDeps {
+	if deps.TurnTimeout <= 0 {
+		deps.TurnTimeout = 120 * time.Second
+	}
+	if deps.Idempotency == nil {
+		deps.Idempotency = idempotency.NewStore(0)
+	}
+	return deps
+}

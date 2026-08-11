@@ -30,37 +30,43 @@ type WecomBotDeps struct {
 	Idempotency   *idempotency.Store
 	PendingSwitch *pendingswitch.Store
 	TurnTimeout   time.Duration
+	// Reporter posts runtime status; when nil, Runtime is used if non-nil.
+	Reporter StatusReporter
 }
 
 const (
 	wecomProcessingContent = "处理中…"
 	wecomReconnectMin      = time.Second
 	wecomReconnectMax      = 60 * time.Second
+	wecomStatusHeartbeat   = 30 * time.Second
 )
 
-// StartWecomBots starts one reconnecting runner per enabled wecom_bot channel.
-// It returns immediately; runners exit when ctx is canceled.
-func StartWecomBots(ctx context.Context, deps WecomBotDeps) {
-	if deps.TurnTimeout <= 0 {
-		deps.TurnTimeout = 120 * time.Second
+func (d WecomBotDeps) statusReporter() StatusReporter {
+	if d.Reporter != nil {
+		return d.Reporter
 	}
-	if deps.Idempotency == nil {
-		deps.Idempotency = idempotency.NewStore(0)
+	if d.Runtime != nil {
+		return d.Runtime
 	}
-	if deps.Registry == nil {
+	return nil
+}
+
+func reportChannelStatus(deps WecomBotDeps, channelID string, body runtimeclient.StatusBody) {
+	rep := deps.statusReporter()
+	if rep == nil || channelID == "" || body.State == "" {
 		return
 	}
-	for _, ch := range deps.Registry.All() {
-		if ch.Type != "wecom_bot" || !ch.Enabled {
-			continue
-		}
-		ch := ch
-		go runWecomBotLoop(ctx, ch, deps)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := rep.ReportChannelStatus(ctx, channelID, body); err != nil {
+		log.Printf("wecom_bot %s: report status %s: %v", channelID, body.State, err)
 	}
 }
 
 func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps) {
+	deps = normalizeWecomBotDeps(deps)
 	backoff := wecomReconnectMin
+	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return
@@ -70,6 +76,22 @@ func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 		if ctx.Err() != nil {
 			return
 		}
+		attempt++
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		reportChannelStatus(deps, ch.ID, runtimeclient.StatusBody{
+			State:     "disconnected",
+			LastError: &errMsg,
+		})
+		reconnectMs := int(backoff / time.Millisecond)
+		reportChannelStatus(deps, ch.ID, runtimeclient.StatusBody{
+			State:            "reconnecting",
+			LastError:        &errMsg,
+			ReconnectAttempt: &attempt,
+			ReconnectInMs:    &reconnectMs,
+		})
 		if time.Since(started) > 30*time.Second {
 			backoff = wecomReconnectMin
 		}
@@ -92,16 +114,43 @@ func runWecomBotOnce(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 		CorpID: ch.CorpID,
 		Secret: ch.CorpSecret,
 	})
+	connCtx, cancelHeartbeat := context.WithCancel(ctx)
+	defer cancelHeartbeat()
+
 	var client *wecom.Client
 	client = wecom.NewClient(wecom.ClientConfig{
 		URL:    ch.WSURL,
 		BotID:  ch.BotID,
 		Secret: ch.Secret,
+		OnConnected: func() {
+			zero := 0
+			empty := ""
+			reportChannelStatus(deps, ch.ID, runtimeclient.StatusBody{
+				State:            "connected",
+				LastError:        &empty,
+				ReconnectAttempt: &zero,
+				ReconnectInMs:    &zero,
+			})
+			go wecomStatusHeartbeatLoop(connCtx, deps, ch.ID)
+		},
 		OnMessage: func(reqID string, body json.RawMessage) {
 			go handleWecomRawMessage(context.Background(), client, reqID, ch, body, deps, dir)
 		},
 	})
 	return client.Run(ctx)
+}
+
+func wecomStatusHeartbeatLoop(ctx context.Context, deps WecomBotDeps, channelID string) {
+	ticker := time.NewTicker(wecomStatusHeartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reportChannelStatus(deps, channelID, runtimeclient.StatusBody{State: "connected"})
+		}
+	}
 }
 
 func handleWecomRawMessage(parent context.Context, conn WecomConn, reqID string, ch channel.Channel, body json.RawMessage, deps WecomBotDeps, dir *wecom.Directory) {

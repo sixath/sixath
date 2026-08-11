@@ -15,7 +15,9 @@ type Config struct {
 	PortalBaseURL  string `yaml:"portal_base_url"`
 	RuntimeToken   string `yaml:"runtime_token"`
 	TurnTimeoutSec int    `yaml:"turn_timeout_sec"`
-	ChannelsFile   string `yaml:"channels_file"`
+	// ChannelsFile is deprecated. Runtime channel config comes from Portal
+	// (GET /runtime/v1/gateway/channels). Kept only for one-shot import tooling.
+	ChannelsFile string `yaml:"channels_file"`
 }
 
 // Load reads and validates a YAML config file.
@@ -40,6 +42,7 @@ func Load(path string) (*Config, error) {
 	if cfg.TurnTimeoutSec <= 0 {
 		cfg.TurnTimeoutSec = 120
 	}
+	// channels_file is ignored at runtime; optional default retained for import scripts.
 	if cfg.ChannelsFile == "" {
 		cfg.ChannelsFile = "./configs/channels.yaml"
 	}
