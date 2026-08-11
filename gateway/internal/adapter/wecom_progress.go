@@ -38,6 +38,9 @@ func NewProgressState(startedAt time.Time) *ProgressState {
 }
 
 func (st *ProgressState) ApplySSEEvent(event string, data []byte) {
+	if st.Failed {
+		return
+	}
 	switch event {
 	case "model_call":
 		var payload struct {

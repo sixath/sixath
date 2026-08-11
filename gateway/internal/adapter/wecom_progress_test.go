@@ -64,6 +64,27 @@ func TestProgressState_ApplySSE_HITLAndError(t *testing.T) {
 	}
 }
 
+func TestProgressState_ApplySSE_FailedIgnoresLaterEvents(t *testing.T) {
+	st := NewProgressState(time.Now())
+	st.ApplySSEEvent("confirm_required", []byte(`{"confirmation":{}}`))
+	st.ApplySSEEvent("chunk", []byte(`{"content":"你好"}`))
+	if st.Stage != progressStageThinking {
+		t.Fatalf("stage=%q want %q after failed+chunk", st.Stage, progressStageThinking)
+	}
+}
+
+func TestProgressState_ApplySSE_DuplicateModelResponded(t *testing.T) {
+	st := NewProgressState(time.Now())
+	st.ApplySSEEvent("model_call", []byte(`{"model_call":{"step":0,"phase":"responded"}}`))
+	if st.StepsDone != 1 {
+		t.Fatalf("steps=%d want 1", st.StepsDone)
+	}
+	st.ApplySSEEvent("model_call", []byte(`{"model_call":{"step":0,"phase":"responded"}}`))
+	if st.StepsDone != 1 {
+		t.Fatalf("duplicate responded counted: %d", st.StepsDone)
+	}
+}
+
 func TestFormatProgressText_ElapsedAndFields(t *testing.T) {
 	st := NewProgressState(time.Unix(100, 0))
 	st.Stage = "调用工具"
