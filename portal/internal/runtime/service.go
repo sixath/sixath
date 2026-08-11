@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	chatv1 "backend/api/chat/v1"
 	"backend/api/common"
@@ -132,13 +133,30 @@ type turnFinalReply struct {
 }
 
 type channelAgentItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type channelAgentsReply struct {
-	DefaultAgent string             `json:"default_agent"`
-	Agents       []channelAgentItem `json:"agents"`
+	DefaultAgent        string             `json:"default_agent"`
+	Agents              []channelAgentItem `json:"agents"`
+	AutoRouteEnabled    bool               `json:"auto_route_enabled"`
+	AutoRouteMention    bool               `json:"auto_route_mention"`
+	AutoRouteClassifier bool               `json:"auto_route_classifier"`
+}
+
+const channelAgentDescriptionMaxRunes = 200
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max])
 }
 
 // turnFinalTimeout caps reply_mode=final; overridable in tests.
@@ -204,6 +222,7 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 			continue
 		}
 		name := ""
+		desc := ""
 		if s.agents != nil {
 			meta, getErr := s.agents.GetForSession(ctx, id)
 			if getErr != nil {
@@ -215,13 +234,17 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 			}
 			if meta != nil {
 				name = meta.Name
+				desc = truncateRunes(meta.Description, channelAgentDescriptionMaxRunes)
 			}
 		}
-		agents = append(agents, channelAgentItem{ID: id, Name: name})
+		agents = append(agents, channelAgentItem{ID: id, Name: name, Description: desc})
 	}
 	return &channelAgentsReply{
-		DefaultAgent: ch.DefaultAgent,
-		Agents:       agents,
+		DefaultAgent:        ch.DefaultAgent,
+		Agents:              agents,
+		AutoRouteEnabled:    ch.AutoRouteEnabled,
+		AutoRouteMention:    ch.AutoRouteMention,
+		AutoRouteClassifier: ch.AutoRouteClassifier,
 	}, nil
 }
 

@@ -366,14 +366,18 @@ func TestRuntimeSessions_DeleteBindingIdempotent(t *testing.T) {
 func TestRuntimeSessions_ListChannelAgents(t *testing.T) {
 	channels := &fakeChannelReader{byID: map[string]*biz.ChannelMeta{
 		"ch1": {
-			ChannelID:     "ch1",
-			DefaultAgent:  "agent-a",
-			AllowedAgents: []string{"agent-a", "agent-b", "missing"},
+			ChannelID:           "ch1",
+			DefaultAgent:        "agent-a",
+			AllowedAgents:       []string{"agent-a", "agent-b", "missing"},
+			AutoRouteEnabled:    true,
+			AutoRouteMention:    true,
+			AutoRouteClassifier: true,
 		},
 	}}
+	longDesc := strings.Repeat("字", 250)
 	agents := &fakeAgentReader{byID: map[string]*biz.AgentMeta{
-		"agent-a": {ID: "agent-a", Name: "Alpha"},
-		"agent-b": {ID: "agent-b", Name: "Beta"},
+		"agent-a": {ID: "agent-a", Name: "Alpha", Description: longDesc},
+		"agent-b": {ID: "agent-b", Name: "Beta", Description: "short"},
 	}}
 	srv := testRuntimeServer(t, newTestServiceFull(nil, nil, nil, channels, agents))
 	req := runtimeReq(http.MethodGet, "/runtime/v1/channels/ch1/agents", "", "", true)
@@ -389,14 +393,25 @@ func TestRuntimeSessions_ListChannelAgents(t *testing.T) {
 	if body.DefaultAgent != "agent-a" {
 		t.Fatalf("default_agent = %q", body.DefaultAgent)
 	}
-	if len(body.Agents) != 2 || body.Agents[0] != (channelAgentItem{ID: "agent-a", Name: "Alpha"}) || body.Agents[1] != (channelAgentItem{ID: "agent-b", Name: "Beta"}) {
+	if !body.AutoRouteEnabled || !body.AutoRouteMention || !body.AutoRouteClassifier {
+		t.Fatalf("auto_route flags = %+v", body)
+	}
+	wantA := channelAgentItem{ID: "agent-a", Name: "Alpha", Description: strings.Repeat("字", 200)}
+	wantB := channelAgentItem{ID: "agent-b", Name: "Beta", Description: "short"}
+	if len(body.Agents) != 2 || body.Agents[0] != wantA || body.Agents[1] != wantB {
 		t.Fatalf("agents = %+v", body.Agents)
 	}
 }
 
 func TestRuntimeSessions_ListChannelAgentsEmptyAllowlist(t *testing.T) {
 	channels := &fakeChannelReader{byID: map[string]*biz.ChannelMeta{
-		"ch1": {ChannelID: "ch1", DefaultAgent: "agent-only"},
+		"ch1": {
+			ChannelID:           "ch1",
+			DefaultAgent:        "agent-only",
+			AutoRouteEnabled:    true,
+			AutoRouteMention:    false,
+			AutoRouteClassifier: true,
+		},
 	}}
 	agents := &fakeAgentReader{byID: map[string]*biz.AgentMeta{
 		"agent-only": {ID: "agent-only", Name: "Only"},
@@ -414,6 +429,9 @@ func TestRuntimeSessions_ListChannelAgentsEmptyAllowlist(t *testing.T) {
 	}
 	if body.DefaultAgent != "agent-only" || len(body.Agents) != 1 || body.Agents[0].ID != "agent-only" || body.Agents[0].Name != "Only" {
 		t.Fatalf("body = %+v", body)
+	}
+	if !body.AutoRouteEnabled || body.AutoRouteMention || !body.AutoRouteClassifier {
+		t.Fatalf("auto_route flags = %+v", body)
 	}
 }
 

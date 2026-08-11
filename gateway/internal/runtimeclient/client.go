@@ -63,14 +63,18 @@ type ResolveRequest struct {
 
 // ChannelAgentItem is one agent in a channel allowlist response.
 type ChannelAgentItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ChannelAgentsReply is GET /runtime/v1/channels/{channel_id}/agents.
 type ChannelAgentsReply struct {
-	DefaultAgent string             `json:"default_agent"`
-	Agents       []ChannelAgentItem `json:"agents"`
+	DefaultAgent        string             `json:"default_agent"`
+	Agents              []ChannelAgentItem `json:"agents"`
+	AutoRouteEnabled    bool               `json:"auto_route_enabled"`
+	AutoRouteMention    bool               `json:"auto_route_mention"`
+	AutoRouteClassifier bool               `json:"auto_route_classifier"`
 }
 
 // ResolveReply is the resolve response.

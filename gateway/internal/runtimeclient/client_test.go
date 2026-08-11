@@ -239,9 +239,12 @@ func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/channels/ch1/agents":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"default_agent": "a-def",
+				"default_agent":         "a-def",
+				"auto_route_enabled":    true,
+				"auto_route_mention":    true,
+				"auto_route_classifier": false,
 				"agents": []map[string]string{
-					{"id": "a-def", "name": "Default"},
+					{"id": "a-def", "name": "Default", "description": "def desc"},
 					{"id": "a2", "name": "Other"},
 				},
 			})
@@ -270,7 +273,10 @@ func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 	if out.DefaultAgent != "a-def" || len(out.Agents) != 2 {
 		t.Fatalf("out=%+v", out)
 	}
-	if out.Agents[0].ID != "a-def" || out.Agents[0].Name != "Default" {
+	if !out.AutoRouteEnabled || !out.AutoRouteMention || out.AutoRouteClassifier {
+		t.Fatalf("auto_route flags=%+v", out)
+	}
+	if out.Agents[0].ID != "a-def" || out.Agents[0].Name != "Default" || out.Agents[0].Description != "def desc" {
 		t.Fatalf("agents[0]=%+v", out.Agents[0])
 	}
 }
