@@ -1,10 +1,126 @@
 package adapter // same package as wecom_progress.go (white-box)
 
 import (
+	"context"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+type progressRespondCall struct {
+	reqID, streamID, content string
+	finish                   bool
+}
+
+type progressFakeConn struct {
+	mu    sync.Mutex
+	calls []progressRespondCall
+}
+
+func (f *progressFakeConn) RespondStream(_ context.Context, reqID, streamID, content string, finish bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, progressRespondCall{reqID: reqID, streamID: streamID, content: content, finish: finish})
+	return nil
+}
+
+func (f *progressFakeConn) snapshot() []progressRespondCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]progressRespondCall, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+func TestConsumeWecomTurnStream_ThrottlesProgress(t *testing.T) {
+	pr, pw := io.Pipe()
+	conn := &progressFakeConn{}
+	started := time.Now()
+	done := make(chan wecomStreamTurnResult, 1)
+	go func() {
+		done <- consumeWecomTurnStream(context.Background(), conn, "req", "sid", pr, started, 20*time.Millisecond)
+	}()
+
+	// Wait until skeleton + at least one tick (tick=20ms); tolerate scheduler jitter.
+	deadline := time.Now().Add(150 * time.Millisecond)
+	for {
+		progress := 0
+		for _, c := range conn.snapshot() {
+			if strings.Contains(c.content, "耗时") {
+				progress++
+			}
+		}
+		if progress >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	_, _ = io.WriteString(pw, "event: chunk\ndata: {\"content\":\"晴\"}\n\n")
+	_, _ = io.WriteString(pw, "event: done\ndata: {\"done\":true,\"content\":\"\"}\n\n")
+	_ = pw.Close()
+
+	res := <-done
+	if res.Failed || res.Content != "晴" {
+		t.Fatalf("res=%+v", res)
+	}
+	calls := conn.snapshot()
+	progress := 0
+	for _, c := range calls {
+		if c.finish {
+			t.Fatalf("consume must not finish card: %+v", c)
+		}
+		if strings.Contains(c.content, "耗时") {
+			progress++
+		}
+	}
+	if progress < 2 {
+		t.Fatalf("progress pushes=%d want >=2 (skeleton+tick): %+v", progress, calls)
+	}
+}
+
+func TestConsumeWecomTurnStream_EmptyContentFails(t *testing.T) {
+	body := strings.NewReader("event: done\ndata: {\"done\":true,\"content\":\"\"}\n\n")
+	conn := &progressFakeConn{}
+	res := consumeWecomTurnStream(context.Background(), conn, "req", "sid", body, time.Now(), time.Hour)
+	if !res.Failed || res.ErrMsg == "" {
+		t.Fatalf("want failure, got %+v", res)
+	}
+}
+
+func TestConsumeWecomTurnStream_HITLFails(t *testing.T) {
+	body := strings.NewReader(
+		"event: confirm_required\ndata: {\"confirmation\":{\"token\":\"t\"}}\n\n" +
+			"event: done\ndata: {\"done\":true,\"content\":\"\"}\n\n",
+	)
+	conn := &progressFakeConn{}
+	res := consumeWecomTurnStream(context.Background(), conn, "req", "sid", body, time.Now(), time.Hour)
+	if !res.Failed || res.ErrMsg != hitlNoSurfaceMsg {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestConsumeWecomTurnStream_ContextCancel(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	conn := &progressFakeConn{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan wecomStreamTurnResult, 1)
+	go func() {
+		done <- consumeWecomTurnStream(ctx, conn, "req", "sid", pr, time.Now(), time.Hour)
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	res := <-done
+	if !res.Failed {
+		t.Fatalf("want failed on cancel, got %+v", res)
+	}
+}
 
 func TestFormatProgressText_Skeleton(t *testing.T) {
 	st := NewProgressState(time.Unix(0, 0))

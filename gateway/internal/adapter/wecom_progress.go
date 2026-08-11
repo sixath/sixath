@@ -1,10 +1,140 @@
 package adapter
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"strings"
 	"time"
 )
+
+type wecomStreamTurnResult struct {
+	Content string
+	Failed  bool
+	ErrMsg  string
+}
+
+type sseEvent struct {
+	event string
+	data  []byte
+}
+
+func consumeWecomTurnStream(
+	ctx context.Context,
+	conn WecomConn,
+	reqID, streamID string,
+	body io.Reader,
+	startedAt time.Time,
+	tick time.Duration,
+) wecomStreamTurnResult {
+	if tick <= 0 {
+		tick = 5 * time.Second
+	}
+
+	st := NewProgressState(startedAt)
+	if err := conn.RespondStream(ctx, reqID, streamID, FormatProgressText(st, time.Now()), false); err != nil {
+		log.Printf("wecom progress skeleton: %v", err)
+	}
+
+	events := make(chan sseEvent, 16)
+	go scanSSEEvents(body, events)
+
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+
+	var full strings.Builder
+	streamDone := false
+	for !streamDone {
+		select {
+		case <-ctx.Done():
+			streamDone = true
+		case <-ticker.C:
+			if err := conn.RespondStream(ctx, reqID, streamID, FormatProgressText(st, time.Now()), false); err != nil {
+				log.Printf("wecom progress tick: %v", err)
+			}
+		case ev, ok := <-events:
+			if !ok {
+				streamDone = true
+				break
+			}
+			if ev.event == "done" {
+				streamDone = true
+				break
+			}
+			st.ApplySSEEvent(ev.event, ev.data)
+			if ev.event == "chunk" {
+				var payload struct {
+					Content string `json:"content"`
+				}
+				if err := json.Unmarshal(ev.data, &payload); err == nil && payload.Content != "" {
+					full.WriteString(payload.Content)
+				}
+			}
+		}
+	}
+
+	content := strings.TrimSpace(full.String())
+	res := wecomStreamTurnResult{Content: content}
+	if st.Failed {
+		res.Failed = true
+		res.ErrMsg = st.ErrMsg
+		if res.ErrMsg == "" {
+			res.ErrMsg = "turn failed"
+		}
+		return res
+	}
+	if err := ctx.Err(); err != nil {
+		res.Failed = true
+		res.ErrMsg = err.Error()
+		return res
+	}
+	if content == "" {
+		res.Failed = true
+		res.ErrMsg = "turn failed"
+		return res
+	}
+	return res
+}
+
+func scanSSEEvents(body io.Reader, out chan<- sseEvent) {
+	defer close(out)
+	sc := bufio.NewScanner(body)
+	// Allow larger SSE data lines (chunk payloads).
+	buf := make([]byte, 0, 64*1024)
+	sc.Buffer(buf, 1024*1024)
+
+	var event string
+	var data strings.Builder
+	flush := func() {
+		if event == "" && data.Len() == 0 {
+			return
+		}
+		out <- sseEvent{event: event, data: []byte(data.String())}
+		event = ""
+		data.Reset()
+	}
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			flush()
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			if data.Len() > 0 {
+				data.WriteByte('\n')
+			}
+			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	flush()
+}
 
 const hitlNoSurfaceMsg = "hitl required but reply_mode=final has no interactive surface"
 
