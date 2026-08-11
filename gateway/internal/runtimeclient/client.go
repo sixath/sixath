@@ -77,6 +77,20 @@ type ChannelAgentsReply struct {
 	AutoRouteClassifier bool               `json:"auto_route_classifier"`
 }
 
+// RouteRequest is POST /runtime/v1/channels/{channel_id}/route body.
+type RouteRequest struct {
+	Text   string `json:"text"`
+	PeerID string `json:"peer_id,omitempty"`
+}
+
+// RouteReply is the classifier / route response.
+type RouteReply struct {
+	AgentID    string `json:"agent_id"`
+	Confidence string `json:"confidence"`
+	Source     string `json:"source"`
+	Reason     string `json:"reason"`
+}
+
 // ResolveReply is the resolve response.
 type ResolveReply struct {
 	SessionID string `json:"session_id"`
@@ -160,6 +174,16 @@ func (c *Client) ListChannelAgents(ctx context.Context, channelID string) (*Chan
 	path := "/runtime/v1/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/agents"
 	var out ChannelAgentsReply
 	if err := c.doJSON(ctx, http.MethodGet, path, "", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RouteChannel asks Portal to classify which allowlisted agent should handle text.
+func (c *Client) RouteChannel(ctx context.Context, channelID string, req RouteRequest) (*RouteReply, error) {
+	path := "/runtime/v1/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/route"
+	var out RouteReply
+	if err := c.doJSON(ctx, http.MethodPost, path, "", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

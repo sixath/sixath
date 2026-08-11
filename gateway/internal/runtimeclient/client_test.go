@@ -281,6 +281,43 @@ func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 	}
 }
 
+func TestClient_RouteChannel(t *testing.T) {
+	var last callSeen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		last = callSeen{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			body:   string(body),
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/runtime/v1/channels/ch1/route" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent_id":   "agent-b",
+			"confidence": "high",
+			"source":     "classifier",
+			"reason":     "classifier_high",
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "rt")
+	out, err := c.RouteChannel(context.Background(), "ch1", RouteRequest{Text: "hello", PeerID: "p1"})
+	if err != nil {
+		t.Fatalf("RouteChannel: %v", err)
+	}
+	assertCall(t, last, http.MethodPost, "/runtime/v1/channels/ch1/route", "Bearer rt", "")
+	if !strings.Contains(last.body, `"text":"hello"`) || !strings.Contains(last.body, `"peer_id":"p1"`) {
+		t.Fatalf("body=%s", last.body)
+	}
+	if out.AgentID != "agent-b" || out.Confidence != "high" || out.Source != "classifier" {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
 func TestClient_TurnsFinalAndStream(t *testing.T) {
 	var lastAuth, lastUser, lastPath, lastMode string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
