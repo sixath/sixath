@@ -121,18 +121,26 @@ docker build -t sixath-web ./web
   `cd gateway && go run ./cmd/gateway -config ./configs/config.example.yaml`（`:8088` → Portal `localhost:8000`）
 - **web**：`cd web && npm install && npm run dev`（Vite `:5173`；会话相关 → `localhost:8088`，其余 `/api` → `localhost:8000`）
 
-开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。  
-`gateway/configs/channels.yaml` 中的企微 `bot_id` / `secret` / `corp_secret` **不要提交**到 Git。
+开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。
+
+**渠道配置权威在 Portal**（Web Channels UI）。Gateway 运行时从 Portal 拉取，**不再读取** `gateway/configs/channels.yaml`（该文件仅归档 / 一次性 import）。Compose 也不再挂载该文件。从旧 yaml 导入：
+
+```bash
+cd portal
+go run ./cmd/import-gateway-channels -config ./configs -channels ../gateway/configs/channels.yaml
+```
+
+企微等真实 `bot_id` / `secret` / `corp_secret` **不要提交**到 Git。
 
 ### 企微智能机器人（长连接）速览
 
 1. 控制台选 **智能机器人 AI+ → 使用长连接**，取得 BotID + Secret。
-2. 在 `gateway/configs/channels.yaml` 增加 `type: wecom_bot` 渠道并 `enabled: true`。
-3. 可选配置 `corp_id` + `corp_secret`（自建应用，成员读取），将回复卡片「发起人」解析为通讯录姓名。
-4. 启动 **单实例** Gateway（同一 BotID 禁止多副本同时订阅）。
+2. 在 Portal Web → **Channels** 创建 `type=wecom_bot` 并 `enabled`，填写 BotID / Secret（可选 `corp_id` + `corp_secret` 解析发起人姓名）。
+3. 启动 **单实例** Gateway（同一 `bot_id` 禁止在多台 Gateway 上同时启用）。
+4. 约 ≤15s 列表 **Runtime Status** 应为 `connected`；停 Gateway 约 ≤90s 变为 `unknown`。
 5. 群 @ / 单聊发消息 → 收到含发起人、问题、答复的 stream 卡片。
 
-完整步骤、字段表与验收清单见 [`gateway/README.md`](gateway/README.md)。
+完整步骤、Runtime Status 五态与验收清单见 [`gateway/README.md`](gateway/README.md)。
 
 ## Inbound Gateway E2E 烟雾
 
@@ -168,5 +176,5 @@ powershell -File _neo4j_q/verify_inbound_gateway.ps1
 ## 说明
 
 - `node_modules/`、`bin/`、本地凭证与调试产物不入库（见 `.gitignore`）。
-- `tool.json`、含明文口令的部署脚本、本地 `gateway/configs/channels.yaml` 真实凭证等密钥文件不要提交。
+- `tool.json`、含明文口令的部署脚本、Portal/本地渠道里的真实企微凭证等密钥不要提交。
 - 旧独立仓 remote 可归档；新改动请在本仓库 `main` 上提交与推送。

@@ -4,6 +4,7 @@ portal_base_url: "http://127.0.0.1:8000"
 # Overridable via env SATH_RUNTIME_TOKEN (compose default: dev-runtime-token)
 runtime_token: "dev-runtime-token"
 turn_timeout_sec: 120
-# Channel registry (webhook, wecom_bot, …). wecom_bot = 企微智能机器人长连接 bot_id+secret，与 Portal type=wecom Webhook 无关。
-channels_file: "./configs/channels.yaml"
+# DEPRECATED — ignored at runtime. Channel config is owned by Portal; Gateway syncs via GET /runtime/v1/gateway/channels.
+# channels.yaml is archive/import only (see portal/cmd/import-gateway-channels).
+# channels_file: "./configs/channels.yaml"
 # Web 用户鉴权：调用 Portal GET /api/v1/auth/me（不透明 Bearer），无 jwt_secret

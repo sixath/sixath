@@ -3,4 +3,4 @@ listen: ":8088"
 portal_base_url: "http://portal:8000"
 runtime_token: "dev-runtime-token"
 turn_timeout_sec: 120
-channels_file: "./configs/channels.yaml"
+# channels_file deprecated — Gateway loads channels from Portal, not yaml.

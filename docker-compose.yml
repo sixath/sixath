@@ -69,7 +69,7 @@ services:
       - runtime_token
     volumes:
       - ./gateway/configs/config.docker.yaml:/app/configs/config.docker.yaml:ro
-      - ./gateway/configs/channels.yaml:/app/configs/channels.yaml:ro
+      # channels.yaml is NOT mounted: runtime channel config comes from Portal.
     depends_on:
       portal:
         condition: service_healthy
