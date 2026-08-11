@@ -1217,7 +1217,7 @@ export interface AgentInsights {
 // Channel API
 /** Admin-facing derived gateway status (wecom_bot only). */
 export interface ChannelRuntimeStatus {
-  state?: string // connected|reconnecting|error|unknown|disabled
+  state?: string // connected|disconnected|reconnecting|disabled|unknown
   last_heartbeat_at?: string
   last_error?: string
   reconnect_attempt?: number

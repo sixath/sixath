@@ -140,7 +140,7 @@ message WebhookInboundReply {
 
 // RuntimeStatus is the Admin-facing derived gateway status (wecom_bot only).
 message RuntimeStatus {
-  string state = 1;                 // connected|reconnecting|error|unknown|disabled
+  string state = 1;                 // connected|disconnected|reconnecting|disabled|unknown
   string last_heartbeat_at = 2;     // RFC3339; empty if unset
   string last_error = 3;
   int32 reconnect_attempt = 4;

@@ -799,7 +799,7 @@ type RuntimeStatus struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	State            string `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`                                              // connected|reconnecting|error|unknown|disabled
+	State            string `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`                                              // connected|disconnected|reconnecting|disabled|unknown
 	LastHeartbeatAt  string `protobuf:"bytes,2,opt,name=last_heartbeat_at,json=lastHeartbeatAt,proto3" json:"last_heartbeat_at,omitempty"` // RFC3339; empty if unset
 	LastError        string `protobuf:"bytes,3,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
 	ReconnectAttempt int32  `protobuf:"varint,4,opt,name=reconnect_attempt,json=reconnectAttempt,proto3" json:"reconnect_attempt,omitempty"`

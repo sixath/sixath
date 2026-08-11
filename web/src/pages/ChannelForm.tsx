@@ -48,12 +48,13 @@ function formatRelativeTime(iso?: string): string {
   return rtf.format(-diffYear, 'year')
 }
 
+/** Five Admin-facing states: connected|disconnected|reconnecting|disabled|unknown */
 const RUNTIME_DOT_COLORS: Record<string, string> = {
   connected: '#16a34a',
+  disconnected: '#dc2626',
   reconnecting: '#d97706',
-  error: '#dc2626',
-  unknown: '#94a3b8',
   disabled: '#64748b',
+  unknown: '#94a3b8',
 }
 
 function RuntimePanel({ status }: { status?: ChannelRuntimeStatus }) {
