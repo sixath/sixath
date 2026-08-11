@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +74,28 @@ func clearPendingSwitch(store *pendingswitch.Store, channelID, peerID string) {
 	if store != nil {
 		store.Delete(channelID, peerID)
 	}
+}
+
+var digitChoiceRe = regexp.MustCompile(`^\s*(\d+)\s*$`)
+
+// parseDigitChoice matches pure numeric replies (not slash commands like /1).
+func parseDigitChoice(text string) (index int, ok bool) {
+	m := digitChoiceRe.FindStringSubmatch(text)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func formatPendingSwitchInvalidPrompt(agentCount int) string {
+	if agentCount < 1 {
+		return "请回复有效序号，或发送 /switch 重新选择。"
+	}
+	return fmt.Sprintf("请回复 1–%d 的序号，或发送 /switch 重新选择。", agentCount)
 }
 
 func formatSwitchPrompt(agents []pendingswitch.Agent, currentID string, currentMode string) string {

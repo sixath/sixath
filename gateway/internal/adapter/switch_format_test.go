@@ -154,3 +154,24 @@ func TestStartSwitch_EmptyAgentsNoPut(t *testing.T) {
 		t.Fatal("expected no pending entry")
 	}
 }
+
+func TestParseDigitChoice(t *testing.T) {
+	tests := []struct {
+		in    string
+		idx   int
+		match bool
+	}{
+		{"1", 1, true},
+		{"  2  ", 2, true},
+		{"/1", 0, false},
+		{"hello", 0, false},
+		{"99", 99, true},
+		{"0", 0, false},
+	}
+	for _, tc := range tests {
+		idx, ok := parseDigitChoice(tc.in)
+		if ok != tc.match || idx != tc.idx {
+			t.Fatalf("parseDigitChoice(%q) = (%d, %v) want (%d, %v)", tc.in, idx, ok, tc.idx, tc.match)
+		}
+	}
+}

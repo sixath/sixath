@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/sixath/gateway/internal/channel"
@@ -140,6 +141,42 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	streamID := streamIDFromMsgID(n.MsgID)
 	if err := conn.RespondStream(ctx, reqID, streamID, wecomProcessingContent, false); err != nil {
 		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
+	}
+
+	if deps.PendingSwitch != nil {
+		if ent, ok := deps.PendingSwitch.Get(ch.ID, n.PeerID, time.Now()); ok {
+			text := strings.TrimSpace(n.QuestionText)
+			if strings.HasPrefix(text, "/") {
+				deps.PendingSwitch.Delete(ch.ID, n.PeerID)
+			} else if idx, isDigit := parseDigitChoice(text); isDigit {
+				if idx < 1 || idx > len(ent.Agents) {
+					reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
+					card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
+					_ = conn.RespondStream(ctx, reqID, streamID, card, true)
+					deps.Idempotency.Complete(n.MsgID, card)
+					return
+				}
+				agentID := ent.Agents[idx-1].ID
+				deps.PendingSwitch.Delete(ch.ID, n.PeerID)
+				msg, err := switchChannelAgent(ctx, deps.Runtime, deps.Sessions, ch.ID, n.PeerID, agentID)
+				if err != nil {
+					failMsg := mapRuntimeUserError(err)
+					_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+					deps.Idempotency.Complete(n.MsgID, failMsg)
+					return
+				}
+				card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, msg)
+				_ = conn.RespondStream(ctx, reqID, streamID, card, true)
+				deps.Idempotency.Complete(n.MsgID, card)
+				return
+			} else {
+				reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
+				card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
+				_ = conn.RespondStream(ctx, reqID, streamID, card, true)
+				deps.Idempotency.Complete(n.MsgID, card)
+				return
+			}
+		}
 	}
 
 	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, deps.PendingSwitch, ch.ID, n.PeerID, n.QuestionText); isCmd {

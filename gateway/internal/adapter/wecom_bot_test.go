@@ -16,6 +16,7 @@ import (
 	"github.com/sixath/gateway/internal/adapter"
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/pendingswitch"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
 	"github.com/sixath/gateway/internal/wecom"
@@ -321,6 +322,335 @@ func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
 	}
 }
 
+func switchAgentsPortalHandler(t *testing.T, w http.ResponseWriter, r *http.Request, turns *int32, resolveCalls *int32, gotResolve *map[string]any) bool {
+	t.Helper()
+	switch {
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"default_agent": "agent-1",
+			"agents": []map[string]any{
+				{"id": "agent-1", "name": "Default"},
+				{"id": "agent-2", "name": "Ops Bot"},
+				{"id": "agent-3", "name": "RCA"},
+			},
+		})
+		return true
+	case r.URL.Path == "/runtime/v1/sessions/binding":
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"channel_id": "xiaotiancai",
+			"peer_id":    "chat:C1",
+			"session_id": "sess-bound",
+			"agent_id":   "agent-2",
+		})
+		return true
+	case r.URL.Path == "/runtime/v1/sessions/resolve":
+		atomic.AddInt32(resolveCalls, 1)
+		body := map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		*gotResolve = body
+		agentID, _ := body["agent_id"].(string)
+		if agentID == "" {
+			agentID = "agent-1"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session_id": "sess-new",
+			"agent_id":   agentID,
+			"user_id":    "u1",
+			"created":    true,
+		})
+		return true
+	case r.URL.Path == "/runtime/v1/turns":
+		atomic.AddInt32(turns, 1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "biz"})
+		return true
+	case r.Method == http.MethodDelete && r.URL.Path == "/runtime/v1/sessions/binding":
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	default:
+		return false
+	}
+}
+
+func TestWecomBot_SwitchThenDigit_ForceNew_NoTurn(t *testing.T) {
+	var turns int32
+	var resolveCalls int32
+	gotResolve := map[string]any{}
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		if !switchAgentsPortalHandler(t, w, r, &turns, &resolveCalls, &gotResolve) {
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+
+	nSwitch := mustNormalize(t, `{"msgid":"M-sw1","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-sw1", ch, nSwitch, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("after /switch turns=%d want 0", turns)
+	}
+	if atomic.LoadInt32(&resolveCalls) != 0 {
+		t.Fatalf("after /switch resolve=%d want 0", resolveCalls)
+	}
+	calls := conn.snapshot()
+	if len(calls) != 2 || !strings.Contains(calls[1].content, "Ops Bot  ← 当前") {
+		t.Fatalf("switch list=%+v", calls)
+	}
+	if _, ok := deps.PendingSwitch.Get(ch.ID, nSwitch.PeerID, time.Now()); !ok {
+		t.Fatal("expected pending after /switch")
+	}
+
+	conn2 := &fakeWecomConn{}
+	nDigit := mustNormalize(t, `{"msgid":"M-sw2","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"2"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), conn2, "req-sw2", ch, nDigit, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("after digit turns=%d want 0", turns)
+	}
+	if atomic.LoadInt32(&resolveCalls) != 1 {
+		t.Fatalf("resolve calls=%d want 1", resolveCalls)
+	}
+	if gotResolve["force_new"] != true || gotResolve["agent_id"] != "agent-2" {
+		t.Fatalf("resolve=%v", gotResolve)
+	}
+	digitCalls := conn2.snapshot()
+	if len(digitCalls) != 2 || !strings.Contains(digitCalls[1].content, "已切换到") {
+		t.Fatalf("digit reply=%+v", digitCalls)
+	}
+	if _, ok := deps.PendingSwitch.Get(ch.ID, nDigit.PeerID, time.Now()); ok {
+		t.Fatal("pending should be cleared after digit bind")
+	}
+}
+
+func TestWecomBot_SwitchThenInvalidThenDigit(t *testing.T) {
+	var turns int32
+	var resolveCalls int32
+	gotResolve := map[string]any{}
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		if !switchAgentsPortalHandler(t, w, r, &turns, &resolveCalls, &gotResolve) {
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	peer := "chat:C1"
+
+	nSwitch := mustNormalize(t, `{"msgid":"M-sw-inv1","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), &fakeWecomConn{}, "req-inv1", ch, nSwitch, deps)
+
+	nHello := mustNormalize(t, `{"msgid":"M-sw-inv2","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"hello"}}`)
+	connHello := &fakeWecomConn{}
+	adapter.HandleWecomMsgCallback(context.Background(), connHello, "req-inv2", ch, nHello, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("after hello turns=%d want 0", turns)
+	}
+	helloCalls := connHello.snapshot()
+	if len(helloCalls) != 2 || !strings.Contains(helloCalls[1].content, "请回复 1–3") {
+		t.Fatalf("hello prompt=%+v", helloCalls)
+	}
+	if _, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now()); !ok {
+		t.Fatal("pending should remain after invalid input")
+	}
+
+	connDigit := &fakeWecomConn{}
+	nDigit := mustNormalize(t, `{"msgid":"M-sw-inv3","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"2"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), connDigit, "req-inv3", ch, nDigit, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("after digit turns=%d want 0", turns)
+	}
+	if gotResolve["agent_id"] != "agent-2" {
+		t.Fatalf("resolve=%v", gotResolve)
+	}
+}
+
+func TestWecomBot_ExpiredPending_BusinessTurn(t *testing.T) {
+	var turns int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/sessions/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    false,
+			})
+		case "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	peer := "chat:C1"
+	deps.PendingSwitch.Put(ch.ID, peer, pendingswitch.Entry{
+		Agents: []pendingswitch.Agent{
+			{ID: "agent-1", Name: "Default"},
+			{ID: "agent-2", Name: "Ops Bot"},
+		},
+		ExpiresAt: time.Now().Add(-time.Minute),
+	})
+
+	n := mustNormalize(t, `{"msgid":"M-exp","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"今天天气如何"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), &fakeWecomConn{}, "req-exp", ch, n, deps)
+
+	if atomic.LoadInt32(&turns) != 1 {
+		t.Fatalf("turns=%d want 1 after expired pending", turns)
+	}
+}
+
+func TestWecomBot_SwitchShowsCurrentBinding(t *testing.T) {
+	var bindingCalls int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "agent-1",
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/binding":
+			atomic.AddInt32(&bindingCalls, 1)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "xiaotiancai",
+				"peer_id":    "user:alice",
+				"session_id": "sess-bound",
+				"agent_id":   "agent-2",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-cur","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-cur", ch, n, deps)
+
+	if atomic.LoadInt32(&bindingCalls) != 1 {
+		t.Fatalf("binding calls=%d want 1", bindingCalls)
+	}
+	calls := conn.snapshot()
+	if len(calls) != 2 || !strings.Contains(calls[1].content, "当前：Ops Bot") {
+		t.Fatalf("switch card=%+v", calls)
+	}
+	if !strings.Contains(calls[1].content, "2. Ops Bot  ← 当前") {
+		t.Fatalf("missing current marker: %q", calls[1].content)
+	}
+}
+
+func TestWecomBot_PendingUnbind_ClearsAndUnbinds(t *testing.T) {
+	var deleteCalls int32
+	var turns int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/binding" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "xiaotiancai",
+				"peer_id":    "user:alice",
+				"session_id": "sess-bound",
+				"agent_id":   "agent-2",
+			})
+		case r.URL.Path == "/runtime/v1/sessions/binding" && r.Method == http.MethodDelete:
+			atomic.AddInt32(&deleteCalls, 1)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "nope"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	peer := "user:alice"
+
+	connSwitch := &fakeWecomConn{}
+	nSwitch := mustNormalize(t, `{"msgid":"M-un-sw","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), connSwitch, "req-un-sw", ch, nSwitch, deps)
+	if _, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now()); !ok {
+		t.Fatal("expected pending after /switch")
+	}
+
+	connUnbind := &fakeWecomConn{}
+	nUnbind := mustNormalize(t, `{"msgid":"M-unbind","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/unbind"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), connUnbind, "req-unbind", ch, nUnbind, deps)
+
+	if atomic.LoadInt32(&deleteCalls) != 1 {
+		t.Fatalf("delete binding calls=%d want 1", deleteCalls)
+	}
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("turns=%d want 0", turns)
+	}
+	if _, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now()); ok {
+		t.Fatal("pending should be cleared after /unbind")
+	}
+	unbindCalls := connUnbind.snapshot()
+	if len(unbindCalls) != 2 || !strings.Contains(unbindCalls[1].content, "已解除绑定") {
+		t.Fatalf("unbind reply=%+v", unbindCalls)
+	}
+}
+
+func TestWecomBot_TwoSwitch_RefreshesPending(t *testing.T) {
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Alpha"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/binding":
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	peer := "user:alice"
+
+	n1 := mustNormalize(t, `{"msgid":"M-sw-a","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), &fakeWecomConn{}, "req-sw-a", ch, n1, deps)
+	ent1, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now())
+	if !ok {
+		t.Fatal("expected pending after first /switch")
+	}
+	exp1 := ent1.ExpiresAt
+
+	time.Sleep(5 * time.Millisecond)
+
+	n2 := mustNormalize(t, `{"msgid":"M-sw-b","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), &fakeWecomConn{}, "req-sw-b", ch, n2, deps)
+	ent2, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now())
+	if !ok {
+		t.Fatal("expected pending after second /switch")
+	}
+	if !ent2.ExpiresAt.After(exp1) {
+		t.Fatalf("expires not refreshed: %v vs %v", ent2.ExpiresAt, exp1)
+	}
+}
+
 func TestWecomBot_ReqIDPassthrough(t *testing.T) {
 	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -395,11 +725,12 @@ channels:
 	}
 	rt := runtimeclient.New(portalURL, "dev-runtime-token")
 	deps := adapter.WecomBotDeps{
-		Registry:    reg,
-		Runtime:     rt,
-		Sessions:    session.NewRouter(rt, 30*time.Second),
-		Idempotency: idempotency.NewStore(10 * time.Minute),
-		TurnTimeout: 5 * time.Second,
+		Registry:      reg,
+		Runtime:       rt,
+		Sessions:      session.NewRouter(rt, 30*time.Second),
+		Idempotency:   idempotency.NewStore(10 * time.Minute),
+		PendingSwitch: pendingswitch.New(),
+		TurnTimeout:   5 * time.Second,
 	}
 	return deps, ch
 }
