@@ -35,7 +35,10 @@ type respondCall struct {
 	finish   bool
 }
 
-func (f *fakeWecomConn) RespondStream(_ context.Context, reqID, streamID, content string, finish bool) error {
+func (f *fakeWecomConn) RespondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, respondCall{reqID: reqID, streamID: streamID, content: content, finish: finish})

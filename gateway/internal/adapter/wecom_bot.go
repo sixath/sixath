@@ -284,6 +284,9 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	defer rc.Close()
 
 	res := consumeWecomTurnStream(ctx, conn, reqID, streamID, rc, time.Now(), deps.ProgressTick)
+	// TurnTimeout may have canceled ctx; final card must still reach WeCom.
+	replyCtx, replyCancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer replyCancel()
 	if res.Failed || strings.TrimSpace(res.Content) == "" {
 		var failMsg string
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -294,13 +297,18 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 				failMsg = "turn failed"
 			}
 		}
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+		if err := conn.RespondStream(replyCtx, reqID, streamID, card, true); err != nil {
+			log.Printf("wecom_bot %s respond final failure: %v", ch.ID, err)
+			return
+		}
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
 	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, res.Content)
-	if err := conn.RespondStream(ctx, reqID, streamID, card, true); err != nil {
+	if err := conn.RespondStream(replyCtx, reqID, streamID, card, true); err != nil {
 		log.Printf("wecom_bot %s respond final: %v", ch.ID, err)
+		return
 	}
 	deps.Idempotency.Complete(n.MsgID, card)
 }
