@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sixath/gateway/internal/channel"
 )
 
 const headerUserID = "X-Sath-User-Id"
@@ -142,6 +144,34 @@ type TurnFinalReply struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// StatusBody is POST /runtime/v1/gateway/channels/{channel_id}/status body.
+type StatusBody struct {
+	State             string  `json:"state"`
+	LastError         *string `json:"last_error,omitempty"`
+	ReconnectAttempt  *int    `json:"reconnect_attempt,omitempty"`
+	ReconnectInMs     *int    `json:"reconnect_in_ms,omitempty"`
+	GatewayInstanceID *string `json:"gateway_instance_id,omitempty"`
+}
+
+type gatewayChannelsReply struct {
+	Channels []gatewayChannelItem `json:"channels"`
+}
+
+type gatewayChannelItem struct {
+	ID               string   `json:"id"`
+	Type             string   `json:"type"`
+	Enabled          bool     `json:"enabled"`
+	WebhookSecret    string   `json:"webhook_secret"`
+	IPWhitelist      []string `json:"ip_whitelist"`
+	DefaultReplyMode string   `json:"default_reply_mode"`
+	BotID            string   `json:"bot_id"`
+	Secret           string   `json:"secret"`
+	BotNames         []string `json:"bot_names"`
+	WSURL            string   `json:"ws_url"`
+	CorpID           string   `json:"corp_id"`
+	CorpSecret       string   `json:"corp_secret"`
+}
+
 // ResolveSession maps channel+peer to a session.
 func (c *Client) ResolveSession(ctx context.Context, userID string, req ResolveRequest) (*ResolveReply, error) {
 	var out ResolveReply
@@ -179,6 +209,42 @@ func (c *Client) ListChannelAgents(ctx context.Context, channelID string) (*Chan
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ListGatewayChannels fetches Gateway channel configs from Portal (includes disabled + plaintext secrets).
+func (c *Client) ListGatewayChannels(ctx context.Context) ([]channel.Channel, error) {
+	var reply gatewayChannelsReply
+	if err := c.doJSON(ctx, http.MethodGet, "/runtime/v1/gateway/channels", "", nil, nil, &reply); err != nil {
+		return nil, err
+	}
+	out := make([]channel.Channel, 0, len(reply.Channels))
+	for _, item := range reply.Channels {
+		ch := channel.Channel{
+			ID:               item.ID,
+			Type:             item.Type,
+			Enabled:          item.Enabled,
+			WebhookSecret:    item.WebhookSecret,
+			IPWhitelist:      item.IPWhitelist,
+			DefaultReplyMode: item.DefaultReplyMode,
+			BotID:            item.BotID,
+			Secret:           item.Secret,
+			BotNames:         item.BotNames,
+			WSURL:            item.WSURL,
+			CorpID:           item.CorpID,
+			CorpSecret:       item.CorpSecret,
+		}
+		if ch.IPWhitelist == nil {
+			ch.IPWhitelist = []string{}
+		}
+		out = append(out, ch)
+	}
+	return out, nil
+}
+
+// ReportChannelStatus posts runtime status for a channel to Portal.
+func (c *Client) ReportChannelStatus(ctx context.Context, channelID string, body StatusBody) error {
+	path := "/runtime/v1/gateway/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/status"
+	return c.doJSON(ctx, http.MethodPost, path, "", nil, body, nil)
 }
 
 // CreateSession creates a web chat session.

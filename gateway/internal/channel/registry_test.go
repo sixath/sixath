@@ -3,6 +3,7 @@ package channel
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -167,4 +168,74 @@ channels:
 	if err == nil {
 		t.Fatal("expected Load error for enabled wecom_bot without bot_id/secret")
 	}
+}
+
+func TestNewRegistry_ReplaceAllAndSnapshot(t *testing.T) {
+	reg := NewRegistry()
+	if got := reg.Snapshot(); len(got) != 0 {
+		t.Fatalf("empty Snapshot len=%d", len(got))
+	}
+
+	reg.ReplaceAll([]Channel{
+		{ID: "a", Type: "webhook", Enabled: true, WebhookSecret: "s1"},
+		{ID: "b", Type: "wecom_bot", Enabled: false, BotID: "bot", Secret: "sec"},
+	})
+
+	snap := reg.Snapshot()
+	if len(snap) != 2 {
+		t.Fatalf("Snapshot len=%d want 2", len(snap))
+	}
+	byID := map[string]Channel{}
+	for _, ch := range snap {
+		byID[ch.ID] = ch
+	}
+	if byID["a"].WebhookSecret != "s1" || byID["b"].Secret != "sec" {
+		t.Fatalf("snapshot=%+v", byID)
+	}
+
+	ch, err := reg.Get("a")
+	if err != nil {
+		t.Fatalf("Get a: %v", err)
+	}
+	if ch.Type != "webhook" || !ch.Enabled {
+		t.Fatalf("Get a=%+v", ch)
+	}
+
+	reg.ReplaceAll([]Channel{{ID: "c", Type: "webhook", Enabled: true}})
+	if _, err := reg.Get("a"); err == nil {
+		t.Fatal("expected Get a to fail after ReplaceAll")
+	}
+	if _, err := reg.Get("c"); err != nil {
+		t.Fatalf("Get c: %v", err)
+	}
+	if len(reg.All()) != 1 {
+		t.Fatalf("All len=%d want 1", len(reg.All()))
+	}
+}
+
+func TestRegistry_ReplaceAllConcurrentGet(t *testing.T) {
+	reg := NewRegistry()
+	reg.ReplaceAll([]Channel{{ID: "x", Type: "webhook", Enabled: true}})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				reg.ReplaceAll([]Channel{{
+					ID:      "x",
+					Type:    "webhook",
+					Enabled: true,
+					WebhookSecret: "s",
+				}})
+				if _, err := reg.Get("x"); err != nil {
+					t.Errorf("Get: %v (goroutine %d)", err, i)
+					return
+				}
+				_ = reg.Snapshot()
+			}
+		}(i)
+	}
+	wg.Wait()
 }

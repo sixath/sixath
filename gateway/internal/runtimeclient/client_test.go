@@ -333,6 +333,82 @@ func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 	}
 }
 
+func TestClient_ListGatewayChannelsAndReportStatus(t *testing.T) {
+	var last callSeen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		last = callSeen{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			user:   r.Header.Get("X-Sath-User-Id"),
+			body:   string(body),
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/gateway/channels":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"channels": []map[string]any{
+					{
+						"id":                 "demo-webhook",
+						"type":               "webhook",
+						"enabled":            false,
+						"webhook_secret":     "wh-secret",
+						"ip_whitelist":       []string{},
+						"default_reply_mode": "async",
+					},
+					{
+						"id":       "sixath4",
+						"type":     "wecom_bot",
+						"enabled":  true,
+						"bot_id":   "bot-1",
+						"secret":   "bot-secret",
+						"bot_names": []string{"sixath"},
+						"ws_url":   "wss://openws.work.weixin.qq.com",
+					},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/gateway/channels/sixath4/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "rt")
+	ctx := context.Background()
+
+	chs, err := c.ListGatewayChannels(ctx)
+	if err != nil {
+		t.Fatalf("ListGatewayChannels: %v", err)
+	}
+	assertCall(t, last, http.MethodGet, "/runtime/v1/gateway/channels", "Bearer rt", "")
+	if len(chs) != 2 {
+		t.Fatalf("len=%d want 2", len(chs))
+	}
+	if chs[0].ID != "demo-webhook" || chs[0].WebhookSecret != "wh-secret" || chs[0].Enabled {
+		t.Fatalf("chs[0]=%+v", chs[0])
+	}
+	if chs[1].ID != "sixath4" || chs[1].Secret != "bot-secret" || chs[1].BotID != "bot-1" {
+		t.Fatalf("chs[1]=%+v", chs[1])
+	}
+
+	gwID := "gw-1"
+	if err := c.ReportChannelStatus(ctx, "sixath4", StatusBody{
+		State:             "connected",
+		GatewayInstanceID: &gwID,
+	}); err != nil {
+		t.Fatalf("ReportChannelStatus: %v", err)
+	}
+	assertCall(t, last, http.MethodPost, "/runtime/v1/gateway/channels/sixath4/status", "Bearer rt", "")
+	if !strings.Contains(last.body, `"state":"connected"`) {
+		t.Fatalf("status body=%s", last.body)
+	}
+	if !strings.Contains(last.body, `"gateway_instance_id":"gw-1"`) {
+		t.Fatalf("status body=%s", last.body)
+	}
+}
+
 func TestClient_TurnsFinalAndStream(t *testing.T) {
 	var lastAuth, lastUser, lastPath, lastMode string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
