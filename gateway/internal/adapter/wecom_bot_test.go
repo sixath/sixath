@@ -188,6 +188,53 @@ func TestWecomBot_GroupPeer(t *testing.T) {
 	}
 }
 
+func TestWecomBot_TurnStreamTimeout_MapsUserError(t *testing.T) {
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/sessions/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case "/runtime/v1/turns":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			<-r.Context().Done()
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-timeout","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"slow"}}`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	adapter.HandleWecomMsgCallback(ctx, conn, "req-timeout", ch, n, deps)
+
+	calls := conn.snapshot()
+	if len(calls) < 2 {
+		t.Fatalf("respond calls=%d want >=2: %+v", len(calls), calls)
+	}
+	last := calls[len(calls)-1]
+	if !last.finish {
+		t.Fatal("expected finish=true on timeout")
+	}
+	if strings.Contains(last.content, "context deadline exceeded") {
+		t.Fatalf("raw timeout leaked to user: %q", last.content)
+	}
+	if !strings.Contains(last.content, "操作失败，请稍后重试") {
+		t.Fatalf("failure card=%q", last.content)
+	}
+}
+
 func TestWecomBot_TurnFailure_FailureCard(t *testing.T) {
 	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

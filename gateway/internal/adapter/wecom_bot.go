@@ -285,9 +285,14 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 
 	res := consumeWecomTurnStream(ctx, conn, reqID, streamID, rc, time.Now(), deps.ProgressTick)
 	if res.Failed || strings.TrimSpace(res.Content) == "" {
-		failMsg := res.ErrMsg
-		if failMsg == "" {
-			failMsg = "turn failed"
+		var failMsg string
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			failMsg = mapRuntimeUserError(ctxErr)
+		} else {
+			failMsg = res.ErrMsg
+			if failMsg == "" {
+				failMsg = "turn failed"
+			}
 		}
 		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
 		deps.Idempotency.Complete(n.MsgID, failMsg)
