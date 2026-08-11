@@ -452,6 +452,29 @@ func TestChannelPeerResolve_LongPeerUserIDFitsColumn(t *testing.T) {
 	}
 }
 
+func TestGetBinding_ReturnsRow(t *testing.T) {
+	uc, _, _ := newPeerUsecase(t, "ch-1", "agent-a", nil)
+	r, err := uc.Resolve(context.Background(), resolveIn("ch-1", "peer-a", "agent-a", false))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	row, err := uc.GetBinding(context.Background(), "ch-1", "peer-a")
+	if err != nil {
+		t.Fatalf("GetBinding: %v", err)
+	}
+	if row.SessionID != r.SessionID || row.AgentID != "agent-a" {
+		t.Fatalf("unexpected row: %+v want session_id=%q agent_id=agent-a", row, r.SessionID)
+	}
+}
+
+func TestGetBinding_NotFound(t *testing.T) {
+	uc, _, _ := newPeerUsecase(t, "ch-1", "agent-a", nil)
+	_, err := uc.GetBinding(context.Background(), "ch-1", "missing-peer")
+	if !errors.Is(err, pkgErrors.ErrNotFound) {
+		t.Fatalf("err=%v want ErrNotFound", err)
+	}
+}
+
 func TestChannelPeerDeleteBinding(t *testing.T) {
 	uc, peerRepo, _ := newPeerUsecase(t, "ch-1", "agent-a", nil)
 	if _, err := uc.Resolve(context.Background(), resolveIn("ch-1", "peer-a", "agent-a", false)); err != nil {

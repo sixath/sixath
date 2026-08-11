@@ -222,6 +222,64 @@ func TestClient_ResolveForceNewAndReasonInBody(t *testing.T) {
 	}
 }
 
+func TestClient_GetBinding(t *testing.T) {
+	var last callSeen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		last = callSeen{
+			method:   r.Method,
+			path:     r.URL.Path,
+			auth:     r.Header.Get("Authorization"),
+			user:     r.Header.Get("X-Sath-User-Id"),
+			rawQuery: r.URL.RawQuery,
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/runtime/v1/sessions/binding" {
+			http.NotFound(w, r)
+			return
+		}
+		channelID := r.URL.Query().Get("channel_id")
+		peerID := r.URL.Query().Get("peer_id")
+		if channelID == "ch1" && peerID == "peer9" {
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "ch1",
+				"peer_id":    "peer9",
+				"session_id": "s-bound",
+				"agent_id":   "a-bound",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"BINDING_NOT_FOUND"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "rt")
+	ctx := context.Background()
+
+	out, err := c.GetBinding(ctx, "ch1", "peer9")
+	if err != nil {
+		t.Fatalf("GetBinding: %v", err)
+	}
+	assertCall(t, last, http.MethodGet, "/runtime/v1/sessions/binding", "Bearer rt", "")
+	if !strings.Contains(last.rawQuery, "channel_id=ch1") || !strings.Contains(last.rawQuery, "peer_id=peer9") {
+		t.Fatalf("query=%s", last.rawQuery)
+	}
+	if out.ChannelID != "ch1" || out.PeerID != "peer9" || out.SessionID != "s-bound" || out.AgentID != "a-bound" {
+		t.Fatalf("out=%+v", out)
+	}
+
+	_, err = c.GetBinding(ctx, "ch1", "missing")
+	if err == nil {
+		t.Fatal("expected error for unbound peer")
+	}
+	httpErr, ok := err.(*HTTPError)
+	if !ok {
+		t.Fatalf("err type=%T (%v)", err, err)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("StatusCode=%d want 404", httpErr.StatusCode)
+	}
+}
+
 func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 	var last callSeen
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

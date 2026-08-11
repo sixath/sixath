@@ -32,6 +32,7 @@ type chatBackend interface {
 
 type peerBackend interface {
 	Resolve(ctx context.Context, in biz.ChannelPeerResolveInput) (*biz.ChannelPeerResolveResult, error)
+	GetBinding(ctx context.Context, channelID, peerID string) (*biz.ChannelPeerSession, error)
 	DeleteBinding(ctx context.Context, channelID, peerID string) error
 }
 
@@ -141,6 +142,13 @@ type channelAgentsReply struct {
 	Agents       []channelAgentItem `json:"agents"`
 }
 
+type bindingReply struct {
+	ChannelID string `json:"channel_id"`
+	PeerID    string `json:"peer_id"`
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
+}
+
 // turnFinalTimeout caps reply_mode=final; overridable in tests.
 var turnFinalTimeout = 120 * time.Second
 
@@ -177,6 +185,30 @@ func (s *Service) deleteBinding(ctx context.Context, channelID, peerID string) e
 		return nil // idempotent unbind
 	}
 	return err
+}
+
+func (s *Service) getBinding(ctx context.Context, channelID, peerID string) (*bindingReply, error) {
+	channelID = strings.TrimSpace(channelID)
+	peerID = strings.TrimSpace(peerID)
+	if channelID == "" || peerID == "" {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", "channel_id and peer_id are required")
+	}
+	if s.peer == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "peer resolver unavailable")
+	}
+	row, err := s.peer.GetBinding(ctx, channelID, peerID)
+	if err != nil {
+		if stderrors.Is(err, pkgErrors.ErrNotFound) {
+			return nil, errors.NotFound("BINDING_NOT_FOUND", "session binding not found")
+		}
+		return nil, err
+	}
+	return &bindingReply{
+		ChannelID: row.ChannelID,
+		PeerID:    row.PeerID,
+		SessionID: row.SessionID,
+		AgentID:   row.AgentID,
+	}, nil
 }
 
 func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*channelAgentsReply, error) {

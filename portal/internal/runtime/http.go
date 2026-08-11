@@ -24,6 +24,7 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 	r := srv.Route("/")
 	// Register static paths before /sessions/{id} so "search" / "resolve" / "binding" are not captured.
 	r.POST("/runtime/v1/sessions/resolve", svc.wrap(svc.handleResolve))
+	r.GET("/runtime/v1/sessions/binding", svc.wrap(svc.handleGetBinding))
 	r.DELETE("/runtime/v1/sessions/binding", svc.wrap(svc.handleDeleteBinding))
 	r.GET("/runtime/v1/sessions/search", svc.wrap(svc.handleSearch))
 	r.POST("/runtime/v1/sessions", svc.wrap(svc.handleCreate))
@@ -106,6 +107,16 @@ func (s *Service) handleDeleteBinding(ctx context.Context, hctx khttp.Context) e
 		return err
 	}
 	return hctx.JSON(200, map[string]any{"ok": true})
+}
+
+func (s *Service) handleGetBinding(ctx context.Context, hctx khttp.Context) error {
+	channelID := strings.TrimSpace(hctx.Query().Get("channel_id"))
+	peerID := strings.TrimSpace(hctx.Query().Get("peer_id"))
+	out, err := s.getBinding(ctx, channelID, peerID)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
 }
 
 func (s *Service) handleListChannelAgents(ctx context.Context, hctx khttp.Context) error {

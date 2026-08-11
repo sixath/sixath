@@ -9,6 +9,7 @@ Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→sessi
 | 本 README | 架构 + 本地用法 + 企微长连接配置 |
 | [入站 Gateway 设计](../docs/superpowers/specs/2026-08-09-inbound-gateway-design.md) | Web / Webhook 契约 |
 | [Portal 入站 Agent 路由](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md) | default/白名单、改绑、指令 |
+| [企微 `/switch` 两步绑定](../docs/superpowers/specs/2026-08-11-wecom-switch-agent-design.md) | 序号选择 Agent、pending TTL |
 | [企微智能机器人设计](../docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md) | 长连接 Adapter |
 | 官方 | [智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463) |
 
@@ -98,10 +99,13 @@ aibot_msg_callback
 
 | 指令 | 行为 |
 |------|------|
+| `/switch` | 列出白名单（标注**当前**绑定）；**2 分钟内**回复纯数字序号完成 `force_new` 改绑；本条不 Turn |
 | `/agent <id\|name>` | `force_new=true`，切到白名单内 Agent 并新开 session |
 | `/agent` 或 `/agents` | 列出本渠道 default + allowed（Portal） |
 | `/new` | `force_new=true`，沿用当前映射 Agent 或 default，新开 session |
 | `/unbind` | 清除 `channel+peer` 映射；下一条普通消息按 default 新建 |
+
+**`/switch` 两步绑定（企微优先）：** 发 `/switch` 后，下一条仅接受 `1`/`2`/…（`/1` 不算序号）。非法输入会提示并继续等待；超时后 pending 取消，消息按普通入站处理。处理顺序：**pending 序号 → slash → Resolve/Turn**。设计见 [企微 /switch 两步绑定](../docs/superpowers/specs/2026-08-11-wecom-switch-agent-design.md)。
 
 Webhook body 可选 `agent_id` / `force_new`（与指令等价；白名单仍由 Portal 校验）。详见 [Agent 路由设计](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md)。
 

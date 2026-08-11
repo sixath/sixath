@@ -155,6 +155,10 @@ type fakePeer struct {
 	deletedChannel, deletedPeer      string
 	deleteErr                        error
 	deleteCalls                      int
+	bindingResult                    *biz.ChannelPeerSession
+	bindingErr                       error
+	lastGetChannel, lastGetPeer      string
+	getBindingCalls                  int
 }
 
 func (f *fakePeer) Resolve(_ context.Context, in biz.ChannelPeerResolveInput) (*biz.ChannelPeerResolveResult, error) {
@@ -178,6 +182,18 @@ func (f *fakePeer) DeleteBinding(_ context.Context, channelID, peerID string) er
 	f.deleteCalls++
 	f.deletedChannel, f.deletedPeer = channelID, peerID
 	return f.deleteErr
+}
+
+func (f *fakePeer) GetBinding(_ context.Context, channelID, peerID string) (*biz.ChannelPeerSession, error) {
+	f.getBindingCalls++
+	f.lastGetChannel, f.lastGetPeer = channelID, peerID
+	if f.bindingErr != nil {
+		return nil, f.bindingErr
+	}
+	if f.bindingResult != nil {
+		return f.bindingResult, nil
+	}
+	return nil, pkgErrors.ErrNotFound
 }
 
 type fakeChannelReader struct {
@@ -335,6 +351,50 @@ func TestRuntimeSessions_ResolveAgentBound(t *testing.T) {
 	}
 	if body.Reason != "AGENT_BOUND" && !strings.Contains(rec.Body.String(), "AGENT_BOUND") {
 		t.Fatalf("expected AGENT_BOUND in body, got %s", rec.Body.String())
+	}
+}
+
+func TestRuntimeSessions_GetBinding(t *testing.T) {
+	peer := &fakePeer{
+		bindingResult: &biz.ChannelPeerSession{
+			ChannelID: "ch1",
+			PeerID:    "p1",
+			SessionID: "sess-1",
+			AgentID:   "agent-1",
+		},
+	}
+	srv := testRuntimeServer(t, newTestService(nil, peer, nil))
+	req := runtimeReq(http.MethodGet, "/runtime/v1/sessions/binding?channel_id=ch1&peer_id=p1", "", "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if peer.lastGetChannel != "ch1" || peer.lastGetPeer != "p1" || peer.getBindingCalls != 1 {
+		t.Fatalf("get args = (%q,%q) calls=%d", peer.lastGetChannel, peer.lastGetPeer, peer.getBindingCalls)
+	}
+	var body struct {
+		ChannelID string `json:"channel_id"`
+		PeerID    string `json:"peer_id"`
+		SessionID string `json:"session_id"`
+		AgentID   string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if body.ChannelID != "ch1" || body.PeerID != "p1" || body.SessionID != "sess-1" || body.AgentID != "agent-1" {
+		t.Fatalf("unexpected binding body: %+v", body)
+	}
+}
+
+func TestRuntimeSessions_GetBindingNotFound(t *testing.T) {
+	peer := &fakePeer{bindingErr: pkgErrors.ErrNotFound}
+	srv := testRuntimeServer(t, newTestService(nil, peer, nil))
+	req := runtimeReq(http.MethodGet, "/runtime/v1/sessions/binding?channel_id=ch1&peer_id=missing", "", "", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

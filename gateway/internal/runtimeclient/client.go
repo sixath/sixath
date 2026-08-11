@@ -73,6 +73,14 @@ type ChannelAgentsReply struct {
 	Agents       []ChannelAgentItem `json:"agents"`
 }
 
+// BindingReply is GET /runtime/v1/sessions/binding.
+type BindingReply struct {
+	ChannelID string `json:"channel_id"`
+	PeerID    string `json:"peer_id"`
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id"`
+}
+
 // ResolveReply is the resolve response.
 type ResolveReply struct {
 	SessionID string `json:"session_id"`
@@ -138,6 +146,18 @@ type TurnFinalReply struct {
 func (c *Client) ResolveSession(ctx context.Context, userID string, req ResolveRequest) (*ResolveReply, error) {
 	var out ResolveReply
 	if err := c.doJSON(ctx, http.MethodPost, "/runtime/v1/sessions/resolve", userID, nil, req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetBinding returns the channel+peer session mapping, or HTTPError 404 if unbound.
+func (c *Client) GetBinding(ctx context.Context, channelID, peerID string) (*BindingReply, error) {
+	vals := url.Values{}
+	vals.Set("channel_id", strings.TrimSpace(channelID))
+	vals.Set("peer_id", strings.TrimSpace(peerID))
+	var out BindingReply
+	if err := c.doJSON(ctx, http.MethodGet, "/runtime/v1/sessions/binding", "", vals, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
