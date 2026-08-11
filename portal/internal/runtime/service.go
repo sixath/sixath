@@ -60,6 +60,10 @@ type TurnBackend interface {
 	SaveAssistantMessage(ctx context.Context, sessionID, content string, metadata map[string]any) (*chatv1.MessageReply, error)
 }
 
+type routeBackend interface {
+	Route(ctx context.Context, in biz.AgentRouteInput) (*biz.AgentRouteResult, error)
+}
+
 // Service exposes Portal Runtime session operations for the inbound Gateway.
 type Service struct {
 	chat     chatBackend
@@ -69,10 +73,11 @@ type Service struct {
 	sessions sessionBackend
 	rewinder RewindBackend
 	turns    TurnBackend
+	router   routeBackend
 }
 
 // NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
-func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend) *Service {
+func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend, routeUC *biz.AgentRouteUsecase) *Service {
 	return &Service{
 		chat:     chatUC,
 		peer:     peerUC,
@@ -81,6 +86,7 @@ func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channel
 		sessions: sessions,
 		rewinder: rewinder,
 		turns:    turns,
+		router:   routeUC,
 	}
 }
 
@@ -245,6 +251,42 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 		AutoRouteEnabled:    ch.AutoRouteEnabled,
 		AutoRouteMention:    ch.AutoRouteMention,
 		AutoRouteClassifier: ch.AutoRouteClassifier,
+	}, nil
+}
+
+type routeRequest struct {
+	Text   string `json:"text"`
+	PeerID string `json:"peer_id"`
+}
+
+type routeReply struct {
+	AgentID    string `json:"agent_id"`
+	Confidence string `json:"confidence"`
+	Source     string `json:"source"`
+	Reason     string `json:"reason"`
+}
+
+func (s *Service) routeChannel(ctx context.Context, channelID string, req routeRequest) (*routeReply, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", "channel_id is required")
+	}
+	if s.router == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "route classifier unavailable")
+	}
+	out, err := s.router.Route(ctx, biz.AgentRouteInput{
+		ChannelID: channelID,
+		PeerID:    req.PeerID,
+		Text:      req.Text,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &routeReply{
+		AgentID:    out.AgentID,
+		Confidence: string(out.Confidence),
+		Source:     string(out.Source),
+		Reason:     out.Reason,
 	}, nil
 }
 

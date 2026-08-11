@@ -31,6 +31,7 @@ func wireApp(*conf.Server, *conf.Data, *conf.Auth, llmReviewEnabledInput, growth
 		service.NewAgentService,
 		service.ProvideChatServiceWithTurnTrace,
 		service.NewChannelService,
+		runtime.ProvideAgentRouteUsecase,
 		runtime.NewService,
 		wire.Bind(new(runtime.RewindBackend), new(*service.ChatService)),
 		wire.Bind(new(runtime.TurnBackend), new(*service.ChatService)),
