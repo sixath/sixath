@@ -130,6 +130,114 @@ func TestWecomBotManager_ReconcileStartStopRestart(t *testing.T) {
 	}
 }
 
+func TestWecomBotManager_RestartDrainsBeforeStart(t *testing.T) {
+	var mu sync.Mutex
+	oldExited := false
+	overlap := false
+	generation := 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := adapter.NewWecomBotManager(ctx, adapter.WecomBotDeps{})
+	mgr.SetDrainTimeoutForTest(2 * time.Second)
+	mgr.SetLoopForTest(func(runCtx context.Context, _ channel.Channel, _ adapter.WecomBotDeps) {
+		mu.Lock()
+		generation++
+		gen := generation
+		mu.Unlock()
+
+		if gen == 1 {
+			<-runCtx.Done()
+			time.Sleep(40 * time.Millisecond) // slow exit to expose races without drain
+			mu.Lock()
+			oldExited = true
+			mu.Unlock()
+			return
+		}
+		mu.Lock()
+		if !oldExited {
+			overlap = true
+		}
+		mu.Unlock()
+		<-runCtx.Done()
+	})
+
+	bot := channel.Channel{
+		ID: "bot1", Type: "wecom_bot", Enabled: true,
+		BotID: "B1", Secret: "S1",
+	}
+	mgr.Reconcile(nil, []channel.Channel{bot})
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		g := generation
+		mu.Unlock()
+		if g >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first runner never started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	changed := bot
+	changed.Secret = "S2"
+	// Reconcile/restart must block until gen1 exits before starting gen2.
+	mgr.Reconcile([]channel.Channel{bot}, []channel.Channel{changed})
+
+	deadline = time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		g := generation
+		exited := oldExited
+		hadOverlap := overlap
+		mu.Unlock()
+		if g >= 2 {
+			if !exited {
+				t.Fatal("expected old runner to have exited before new runner started")
+			}
+			if hadOverlap {
+				t.Fatal("new runner started before old runner finished (double-connect risk)")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected restart; generation=%d oldExited=%v overlap=%v", g, exited, hadOverlap)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestWecomBotManager_ReportsDisabledOnEnableToDisable(t *testing.T) {
+	reporter := &fakeStatusReporter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := adapter.NewWecomBotManager(ctx, adapter.WecomBotDeps{Reporter: reporter})
+	mgr.SetLoopForTest(func(runCtx context.Context, _ channel.Channel, _ adapter.WecomBotDeps) {
+		<-runCtx.Done()
+	})
+
+	bot := channel.Channel{
+		ID: "bot1", Type: "wecom_bot", Enabled: true,
+		BotID: "B1", Secret: "S1",
+	}
+	mgr.Reconcile(nil, []channel.Channel{bot})
+	time.Sleep(20 * time.Millisecond)
+
+	disabled := bot
+	disabled.Enabled = false
+	mgr.Reconcile([]channel.Channel{bot}, []channel.Channel{disabled})
+
+	states := reporter.statesFor("bot1")
+	if len(states) != 1 || states[0] != "disabled" {
+		t.Fatalf("states=%v want [disabled]", states)
+	}
+}
+
 func TestWecomBotManager_IgnoresWebhook(t *testing.T) {
 	var mu sync.Mutex
 	started := 0

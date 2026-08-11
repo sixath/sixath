@@ -18,24 +18,34 @@ type StatusReporter interface {
 
 type wecomLoopFunc func(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 
+type runnerHandle struct {
+	cancel context.CancelFunc
+	done   <-chan struct{}
+}
+
+// Drain timeout waiting for a canceled runner before starting another (same bot_id safety).
+const runnerDrainTimeout = 15 * time.Second
+
 // WecomBotManager starts/stops per-channel wecom_bot runners based on config diffs.
 type WecomBotManager struct {
 	parent context.Context
 	deps   WecomBotDeps
 
-	mu     sync.Mutex
-	active map[string]context.CancelFunc
-	loopFn wecomLoopFunc
+	mu           sync.Mutex
+	active       map[string]*runnerHandle
+	loopFn       wecomLoopFunc
+	drainTimeout time.Duration
 }
 
 // NewWecomBotManager builds a manager bound to parent ctx (process lifetime).
 func NewWecomBotManager(parent context.Context, deps WecomBotDeps) *WecomBotManager {
 	deps = normalizeWecomBotDeps(deps)
 	return &WecomBotManager{
-		parent: parent,
-		deps:   deps,
-		active: make(map[string]context.CancelFunc),
-		loopFn: runWecomBotLoop,
+		parent:       parent,
+		deps:         deps,
+		active:       make(map[string]*runnerHandle),
+		loopFn:       runWecomBotLoop,
+		drainTimeout: runnerDrainTimeout,
 	}
 }
 
@@ -46,6 +56,16 @@ func (m *WecomBotManager) SetLoopForTest(fn func(ctx context.Context, ch channel
 	}
 	m.mu.Lock()
 	m.loopFn = fn
+	m.mu.Unlock()
+}
+
+// SetDrainTimeoutForTest overrides how long stop/restart waits for the old goroutine.
+func (m *WecomBotManager) SetDrainTimeoutForTest(d time.Duration) {
+	if m == nil || d <= 0 {
+		return
+	}
+	m.mu.Lock()
+	m.drainTimeout = d
 	m.mu.Unlock()
 }
 
@@ -129,36 +149,57 @@ func (m *WecomBotManager) isRunning(id string) bool {
 }
 
 func (m *WecomBotManager) start(ch channel.Channel) {
+	// Always drain any prior runner for this channel_id before dialing again.
+	m.stop(ch.ID, false)
+
 	m.mu.Lock()
-	if cancel, ok := m.active[ch.ID]; ok {
-		cancel()
-		delete(m.active, ch.ID)
-	}
 	ctx, cancel := context.WithCancel(m.parent)
-	m.active[ch.ID] = cancel
+	done := make(chan struct{})
+	m.active[ch.ID] = &runnerHandle{cancel: cancel, done: done}
 	loop := m.loopFn
 	deps := m.deps
 	m.mu.Unlock()
 
 	log.Printf("wecom_bot %s: starting runner bot_id=%s", ch.ID, ch.BotID)
-	go loop(ctx, ch, deps)
+	go func() {
+		defer close(done)
+		loop(ctx, ch, deps)
+	}()
 }
 
 func (m *WecomBotManager) stop(id string, reportDisabled bool) {
 	m.mu.Lock()
-	cancel, ok := m.active[id]
+	h, ok := m.active[id]
 	if ok {
-		cancel()
 		delete(m.active, id)
 	}
 	deps := m.deps
+	timeout := m.drainTimeout
 	m.mu.Unlock()
 
-	if ok {
+	if ok && h != nil {
 		log.Printf("wecom_bot %s: stopping runner", id)
+		h.cancel()
+		m.waitDrain(id, h.done, timeout)
 	}
 	if reportDisabled {
 		reportChannelStatus(deps, id, runtimeclient.StatusBody{State: "disabled"})
+	}
+}
+
+func (m *WecomBotManager) waitDrain(id string, done <-chan struct{}, timeout time.Duration) {
+	if done == nil {
+		return
+	}
+	if timeout <= 0 {
+		timeout = runnerDrainTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		log.Printf("wecom_bot %s: timed out waiting for runner to exit after %s", id, timeout)
 	}
 }
 

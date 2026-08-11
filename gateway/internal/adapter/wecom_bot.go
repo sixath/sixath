@@ -32,6 +32,8 @@ type WecomBotDeps struct {
 	TurnTimeout   time.Duration
 	// Reporter posts runtime status; when nil, Runtime is used if non-nil.
 	Reporter StatusReporter
+	// RunOnce overrides a single connect attempt (tests); nil uses real WS dial.
+	RunOnce func(ctx context.Context, ch channel.Channel, deps WecomBotDeps) error
 }
 
 const (
@@ -65,6 +67,10 @@ func reportChannelStatus(deps WecomBotDeps, channelID string, body runtimeclient
 
 func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps) {
 	deps = normalizeWecomBotDeps(deps)
+	once := deps.RunOnce
+	if once == nil {
+		once = runWecomBotOnce
+	}
 	backoff := wecomReconnectMin
 	attempt := 0
 	for {
@@ -72,7 +78,7 @@ func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 			return
 		}
 		started := time.Now()
-		err := runWecomBotOnce(ctx, ch, deps)
+		err := once(ctx, ch, deps)
 		if ctx.Err() != nil {
 			return
 		}
@@ -109,6 +115,17 @@ func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 	}
 }
 
+func reportWecomConnected(deps WecomBotDeps, channelID string) {
+	zero := 0
+	empty := ""
+	reportChannelStatus(deps, channelID, runtimeclient.StatusBody{
+		State:            "connected",
+		LastError:        &empty,
+		ReconnectAttempt: &zero,
+		ReconnectInMs:    &zero,
+	})
+}
+
 func runWecomBotOnce(ctx context.Context, ch channel.Channel, deps WecomBotDeps) error {
 	dir := wecom.NewDirectory(wecom.DirectoryConfig{
 		CorpID: ch.CorpID,
@@ -123,14 +140,7 @@ func runWecomBotOnce(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 		BotID:  ch.BotID,
 		Secret: ch.Secret,
 		OnConnected: func() {
-			zero := 0
-			empty := ""
-			reportChannelStatus(deps, ch.ID, runtimeclient.StatusBody{
-				State:            "connected",
-				LastError:        &empty,
-				ReconnectAttempt: &zero,
-				ReconnectInMs:    &zero,
-			})
+			reportWecomConnected(deps, ch.ID)
 			go wecomStatusHeartbeatLoop(connCtx, deps, ch.ID)
 		},
 		OnMessage: func(reqID string, body json.RawMessage) {
