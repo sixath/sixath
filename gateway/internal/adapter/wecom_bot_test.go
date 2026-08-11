@@ -3,6 +3,7 @@ package adapter_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,19 @@ func (f *fakeWecomConn) RespondStream(_ context.Context, reqID, streamID, conten
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, respondCall{reqID: reqID, streamID: streamID, content: content, finish: finish})
 	return nil
+}
+
+// ctxStrictWecomConn rejects RespondStream when ctx is already canceled
+// (mirrors real wecom.Client.writeFrame behavior).
+type ctxStrictWecomConn struct {
+	fakeWecomConn
+}
+
+func (f *ctxStrictWecomConn) RespondStream(ctx context.Context, reqID, streamID, content string, finish bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.fakeWecomConn.RespondStream(ctx, reqID, streamID, content, finish)
 }
 
 func (f *fakeWecomConn) snapshot() []respondCall {
@@ -102,6 +116,59 @@ func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 	}
 	if atomic.LoadInt32(&turns) != 1 {
 		t.Fatalf("turns=%d", turns)
+	}
+}
+
+func TestWecomBot_MentionAutoRoute(t *testing.T) {
+	var gotTurn map[string]any
+	var gotResolve map[string]any
+	var resolveN int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent":         "agent-1",
+				"auto_route_enabled":    true,
+				"auto_route_mention":    true,
+				"auto_route_classifier": false,
+				"agents": []map[string]string{
+					{"id": "agent-1", "name": "Alpha"},
+					{"id": "agent-2", "name": "Ops"},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/sessions/resolve":
+			n := atomic.AddInt32(&resolveN, 1)
+			_ = json.Unmarshal(body, &gotResolve)
+			if n == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"reason":"AGENT_BOUND"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-2", "agent_id": "agent-2", "user_id": "u1", "created": true,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/turns":
+			_ = json.Unmarshal(body, &gotTurn)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-ar","aibotid":"BOT","chatid":"C1","chattype":"group","from":{"userid":"alice"},"msgtype":"text","text":{"content":"@小天才 @Ops hello"}}`)
+
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-ar", ch, n, deps)
+
+	if gotResolve["agent_id"] != "agent-2" || gotResolve["force_new"] != true {
+		t.Fatalf("resolve=%v", gotResolve)
+	}
+	wantContent := wecom.FormatRuntimeContent("alice", "alice", "hello")
+	if gotTurn["content"] != wantContent {
+		t.Fatalf("turn content=%v want %q", gotTurn["content"], wantContent)
 	}
 }
 
@@ -174,6 +241,60 @@ func TestWecomBot_GroupPeer(t *testing.T) {
 
 	if gotPeer != "chat:C1" {
 		t.Fatalf("peer_id=%q want chat:C1", gotPeer)
+	}
+}
+
+func TestWecomBot_TurnTimeout_StillFinishesStream(t *testing.T) {
+	// After turn ctx deadline, finish=true must still be delivered (otherwise UI sticks on 处理中…).
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/sessions/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case "/runtime/v1/turns":
+			select {
+			case <-r.Context().Done():
+			case <-time.After(2 * time.Second):
+			}
+			return
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	deps.TurnTimeout = 80 * time.Millisecond
+	conn := &ctxStrictWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-timeout","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"慢查询"}}`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		adapter.HandleWecomMsgCallback(ctx, conn, "req-timeout", ch, n, deps)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("HandleWecomMsgCallback hung")
+	}
+
+	calls := conn.snapshot()
+	if len(calls) < 2 {
+		t.Fatalf("respond calls=%d want >=2: %+v", len(calls), calls)
+	}
+	last := calls[len(calls)-1]
+	if !last.finish {
+		t.Fatalf("last respond must finish=true, got %+v", last)
+	}
+	if !strings.Contains(last.content, "处理超时") && !strings.Contains(last.content, "操作失败") {
+		t.Fatalf("expected timeout/failure card content, got %q", last.content)
 	}
 }
 

@@ -95,6 +95,10 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 			status = "error"
 			return nil, errors.New("execute_read: datasource_id is required (or set default)")
 		}
+		if err := RejectElasticsearchDatasource(cfg.Registry, datasourceID, "execute_read"); err != nil {
+			status = "error"
+			return nil, err
+		}
 
 		// dsl 或 query 至少需要一个
 		var dsl string

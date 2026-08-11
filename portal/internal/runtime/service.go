@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	chatv1 "backend/api/chat/v1"
 	"backend/api/common"
@@ -59,6 +60,10 @@ type TurnBackend interface {
 	SaveAssistantMessage(ctx context.Context, sessionID, content string, metadata map[string]any) (*chatv1.MessageReply, error)
 }
 
+type routeBackend interface {
+	Route(ctx context.Context, in biz.AgentRouteInput) (*biz.AgentRouteResult, error)
+}
+
 // Service exposes Portal Runtime session operations for the inbound Gateway.
 type Service struct {
 	chat     chatBackend
@@ -68,10 +73,11 @@ type Service struct {
 	sessions sessionBackend
 	rewinder RewindBackend
 	turns    TurnBackend
+	router   routeBackend
 }
 
 // NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
-func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend) *Service {
+func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, rewinder RewindBackend, turns TurnBackend, routeUC *biz.AgentRouteUsecase) *Service {
 	return &Service{
 		chat:     chatUC,
 		peer:     peerUC,
@@ -80,6 +86,7 @@ func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channel
 		sessions: sessions,
 		rewinder: rewinder,
 		turns:    turns,
+		router:   routeUC,
 	}
 }
 
@@ -132,17 +139,35 @@ type turnFinalReply struct {
 }
 
 type channelAgentItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type channelAgentsReply struct {
-	DefaultAgent string             `json:"default_agent"`
-	Agents       []channelAgentItem `json:"agents"`
+	DefaultAgent        string             `json:"default_agent"`
+	Agents              []channelAgentItem `json:"agents"`
+	AutoRouteEnabled    bool               `json:"auto_route_enabled"`
+	AutoRouteMention    bool               `json:"auto_route_mention"`
+	AutoRouteClassifier bool               `json:"auto_route_classifier"`
+}
+
+const channelAgentDescriptionMaxRunes = 200
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max])
 }
 
 // turnFinalTimeout caps reply_mode=final; overridable in tests.
-var turnFinalTimeout = 120 * time.Second
+// Keep aligned with Gateway turn_timeout_sec / Portal HTTP timeout (long tool loops).
+var turnFinalTimeout = 600 * time.Second
 
 func (s *Service) resolve(ctx context.Context, req resolveRequest) (*resolveReply, error) {
 	out, err := s.peer.Resolve(ctx, biz.ChannelPeerResolveInput{
@@ -204,6 +229,7 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 			continue
 		}
 		name := ""
+		desc := ""
 		if s.agents != nil {
 			meta, getErr := s.agents.GetForSession(ctx, id)
 			if getErr != nil {
@@ -215,13 +241,53 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 			}
 			if meta != nil {
 				name = meta.Name
+				desc = truncateRunes(meta.Description, channelAgentDescriptionMaxRunes)
 			}
 		}
-		agents = append(agents, channelAgentItem{ID: id, Name: name})
+		agents = append(agents, channelAgentItem{ID: id, Name: name, Description: desc})
 	}
 	return &channelAgentsReply{
-		DefaultAgent: ch.DefaultAgent,
-		Agents:       agents,
+		DefaultAgent:        ch.DefaultAgent,
+		Agents:              agents,
+		AutoRouteEnabled:    ch.AutoRouteEnabled,
+		AutoRouteMention:    ch.AutoRouteMention,
+		AutoRouteClassifier: ch.AutoRouteClassifier,
+	}, nil
+}
+
+type routeRequest struct {
+	Text   string `json:"text"`
+	PeerID string `json:"peer_id"`
+}
+
+type routeReply struct {
+	AgentID    string `json:"agent_id"`
+	Confidence string `json:"confidence"`
+	Source     string `json:"source"`
+	Reason     string `json:"reason"`
+}
+
+func (s *Service) routeChannel(ctx context.Context, channelID string, req routeRequest) (*routeReply, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", "channel_id is required")
+	}
+	if s.router == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "route classifier unavailable")
+	}
+	out, err := s.router.Route(ctx, biz.AgentRouteInput{
+		ChannelID: channelID,
+		PeerID:    req.PeerID,
+		Text:      req.Text,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &routeReply{
+		AgentID:    out.AgentID,
+		Confidence: string(out.Confidence),
+		Source:     string(out.Source),
+		Reason:     out.Reason,
 	}, nil
 }
 
@@ -413,7 +479,11 @@ func (s *Service) runFinalTurn(ctx context.Context, req turnRequest) (*turnFinal
 	// Timeout/cancel must fail even when partial chunks arrived and stream error was suppressed.
 	if err := runCtx.Err(); err != nil {
 		out.Status = "failed"
-		out.Error = err.Error()
+		if stderrors.Is(err, context.DeadlineExceeded) {
+			out.Error = "turn timed out"
+		} else {
+			out.Error = err.Error()
+		}
 		if agg.Content != "" {
 			out.Content = agg.Content
 		}

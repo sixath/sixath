@@ -1,6 +1,9 @@
 package tooldata
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/sixath/framework/datasource"
 )
 
@@ -34,4 +37,24 @@ func ResolveDatasourceID(params map[string]any, cfgDefault string, reg *datasour
 		return cfgDefault
 	}
 	return id
+}
+
+// RejectElasticsearchDatasource returns an error when datasourceID resolves to Elasticsearch.
+// Used so data trio tools never run ES queries (use es_log_query / http_request instead).
+func RejectElasticsearchDatasource(reg *datasource.Registry, datasourceID, toolName string) error {
+	if reg == nil || strings.TrimSpace(datasourceID) == "" {
+		return nil
+	}
+	ds, err := reg.Get(datasourceID)
+	if err != nil || ds == nil {
+		return nil
+	}
+	typ := strings.ToLower(strings.TrimSpace(ds.Type()))
+	if typ == datasource.TypeElasticsearch || typ == "es" {
+		if toolName == "" {
+			toolName = "data tool"
+		}
+		return fmt.Errorf("%s 不支持 Elasticsearch；请使用 es_log_query 或 http_request", toolName)
+	}
+	return nil
 }

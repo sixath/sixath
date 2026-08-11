@@ -32,6 +32,9 @@ export default function ChannelForm() {
   const [defaultAgent, setDefaultAgent] = useState('')
   const [allowedAgents, setAllowedAgents] = useState<string[]>([])
   const [enabled, setEnabled] = useState(true)
+  const [autoRouteEnabled, setAutoRouteEnabled] = useState(true)
+  const [autoRouteMention, setAutoRouteMention] = useState(true)
+  const [autoRouteClassifier, setAutoRouteClassifier] = useState(true)
   const [webhookPath, setWebhookPath] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
   const [ipWhitelist, setIpWhitelist] = useState('')
@@ -57,6 +60,9 @@ export default function ChannelForm() {
         setDefaultAgent(channel.default_agent || '')
         setAllowedAgents(channel.allowed_agents ?? [])
         setEnabled(channel.enabled)
+        setAutoRouteEnabled(channel.auto_route_enabled ?? true)
+        setAutoRouteMention(channel.auto_route_mention ?? true)
+        setAutoRouteClassifier(channel.auto_route_classifier ?? true)
         setWebhookPath(channel.webhook_path || '')
         setIpWhitelist(joinList(channel.ip_whitelist))
         setDefaultUids(joinList(channel.default_uids))
@@ -110,6 +116,9 @@ export default function ChannelForm() {
           default_agent: defaultAgent || undefined,
           enabled,
           allowed_agents: allowedForSubmit ?? [],
+          auto_route_enabled: autoRouteEnabled,
+          auto_route_mention: autoRouteMention,
+          auto_route_classifier: autoRouteClassifier,
         }
         if (type === 'webhook' || type === 'api') {
           updates.webhook_path = webhookPath.trim() || undefined
@@ -131,6 +140,9 @@ export default function ChannelForm() {
           default_agent: defaultAgent || undefined,
           allowed_agents: allowedForSubmit,
           enabled,
+          auto_route_enabled: autoRouteEnabled,
+          auto_route_mention: autoRouteMention,
+          auto_route_classifier: autoRouteClassifier,
           webhook_path: webhookPath.trim() || undefined,
           webhook_secret: webhookSecret.trim() || undefined,
           ip_whitelist: parseList(ipWhitelist),
@@ -224,6 +236,49 @@ export default function ChannelForm() {
               ) : (
                 <p style={{ color: 'var(--muted)', margin: 0 }}>暂无 Agent，请先创建 Agent。</p>
               )}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <div className="form-panel">
+              <label>Auto-route</label>
+              <p className="form-panel__desc">
+                控制本渠道是否按消息自动选择 Agent（@提及 / 分类器）。
+              </p>
+              <div className="checkbox-list">
+                <div className="checkbox-list__item">
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={autoRouteEnabled}
+                      onChange={(e) => setAutoRouteEnabled(e.target.checked)}
+                    />
+                    <span>Enable auto-route</span>
+                  </label>
+                </div>
+                <div className="checkbox-list__item">
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={autoRouteMention}
+                      disabled={!autoRouteEnabled}
+                      onChange={(e) => setAutoRouteMention(e.target.checked)}
+                    />
+                    <span>@Agent mention</span>
+                  </label>
+                </div>
+                <div className="checkbox-list__item">
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={autoRouteClassifier}
+                      disabled={!autoRouteEnabled}
+                      onChange={(e) => setAutoRouteClassifier(e.target.checked)}
+                    />
+                    <span>Classifier (no @)</span>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 

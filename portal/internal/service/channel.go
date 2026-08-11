@@ -58,17 +58,20 @@ func NewChannelService(uc *biz.ChannelUsecase, agentSvc *AgentService, logger lo
 
 func channelMetaToReply(ch *biz.ChannelMeta) *channelv1.ChannelReply {
 	r := &channelv1.ChannelReply{
-		Ret:           baseSuccess(),
-		Id:            ch.ID,
-		ChannelId:     ch.ChannelID,
-		Type:          ch.Type,
-		DefaultAgent:  ch.DefaultAgent,
-		AllowedAgents: ch.AllowedAgents,
-		Enabled:       ch.Enabled,
-		WebhookPath:  ch.WebhookPath,
-		IpWhitelist:  ch.IPWhitelist,
-		CreatedAt:    ch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:    ch.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Ret:                 baseSuccess(),
+		Id:                  ch.ID,
+		ChannelId:           ch.ChannelID,
+		Type:                ch.Type,
+		DefaultAgent:        ch.DefaultAgent,
+		AllowedAgents:       ch.AllowedAgents,
+		Enabled:             ch.Enabled,
+		AutoRouteEnabled:    ch.AutoRouteEnabled,
+		AutoRouteMention:    ch.AutoRouteMention,
+		AutoRouteClassifier: ch.AutoRouteClassifier,
+		WebhookPath:         ch.WebhookPath,
+		IpWhitelist:         ch.IPWhitelist,
+		CreatedAt:           ch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:           ch.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if ch.Type == "wxpusher" {
 		r.DefaultUids = ch.DefaultUids
@@ -131,18 +134,31 @@ func (s *ChannelService) CreateChannel(ctx context.Context, req *channelv1.Creat
 	if req.GetType() == "wecom" && !isValidWeComWebhookURL(req.GetWebhookUrl()) {
 		return nil, errors.BadRequest("INVALID", "wecom channel requires valid webhook_url")
 	}
+	autoRouteEnabled, autoRouteMention, autoRouteClassifier := true, true, true
+	if req.AutoRouteEnabled != nil {
+		autoRouteEnabled = req.GetAutoRouteEnabled()
+	}
+	if req.AutoRouteMention != nil {
+		autoRouteMention = req.GetAutoRouteMention()
+	}
+	if req.AutoRouteClassifier != nil {
+		autoRouteClassifier = req.GetAutoRouteClassifier()
+	}
 	ch, err := s.uc.Create(ctx, &biz.ChannelCreate{
-		ChannelID:     req.GetChannelId(),
-		Type:          req.GetType(),
-		DefaultAgent:  req.GetDefaultAgent(),
-		AllowedAgents: req.GetAllowedAgents(),
-		Enabled:       req.GetEnabled(),
-		WebhookPath:   req.GetWebhookPath(),
-		WebhookSecret: req.GetWebhookSecret(),
-		IPWhitelist:   req.GetIpWhitelist(),
-		AppToken:      req.GetAppToken(),
-		DefaultUids:   req.GetDefaultUids(),
-		WebhookURL:    req.GetWebhookUrl(),
+		ChannelID:           req.GetChannelId(),
+		Type:                req.GetType(),
+		DefaultAgent:        req.GetDefaultAgent(),
+		AllowedAgents:       req.GetAllowedAgents(),
+		Enabled:             req.GetEnabled(),
+		AutoRouteEnabled:    autoRouteEnabled,
+		AutoRouteMention:    autoRouteMention,
+		AutoRouteClassifier: autoRouteClassifier,
+		WebhookPath:         req.GetWebhookPath(),
+		WebhookSecret:       req.GetWebhookSecret(),
+		IPWhitelist:         req.GetIpWhitelist(),
+		AppToken:            req.GetAppToken(),
+		DefaultUids:         req.GetDefaultUids(),
+		WebhookURL:          req.GetWebhookUrl(),
 	})
 	if err != nil {
 		logServiceError(s.log, "CreateChannel", err, "channel_id", req.GetChannelId(), "type", req.GetType())

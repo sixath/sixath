@@ -39,7 +39,7 @@ const (
 // It returns immediately; runners exit when ctx is canceled.
 func StartWecomBots(ctx context.Context, deps WecomBotDeps) {
 	if deps.TurnTimeout <= 0 {
-		deps.TurnTimeout = 120 * time.Second
+		deps.TurnTimeout = 600 * time.Second
 	}
 	if deps.Idempotency == nil {
 		deps.Idempotency = idempotency.NewStore(0)
@@ -112,7 +112,7 @@ func handleWecomRawMessage(parent context.Context, conn WecomConn, reqID string,
 	}
 	timeout := deps.TurnTimeout
 	if timeout <= 0 {
-		timeout = 120 * time.Second
+		timeout = 600 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
@@ -136,32 +136,53 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	}
 
 	streamID := streamIDFromMsgID(n.MsgID)
-	if err := conn.RespondStream(ctx, reqID, streamID, wecomProcessingContent, false); err != nil {
+	if err := respondWecomFinish(conn, reqID, streamID, wecomProcessingContent, false); err != nil {
 		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
 	}
 
 	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, ch.ID, n.PeerID, n.QuestionText); isCmd {
 		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, cmdReply)
-		_ = conn.RespondStream(ctx, reqID, streamID, card, true)
+		if err := respondWecomFinish(conn, reqID, streamID, card, true); err != nil {
+			log.Printf("wecom_bot %s respond command: %v", ch.ID, err)
+		}
 		deps.Idempotency.Complete(n.MsgID, card)
 		return
 	}
 
-	// Portal owns default/allowlist; do not send yaml default_agent.
-	resolved, err := deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
-		ChannelID: ch.ID,
-		PeerID:    n.PeerID,
-	})
+	plan := prepareAutoRoute(ctx, deps.Runtime, ch.ID, n.PeerID, n.QuestionText)
+	turnQuestion := n.QuestionText
+	if plan.TurnText != "" {
+		turnQuestion = plan.TurnText
+	}
+	runtimeContent := n.RuntimeContent
+	if plan.Source == "mention" && turnQuestion != n.QuestionText {
+		runtimeContent = wecom.FormatRuntimeContent(n.AskerName, n.AskerID, turnQuestion)
+	}
+
+	var resolved *runtimeclient.ResolveReply
+	var err error
+	if plan.AgentID != "" {
+		resolved, err = resolveMaybeRebind(ctx, deps.Sessions, ch.ID, n.PeerID, plan.AgentID, plan.Reason)
+	} else {
+		// Portal owns default/allowlist; do not send yaml default_agent.
+		resolved, err = deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
+			ChannelID: ch.ID,
+			PeerID:    n.PeerID,
+		})
+	}
 	if err != nil {
 		failMsg := mapRuntimeUserError(err)
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+		if err := respondWecomFinish(conn, reqID, streamID, card, true); err != nil {
+			log.Printf("wecom_bot %s respond resolve fail: %v", ch.ID, err)
+		}
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
 
 	out, err := deps.Runtime.TurnsFinal(ctx, resolved.UserID, runtimeclient.TurnRequest{
 		SessionID:      resolved.SessionID,
-		Content:        n.RuntimeContent,
+		Content:        runtimeContent,
 		ChannelID:      ch.ID,
 		PeerID:         n.PeerID,
 		CorrelationID:  corr,
@@ -169,7 +190,10 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	})
 	if err != nil {
 		failMsg := mapRuntimeUserError(err)
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+		if err := respondWecomFinish(conn, reqID, streamID, card, true); err != nil {
+			log.Printf("wecom_bot %s respond turn fail: %v", ch.ID, err)
+		}
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
@@ -179,23 +203,31 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		status = "ok"
 	}
 	if status == "failed" {
-		failMsg := out.Error
-		if failMsg == "" {
-			failMsg = out.Content
+		failMsg := mapTurnFailureMessage(out.Error, out.Content)
+		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+		if err := respondWecomFinish(conn, reqID, streamID, card, true); err != nil {
+			log.Printf("wecom_bot %s respond failed status: %v", ch.ID, err)
 		}
-		if failMsg == "" {
-			failMsg = "turn failed"
-		}
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
 
 	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, out.Content)
-	if err := conn.RespondStream(ctx, reqID, streamID, card, true); err != nil {
+	if err := respondWecomFinish(conn, reqID, streamID, card, true); err != nil {
 		log.Printf("wecom_bot %s respond final: %v", ch.ID, err)
 	}
 	deps.Idempotency.Complete(n.MsgID, card)
+}
+
+// respondWecomFinish writes stream updates with a detached deadline so turn-timeout
+// cancellation cannot leave企微 stuck on 「处理中…」without finish=true.
+func respondWecomFinish(conn WecomConn, reqID, streamID, content string, finish bool) error {
+	if conn == nil {
+		return nil
+	}
+	rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return conn.RespondStream(rctx, reqID, streamID, content, finish)
 }
 
 func streamIDFromMsgID(msgID string) string {

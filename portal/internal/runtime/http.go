@@ -29,6 +29,7 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 	r.POST("/runtime/v1/sessions", svc.wrap(svc.handleCreate))
 	r.GET("/runtime/v1/sessions", svc.wrap(svc.handleListAll))
 	r.GET("/runtime/v1/channels/{channel_id}/agents", svc.wrap(svc.handleListChannelAgents))
+	r.POST("/runtime/v1/channels/{channel_id}/route", svc.wrap(svc.handleRoute))
 	r.GET("/runtime/v1/agents/{agent_id}/sessions", svc.wrap(svc.handleListByAgent))
 	r.GET("/runtime/v1/sessions/{id}", svc.wrap(svc.handleGet))
 	r.PUT("/runtime/v1/sessions/{id}", svc.wrap(svc.handleUpdate))
@@ -111,6 +112,19 @@ func (s *Service) handleDeleteBinding(ctx context.Context, hctx khttp.Context) e
 func (s *Service) handleListChannelAgents(ctx context.Context, hctx khttp.Context) error {
 	channelID := strings.TrimSpace(hctx.Vars().Get("channel_id"))
 	out, err := s.listChannelAgents(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
+}
+
+func (s *Service) handleRoute(ctx context.Context, hctx khttp.Context) error {
+	channelID := strings.TrimSpace(hctx.Vars().Get("channel_id"))
+	var req routeRequest
+	if err := decodeJSON(hctx, &req); err != nil {
+		return err
+	}
+	out, err := s.routeChannel(ctx, channelID, req)
 	if err != nil {
 		return err
 	}

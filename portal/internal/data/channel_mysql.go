@@ -34,6 +34,9 @@ func (r *channelRepo) Create(ctx context.Context, ch *biz.ChannelCreate) (*biz.C
 		Type:          ch.Type,
 		DefaultAgent:  ch.DefaultAgent,
 		AllowedAgents: model.StringSlice(ch.AllowedAgents),
+		AutoRouteEnabled:    ch.AutoRouteEnabled,
+		AutoRouteMention:    ch.AutoRouteMention,
+		AutoRouteClassifier: ch.AutoRouteClassifier,
 		Enabled:       ch.Enabled,
 		WebhookPath:   ch.WebhookPath,
 		WebhookSecret: ch.WebhookSecret,
@@ -130,7 +133,9 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 		return nil, err
 	}
 	allowed := map[string]bool{
-		"channel_id": true, "type": true, "default_agent": true, "allowed_agents": true, "enabled": true,
+		"channel_id": true, "type": true, "default_agent": true, "allowed_agents": true,
+		"auto_route_enabled": true, "auto_route_mention": true, "auto_route_classifier": true,
+		"enabled": true,
 		"webhook_path": true, "webhook_secret": true, "ip_whitelist": true,
 		"app_token": true, "default_uids": true,
 		"webhook_url": true,
@@ -189,6 +194,9 @@ func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {
 		Type:          m.Type,
 		DefaultAgent:  m.DefaultAgent,
 		AllowedAgents: allowedAgents,
+		AutoRouteEnabled:    m.AutoRouteEnabled,
+		AutoRouteMention:    m.AutoRouteMention,
+		AutoRouteClassifier: m.AutoRouteClassifier,
 		Enabled:       m.Enabled,
 		WebhookPath:   m.WebhookPath,
 		WebhookSecret: m.WebhookSecret,

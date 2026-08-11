@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClient_SendsBearerAndOptionalUserHeader(t *testing.T) {
@@ -239,9 +240,12 @@ func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/channels/ch1/agents":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"default_agent": "a-def",
+				"default_agent":         "a-def",
+				"auto_route_enabled":    true,
+				"auto_route_mention":    true,
+				"auto_route_classifier": false,
 				"agents": []map[string]string{
-					{"id": "a-def", "name": "Default"},
+					{"id": "a-def", "name": "Default", "description": "def desc"},
 					{"id": "a2", "name": "Other"},
 				},
 			})
@@ -270,8 +274,48 @@ func TestClient_DeleteBindingAndListChannelAgents(t *testing.T) {
 	if out.DefaultAgent != "a-def" || len(out.Agents) != 2 {
 		t.Fatalf("out=%+v", out)
 	}
-	if out.Agents[0].ID != "a-def" || out.Agents[0].Name != "Default" {
+	if !out.AutoRouteEnabled || !out.AutoRouteMention || out.AutoRouteClassifier {
+		t.Fatalf("auto_route flags=%+v", out)
+	}
+	if out.Agents[0].ID != "a-def" || out.Agents[0].Name != "Default" || out.Agents[0].Description != "def desc" {
 		t.Fatalf("agents[0]=%+v", out.Agents[0])
+	}
+}
+
+func TestClient_RouteChannel(t *testing.T) {
+	var last callSeen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		last = callSeen{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			body:   string(body),
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/runtime/v1/channels/ch1/route" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent_id":   "agent-b",
+			"confidence": "high",
+			"source":     "classifier",
+			"reason":     "classifier_high",
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "rt")
+	out, err := c.RouteChannel(context.Background(), "ch1", RouteRequest{Text: "hello", PeerID: "p1"})
+	if err != nil {
+		t.Fatalf("RouteChannel: %v", err)
+	}
+	assertCall(t, last, http.MethodPost, "/runtime/v1/channels/ch1/route", "Bearer rt", "")
+	if !strings.Contains(last.body, `"text":"hello"`) || !strings.Contains(last.body, `"peer_id":"p1"`) {
+		t.Fatalf("body=%s", last.body)
+	}
+	if out.AgentID != "agent-b" || out.Confidence != "high" || out.Source != "classifier" {
+		t.Fatalf("out=%+v", out)
 	}
 }
 
@@ -337,6 +381,39 @@ func TestClient_TurnsFinalAndStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), "data:") {
+		t.Fatalf("stream body=%q", raw)
+	}
+}
+
+func TestClient_TurnsStream_SurvivesBeyondJSONClientTimeout(t *testing.T) {
+	// Reproduce the Web chat bug: JSON Client.Timeout must not apply to SSE proxying.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte("data: {\"type\":\"done\"}\n\n"))
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		baseURL:          srv.URL,
+		token:            "rt",
+		httpClient:       &http.Client{Timeout: 50 * time.Millisecond},
+		streamHTTPClient: &http.Client{}, // no Timeout
+	}
+	rc, _, err := c.TurnsStream(context.Background(), "u1", TurnRequest{SessionID: "s1", Content: "hi"})
+	if err != nil {
+		t.Fatalf("TurnsStream: %v", err)
+	}
+	defer rc.Close()
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if !strings.Contains(string(raw), `"type":"done"`) {
 		t.Fatalf("stream body=%q", raw)
 	}
 }
