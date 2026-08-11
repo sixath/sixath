@@ -3,19 +3,120 @@
 
 openapi: 3.0.3
 info:
-    title: Greeter API
-    description: The greeting service definition.
+    title: ""
     version: 0.0.1
 paths:
-    /helloworld/{name}:
+    /api/v1/agents:
         get:
             tags:
-                - Greeter
-                - subgroup
-            description: Sends a greeting
-            operationId: Greeter_SayHello
+                - Agent
+            description: Agent 列表（分页）
+            operationId: Agent_ListAgents
             parameters:
-                - name: name
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.ListAgentsReply'
+        post:
+            tags:
+                - Agent
+            description: 创建 Agent
+            operationId: Agent_CreateAgent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.CreateAgentRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.AgentReply'
+    /api/v1/agents/{agentId}/sessions:
+        get:
+            tags:
+                - Chat
+            description: 获取该 Agent 的会话列表（分页）
+            operationId: Chat_ListSessions
+            parameters:
+                - name: agentId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: q
+                  in: query
+                  schema:
+                    type: string
+                - name: includePreview
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.ListSessionsReply'
+        post:
+            tags:
+                - Chat
+            description: 新建会话
+            operationId: Chat_CreateSession
+            parameters:
+                - name: agentId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/chat.v1.CreateSessionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.SessionReply'
+    /api/v1/agents/{id}:
+        get:
+            tags:
+                - Agent
+            description: 获取单个 Agent
+            operationId: Agent_GetAgent
+            parameters:
+                - name: id
                   in: path
                   required: true
                   schema:
@@ -26,14 +127,1716 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/helloworld.v1.HelloReply'
+                                $ref: '#/components/schemas/agent.v1.AgentReply'
+        put:
+            tags:
+                - Agent
+            description: 更新 Agent
+            operationId: Agent_UpdateAgent
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.UpdateAgentRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.AgentReply'
+        delete:
+            tags:
+                - Agent
+            description: 删除 Agent
+            operationId: Agent_DeleteAgent
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.DeleteAgentReply'
+    /api/v1/agents/{id}/chat:
+        post:
+            tags:
+                - Agent
+            description: 与 Agent 对话
+            operationId: Agent_Chat
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.ChatRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.ChatReply'
+    /api/v1/agents/{id}/skills:
+        get:
+            tags:
+                - Agent
+            description: 列出该 Agent 下所有技能（扫描 workspace/skills 子目录，含 SKILL.md 视为有效）
+            operationId: Agent_ListSkills
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.ListSkillsReply'
+    /api/v1/agents/{id}/skills/execute:
+        post:
+            tags:
+                - Agent
+            description: 执行技能脚本（调试用）
+            operationId: Agent_ExecuteSkill
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.ExecuteSkillRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.ExecuteSkillReply'
+    /api/v1/agents/{id}/skills/upload:
+        post:
+            tags:
+                - Agent
+            description: 上传技能包（校验通过后解压到 workspace/skills）
+            operationId: Agent_UploadSkillPackage
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.UploadSkillPackageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.UploadSkillPackageReply'
+    /api/v1/agents/{id}/skills/validate:
+        post:
+            tags:
+                - Agent
+            description: 校验技能包（仅校验不解压）
+            operationId: Agent_ValidateSkillPackage
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.ValidateSkillPackageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.ValidateSkillPackageReply'
+    /api/v1/agents/{id}/skills/{skillName}:
+        delete:
+            tags:
+                - Agent
+            description: 删除指定技能，移除 workspace/skills/{skill_name}/ 目录及其下所有文件
+            operationId: Agent_DeleteSkill
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: skillName
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.DeleteSkillReply'
+    /api/v1/agents/{id}/tools:
+        post:
+            tags:
+                - Agent
+            description: 绑定工具
+            operationId: Agent_BindTools
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/agent.v1.BindToolsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.BindToolsReply'
+        delete:
+            tags:
+                - Agent
+            description: 解绑工具
+            operationId: Agent_UnbindTools
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: toolIds
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agent.v1.UnbindToolsReply'
+    /api/v1/channels:
+        get:
+            tags:
+                - Channel
+            description: 渠道列表（分页、筛选）
+            operationId: Channel_ListChannels
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: type
+                  in: query
+                  schema:
+                    type: string
+                - name: enabled
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.ListChannelsReply'
+        post:
+            tags:
+                - Channel
+            description: 创建渠道
+            operationId: Channel_CreateChannel
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/channel.v1.CreateChannelRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.ChannelReply'
+    /api/v1/channels/{id}:
+        get:
+            tags:
+                - Channel
+            description: 获取单个渠道
+            operationId: Channel_GetChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.ChannelReply'
+        put:
+            tags:
+                - Channel
+            description: 更新渠道
+            operationId: Channel_UpdateChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/channel.v1.UpdateChannelRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.ChannelReply'
+        delete:
+            tags:
+                - Channel
+            description: 删除渠道
+            operationId: Channel_DeleteChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.DeleteChannelReply'
+    /api/v1/channels/{id}/send:
+        post:
+            tags:
+                - Channel
+            description: 向 WxPusher 渠道发送消息
+            operationId: Channel_SendChannel
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/channel.v1.SendChannelRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.SendChannelReply'
+    /api/v1/cron/tasks:
+        get:
+            tags:
+                - Cron
+            description: 任务列表（分页、筛选）
+            operationId: Cron_ListCronTasks
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: agentId
+                  in: query
+                  schema:
+                    type: string
+                - name: enabled
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.ListCronTasksReply'
+        post:
+            tags:
+                - Cron
+            description: 创建定时任务
+            operationId: Cron_CreateCronTask
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/cron.v1.CreateCronTaskRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.CronTaskReply'
+    /api/v1/cron/tasks/{id}:
+        get:
+            tags:
+                - Cron
+            description: 获取单个任务
+            operationId: Cron_GetCronTask
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.CronTaskReply'
+        put:
+            tags:
+                - Cron
+            description: 更新任务
+            operationId: Cron_UpdateCronTask
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/cron.v1.UpdateCronTaskRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.CronTaskReply'
+        delete:
+            tags:
+                - Cron
+            description: 删除任务
+            operationId: Cron_DeleteCronTask
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.DeleteCronTaskReply'
+    /api/v1/cron/tasks/{id}/run:
+        post:
+            tags:
+                - Cron
+            description: 立即执行
+            operationId: Cron_RunCronTask
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.RunCronTaskReply'
+    /api/v1/cron/tasks/{id}/runs:
+        get:
+            tags:
+                - Cron
+            description: 执行历史
+            operationId: Cron_ListCronRuns
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/cron.v1.ListCronRunsReply'
+    /api/v1/sessions:
+        get:
+            tags:
+                - Chat
+            description: 跨 Agent 分页列出会话（全局历史）
+            operationId: Chat_ListAllSessions
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: includePreview
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.ListAllSessionsReply'
+    /api/v1/sessions/search:
+        get:
+            tags:
+                - Chat
+            description: 跨 Agent FTS 搜索会话
+            operationId: Chat_SearchSessions
+            parameters:
+                - name: query
+                  in: query
+                  schema:
+                    type: string
+                - name: agentId
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.SearchSessionsReply'
+    /api/v1/sessions/{id}:
+        get:
+            tags:
+                - Chat
+            description: 获取会话详情
+            operationId: Chat_GetSession
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.SessionReply'
+        put:
+            tags:
+                - Chat
+            description: 更新会话（如标题）
+            operationId: Chat_UpdateSession
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/chat.v1.UpdateSessionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.SessionReply'
+        delete:
+            tags:
+                - Chat
+            description: 删除会话（级联删除消息）
+            operationId: Chat_DeleteSession
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.DeleteSessionReply'
+    /api/v1/sessions/{sessionId}/messages:
+        get:
+            tags:
+                - Chat
+            description: 获取会话内消息历史（按时间升序）
+            operationId: Chat_ListMessages
+            parameters:
+                - name: sessionId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.ListMessagesReply'
+        post:
+            tags:
+                - Chat
+            description: '发送用户消息，触发 Agent 回复（支持流式 SSE，Accept: text/event-stream）'
+            operationId: Chat_SendMessage
+            parameters:
+                - name: sessionId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/chat.v1.SendMessageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/chat.v1.MessageReply'
+    /api/v1/tools:
+        get:
+            tags:
+                - Tool
+            description: 工具列表（分页、筛选）
+            operationId: Tool_ListTools
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: name
+                  in: query
+                  schema:
+                    type: string
+                - name: type
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/tool.v1.ListToolsReply'
+        post:
+            tags:
+                - Tool
+            description: 创建工具
+            operationId: Tool_CreateTool
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/tool.v1.CreateToolRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/tool.v1.ToolReply'
+    /api/v1/tools/{id}:
+        get:
+            tags:
+                - Tool
+            description: 获取单个工具
+            operationId: Tool_GetTool
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/tool.v1.ToolReply'
+        put:
+            tags:
+                - Tool
+            description: 更新工具
+            operationId: Tool_UpdateTool
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/tool.v1.UpdateToolRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/tool.v1.ToolReply'
+        delete:
+            tags:
+                - Tool
+            description: 删除工具（若被绑定返回 409）
+            operationId: Tool_DeleteTool
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/tool.v1.DeleteToolReply'
+    /api/v1/webhooks/{channelId}:
+        post:
+            tags:
+                - Channel
+            description: Webhook 入站
+            operationId: Channel_WebhookInbound
+            parameters:
+                - name: channelId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/channel.v1.WebhookInboundRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/channel.v1.WebhookInboundReply'
 components:
     schemas:
-        helloworld.v1.HelloReply:
+        agent.v1.AgentReply:
             type: object
             properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                systemPrompt:
+                    type: string
+                modelConfig:
+                    $ref: '#/components/schemas/agent.v1.ModelConfig'
+                workspace:
+                    type: string
+                toolIds:
+                    type: array
+                    items:
+                        type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                debugRun:
+                    type: boolean
+                wecomChannelId:
+                    type: string
+                runtimeTools:
+                    $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
+                mcpServerIds:
+                    type: array
+                    items:
+                        type: string
+        agent.v1.BindToolsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        agent.v1.BindToolsRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                toolIds:
+                    type: array
+                    items:
+                        type: string
+        agent.v1.ChatReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                content:
+                    type: string
+                metadata:
+                    type: object
+        agent.v1.ChatRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                content:
+                    type: string
+            description: 快捷对话（无会话）：单轮对话，不持久化
+        agent.v1.CreateAgentRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                description:
+                    type: string
+                systemPrompt:
+                    type: string
+                modelConfig:
+                    $ref: '#/components/schemas/agent.v1.ModelConfig'
+                workspace:
+                    type: string
+                toolIds:
+                    type: array
+                    items:
+                        type: string
+                debugRun:
+                    type: boolean
+                runtimeTools:
+                    $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
+                wecomChannelId:
+                    type: string
+        agent.v1.DeleteAgentReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        agent.v1.DeleteSkillReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        agent.v1.ExecuteSkillReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                output:
+                    type: string
+        agent.v1.ExecuteSkillRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                path:
+                    type: string
+                input:
+                    type: string
+        agent.v1.ListAgentsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/agent.v1.AgentReply'
+                total:
+                    type: integer
+                    format: int32
+        agent.v1.ListSkillsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/agent.v1.SkillMeta'
+        agent.v1.ModelConfig:
+            type: object
+            properties:
+                provider:
+                    type: string
+                model:
+                    type: string
+                apiKey:
+                    type: string
+                baseUrl:
+                    type: string
+                maxOutputTokens:
+                    type: integer
+                    description: max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（8192）。
+                    format: int32
+            description: 模型配置
+        agent.v1.RuntimeToolsConfig:
+            type: object
+            properties:
+                memoryWriteEnabled:
+                    type: boolean
+                skillRuntimeManageEnabled:
+                    type: boolean
+                todoEnabled:
+                    type: boolean
+                workspaceFilesEnabled:
+                    type: boolean
+                webToolsEnabled:
+                    type: boolean
+                terminalLocalEnabled:
+                    type: boolean
+                cronjobToolEnabled:
+                    type: boolean
+                browserEnabled:
+                    type: boolean
+                hybridRecall:
+                    type: boolean
+                    description: unset = on（默认开启混合召回）；presence 全链路保留
+                hubGovernance:
+                    type: string
+                    description: Memory Hub provider overrides（空/unset = 用进程 defaults；非空 = Catalog name）
+                hubKnowledge:
+                    type: string
+                hubFallbackToDefaultOnReadError:
+                    type: boolean
+                    description: §3.5.1 读路径运输错误时是否回落到 defaults 治理面
+            description: Hermes P0 运行时工具开关（与全局 env OR 合并）
+        agent.v1.SkillMeta:
+            type: object
+            properties:
+                name:
+                    type: string
+                description:
+                    type: string
+                path:
+                    type: string
+            description: 技能元数据（用于列表返回）
+        agent.v1.UnbindToolsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        agent.v1.UpdateAgentRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                systemPrompt:
+                    type: string
+                modelConfig:
+                    $ref: '#/components/schemas/agent.v1.ModelConfig'
+                workspace:
+                    type: string
+                debugRun:
+                    type: boolean
+                runtimeTools:
+                    $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
+                wecomChannelId:
+                    type: string
+        agent.v1.UploadSkillPackageReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                success:
+                    type: boolean
                 message:
                     type: string
-            description: The response message containing the greetings
+        agent.v1.UploadSkillPackageRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                file:
+                    type: string
+                    format: bytes
+        agent.v1.ValidateSkillPackageReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                valid:
+                    type: boolean
+                message:
+                    type: string
+                errors:
+                    type: array
+                    items:
+                        type: string
+        agent.v1.ValidateSkillPackageRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                file:
+                    type: string
+                    format: bytes
+            description: 技能包校验：file 为 zip 文件字节（base64 或通过 multipart 单独处理时可为空）
+        api.common.BaseResponse:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                reason:
+                    type: string
+            description: 统一响应基类，所有 Response/Reply 需嵌入
+        channel.v1.ChannelReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                id:
+                    type: string
+                channelId:
+                    type: string
+                type:
+                    type: string
+                defaultAgent:
+                    type: string
+                enabled:
+                    type: boolean
+                webhookPath:
+                    type: string
+                ipWhitelist:
+                    type: array
+                    items:
+                        type: string
+                defaultUids:
+                    type: array
+                    items:
+                        type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                webhookUrlMasked:
+                    type: string
+                allowedAgents:
+                    type: array
+                    items:
+                        type: string
+                botId:
+                    type: string
+                    description: wecom_bot / webhook gateway (secrets never returned as plaintext)
+                secretSet:
+                    type: boolean
+                botNames:
+                    type: array
+                    items:
+                        type: string
+                wsUrl:
+                    type: string
+                corpId:
+                    type: string
+                defaultReplyMode:
+                    type: string
+                runtimeStatus:
+                    $ref: '#/components/schemas/channel.v1.RuntimeStatus'
+        channel.v1.CreateChannelRequest:
+            type: object
+            properties:
+                channelId:
+                    type: string
+                type:
+                    type: string
+                defaultAgent:
+                    type: string
+                enabled:
+                    type: boolean
+                webhookPath:
+                    type: string
+                webhookSecret:
+                    type: string
+                ipWhitelist:
+                    type: array
+                    items:
+                        type: string
+                appToken:
+                    type: string
+                defaultUids:
+                    type: array
+                    items:
+                        type: string
+                webhookUrl:
+                    type: string
+                allowedAgents:
+                    type: array
+                    items:
+                        type: string
+                botId:
+                    type: string
+                    description: wecom_bot / webhook gateway fields (write on create)
+                secret:
+                    type: string
+                botNames:
+                    type: array
+                    items:
+                        type: string
+                wsUrl:
+                    type: string
+                corpId:
+                    type: string
+                corpSecret:
+                    type: string
+                defaultReplyMode:
+                    type: string
+        channel.v1.DeleteChannelReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        channel.v1.ListChannelsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/channel.v1.ChannelReply'
+                total:
+                    type: integer
+                    format: int32
+        channel.v1.RuntimeStatus:
+            type: object
+            properties:
+                state:
+                    type: string
+                lastHeartbeatAt:
+                    type: string
+                lastError:
+                    type: string
+                reconnectAttempt:
+                    type: integer
+                    format: int32
+                reconnectInMs:
+                    type: integer
+                    format: int32
+            description: RuntimeStatus is the Admin-facing derived gateway status (wecom_bot only).
+        channel.v1.SendChannelReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        channel.v1.SendChannelRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                content:
+                    type: string
+                summary:
+                    type: string
+                uids:
+                    type: array
+                    items:
+                        type: string
+        channel.v1.UpdateChannelRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                updates:
+                    type: object
+            description: |-
+                UpdateChannelRequest.updates supports the same keys as CreateChannelRequest fields
+                 (snake_case), including gateway keys: bot_id, secret (alias for bot_secret),
+                 bot_secret, bot_names, ws_url, corp_id, corp_secret, default_reply_mode.
+                 Empty secret/bot_secret/corp_secret values are ignored (preserve existing).
+        channel.v1.WebhookInboundReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                async:
+                    type: boolean
+                content:
+                    type: string
+        channel.v1.WebhookInboundRequest:
+            type: object
+            properties:
+                channelId:
+                    type: string
+                content:
+                    type: string
+                agentId:
+                    type: string
+                replyUrl:
+                    type: string
+        chat.v1.CreateSessionRequest:
+            type: object
+            properties:
+                agentId:
+                    type: string
+                title:
+                    type: string
+                parentSessionId:
+                    type: string
+            description: 会话
+        chat.v1.DeleteSessionReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        chat.v1.ListAllSessionsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/chat.v1.SessionReply'
+                total:
+                    type: integer
+                    format: int32
+        chat.v1.ListMessagesReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/chat.v1.MessageReply'
+        chat.v1.ListSessionsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/chat.v1.SessionReply'
+                total:
+                    type: integer
+                    format: int32
+        chat.v1.MessageReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                id:
+                    type: string
+                sessionId:
+                    type: string
+                role:
+                    type: string
+                content:
+                    type: string
+                createdAt:
+                    type: string
+                metadata:
+                    type: object
+                    description: Optional JSON bag (e.g. timeline for tool/model call replay after refresh).
+        chat.v1.SearchHitReply:
+            type: object
+            properties:
+                sessionId:
+                    type: string
+                rootSessionId:
+                    type: string
+                agentId:
+                    type: string
+                agentName:
+                    type: string
+                title:
+                    type: string
+                preview:
+                    type: string
+                matchedSnippets:
+                    type: array
+                    items:
+                        type: string
+                updatedAt:
+                    type: string
+        chat.v1.SearchSessionsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/chat.v1.SearchHitReply'
+        chat.v1.SendMessageRequest:
+            type: object
+            properties:
+                sessionId:
+                    type: string
+                content:
+                    type: string
+            description: 消息
+        chat.v1.SessionReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                id:
+                    type: string
+                agentId:
+                    type: string
+                title:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                parentSessionId:
+                    type: string
+                preview:
+                    type: string
+                agentName:
+                    type: string
+        chat.v1.UpdateSessionRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+        cron.v1.CreateCronTaskRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                agentId:
+                    type: string
+                scheduleKind:
+                    type: string
+                scheduleExpr:
+                    type: string
+                timezone:
+                    type: string
+                staggerSec:
+                    type: integer
+                    format: int32
+                payloadKind:
+                    type: string
+                payloadContent:
+                    type: string
+                timeoutSec:
+                    type: integer
+                    format: int32
+                retryCount:
+                    type: integer
+                    format: int32
+                retryIntervalSec:
+                    type: integer
+                    format: int32
+                deliveryMode:
+                    type: string
+                deliveryWebhookUrl:
+                    type: string
+                deliverySecret:
+                    type: string
+                deliveryBestEffort:
+                    type: boolean
+                deliverySessionId:
+                    type: string
+                deliveryChannelId:
+                    type: string
+                enabled:
+                    type: boolean
+        cron.v1.CronRunReply:
+            type: object
+            properties:
+                id:
+                    type: string
+                taskId:
+                    type: string
+                triggeredAt:
+                    type: string
+                startedAt:
+                    type: string
+                finishedAt:
+                    type: string
+                status:
+                    type: string
+                outputSummary:
+                    type: string
+                error:
+                    type: string
+                deliveryOk:
+                    type: boolean
+        cron.v1.CronTaskReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                id:
+                    type: string
+                name:
+                    type: string
+                agentId:
+                    type: string
+                scheduleKind:
+                    type: string
+                scheduleExpr:
+                    type: string
+                timezone:
+                    type: string
+                staggerSec:
+                    type: integer
+                    format: int32
+                payloadKind:
+                    type: string
+                payloadContent:
+                    type: string
+                timeoutSec:
+                    type: integer
+                    format: int32
+                retryCount:
+                    type: integer
+                    format: int32
+                retryIntervalSec:
+                    type: integer
+                    format: int32
+                deliveryMode:
+                    type: string
+                deliveryWebhookUrl:
+                    type: string
+                deliverySessionId:
+                    type: string
+                deliveryChannelId:
+                    type: string
+                enabled:
+                    type: boolean
+                nextRunAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        cron.v1.DeleteCronTaskReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        cron.v1.ListCronRunsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/cron.v1.CronRunReply'
+                total:
+                    type: integer
+                    format: int32
+        cron.v1.ListCronTasksReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/cron.v1.CronTaskReply'
+                total:
+                    type: integer
+                    format: int32
+        cron.v1.RunCronTaskReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        cron.v1.UpdateCronTaskRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                updates:
+                    type: object
+        tool.v1.CreateToolRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                description:
+                    type: string
+                type:
+                    type: string
+                config:
+                    $ref: '#/components/schemas/tool.v1.ToolConfig'
+        tool.v1.DatasourceConfig:
+            type: object
+            properties:
+                id:
+                    type: string
+                type:
+                    type: string
+                dsn:
+                    type: string
+                host:
+                    type: string
+                port:
+                    type: integer
+                    format: int32
+                user:
+                    type: string
+                password:
+                    type: string
+                dbname:
+                    type: string
+                readOnly:
+                    type: boolean
+            description: DatasourceConfig 数据源配置，与 framework/datasource.Config 对齐
+        tool.v1.DeleteToolReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+        tool.v1.ListToolsReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/tool.v1.ToolReply'
+                total:
+                    type: integer
+                    format: int32
+        tool.v1.McpConfig:
+            type: object
+            properties:
+                endpoint:
+                    type: string
+                id:
+                    type: string
+                backend:
+                    type: string
+            description: McpConfig MCP 工具运行时配置，与 framework/tool.McpConfig 对齐
+        tool.v1.RCAConfig:
+            type: object
+            properties:
+                funcPath:
+                    type: string
+                roots:
+                    type: array
+                    items:
+                        type: string
+                queryUrl:
+                    type: string
+                datasourceId:
+                    type: string
+                defaultIndex:
+                    type: string
+                traceIdField:
+                    type: string
+            description: RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
+        tool.v1.ToolConfig:
+            type: object
+            properties:
+                funcPath:
+                    type: string
+                parameters:
+                    type: object
+                async:
+                    type: boolean
+                mcpServerId:
+                    type: string
+                    description: MCP 配置（兼容旧字段，优先使用 mcp 嵌套）
+                mcpEndpoint:
+                    type: string
+                mcpBackend:
+                    type: string
+                timeoutSec:
+                    type: integer
+                    format: int32
+                mcp:
+                    $ref: '#/components/schemas/tool.v1.McpConfig'
+                datasource:
+                    $ref: '#/components/schemas/tool.v1.DatasourceConfig'
+                rca:
+                    $ref: '#/components/schemas/tool.v1.RCAConfig'
+            description: 工具配置：内置用 func_path/parameters，MCP 用 mcp 或 mcp_* 字段，数据源用 datasource
+        tool.v1.ToolReply:
+            type: object
+            properties:
+                ret:
+                    $ref: '#/components/schemas/api.common.BaseResponse'
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                type:
+                    type: string
+                config:
+                    $ref: '#/components/schemas/tool.v1.ToolConfig'
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        tool.v1.UpdateToolRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                type:
+                    type: string
+                config:
+                    $ref: '#/components/schemas/tool.v1.ToolConfig'
 tags:
-    - name: Greeter
+    - name: Agent
+      description: Agent 管理服务
+    - name: Channel
+      description: 渠道管理服务
+    - name: Chat
+      description: 对话服务：会话管理、消息发送与历史
+    - name: Cron
+      description: 定时任务服务
+    - name: Tool
+      description: 工具管理服务

@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 	urlpkg "net/url"
 	"strings"
+	"time"
 
 	agentv1 "backend/api/agent/v1"
 	channelv1 "backend/api/channel/v1"
 	"backend/internal/biz"
 	"backend/internal/channel"
+	pkgErrors "backend/internal/pkg/errors"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
@@ -46,29 +49,38 @@ func last4Chars(s string) string {
 
 // ChannelService implements channel.v1.ChannelHTTPServer
 type ChannelService struct {
-	uc       *biz.ChannelUsecase
-	agentSvc *AgentService
-	log      *log.Helper
+	uc          *biz.ChannelUsecase
+	runtimeRepo biz.ChannelRuntimeRepo
+	agentSvc    *AgentService
+	log         *log.Helper
 }
 
 // NewChannelService creates a ChannelService
-func NewChannelService(uc *biz.ChannelUsecase, agentSvc *AgentService, logger log.Logger) *ChannelService {
-	return &ChannelService{uc: uc, agentSvc: agentSvc, log: log.NewHelper(logger)}
+func NewChannelService(uc *biz.ChannelUsecase, runtimeRepo biz.ChannelRuntimeRepo, agentSvc *AgentService, logger log.Logger) *ChannelService {
+	return &ChannelService{uc: uc, runtimeRepo: runtimeRepo, agentSvc: agentSvc, log: log.NewHelper(logger)}
 }
 
+// channelMetaToReply maps ChannelMeta to Admin ChannelReply.
+// Never includes plaintext bot_secret / corp_secret (use secret_set instead).
 func channelMetaToReply(ch *biz.ChannelMeta) *channelv1.ChannelReply {
 	r := &channelv1.ChannelReply{
-		Ret:           baseSuccess(),
-		Id:            ch.ID,
-		ChannelId:     ch.ChannelID,
-		Type:          ch.Type,
-		DefaultAgent:  ch.DefaultAgent,
-		AllowedAgents: ch.AllowedAgents,
-		Enabled:       ch.Enabled,
-		WebhookPath:  ch.WebhookPath,
-		IpWhitelist:  ch.IPWhitelist,
-		CreatedAt:    ch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:    ch.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Ret:              baseSuccess(),
+		Id:               ch.ID,
+		ChannelId:        ch.ChannelID,
+		Type:             ch.Type,
+		DefaultAgent:     ch.DefaultAgent,
+		AllowedAgents:    ch.AllowedAgents,
+		Enabled:          ch.Enabled,
+		WebhookPath:      ch.WebhookPath,
+		IpWhitelist:      ch.IPWhitelist,
+		CreatedAt:        ch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:        ch.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		BotId:            ch.BotID,
+		SecretSet:        ch.BotSecret != "",
+		BotNames:         ch.BotNames,
+		WsUrl:            ch.WSURL,
+		CorpId:           ch.CorpID,
+		DefaultReplyMode: ch.DefaultReplyMode,
 	}
 	if ch.Type == "wxpusher" {
 		r.DefaultUids = ch.DefaultUids
@@ -76,6 +88,44 @@ func channelMetaToReply(ch *biz.ChannelMeta) *channelv1.ChannelReply {
 	if ch.Type == "wecom" {
 		r.WebhookUrlMasked = maskWeComWebhookURL(ch.WebhookURL)
 	}
+	return r
+}
+
+func runtimeStatusViewToProto(v *biz.RuntimeStatusView) *channelv1.RuntimeStatus {
+	if v == nil {
+		return nil
+	}
+	out := &channelv1.RuntimeStatus{
+		State:             v.State,
+		LastError:         v.LastError,
+		ReconnectAttempt:  int32(v.ReconnectAttempt),
+		ReconnectInMs:     int32(v.ReconnectInMs),
+	}
+	if !v.LastHeartbeatAt.IsZero() {
+		out.LastHeartbeatAt = v.LastHeartbeatAt.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+func (s *ChannelService) loadRuntimeRow(ctx context.Context, channelID string) *biz.RuntimeStatusRow {
+	if s == nil || s.runtimeRepo == nil || channelID == "" {
+		return nil
+	}
+	row, err := s.runtimeRepo.Get(ctx, channelID)
+	if err != nil {
+		if stderrors.Is(err, pkgErrors.ErrNotFound) {
+			return nil
+		}
+		s.log.Warnf("get channel runtime status channel_id=%s: %v", channelID, err)
+		return nil
+	}
+	return row
+}
+
+func (s *ChannelService) channelToReply(ctx context.Context, ch *biz.ChannelMeta) *channelv1.ChannelReply {
+	r := channelMetaToReply(ch)
+	view := biz.DeriveRuntimeStatus(ch, s.loadRuntimeRow(ctx, ch.ChannelID), time.Now())
+	r.RuntimeStatus = runtimeStatusViewToProto(view)
 	return r
 }
 
@@ -132,17 +182,24 @@ func (s *ChannelService) CreateChannel(ctx context.Context, req *channelv1.Creat
 		return nil, errors.BadRequest("INVALID", "wecom channel requires valid webhook_url")
 	}
 	ch, err := s.uc.Create(ctx, &biz.ChannelCreate{
-		ChannelID:     req.GetChannelId(),
-		Type:          req.GetType(),
-		DefaultAgent:  req.GetDefaultAgent(),
-		AllowedAgents: req.GetAllowedAgents(),
-		Enabled:       req.GetEnabled(),
-		WebhookPath:   req.GetWebhookPath(),
-		WebhookSecret: req.GetWebhookSecret(),
-		IPWhitelist:   req.GetIpWhitelist(),
-		AppToken:      req.GetAppToken(),
-		DefaultUids:   req.GetDefaultUids(),
-		WebhookURL:    req.GetWebhookUrl(),
+		ChannelID:        req.GetChannelId(),
+		Type:             req.GetType(),
+		DefaultAgent:     req.GetDefaultAgent(),
+		AllowedAgents:    req.GetAllowedAgents(),
+		Enabled:          req.GetEnabled(),
+		WebhookPath:      req.GetWebhookPath(),
+		WebhookSecret:    req.GetWebhookSecret(),
+		IPWhitelist:      req.GetIpWhitelist(),
+		AppToken:         req.GetAppToken(),
+		DefaultUids:      req.GetDefaultUids(),
+		WebhookURL:       req.GetWebhookUrl(),
+		BotID:            req.GetBotId(),
+		BotSecret:        req.GetSecret(),
+		BotNames:         req.GetBotNames(),
+		WSURL:            req.GetWsUrl(),
+		CorpID:           req.GetCorpId(),
+		CorpSecret:       req.GetCorpSecret(),
+		DefaultReplyMode: req.GetDefaultReplyMode(),
 	})
 	if err != nil {
 		logServiceError(s.log, "CreateChannel", err, "channel_id", req.GetChannelId(), "type", req.GetType())
@@ -153,7 +210,7 @@ func (s *ChannelService) CreateChannel(ctx context.Context, req *channelv1.Creat
 			logServiceError(s.log, "CreateChannel.BindWecomChannel", err, "channel_id", ch.ID, "agent_id", ch.DefaultAgent)
 		}
 	}
-	return channelMetaToReply(ch), nil
+	return s.channelToReply(ctx, ch), nil
 }
 
 // ListChannels implements channel.v1.ChannelHTTPServer
@@ -176,7 +233,7 @@ func (s *ChannelService) ListChannels(ctx context.Context, req *channelv1.ListCh
 	}
 	items := make([]*channelv1.ChannelReply, len(list))
 	for i, c := range list {
-		items[i] = channelMetaToReply(c)
+		items[i] = s.channelToReply(ctx, c)
 	}
 	return &channelv1.ListChannelsReply{
 		Ret:   baseSuccess(),
@@ -192,10 +249,13 @@ func (s *ChannelService) GetChannel(ctx context.Context, req *channelv1.GetChann
 		logServiceError(s.log, "GetChannel", err, "channel_id", req.GetId())
 		return nil, err
 	}
-	return channelMetaToReply(ch), nil
+	return s.channelToReply(ctx, ch), nil
 }
 
-// UpdateChannel implements channel.v1.ChannelHTTPServer
+// UpdateChannel implements channel.v1.ChannelHTTPServer.
+// updates Struct keys (snake_case) include existing fields plus gateway keys:
+// bot_id, secret (alias→bot_secret), bot_secret, bot_names, ws_url, corp_id,
+// corp_secret, default_reply_mode. Empty secret/bot_secret/corp_secret preserve existing.
 func (s *ChannelService) UpdateChannel(ctx context.Context, req *channelv1.UpdateChannelRequest) (*channelv1.ChannelReply, error) {
 	updates := structToMap(req.GetUpdates())
 	if len(updates) == 0 {
@@ -231,7 +291,7 @@ func (s *ChannelService) UpdateChannel(ctx context.Context, req *channelv1.Updat
 			logServiceError(s.log, "UpdateChannel.BindWecomChannel", err, "channel_id", ch.ID, "agent_id", ch.DefaultAgent)
 		}
 	}
-	return channelMetaToReply(ch), nil
+	return s.channelToReply(ctx, ch), nil
 }
 
 // DeleteChannel implements channel.v1.ChannelHTTPServer

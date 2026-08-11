@@ -60,7 +60,7 @@ service Channel {
 
 message CreateChannelRequest {
   string channel_id = 1;
-  string type = 2;  // web | api | webhook | wxpusher | wecom
+  string type = 2;  // web | api | webhook | wxpusher | wecom | wecom_bot
   string default_agent = 3;
   bool enabled = 4;
   string webhook_path = 5;
@@ -70,6 +70,14 @@ message CreateChannelRequest {
   repeated string default_uids = 9;
   string webhook_url = 10;
   repeated string allowed_agents = 11;
+  // wecom_bot / webhook gateway fields (write on create)
+  string bot_id = 12;
+  string secret = 13;            // maps to bot_secret; never returned in replies
+  repeated string bot_names = 14;
+  string ws_url = 15;
+  string corp_id = 16;
+  string corp_secret = 17;       // write-only; never returned in replies
+  string default_reply_mode = 18; // async|sync (webhook)
 }
 
 message ListChannelsRequest {
@@ -89,6 +97,10 @@ message GetChannelRequest {
   string id = 1;
 }
 
+// UpdateChannelRequest.updates supports the same keys as CreateChannelRequest fields
+// (snake_case), including gateway keys: bot_id, secret (alias for bot_secret),
+// bot_secret, bot_names, ws_url, corp_id, corp_secret, default_reply_mode.
+// Empty secret/bot_secret/corp_secret values are ignored (preserve existing).
 message UpdateChannelRequest {
   string id = 1;
   google.protobuf.Struct updates = 2;
@@ -126,6 +138,15 @@ message WebhookInboundReply {
   string content = 3;
 }
 
+// RuntimeStatus is the Admin-facing derived gateway status (wecom_bot only).
+message RuntimeStatus {
+  string state = 1;                 // connected|reconnecting|error|unknown|disabled
+  string last_heartbeat_at = 2;     // RFC3339; empty if unset
+  string last_error = 3;
+  int32 reconnect_attempt = 4;
+  int32 reconnect_in_ms = 5;
+}
+
 message ChannelReply {
   api.common.BaseResponse ret = 1;
   string id = 2;
@@ -140,4 +161,12 @@ message ChannelReply {
   string updated_at = 11;
   string webhook_url_masked = 12;  // wecom only; masked display, never full URL
   repeated string allowed_agents = 13;
+  // wecom_bot / webhook gateway (secrets never returned as plaintext)
+  string bot_id = 14;
+  bool secret_set = 15;            // true if bot_secret is non-empty
+  repeated string bot_names = 16;
+  string ws_url = 17;
+  string corp_id = 18;
+  string default_reply_mode = 19;
+  RuntimeStatus runtime_status = 20; // wecom_bot only; omitted/nil otherwise
 }
