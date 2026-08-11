@@ -30,6 +30,9 @@ type WecomBotDeps struct {
 	Idempotency   *idempotency.Store
 	PendingSwitch *pendingswitch.Store
 	TurnTimeout   time.Duration
+	// ProgressTick is the interval for progress card updates during TurnsStream.
+	// Zero means 5s; tests may set a shorter duration.
+	ProgressTick time.Duration
 	// Reporter posts runtime status; when nil, Runtime is used if non-nil.
 	Reporter StatusReporter
 	// RunOnce overrides a single connect attempt (tests); nil uses real WS dial.
@@ -264,7 +267,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		return
 	}
 
-	out, err := deps.Runtime.TurnsFinal(ctx, resolved.UserID, runtimeclient.TurnRequest{
+	rc, _, err := deps.Runtime.TurnsStream(ctx, resolved.UserID, runtimeclient.TurnRequest{
 		SessionID:      resolved.SessionID,
 		Content:        n.RuntimeContent,
 		ChannelID:      ch.ID,
@@ -278,16 +281,11 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
+	defer rc.Close()
 
-	status := out.Status
-	if status == "" {
-		status = "ok"
-	}
-	if status == "failed" {
-		failMsg := out.Error
-		if failMsg == "" {
-			failMsg = out.Content
-		}
+	res := consumeWecomTurnStream(ctx, conn, reqID, streamID, rc, time.Now(), deps.ProgressTick)
+	if res.Failed || strings.TrimSpace(res.Content) == "" {
+		failMsg := res.ErrMsg
 		if failMsg == "" {
 			failMsg = "turn failed"
 		}
@@ -295,8 +293,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
-
-	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, out.Content)
+	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, res.Content)
 	if err := conn.RespondStream(ctx, reqID, streamID, card, true); err != nil {
 		log.Printf("wecom_bot %s respond final: %v", ch.ID, err)
 	}

@@ -3,6 +3,7 @@ package adapter_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,6 +50,14 @@ func (f *fakeWecomConn) snapshot() []respondCall {
 	return out
 }
 
+func writeRuntimeSSEOK(w http.ResponseWriter, answer string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	payload, _ := json.Marshal(map[string]any{"content": answer})
+	_, _ = io.WriteString(w, "event: chunk\ndata: "+string(payload)+"\n\n")
+	_, _ = io.WriteString(w, "event: done\ndata: {\"done\":true,\"content\":\"\"}\n\n")
+}
+
 func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 	var turns int32
 	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
@@ -67,11 +76,7 @@ func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 			if !strings.Contains(body["content"].(string), "今天天气如何") {
 				t.Errorf("turn content=%v", body["content"])
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"correlation_id": "c-portal",
-				"status":         "ok",
-				"content":        "晴",
-			})
+			writeRuntimeSSEOK(w, "晴")
 		default:
 			http.NotFound(w, r)
 		}
@@ -85,21 +90,25 @@ func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-abc", ch, n, deps)
 
 	calls := conn.snapshot()
-	if len(calls) != 2 {
-		t.Fatalf("respond calls=%d want 2: %+v", len(calls), calls)
+	if len(calls) < 3 {
+		t.Fatalf("respond calls=%d want >=3: %+v", len(calls), calls)
 	}
 	if calls[0].finish || calls[0].content != "处理中…" {
 		t.Fatalf("first call=%+v", calls[0])
 	}
-	if !calls[1].finish {
-		t.Fatalf("second finish=false")
+	last := calls[len(calls)-1]
+	if !last.finish {
+		t.Fatalf("last finish=false")
 	}
-	if calls[0].streamID == "" || calls[0].streamID != calls[1].streamID {
-		t.Fatalf("streamID mismatch: %q vs %q", calls[0].streamID, calls[1].streamID)
+	if calls[0].streamID == "" || calls[0].streamID != last.streamID {
+		t.Fatalf("streamID mismatch: %q vs %q", calls[0].streamID, last.streamID)
 	}
 	wantCard := wecom.FormatReplyCard("alice", "今天天气如何", "晴")
-	if calls[1].content != wantCard {
-		t.Fatalf("reply card=%q want %q", calls[1].content, wantCard)
+	if last.content != wantCard {
+		t.Fatalf("reply card=%q want %q", last.content, wantCard)
+	}
+	if strings.Contains(last.content, "耗时") || strings.Contains(last.content, "阶段") {
+		t.Fatalf("final card should not contain progress fields: %q", last.content)
 	}
 	if atomic.LoadInt32(&turns) != 1 {
 		t.Fatalf("turns=%d", turns)
@@ -119,10 +128,7 @@ func TestWecomBot_IdempotentMsgID(t *testing.T) {
 			})
 		case "/runtime/v1/turns":
 			atomic.AddInt32(&turns, 1)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":  "ok",
-				"content": "once",
-			})
+			writeRuntimeSSEOK(w, "once")
 		default:
 			http.NotFound(w, r)
 		}
@@ -134,14 +140,18 @@ func TestWecomBot_IdempotentMsgID(t *testing.T) {
 	n := mustNormalize(t, `{"msgid":"M-dup","aibotid":"BOT","chatid":"C1","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"hi"}}`)
 
 	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-1", ch, n, deps)
+	firstCalls := len(conn.snapshot())
+	if firstCalls < 3 {
+		t.Fatalf("first call responds=%d want >=3: %+v", firstCalls, conn.snapshot())
+	}
 	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-2", ch, n, deps)
 
 	if atomic.LoadInt32(&turns) != 1 {
 		t.Fatalf("expected 1 turn, got %d", turns)
 	}
 	calls := conn.snapshot()
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 responds (ack+final), got %d: %+v", len(calls), calls)
+	if len(calls) != firstCalls {
+		t.Fatalf("expected no extra responds on duplicate msgid, got %d after %d: %+v", len(calls), firstCalls, calls)
 	}
 }
 
@@ -160,7 +170,7 @@ func TestWecomBot_GroupPeer(t *testing.T) {
 				"created":    true,
 			})
 		case "/runtime/v1/turns":
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+			writeRuntimeSSEOK(w, "ok")
 		default:
 			http.NotFound(w, r)
 		}
@@ -246,7 +256,7 @@ func TestWecomBot_AgentListCommand_NoTurn(t *testing.T) {
 			})
 		case r.URL.Path == "/runtime/v1/turns":
 			atomic.AddInt32(&turns, 1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "nope"})
+			writeRuntimeSSEOK(w, "nope")
 		default:
 			http.NotFound(w, r)
 		}
@@ -297,7 +307,7 @@ func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
 			})
 		case r.URL.Path == "/runtime/v1/turns":
 			atomic.AddInt32(&turns, 1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "nope"})
+			writeRuntimeSSEOK(w, "nope")
 		default:
 			http.NotFound(w, r)
 		}
@@ -361,7 +371,7 @@ func switchAgentsPortalHandler(t *testing.T, w http.ResponseWriter, r *http.Requ
 		return true
 	case r.URL.Path == "/runtime/v1/turns":
 		atomic.AddInt32(turns, 1)
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "biz"})
+		writeRuntimeSSEOK(w, "biz")
 		return true
 	case r.Method == http.MethodDelete && r.URL.Path == "/runtime/v1/sessions/binding":
 		w.WriteHeader(http.StatusNoContent)
@@ -481,7 +491,7 @@ func TestWecomBot_ExpiredPending_BusinessTurn(t *testing.T) {
 			})
 		case "/runtime/v1/turns":
 			atomic.AddInt32(&turns, 1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+			writeRuntimeSSEOK(w, "ok")
 		default:
 			http.NotFound(w, r)
 		}
@@ -573,7 +583,7 @@ func TestWecomBot_PendingUnbind_ClearsAndUnbinds(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/runtime/v1/turns":
 			atomic.AddInt32(&turns, 1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "nope"})
+			writeRuntimeSSEOK(w, "nope")
 		default:
 			http.NotFound(w, r)
 		}
@@ -662,7 +672,7 @@ func TestWecomBot_ReqIDPassthrough(t *testing.T) {
 				"created":    true,
 			})
 		case "/runtime/v1/turns":
-			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "ok"})
+			writeRuntimeSSEOK(w, "ok")
 		default:
 			http.NotFound(w, r)
 		}
