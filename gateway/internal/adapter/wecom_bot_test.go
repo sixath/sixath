@@ -58,6 +58,28 @@ func writeRuntimeSSEOK(w http.ResponseWriter, answer string) {
 	_, _ = io.WriteString(w, "event: done\ndata: {\"done\":true,\"content\":\"\"}\n\n")
 }
 
+func writeRuntimeSSEHITL(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, "event: confirm_required\ndata: {\"confirmation\":{\"token\":\"t\"}}\n\n")
+	_, _ = io.WriteString(w, "event: done\ndata: {\"done\":true,\"content\":\"\"}\n\n")
+}
+
+// hitlNoSurfaceMsg matches portal AggregateFinal / wecom_progress (unexported there).
+const hitlNoSurfaceMsg = "hitl required but reply_mode=final has no interactive surface"
+
+func assertFastPathNoProgressTicker(t *testing.T, calls []respondCall) {
+	t.Helper()
+	for _, c := range calls {
+		if c.finish {
+			continue
+		}
+		if c.content != "处理中…" && strings.Contains(c.content, "耗时") {
+			t.Fatalf("fast-path finish=false must be 处理中… or lack 耗时: %+v", c)
+		}
+	}
+}
+
 func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 	var turns int32
 	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +351,7 @@ func TestWecomBot_AgentListCommand_NoTurn(t *testing.T) {
 	if !strings.Contains(calls[1].content, "可用 Agent") || !strings.Contains(calls[1].content, "Ops") {
 		t.Fatalf("list reply=%q", calls[1].content)
 	}
+	assertFastPathNoProgressTicker(t, calls)
 }
 
 func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
@@ -376,6 +399,50 @@ func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
 	calls := conn.snapshot()
 	if len(calls) != 2 || !strings.Contains(calls[1].content, "已切换到") {
 		t.Fatalf("respond=%+v", calls)
+	}
+	assertFastPathNoProgressTicker(t, calls)
+}
+
+func TestWecomBot_HITL_FailureCard(t *testing.T) {
+	var turns int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/sessions/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			writeRuntimeSSEHITL(w)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-hitl","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"需要确认的操作"}}`)
+
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-hitl", ch, n, deps)
+
+	if atomic.LoadInt32(&turns) != 1 {
+		t.Fatalf("turns=%d want 1", turns)
+	}
+	calls := conn.snapshot()
+	if len(calls) < 2 {
+		t.Fatalf("respond calls=%d want >=2: %+v", len(calls), calls)
+	}
+	last := calls[len(calls)-1]
+	if !last.finish {
+		t.Fatal("expected finish=true on HITL failure")
+	}
+	wantCard := wecom.FormatFailureCard("alice", "需要确认的操作", hitlNoSurfaceMsg)
+	if last.content != wantCard {
+		t.Fatalf("failure card=%q want %q", last.content, wantCard)
 	}
 }
 
@@ -455,6 +522,7 @@ func TestWecomBot_SwitchThenDigit_ForceNew_NoTurn(t *testing.T) {
 	if len(calls) != 2 || !strings.Contains(calls[1].content, "Ops Bot  ← 当前") {
 		t.Fatalf("switch list=%+v", calls)
 	}
+	assertFastPathNoProgressTicker(t, calls)
 	if _, ok := deps.PendingSwitch.Get(ch.ID, nSwitch.PeerID, time.Now()); !ok {
 		t.Fatal("expected pending after /switch")
 	}
@@ -476,6 +544,7 @@ func TestWecomBot_SwitchThenDigit_ForceNew_NoTurn(t *testing.T) {
 	if len(digitCalls) != 2 || !strings.Contains(digitCalls[1].content, "已切换到") {
 		t.Fatalf("digit reply=%+v", digitCalls)
 	}
+	assertFastPathNoProgressTicker(t, digitCalls)
 	if _, ok := deps.PendingSwitch.Get(ch.ID, nDigit.PeerID, time.Now()); ok {
 		t.Fatal("pending should be cleared after digit bind")
 	}
@@ -604,6 +673,7 @@ func TestWecomBot_SwitchShowsCurrentBinding(t *testing.T) {
 	if !strings.Contains(calls[1].content, "2. Ops Bot  ← 当前") {
 		t.Fatalf("missing current marker: %q", calls[1].content)
 	}
+	assertFastPathNoProgressTicker(t, calls)
 }
 
 func TestWecomBot_PendingUnbind_ClearsAndUnbinds(t *testing.T) {
@@ -664,6 +734,7 @@ func TestWecomBot_PendingUnbind_ClearsAndUnbinds(t *testing.T) {
 	if len(unbindCalls) != 2 || !strings.Contains(unbindCalls[1].content, "已解除绑定") {
 		t.Fatalf("unbind reply=%+v", unbindCalls)
 	}
+	assertFastPathNoProgressTicker(t, unbindCalls)
 }
 
 func TestWecomBot_TwoSwitch_RefreshesPending(t *testing.T) {
