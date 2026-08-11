@@ -1215,6 +1215,15 @@ export interface AgentInsights {
 }
 
 // Channel API
+/** Admin-facing derived gateway status (wecom_bot only). */
+export interface ChannelRuntimeStatus {
+  state?: string // connected|reconnecting|error|unknown|disabled
+  last_heartbeat_at?: string
+  last_error?: string
+  reconnect_attempt?: number
+  reconnect_in_ms?: number
+}
+
 export interface Channel {
   id: string
   channel_id: string
@@ -1226,6 +1235,13 @@ export interface Channel {
   webhook_url_masked?: string
   ip_whitelist?: string[]
   default_uids?: string[]
+  bot_id?: string
+  secret_set?: boolean
+  bot_names?: string[]
+  ws_url?: string
+  corp_id?: string
+  default_reply_mode?: string
+  runtime_status?: ChannelRuntimeStatus
   created_at: string
   updated_at: string
 }
@@ -1238,7 +1254,7 @@ export interface ChannelListResponse {
 
 export interface CreateChannelRequest {
   channel_id: string
-  type: 'web' | 'api' | 'webhook' | 'wxpusher' | 'wecom'
+  type: 'web' | 'api' | 'webhook' | 'wxpusher' | 'wecom' | 'wecom_bot'
   default_agent?: string
   allowed_agents?: string[]
   enabled?: boolean
@@ -1248,6 +1264,28 @@ export interface CreateChannelRequest {
   ip_whitelist?: string[]
   app_token?: string
   default_uids?: string[]
+  bot_id?: string
+  secret?: string
+  bot_names?: string[]
+  ws_url?: string
+  corp_id?: string
+  corp_secret?: string
+  default_reply_mode?: string
+}
+
+function normalizeRuntimeStatus(raw: unknown): ChannelRuntimeStatus | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  return {
+    state: (r.state as string | undefined) ?? '',
+    last_heartbeat_at:
+      (r.last_heartbeat_at as string | undefined) ?? (r.lastHeartbeatAt as string | undefined) ?? '',
+    last_error: (r.last_error as string | undefined) ?? (r.lastError as string | undefined) ?? '',
+    reconnect_attempt:
+      (r.reconnect_attempt as number | undefined) ?? (r.reconnectAttempt as number | undefined) ?? 0,
+    reconnect_in_ms:
+      (r.reconnect_in_ms as number | undefined) ?? (r.reconnectInMs as number | undefined) ?? 0,
+  }
 }
 
 function normalizeChannel(raw: Channel & Record<string, unknown>): Channel {
@@ -1263,6 +1301,14 @@ function normalizeChannel(raw: Channel & Record<string, unknown>): Channel {
     webhook_url_masked: (raw.webhook_url_masked as string) ?? (raw.webhookUrlMasked as string),
     ip_whitelist: (raw.ip_whitelist as string[]) ?? (raw.ipWhitelist as string[]),
     default_uids: (raw.default_uids as string[]) ?? (raw.defaultUids as string[]),
+    bot_id: (raw.bot_id as string | undefined) ?? (raw.botId as string | undefined),
+    secret_set: (raw.secret_set as boolean | undefined) ?? (raw.secretSet as boolean | undefined),
+    bot_names: (raw.bot_names as string[] | undefined) ?? (raw.botNames as string[] | undefined),
+    ws_url: (raw.ws_url as string | undefined) ?? (raw.wsUrl as string | undefined),
+    corp_id: (raw.corp_id as string | undefined) ?? (raw.corpId as string | undefined),
+    default_reply_mode:
+      (raw.default_reply_mode as string | undefined) ?? (raw.defaultReplyMode as string | undefined),
+    runtime_status: normalizeRuntimeStatus(raw.runtime_status ?? raw.runtimeStatus),
     created_at: (raw.created_at as string) ?? (raw.createdAt as string) ?? '',
     updated_at: (raw.updated_at as string) ?? (raw.updatedAt as string) ?? '',
   }

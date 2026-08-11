@@ -1,7 +1,37 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { channelApi, type Channel } from '../api/client'
+import { channelApi, type Channel, type ChannelRuntimeStatus } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+
+const RUNTIME_DOT_COLORS: Record<string, string> = {
+  connected: '#16a34a',
+  reconnecting: '#d97706',
+  error: '#dc2626',
+  unknown: '#94a3b8',
+  disabled: '#64748b',
+}
+
+function RuntimeStatusCell({ channel }: { channel: Channel }) {
+  if (channel.type !== 'wecom_bot') return <>—</>
+  const status: ChannelRuntimeStatus | undefined = channel.runtime_status
+  const state = status?.state || 'unknown'
+  const color = RUNTIME_DOT_COLORS[state] ?? RUNTIME_DOT_COLORS.unknown
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+      <span
+        aria-hidden
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: color,
+          flexShrink: 0,
+        }}
+      />
+      <span>{state}</span>
+    </span>
+  )
+}
 
 export default function ChannelList() {
   const [channels, setChannels] = useState<Channel[]>([])
@@ -77,6 +107,7 @@ export default function ChannelList() {
             <option value="webhook">Webhook</option>
             <option value="wxpusher">WxPusher</option>
             <option value="wecom">WeCom</option>
+            <option value="wecom_bot">WeCom Bot</option>
           </select>
           <select value={enabled} onChange={(e) => setEnabled(e.target.value)}>
             <option value="">All states</option>
@@ -101,6 +132,7 @@ export default function ChannelList() {
                 <th>Type</th>
                 <th>Default Agent</th>
                 <th>Status</th>
+                <th>Runtime Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -114,6 +146,7 @@ export default function ChannelList() {
                   <td><span className={`badge badge-${channel.type}`}>{channel.type}</span></td>
                   <td><code>{channel.default_agent || '-'}</code></td>
                   <td>{channel.enabled ? 'Enabled' : 'Disabled'}</td>
+                  <td><RuntimeStatusCell channel={channel} /></td>
                   <td>
                     <div className="actions">
                       <Link to={`/channels/${channel.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
