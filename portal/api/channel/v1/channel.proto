@@ -70,6 +70,9 @@ message CreateChannelRequest {
   repeated string default_uids = 9;
   string webhook_url = 10;
   repeated string allowed_agents = 11;
+  optional bool auto_route_enabled = 14;
+  optional bool auto_route_mention = 15;
+  optional bool auto_route_classifier = 16;
 }
 
 message ListChannelsRequest {
@@ -140,4 +143,7 @@ message ChannelReply {
   string updated_at = 11;
   string webhook_url_masked = 12;  // wecom only; masked display, never full URL
   repeated string allowed_agents = 13;
+  bool auto_route_enabled = 14;
+  bool auto_route_mention = 15;
+  bool auto_route_classifier = 16;
 }

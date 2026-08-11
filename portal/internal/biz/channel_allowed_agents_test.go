@@ -88,6 +88,15 @@ func (f *fakeChannelRepo) Update(_ context.Context, id string, updates map[strin
 	if v, ok := updates["allowed_agents"].([]string); ok {
 		cp.AllowedAgents = append([]string(nil), v...)
 	}
+	if v, ok := updates["auto_route_enabled"].(bool); ok {
+		cp.AutoRouteEnabled = v
+	}
+	if v, ok := updates["auto_route_mention"].(bool); ok {
+		cp.AutoRouteMention = v
+	}
+	if v, ok := updates["auto_route_classifier"].(bool); ok {
+		cp.AutoRouteClassifier = v
+	}
 	cp.UpdatedAt = time.Now()
 	f.byID[id] = &cp
 	out := cp
