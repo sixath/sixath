@@ -165,6 +165,23 @@ func (uc *ChannelPeerUsecase) DeleteBinding(ctx context.Context, channelID, peer
 	return uc.peerRepo.Delete(ctx, strings.TrimSpace(channelID), strings.TrimSpace(peerID))
 }
 
+// GetBinding returns the persisted channel+peer session mapping without creating a session.
+func (uc *ChannelPeerUsecase) GetBinding(ctx context.Context, channelID, peerID string) (*ChannelPeerSession, error) {
+	channelID = strings.TrimSpace(channelID)
+	peerID = strings.TrimSpace(peerID)
+	if channelID == "" || peerID == "" {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "channel_id and peer_id are required")
+	}
+	row, err := uc.peerRepo.Get(ctx, channelID, peerID)
+	if err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) {
+			return nil, pkgErrors.ErrNotFound
+		}
+		return nil, err
+	}
+	return row, nil
+}
+
 func agentAllowed(ch *ChannelMeta, agentID string) bool {
 	if len(ch.AllowedAgents) == 0 {
 		return agentID == ch.DefaultAgent
