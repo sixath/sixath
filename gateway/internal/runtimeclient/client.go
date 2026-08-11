@@ -41,6 +41,9 @@ type Client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+	// streamHTTPClient has no Client.Timeout so long-lived SSE turns are not
+	// killed mid-stream; cancellation comes from the request context only.
+	streamHTTPClient *http.Client
 }
 
 // New builds a Runtime client. baseURL is the Portal origin (no trailing slash required).
@@ -51,6 +54,10 @@ func New(baseURL, token string) *Client {
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
+		// Timeout must stay 0: Web chat proxies TurnsStream for multi-minute
+		// tool loops; a Client.Timeout would abort the whole SSE after N seconds
+		// and UI would show model nodes as 「已中断」.
+		streamHTTPClient: &http.Client{},
 	}
 }
 
@@ -309,10 +316,12 @@ func (c *Client) Rewind(ctx context.Context, userID, sessionID string, req Rewin
 }
 
 // TurnsFinal runs a turn with reply_mode=final and returns JSON.
+// Uses the no-Client.Timeout transport so the caller's context deadline controls duration
+// (企微/webhook set turn timeouts of several minutes; a 120s Client.Timeout would win first).
 func (c *Client) TurnsFinal(ctx context.Context, userID string, req TurnRequest) (*TurnFinalReply, error) {
 	req.ReplyMode = "final"
 	var out TurnFinalReply
-	if err := c.doJSON(ctx, http.MethodPost, "/runtime/v1/turns", userID, nil, req, &out); err != nil {
+	if err := c.doJSONWith(c.streamClient(), ctx, http.MethodPost, "/runtime/v1/turns", userID, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -320,9 +329,10 @@ func (c *Client) TurnsFinal(ctx context.Context, userID string, req TurnRequest)
 
 // TurnsStream runs a turn with reply_mode=stream.
 // Caller must Close the returned body. Headers are a clone of the response headers.
+// Unlike JSON helpers, this does not apply the 120s Client.Timeout — only ctx cancels the stream.
 func (c *Client) TurnsStream(ctx context.Context, userID string, req TurnRequest) (io.ReadCloser, http.Header, error) {
 	req.ReplyMode = "stream"
-	resp, err := c.doRequest(ctx, http.MethodPost, "/runtime/v1/turns", userID, nil, req)
+	resp, err := c.doRequestWith(c.streamClient(), ctx, http.MethodPost, "/runtime/v1/turns", userID, nil, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -337,6 +347,14 @@ func (c *Client) TurnsStream(ctx context.Context, userID string, req TurnRequest
 		}
 	}
 	return resp.Body, resp.Header.Clone(), nil
+}
+
+func (c *Client) streamClient() *http.Client {
+	if c != nil && c.streamHTTPClient != nil {
+		return c.streamHTTPClient
+	}
+	// Fallback for partially constructed clients in tests.
+	return &http.Client{}
 }
 
 func listQuery(q ListSessionsQuery) url.Values {
@@ -365,7 +383,11 @@ func (c *Client) doRawJSON(ctx context.Context, method, path, userID string, que
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path, userID string, query url.Values, body any, out any) error {
-	resp, err := c.doRequest(ctx, method, path, userID, query, body)
+	return c.doJSONWith(c.httpClient, ctx, method, path, userID, query, body, out)
+}
+
+func (c *Client) doJSONWith(hc *http.Client, ctx context.Context, method, path, userID string, query url.Values, body any, out any) error {
+	resp, err := c.doRequestWith(hc, ctx, method, path, userID, query, body)
 	if err != nil {
 		return err
 	}
@@ -392,8 +414,15 @@ func (c *Client) doJSON(ctx context.Context, method, path, userID string, query 
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, userID string, query url.Values, body any) (*http.Response, error) {
+	return c.doRequestWith(c.httpClient, ctx, method, path, userID, query, body)
+}
+
+func (c *Client) doRequestWith(hc *http.Client, ctx context.Context, method, path, userID string, query url.Values, body any) (*http.Response, error) {
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("runtime client not configured")
+	}
+	if hc == nil {
+		return nil, fmt.Errorf("runtime http client not configured")
 	}
 	u := c.baseURL + path
 	if len(query) > 0 {
@@ -418,7 +447,7 @@ func (c *Client) doRequest(ctx context.Context, method, path, userID string, que
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}

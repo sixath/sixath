@@ -40,7 +40,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("runtime_token is required")
 	}
 	if cfg.TurnTimeoutSec <= 0 {
-		cfg.TurnTimeoutSec = 120
+		cfg.TurnTimeoutSec = 600
 	}
 	// channels_file is ignored at runtime; optional default retained for import scripts.
 	if cfg.ChannelsFile == "" {

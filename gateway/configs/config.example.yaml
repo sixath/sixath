@@ -3,7 +3,8 @@ listen: ":8088"
 portal_base_url: "http://127.0.0.1:8000"
 # Overridable via env SATH_RUNTIME_TOKEN (compose default: dev-runtime-token)
 runtime_token: "dev-runtime-token"
-turn_timeout_sec: 120
+turn_timeout_sec: 600
+# turn_timeout_sec covers wecom/webhook single turns; Web SSE has no Client total timeout (see runtimeclient).
 # DEPRECATED — ignored at runtime. Channel config is owned by Portal; Gateway syncs via GET /runtime/v1/gateway/channels.
 # channels.yaml is archive/import only (see portal/cmd/import-gateway-channels).
 # channels_file: "./configs/channels.yaml"
