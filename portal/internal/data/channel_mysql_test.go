@@ -72,6 +72,68 @@ func TestChannelRepo_CreateUpdateGatewayFields(t *testing.T) {
 	}
 }
 
+func TestChannelRepo_CreateDisabledPersistsFalse(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newChannelRepoForTest(db)
+	ctx := context.Background()
+
+	created, err := repo.Create(ctx, &biz.ChannelCreate{
+		ChannelID: "disabled-1",
+		Type:      "webhook",
+		Enabled:   false,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.Enabled {
+		t.Fatal("Create returned Enabled=true, want false")
+	}
+
+	var raw int
+	if err := db.Raw("SELECT enabled FROM channels WHERE id = ?", created.ID).Scan(&raw).Error; err != nil {
+		t.Fatalf("raw select: %v", err)
+	}
+	if raw != 0 {
+		t.Fatalf("raw enabled = %d, want 0 (single Create path, no orphan enabled=true)", raw)
+	}
+
+	got, err := repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Enabled {
+		t.Fatal("GetByID Enabled=true, want false")
+	}
+}
+
+func TestChannelRepo_UpdateBotNamesFromAnySlice(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newChannelRepoForTest(db)
+	ctx := context.Background()
+
+	created, err := repo.Create(ctx, &biz.ChannelCreate{
+		ChannelID: "names-any",
+		Type:      "wecom_bot",
+		Enabled:   true,
+		BotID:     "b1",
+		BotSecret: "s1",
+		BotNames:  []string{"old"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := repo.Update(ctx, created.ID, map[string]any{
+		"bot_names": []any{"N1", "N2"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(updated.BotNames) != 2 || updated.BotNames[0] != "N1" || updated.BotNames[1] != "N2" {
+		t.Fatalf("BotNames = %v, want [N1 N2]", updated.BotNames)
+	}
+}
+
 func TestChannelRepo_ListGatewayChannelsIncludesDisabled(t *testing.T) {
 	db := openChannelTestDB(t)
 	repo := newChannelRepoForTest(db)

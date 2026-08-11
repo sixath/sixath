@@ -49,18 +49,25 @@ func (r *channelRepo) Create(ctx context.Context, ch *biz.ChannelCreate) (*biz.C
 		CorpSecret:       ch.CorpSecret,
 		DefaultReplyMode: ch.DefaultReplyMode,
 	}
-	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+	// GORM skips zero-value fields with DB defaults on Create; wrap Create+enabled
+	// correction in one transaction so a failed second step cannot leave enabled=true.
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		if !ch.Enabled {
+			if err := tx.Model(&model.Channel{}).Where("id = ?", id).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			m.Enabled = false
+		}
+		return nil
+	})
+	if err != nil {
 		if isDuplicateKey(err) {
 			return nil, ErrDuplicateName
 		}
 		return nil, err
-	}
-	// GORM skips zero-value fields that have DB defaults; force-write enabled=false.
-	if !ch.Enabled {
-		if err := r.db.WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", false).Error; err != nil {
-			return nil, err
-		}
-		m.Enabled = false
 	}
 	return channelModelToBiz(m), nil
 }
@@ -169,15 +176,16 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 	}
 	upd := make(map[string]interface{})
 	for k, v := range updates {
-		if allowed[k] {
-			if k == "ip_whitelist" || k == "default_uids" || k == "allowed_agents" || k == "bot_names" {
-				if sl, ok := v.([]string); ok {
-					upd[k] = model.StringSlice(sl)
-				}
-			} else {
-				upd[k] = v
-			}
+		if !allowed[k] {
+			continue
 		}
+		if k == "ip_whitelist" || k == "default_uids" || k == "allowed_agents" || k == "bot_names" {
+			if sl, ok := coerceUpdateStringSlice(v); ok {
+				upd[k] = sl
+			}
+			continue
+		}
+		upd[k] = v
 	}
 	if len(upd) > 0 {
 		if err := r.db.WithContext(ctx).Model(&m).Updates(upd).Error; err != nil {
@@ -200,6 +208,27 @@ func (r *channelRepo) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func coerceUpdateStringSlice(v any) (model.StringSlice, bool) {
+	switch x := v.(type) {
+	case []string:
+		return model.StringSlice(x), true
+	case model.StringSlice:
+		return x, true
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return model.StringSlice(out), true
+	default:
+		return nil, false
+	}
 }
 
 func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {

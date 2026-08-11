@@ -126,6 +126,40 @@ func TestChannelUpdate_EnableWecomBotWithoutSecretFails(t *testing.T) {
 	}
 }
 
+func TestChannelUpdate_CoercesBotNamesFromAnySlice(t *testing.T) {
+	repo := &fakeChannelRepo{byID: map[string]*ChannelMeta{}}
+	uc := newChannelUsecaseForTest(repo)
+
+	created, err := uc.Create(context.Background(), &ChannelCreate{
+		ChannelID: "wb-names",
+		Type:      "wecom_bot",
+		Enabled:   true,
+		BotID:     "bot-1",
+		BotSecret: "sec",
+		BotNames:  []string{"old"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := uc.Update(context.Background(), created.ID, map[string]any{
+		"bot_names": []any{"Alice", "Bob"},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(updated.BotNames) != 2 || updated.BotNames[0] != "Alice" || updated.BotNames[1] != "Bob" {
+		t.Fatalf("BotNames = %v, want [Alice Bob]", updated.BotNames)
+	}
+
+	_, err = uc.Update(context.Background(), created.ID, map[string]any{
+		"bot_names": "not-an-array",
+	})
+	if !isReason(err, "INVALID_ARGUMENT") {
+		t.Fatalf("Update error = %v, want INVALID_ARGUMENT", err)
+	}
+}
+
 func TestListGatewayChannels_IncludesDisabled(t *testing.T) {
 	repo := &fakeChannelRepo{byID: map[string]*ChannelMeta{}}
 	uc := newChannelUsecaseForTest(repo)

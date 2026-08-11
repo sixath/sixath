@@ -222,6 +222,13 @@ func (uc *ChannelUsecase) Update(ctx context.Context, id string, updates map[str
 		return nil, err
 	}
 	stripEmptySecretUpdates(updates)
+	if raw, ok := updates["bot_names"]; ok {
+		sl, ok := coerceStringSlice(raw)
+		if !ok {
+			return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "bot_names must be a string array")
+		}
+		updates["bot_names"] = sl
+	}
 	typ, enabled, botID, botSecret, mode := effectiveChannelProtocol(current, updates)
 	if err := validateChannelProtocol(typ, enabled, botID, botSecret, mode); err != nil {
 		return nil, err
