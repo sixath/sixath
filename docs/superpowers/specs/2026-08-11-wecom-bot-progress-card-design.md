@@ -82,15 +82,20 @@ Turn 终态（done / error / HITL / ctx）────────┴─▶ 停 
 
 | SSE 事件 | 状态更新 |
 |----------|----------|
-| `model_call` `phase=invoked` | `stage=思考中`（若尚无进行中工具） |
+| `model_call` `phase=invoked` | `stage=思考中`（若当前 `stage=调用工具` 且该 tool 尚未 `completed`，保持「调用工具」） |
 | `tool_call` `phase=started` | `stage=调用工具`；`toolName=tool_name` |
-| `tool_call` `phase=completed`（或失败完成） | `stepsDone++`；可清空或保留 `toolName`（保留最近名） |
-| `model_call` `phase=responded` | `stepsDone++`；若后续无 tool，可保持 `思考中` 或在收到 `chunk` 后切阶段 |
-| `chunk`（首次有正文） | `stage=生成回复` |
-| `error` / HITL（`input_required` / `confirm_required`） | 记失败语义，准备终卡（与今日 `TurnsFinal`/`AggregateFinal` 非交互面一致） |
-| `done` | 停止进度循环，聚合最终正文后出终卡 |
+| `tool_call` `phase=completed`（含错误完成） | `stepsDone++`（按 tool `id` 去重）；**保留** `toolName` 为最近工具名 |
+| `model_call` `phase=responded` | `stepsDone++`（按 model `step` 去重）；`stage` 保持 `思考中`（除非已是「生成回复」） |
+| `chunk`（首次非空正文） | `stage=生成回复` |
+| `error` / HITL（`input_required` / `confirm_required`） | 记失败语义，准备终卡（与今日 `AggregateFinal` 非交互面一致） |
+| `done` | 停止进度循环；**不**依赖 `done` 上的 `status`/`content`（Portal `done` 常无正文） |
 
-`stepsDone` 定义：**每完成一次 tool（`completed`）或一次 model（`responded`）计 1**。若同一 id 重复 `completed`，不得重复计数（按 tool `id` / model step 去重）。
+终态判定（stream）：
+
+- 出现 `error` 或 HITL → **失败卡**
+- 否则聚合全部 `chunk` 正文 → **成功卡**（正文为空且无显式错误时，按现有失败文案兜底）
+
+`stepsDone` 定义：**每完成一次 tool（`completed`）或一次 model（`responded`）计 1**；同一 tool `id` / 同一 model `step` 不得重复计数。
 
 ### 3.3 进度文案格式
 
@@ -124,7 +129,7 @@ Turn 终态（done / error / HITL / ctx）────────┴─▶ 停 
 5. **中间推卡失败**：打日志，继续收 SSE；终卡再试一次。
 6. **ctx 取消 / TurnTimeout**：停 ticker → 失败卡。
 
-快路径（PendingSwitch、斜杠命令、Resolve 失败等）行为保持现状：不启 stream / ticker。
+快路径（PendingSwitch、斜杠命令、Resolve 失败等）：不启 stream / ticker。今日回调开头会先推一帧「处理中…」再走快路径终卡；**本轮保持该行为**（不顺带去掉快路径上的 processing 帧），避免范围膨胀。
 
 实现时注意：`TurnsStream` 必须使用**不带整体 Timeout 的 stream HTTP client**（与 Web 代理长 SSE 的修复一致），Turn 上限仍由现有 `TurnTimeout`/`context.WithTimeout` 控制。
 
@@ -151,7 +156,7 @@ Turn 终态（done / error / HITL / ctx）────────┴─▶ 停 
 | Portal/网络错误 | 失败卡（`mapRuntimeUserError`） |
 | SSE `error` | 失败卡 |
 | `input_required` / `confirm_required` | 非交互面视为失败并终卡（与现 `AggregateFinal` 语义对齐） |
-| Turn `status=failed` 或无有效正文且流异常结束 | 失败卡 |
+| 流正常 `done` 但聚合正文为空 | 失败卡（兜底文案） |
 | 中间进度推送失败 | 日志；不中断 Turn |
 
 ---
