@@ -40,17 +40,22 @@ func consumeWecomTurnStream(
 	}
 
 	events := make(chan sseEvent, 16)
-	go scanSSEEvents(body, events)
+	go scanSSEEvents(ctx, body, events)
 
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
 	var full strings.Builder
+	cancelled := false
 	streamDone := false
 	for !streamDone {
 		select {
 		case <-ctx.Done():
+			cancelled = true
 			streamDone = true
+			if c, ok := body.(io.Closer); ok {
+				_ = c.Close()
+			}
 		case <-ticker.C:
 			if err := conn.RespondStream(ctx, reqID, streamID, FormatProgressText(st, time.Now()), false); err != nil {
 				log.Printf("wecom progress tick: %v", err)
@@ -73,6 +78,13 @@ func consumeWecomTurnStream(
 					full.WriteString(payload.Content)
 				}
 			}
+		}
+	}
+
+	// After cancel (or early exit), drain until scanner closes the channel so the
+	// scanSSEEvents goroutine cannot leak on a blocked Scan/flush.
+	if cancelled {
+		for range events {
 		}
 	}
 
@@ -99,7 +111,7 @@ func consumeWecomTurnStream(
 	return res
 }
 
-func scanSSEEvents(body io.Reader, out chan<- sseEvent) {
+func scanSSEEvents(ctx context.Context, body io.Reader, out chan<- sseEvent) {
 	defer close(out)
 	sc := bufio.NewScanner(body)
 	// Allow larger SSE data lines (chunk payloads).
@@ -108,18 +120,26 @@ func scanSSEEvents(body io.Reader, out chan<- sseEvent) {
 
 	var event string
 	var data strings.Builder
-	flush := func() {
+	flush := func() bool {
 		if event == "" && data.Len() == 0 {
-			return
+			return true
 		}
-		out <- sseEvent{event: event, data: []byte(data.String())}
+		ev := sseEvent{event: event, data: []byte(data.String())}
 		event = ""
 		data.Reset()
+		select {
+		case out <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
 	}
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
-			flush()
+			if !flush() {
+				return
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "event:") {
@@ -133,7 +153,17 @@ func scanSSEEvents(body io.Reader, out chan<- sseEvent) {
 			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
 	}
-	flush()
+	if err := sc.Err(); err != nil {
+		log.Printf("wecom SSE scan: %v", err)
+		// Surface as a synthetic error event when the stream ends uncleanly
+		// and no terminal failure was already produced by the consumer.
+		select {
+		case out <- sseEvent{event: "error", data: []byte(`{"error":"sse scan failed"}`)}:
+		case <-ctx.Done():
+		}
+		return
+	}
+	_ = flush()
 }
 
 const hitlNoSurfaceMsg = "hitl required but reply_mode=final has no interactive surface"

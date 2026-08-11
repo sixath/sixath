@@ -116,9 +116,14 @@ func TestConsumeWecomTurnStream_ContextCancel(t *testing.T) {
 	}()
 	time.Sleep(10 * time.Millisecond)
 	cancel()
-	res := <-done
-	if !res.Failed {
-		t.Fatalf("want failed on cancel, got %+v", res)
+
+	select {
+	case res := <-done:
+		if !res.Failed {
+			t.Fatalf("want failed on cancel, got %+v", res)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumeWecomTurnStream hung after context cancel")
 	}
 }
 
