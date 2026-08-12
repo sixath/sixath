@@ -57,9 +57,20 @@ for ex in secrets/*.txt.example; do
   [[ -e "$ex" ]] || continue
   dest="${ex%.example}"
   if [[ ! -f "$dest" ]]; then
-    cp "$ex" "$dest"
+    # Strip CR/LF: MySQL MYSQL_*_PASSWORD_FILE treats trailing \r as part of the password.
+    tr -d '\r\n' < "$ex" > "$dest"
     echo "WARNING: created $dest from example — replace before production use"
   fi
+done
+
+# Normalize existing secrets (Windows CRLF would break MySQL vs Portal password match).
+for dest in secrets/*.txt; do
+  [[ -f "$dest" ]] || continue
+  [[ "$dest" == *.example ]] && continue
+  tmp="$(mktemp)"
+  tr -d '\r\n' < "$dest" > "$tmp"
+  cat "$tmp" > "$dest"
+  rm -f "$tmp"
 done
 
 # Load KEY=VAL from .env without evaluating shell metacharacters (e.g. | in COMPOSE_FILE).

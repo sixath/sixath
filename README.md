@@ -76,7 +76,7 @@ bash deploy/install-docker-wsl.sh
 | 停栈保留卷 | `--down` / `-Down` |
 | 仅验活 | `--smoke-only` / `-SmokeOnly` |
 
-**WSL（无 Docker Desktop）**：在 Ubuntu 内安装 Engine：`bash deploy/install-docker-wsl.sh`。仓库若在 `/mnt/c` 等 Windows 盘，脚本会把 `PORTAL_DATA_DIR` 指到 `~/sixath-data/portal`；更推荐把仓库 clone 到 `~/src/sixath`（Linux 文件系统）再部署。
+**WSL（无 Docker Desktop）**：完整步骤见 **[`deploy/WSL.md`](deploy/WSL.md)**。摘要：在 Ubuntu 内 `bash deploy/install-docker-wsl.sh`，再 `./deploy/deploy-wsl.sh --build`。仓库若在 `/mnt/c` 等 Windows 盘，脚本会把 `PORTAL_DATA_DIR` 指到 `~/sixath-data/portal`；更推荐把仓库 clone 到 `~/src/sixath`（Linux 文件系统）再部署。
 
 设计说明：[`docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md`](docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md)。  
 密钥：见 [`secrets/README.md`](secrets/README.md)。登录用 `BOOTSTRAP_ADMIN_EMAIL` + `secrets/bootstrap_password.txt`。
