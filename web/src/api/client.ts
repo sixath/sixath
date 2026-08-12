@@ -168,7 +168,7 @@ export interface ToolResponse {
   updated_at: string
 }
 
-function normalizeToolConfig(raw?: ToolConfig & Record<string, unknown>): ToolConfig {
+export function normalizeToolConfig(raw?: ToolConfig & Record<string, unknown>): ToolConfig {
   if (!raw) return {}
   const cfg = raw as Record<string, unknown>
   return {
