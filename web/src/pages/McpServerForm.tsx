@@ -249,8 +249,13 @@ export default function McpServerForm() {
                 <input
                   value={command}
                   onChange={(e) => setCommand(e.target.value)}
-                  placeholder="npx / node / npm"
+                  placeholder="npx（跨平台；也可填绝对路径）"
                 />
+                <p style={{ fontSize: '0.82em', color: 'var(--muted)', margin: '0.35rem 0 0' }}>
+                  推荐直接填 <code>npx</code>。Windows 本机若找不到，可填{' '}
+                  <code>C:\Program Files\nodejs\npx.cmd</code>，或设置环境变量{' '}
+                  <code>SATH_MCP_STDIO_NPX</code>。Docker Compose 镜像已内置 Node 20。
+                </p>
               </div>
               <div className="form-group">
                 <label>Args（每行一个）</label>

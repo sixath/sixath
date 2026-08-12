@@ -546,7 +546,11 @@ func newMark3labsStdioClient(cfg *McpConfig) (mcpClient, error) {
 	for k, v := range cfg.Env {
 		envSlice = append(envSlice, k+"="+v)
 	}
-	cli, err := markclient.NewStdioMCPClient(cfg.Command, envSlice, cfg.Args...)
+	cmd, err := ResolveStdioMcpCommand(cfg.Command)
+	if err != nil {
+		return nil, err
+	}
+	cli, err := markclient.NewStdioMCPClient(cmd, envSlice, cfg.Args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mark3labs stdio client: %w", err)
 	}

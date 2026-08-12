@@ -316,6 +316,23 @@ systemd=true
 
 ---
 
+### 8.8 stdio MCP（npx）跨平台
+
+Command 推荐填 `npx`（允许列表：`npx` / `node` / `npm`）。
+
+| 环境 | 说明 |
+|------|------|
+| Windows 本机 Portal | 自动解析 `npx.cmd`；也可设 `SATH_MCP_STDIO_NPX=C:\Program Files\nodejs\npx.cmd` |
+| macOS / Linux 本机 | 依赖 PATH 或 `/usr/local/bin`、Homebrew 路径探测 |
+| Docker Compose Portal | 镜像已含 Node 20，`npx` 可直接用；改 Dockerfile 后需 `--build` 重建 |
+
+```bash
+# 重建 portal 镜像后验证
+docker compose exec portal npx -v
+```
+
+---
+
 ## 9. 推荐流程（清单）
 
 - [ ] `wsl -d Ubuntu` 可正常进入  
