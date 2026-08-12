@@ -36,6 +36,8 @@ auth:
   bootstrap_org_id: "default"
   # email/password/token 由 SATH_BOOTSTRAP_* / secrets 注入
 data:
+  # Persist agent workspaces + skills across container recreate (compose mounts this path).
+  data_root: /data/portal
   database:
     driver: mysql
     source: root:root@tcp(mysql:3306)/sath?parseTime=True&loc=Local&charset=utf8mb4

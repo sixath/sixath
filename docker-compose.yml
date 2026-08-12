@@ -45,6 +45,8 @@ services:
       - bootstrap_token
     volumes:
       - ./portal/configs/config.docker.yaml:/data/conf-ro/config.yaml:ro
+      # Persist data_root (agents/{id}/skills, org skills/, vectors, …) across restarts.
+      - ${PORTAL_DATA_DIR:-./data/portal}:/data/portal
     tmpfs:
       - /data/conf:mode=1777
     depends_on:

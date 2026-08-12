@@ -52,22 +52,31 @@ Go AI Agent 平台工作区：可嵌入的 Agent 运行时（framework）、后�
 ### 一键部署（推荐）
 
 ```bash
-# Linux / macOS
+# Linux / macOS / 服务器
 ./deploy/deploy.sh --build
 
-# Windows PowerShell
-.\deploy\deploy.ps1 -Build
+# Windows 公司环境（禁用 Docker Desktop）：用 WSL2 Ubuntu + Docker Engine
+wsl -d Ubuntu
+# 首次在 Ubuntu 内安装引擎（只需一次）：
+bash deploy/install-docker-wsl.sh
+# 新开一个 Ubuntu 窗口后一键起栈：
+./deploy/deploy-wsl.sh --build
+
+# 也可从 Windows PowerShell 唤起 WSL：
+.\deploy\deploy-wsl.ps1 -Build
 ```
 
 脚本会：补齐 `.env` 与 `secrets/*.txt`（来自 example，并打印警告）→ `compose up` → 等待 healthy → smoke。
 
 | 场景 | 命令 |
 |------|------|
-| 默认 HTTP | `./deploy/deploy.sh --build` / `.\deploy\deploy.ps1 -Build` |
+| 默认 HTTP | `./deploy/deploy-wsl.sh --build` / `.\deploy\deploy-wsl.ps1 -Build` |
 | + Neo4j | 加 `--with-neo4j` / `-WithNeo4j` |
 | + TLS（Caddy） | 加 `--with-tls` / `-WithTls`（`.env` 中 `DOMAIN` 必填且非 localhost） |
 | 停栈保留卷 | `--down` / `-Down` |
 | 仅验活 | `--smoke-only` / `-SmokeOnly` |
+
+**WSL（无 Docker Desktop）**：在 Ubuntu 内安装 Engine：`bash deploy/install-docker-wsl.sh`。仓库若在 `/mnt/c` 等 Windows 盘，脚本会把 `PORTAL_DATA_DIR` 指到 `~/sixath-data/portal`；更推荐把仓库 clone 到 `~/src/sixath`（Linux 文件系统）再部署。
 
 设计说明：[`docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md`](docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md)。  
 密钥：见 [`secrets/README.md`](secrets/README.md)。登录用 `BOOTSTRAP_ADMIN_EMAIL` + `secrets/bootstrap_password.txt`。

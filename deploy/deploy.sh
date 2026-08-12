@@ -62,11 +62,27 @@ for ex in secrets/*.txt.example; do
   fi
 done
 
-# shellcheck disable=SC1091
-set -a
-# shellcheck source=/dev/null
-source .env
-set +a
+# Load KEY=VAL from .env without evaluating shell metacharacters (e.g. | in COMPOSE_FILE).
+load_dotenv() {
+  local f="${1:-.env}"
+  [[ -f "$f" ]] || return 0
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[1]}"
+    val="${BASH_REMATCH[2]}"
+    if [[ "$val" =~ ^\"(.*)\"$ ]]; then
+      val="${BASH_REMATCH[1]}"
+    elif [[ "$val" =~ ^\'(.*)\'$ ]]; then
+      val="${BASH_REMATCH[1]}"
+    fi
+    export "$key=$val"
+  done < "$f"
+}
+
+load_dotenv .env
 
 if [[ "$WITH_TLS" -eq 1 ]]; then
   if [[ -z "${DOMAIN:-}" || "$DOMAIN" == "localhost" ]]; then

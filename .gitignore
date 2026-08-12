@@ -37,3 +37,6 @@ deploy/last-smoke.json
 # Large / local-only data dumps under portal
 portal/internal/chat/data/
 portal/internal/service/data/
+
+# Compose Portal data_root bind mount (skills / workspaces)
+/data/
