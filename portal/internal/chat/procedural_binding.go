@@ -18,9 +18,8 @@ var (
 	injectSkillRouter    = true
 	proceduralAutoCommit bool
 	proceduralPilots     []string
-	proceduralCatalog    *memory.ProceduralCatalog
-	defaultFailureOnce   sync.Once
-	defaultFailureSink   memory.FailureSignalSink
+	proceduralCatalog  *memory.ProceduralCatalog
+	defaultFailureSink memory.FailureSignalSink
 )
 
 // SetProceduralRepairConfig loads hand-written bindings into the P3-D catalog (P3-C/D/E).
@@ -126,19 +125,16 @@ func rebuildDefaultFailureSinkLocked() {
 		sinks = append(sinks, memory.ProceduralCatalogSink{Catalog: proceduralCatalog})
 	}
 	defaultFailureSink = sinks
-	// Allow DefaultFailureSignalSink to pick up new sink even after Once — reset Once on config change.
-	defaultFailureOnce = sync.Once{}
 }
 
 // DefaultFailureSignalSink returns Logging+Ring(+Catalog) sink for turnBus bridges.
+// Must not use sync.Once that rebuild resets — that unlocks a replaced mutex and fatals.
 func DefaultFailureSignalSink() memory.FailureSignalSink {
 	proceduralMu.Lock()
 	defer proceduralMu.Unlock()
-	defaultFailureOnce.Do(func() {
-		if defaultFailureSink == nil {
-			rebuildDefaultFailureSinkLocked()
-		}
-	})
+	if defaultFailureSink == nil {
+		rebuildDefaultFailureSinkLocked()
+	}
 	return defaultFailureSink
 }
 
