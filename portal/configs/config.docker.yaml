@@ -38,6 +38,8 @@ auth:
 data:
   # Persist agent workspaces + skills across container recreate (compose mounts this path).
   data_root: /data/portal
+  code_roots:
+    - /mnt/codes
   database:
     driver: mysql
     source: root:root@tcp(mysql:3306)/sath?parseTime=True&loc=Local&charset=utf8mb4

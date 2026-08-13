@@ -116,7 +116,7 @@ func newHybridUpdateAgentService(t *testing.T, stored biz.RuntimeToolsConfig) (*
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
 	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), "/tmp", log.NewStdLogger(nil))
-	return NewAgentService(uc, nil, nil, nil, nil, log.NewStdLogger(nil)), repo
+	return NewAgentService(uc, nil, nil, nil, nil, nil, log.NewStdLogger(nil)), repo
 }
 
 func TestUpdateAgent_OmitsHybridRecall_PreservesStored(t *testing.T) {

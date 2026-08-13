@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   agentApi,
   channelApi,
+  codeRootsApi,
   memoryHubApi,
   CODING_ASSISTANT_RUNTIME_TOOLS,
   RUNTIME_TOOL_FIELDS,
   serializeRuntimeTools,
   type Channel,
+  type CodeRootBrowseEntry,
   type CreateAgentRequest,
   type MemoryHubCatalog,
   type ModelConfig,
@@ -15,6 +17,15 @@ import {
 } from '../api/client'
 
 const emptyRuntimeTools = (): RuntimeToolsConfig => ({})
+
+type WorkspaceMode = 'subdir' | 'full'
+
+function joinRootPath(root: string, path: string): string {
+  const r = root.replace(/[/\\]+$/, '')
+  const p = path.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '')
+  if (!p) return r
+  return `${r}/${p}`
+}
 
 export default function AgentForm() {
   const { id } = useParams()
@@ -25,6 +36,14 @@ export default function AgentForm() {
   const [description, setDescription] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [workspace, setWorkspace] = useState('')
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('subdir')
+  const [selectedTarget, setSelectedTarget] = useState('')
+  const [codeRoots, setCodeRoots] = useState<string[]>([])
+  const [browseRoot, setBrowseRoot] = useState('')
+  const [browsePath, setBrowsePath] = useState('')
+  const [browseEntries, setBrowseEntries] = useState<CodeRootBrowseEntry[]>([])
+  const [browseLoading, setBrowseLoading] = useState(false)
+  const [browseError, setBrowseError] = useState('')
   const [modelConfig, setModelConfig] = useState<ModelConfig>({ provider: 'openai', model: 'gpt-4' })
   const [debugRun, setDebugRun] = useState(false)
   const [runtimeTools, setRuntimeTools] = useState<RuntimeToolsConfig>(emptyRuntimeTools())
@@ -36,6 +55,27 @@ export default function AgentForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const loadBrowse = useCallback(async (root: string, path = '') => {
+    if (!root) {
+      setBrowseEntries([])
+      setBrowsePath('')
+      return
+    }
+    setBrowseLoading(true)
+    setBrowseError('')
+    try {
+      const res = await codeRootsApi.browse(root, path)
+      setBrowseRoot(res.root || root)
+      setBrowsePath(res.path ?? path)
+      setBrowseEntries(res.entries || [])
+    } catch (e) {
+      setBrowseError((e as Error).message)
+      setBrowseEntries([])
+    } finally {
+      setBrowseLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     channelApi.list({ type: 'wecom', page: 1, page_size: 100 })
       .then((res) => setWecomChannels(res.items))
@@ -43,7 +83,17 @@ export default function AgentForm() {
     memoryHubApi.catalog()
       .then(setHubCatalog)
       .catch(() => setHubCatalog({ defaults: { governance: 'local', knowledge: 'local' }, governance: ['local'], knowledge: ['local'] }))
-  }, [])
+    codeRootsApi.list()
+      .then((res) => {
+        const roots = res.roots || []
+        setCodeRoots(roots)
+        if (roots.length > 0) {
+          setBrowseRoot(roots[0])
+          void loadBrowse(roots[0], '')
+        }
+      })
+      .catch(() => setCodeRoots([]))
+  }, [loadBrowse])
 
   useEffect(() => {
     if (isEdit && id) {
@@ -70,6 +120,19 @@ export default function AgentForm() {
     setRuntimeTools({ ...CODING_ASSISTANT_RUNTIME_TOOLS })
   }
 
+  const breadcrumbParts = browsePath
+    ? browsePath.split(/[/\\]/).filter(Boolean)
+    : []
+
+  const selectCurrentDir = () => {
+    if (!browseRoot) return
+    const abs = joinRootPath(browseRoot, browsePath)
+    setSelectedTarget(abs)
+    if (workspaceMode === 'full') {
+      setWorkspace(abs)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -77,8 +140,13 @@ export default function AgentForm() {
       setError('请输入 Agent 名称')
       return
     }
-    if (!workspace.trim()) {
-      setError('请输入工作空间路径')
+    if (workspaceMode === 'subdir') {
+      if (!selectedTarget.trim()) {
+        setError('请先浏览并选择要挂载的代码目录')
+        return
+      }
+    } else if (!workspace.trim()) {
+      setError('请输入工作空间路径（或浏览选择整仓目录）')
       return
     }
     if (!modelConfig.provider || !modelConfig.model) {
@@ -91,7 +159,8 @@ export default function AgentForm() {
         name: name.trim(),
         description: description.trim() || undefined,
         system_prompt: systemPrompt.trim() || undefined,
-        workspace: workspace.trim(),
+        // subdir: empty string lets server default to {data_root}/agents/{id}
+        workspace: workspaceMode === 'subdir' ? (workspace.trim() || '') : workspace.trim(),
         model_config: modelConfig,
         debug_run: debugRun,
         runtime_tools: serializeRuntimeTools(runtimeTools),
@@ -102,8 +171,26 @@ export default function AgentForm() {
         if (clearBindingsOnSave) {
           await memoryHubApi.clearBindings(id)
         }
+        if (workspaceMode === 'subdir' && selectedTarget.trim()) {
+          try {
+            await agentApi.workspaceLink(id, selectedTarget.trim())
+          } catch (linkErr) {
+            setError(`Agent 已更新，但 workspace/code 链接失败：${(linkErr as Error).message}`)
+            return
+          }
+        }
       } else {
-        await agentApi.create(data)
+        const created = await agentApi.create(data)
+        if (workspaceMode === 'subdir' && selectedTarget.trim()) {
+          try {
+            await agentApi.workspaceLink(created.id, selectedTarget.trim())
+          } catch (linkErr) {
+            setError(
+              `Agent 已创建（id=${created.id}），但 workspace/code 链接失败：${(linkErr as Error).message}。可编辑该 Agent 后重试链接。`,
+            )
+            return
+          }
+        }
       }
       navigate('/agents')
     } catch (e) {
@@ -135,10 +222,148 @@ export default function AgentForm() {
               <label>系统提示词</label>
               <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={4} placeholder="角色与行为设定" />
             </div>
+
             <div className="form-group">
-              <label>工作空间路径 *</label>
-              <input value={workspace} onChange={(e) => setWorkspace(e.target.value)} placeholder="/data/agents/my-agent" />
-              <small>技能包将解压到 workspace/skills/</small>
+              <label>Workspace 模式</label>
+              <div className="checkbox-list">
+                <label className="checkbox-field">
+                  <input
+                    type="radio"
+                    name="workspace-mode"
+                    checked={workspaceMode === 'subdir'}
+                    onChange={() => setWorkspaceMode('subdir')}
+                  />
+                  <span>挂到 workspace/code（推荐）</span>
+                </label>
+                <label className="checkbox-field">
+                  <input
+                    type="radio"
+                    name="workspace-mode"
+                    checked={workspaceMode === 'full'}
+                    onChange={() => setWorkspaceMode('full')}
+                  />
+                  <span>整仓作 Workspace</span>
+                </label>
+              </div>
+              {workspaceMode === 'full' ? (
+                <small style={{ color: 'var(--warning, #b45309)', display: 'block', marginTop: 8 }}>
+                  代码根默认只读，技能上传不可用
+                </small>
+              ) : (
+                <small style={{ display: 'block', marginTop: 8 }}>
+                  可写 workspace 由服务端默认；所选代码目录将 symlink 到 workspace/code
+                </small>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label>浏览代码根</label>
+              {codeRoots.length === 0 ? (
+                <p className="form-panel__desc">未配置 code_roots，请手动填写工作空间路径。</p>
+              ) : (
+                <div className="form-panel">
+                  <div className="form-group" style={{ marginBottom: 8 }}>
+                    <label>代码根</label>
+                    <select
+                      value={browseRoot}
+                      onChange={(e) => {
+                        const root = e.target.value
+                        setBrowseRoot(root)
+                        void loadBrowse(root, '')
+                      }}
+                    >
+                      {codeRoots.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', marginBottom: 8, wordBreak: 'break-all' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginRight: 6 }}
+                      disabled={!browseRoot || browseLoading}
+                      onClick={() => void loadBrowse(browseRoot, '')}
+                    >
+                      {browseRoot || '根'}
+                    </button>
+                    {breadcrumbParts.map((seg, i) => {
+                      const sub = breadcrumbParts.slice(0, i + 1).join('/')
+                      return (
+                        <span key={sub}>
+                          <span style={{ margin: '0 4px', color: 'var(--muted)' }}>/</span>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={browseLoading}
+                            onClick={() => void loadBrowse(browseRoot, sub)}
+                          >
+                            {seg}
+                          </button>
+                        </span>
+                      )
+                    })}
+                  </div>
+                  {browseLoading ? (
+                    <p className="form-panel__desc">加载中…</p>
+                  ) : browseError ? (
+                    <div className="error">{browseError}</div>
+                  ) : (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px', maxHeight: 200, overflow: 'auto' }}>
+                      {browseEntries.length === 0 ? (
+                        <li style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>（空目录）</li>
+                      ) : (
+                        browseEntries.map((ent) => (
+                          <li key={ent.path}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ marginBottom: 4, width: '100%', textAlign: 'left' }}
+                              onClick={() => void loadBrowse(browseRoot, ent.path)}
+                            >
+                              {ent.name}/
+                            </button>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={!browseRoot || browseLoading}
+                    onClick={selectCurrentDir}
+                  >
+                    选择当前目录
+                  </button>
+                  {selectedTarget ? (
+                    <p style={{ marginTop: 8, fontSize: '0.85rem', wordBreak: 'break-all' }}>
+                      已选：{selectedTarget}
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label>
+                工作空间路径
+                {workspaceMode === 'full' ? ' *' : '（高级 / 可留空）'}
+              </label>
+              <input
+                value={workspace}
+                onChange={(e) => setWorkspace(e.target.value)}
+                placeholder={
+                  workspaceMode === 'subdir'
+                    ? '留空则服务端默认 data_root/agents/{id}'
+                    : '/mnt/codes/my-repo'
+                }
+              />
+              {workspaceMode === 'subdir' ? (
+                <small>子目录模式可留空；技能包仍解压到可写 workspace/skills/</small>
+              ) : (
+                <small>整仓模式请使用代码根下绝对路径；技能上传不可用</small>
+              )}
             </div>
           </section>
 

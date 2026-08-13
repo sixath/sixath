@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"backend/internal/conf"
 	"backend/internal/data/model"
@@ -14,7 +15,7 @@ import (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewGrowthRepo, NewCuratorRepo)
+var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewGrowthRepo, NewCuratorRepo)
 
 // Data .
 type Data struct {
@@ -27,6 +28,26 @@ func ProvideDataRoot(c *conf.Data) string {
 		return ""
 	}
 	return c.GetDataRoot()
+}
+
+// ProvideCodeRoots returns a trimmed copy of configured code roots for browse/link APIs.
+func ProvideCodeRoots(c *conf.Data) []string {
+	if c == nil {
+		return nil
+	}
+	roots := c.GetCodeRoots()
+	if len(roots) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(roots))
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // NewData initializes MySQL, migrates the schema, and bootstraps ACL anchors.

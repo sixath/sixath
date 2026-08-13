@@ -30,7 +30,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, runtimeSvc *runtime.Service, pinger DBPinger, logger log.Logger) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -93,6 +93,10 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/growth/metrics", GrowthMetricsHandler())
 	// Trajectory utilization: message-level SearchAnchored for UI (hand-written; not in chat.proto).
 	r.GET("/api/v1/agents/{agent_id}/transcript/search", TranscriptSearchHandler(chat))
+	// Code roots browse + agent workspace/code symlink (hand-written).
+	r.GET("/api/v1/code-roots", CodeRootsListHandler(codeRoots))
+	r.GET("/api/v1/code-roots/browse", CodeRootsBrowseHandler(codeRoots))
+	r.POST("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkHandler(agentUC, codeRoots))
 	r.GET("/api/v1/agents/{agent_id}/insights", InsightsHandler(chat))
 	r.POST("/api/v1/sessions/{session_id}/rewind", RewindHandler(chat))
 	r.GET("/api/v1/memory-hub/catalog", MemoryHubCatalogHandler())

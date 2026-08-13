@@ -675,6 +675,26 @@ export interface HubBindingsView {
   total: number
 }
 
+export interface CodeRootBrowseEntry {
+  name: string
+  path: string
+  type: string
+}
+
+export interface CodeRootBrowseResponse {
+  root: string
+  path: string
+  entries: CodeRootBrowseEntry[]
+}
+
+export const codeRootsApi = {
+  list: () => request<{ roots: string[] }>('/code-roots'),
+  browse: (root: string, path = '') =>
+    request<CodeRootBrowseResponse>(
+      `/code-roots/browse?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`,
+    ),
+}
+
 export const agentApi = {
   list: async (params?: { page?: number; page_size?: number }) => {
     const q = new URLSearchParams()
@@ -707,6 +727,12 @@ export const agentApi = {
     const res = await request<{ ret?: BaseResponse }>(`/agents/${id}`, { method: 'DELETE' })
     checkRet(res)
   },
+  /** Create workspace/code → target symlink under code_roots. */
+  workspaceLink: (id: string, target: string) =>
+    request<{ link?: string; target?: string }>(`/agents/${id}/workspace-link`, {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
   bindTools: async (id: string, toolIds: string[]) => {
     const res = await request<{ ret?: BaseResponse }>(`/agents/${id}/tools`, {
       method: 'POST',
