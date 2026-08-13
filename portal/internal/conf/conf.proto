@@ -140,4 +140,6 @@ message Data {
   Database database = 1;
   Redis redis = 2;
   string data_root = 3;
+  // code_roots are absolute container paths allowed for browse / workspace-link (e.g. /mnt/codes).
+  repeated string code_roots = 4;
 }

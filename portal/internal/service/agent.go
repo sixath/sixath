@@ -32,17 +32,18 @@ func baseFail(code int32, msg string) *common.BaseResponse {
 // AgentService implements agent.v1.AgentHTTPServer and agent.v1.AgentServer
 type AgentService struct {
 	agentv1.UnimplementedAgentServer
-	uc           *biz.AgentUsecase
-	toolUC       *biz.ToolUsecase
-	mcpServerUC  *biz.McpServerUsecase
-	skillUC      *biz.SkillResourceUsecase
-	channelUC    *biz.ChannelUsecase
-	log          *log.Helper
+	uc          *biz.AgentUsecase
+	toolUC      *biz.ToolUsecase
+	mcpServerUC *biz.McpServerUsecase
+	skillUC     *biz.SkillResourceUsecase
+	channelUC   *biz.ChannelUsecase
+	codeRoots   []string
+	log         *log.Helper
 }
 
 // NewAgentService creates an AgentService
-func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *AgentService {
-	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, log: log.NewHelper(logger)}
+func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, codeRoots []string, logger log.Logger) *AgentService {
+	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, codeRoots: codeRoots, log: log.NewHelper(logger)}
 }
 
 func (s *AgentService) sharedSkillDirs(ctx context.Context, agentID string) ([]string, error) {
@@ -432,6 +433,14 @@ func (s *AgentService) UploadSkillPackage(ctx context.Context, req *agentv1.Uplo
 	if err != nil {
 		s.log.Errorf("UploadSkillPackage get agent failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
+	}
+	if chat.WorkspaceUnderCodeRoots(agent.Workspace, s.codeRoots) {
+		const msg = "workspace is under read-only code root; use subdirectory mode (workspace/code)"
+		return &agentv1.UploadSkillPackageReply{
+			Ret:     baseFail(400, msg),
+			Success: false,
+			Message: msg,
+		}, nil
 	}
 	result := validator.ValidateSkillPackage(req.GetFile())
 	if !result.Valid {
