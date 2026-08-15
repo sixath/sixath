@@ -16,6 +16,7 @@ type RuntimeToolsConfig struct {
 	TerminalLocalEnabled      bool  `json:"terminal_local_enabled"`
 	CronjobToolEnabled        bool  `json:"cronjob_tool_enabled"`
 	BrowserEnabled            bool  `json:"browser_enabled"`
+	MEAEnabled                bool  `json:"mea_enabled"`
 	HybridRecall              *bool `json:"hybrid_recall,omitempty"` // unset = on; presence preserved
 	HubGovernance                   *string `json:"hub_governance,omitempty"`
 	HubKnowledge                    *string `json:"hub_knowledge,omitempty"`

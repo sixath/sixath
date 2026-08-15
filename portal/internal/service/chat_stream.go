@@ -22,6 +22,7 @@ const (
 	ChatStreamEventDebug           ChatStreamEventType = "debug"
 	ChatStreamEventToolCall        ChatStreamEventType = "tool_call"
 	ChatStreamEventModelCall       ChatStreamEventType = "model_call"
+	ChatStreamEventMEA             ChatStreamEventType = "mea"
 )
 
 const toolPayloadFieldLimit = 8 * 1024 // 单字段截断上限（字节）
@@ -35,6 +36,17 @@ type ChatStreamEvent struct {
 	Input         *ChatInputRequest
 	ToolCall      *ToolCallPayload
 	ModelCall     *ModelCallPayload
+	MEA           *MEAStreamPayload
+}
+
+// MEAStreamPayload is emitted after a Manage-Execute-Audit round or final result (M0.5).
+type MEAStreamPayload struct {
+	Phase    string `json:"phase"` // started | round | finished
+	Reason   string `json:"reason,omitempty"`
+	Round    int    `json:"round,omitempty"`
+	Pending  int    `json:"pending,omitempty"`
+	Completed int   `json:"completed,omitempty"`
+	Goal     string `json:"goal,omitempty"`
 }
 
 type ConfirmResultPayload struct {

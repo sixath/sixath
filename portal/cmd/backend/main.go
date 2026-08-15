@@ -236,6 +236,7 @@ func main() {
 
 	if bc.Data != nil {
 		chat.SetMemoryVectorDataRoot(bc.Data.GetDataRoot())
+		chat.SetMEADataRoot(bc.Data.GetDataRoot())
 	}
 
 	if portalExtra != nil {

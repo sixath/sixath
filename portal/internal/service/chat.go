@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/events"
+	"github.com/sixath/framework/mea"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/sessionsearch"
@@ -606,6 +606,16 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 
 	userForIntent := chat.UserMessageContentForTurn(content, ir)
+	var meaChecks []mea.AcceptanceCheck
+	var meaAcceptance []string
+	if clean, checks, ok := chat.ParseMEAChecks(userForIntent); ok {
+		userForIntent = clean
+		meaChecks = checks
+	}
+	if clean, acceptance, ok := chat.ParseMEAAcceptance(userForIntent); ok {
+		userForIntent = clean
+		meaAcceptance = acceptance
+	}
 	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
 	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
 		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
@@ -745,6 +755,18 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 
 	userContent := chat.UserMessageContentForTurn(content, ir)
+	if clean, checks, ok := chat.ParseMEAChecks(userContent); ok {
+		userContent = clean
+		if len(meaChecks) == 0 {
+			meaChecks = checks
+		}
+	}
+	if clean, acceptance, ok := chat.ParseMEAAcceptance(userContent); ok {
+		userContent = clean
+		if len(meaAcceptance) == 0 {
+			meaAcceptance = acceptance
+		}
+	}
 	var synthetic []model.Message
 	if ir != nil {
 		pending, outcome, applyErr := chat.ApplyInputResponse(ctx, sessionID, *ir, chat.AskUserPendingStore(), chat.AskUserFulfillmentStore())
@@ -855,79 +877,16 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
 		}
 
-		ea, ok := a.(agent.EventStreamableAgent)
-		if !ok {
-			resp, err := a.Run(runCtx, req)
-			if err != nil {
-				s.handleStreamRunError(ctx, sessionID, session.AgentID, streamSessionProvider, ch, err)
-				return
-			}
-			tr := chat.RunTraceFromMetadata(resp.Metadata)
-			s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
-			s.persistCompactBoundary(runCtx, sessionID, tr)
-			s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, resp.Messages, tr)
-			for _, event := range streamEventsFromResponse(resp) {
-				ch <- event
-			}
+		useMEA := (len(meaChecks) > 0 || len(meaAcceptance) > 0) &&
+			chat.MEAEnabledForAgent(session.AgentID, agentMeta.RuntimeTools.MEAEnabled) &&
+			strings.TrimSpace(agentMeta.Workspace) != ""
+		if useMEA {
+			s.streamWithRulesMEA(runCtx, sessionID, session.AgentID, agentMeta.Workspace, userContent, meaChecks, meaAcceptance, agentMeta.RuntimeTools.MEAEnabled, m, a, messages, req.Metadata, streamSessionProvider, ch)
 			return
 		}
 
-		evCh, err := ea.RunEvents(runCtx, req)
-		if err != nil {
-			ch <- ChatStreamEvent{Type: ChatStreamEventError, Error: err.Error()}
+		if _, err := s.streamAgentEvents(runCtx, sessionID, session.AgentID, agentMeta.Workspace, a, req, streamSessionProvider, ch); err != nil {
 			return
-		}
-		for ev := range evCh {
-			switch ev.Type {
-			case agent.StreamEventDelta:
-				if ev.Text != "" {
-					ch <- ChatStreamEvent{Type: ChatStreamEventChunk, Content: ev.Text}
-				}
-			case agent.StreamEventToolStarted:
-				if ev.ToolCall != nil {
-					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "started")}
-				}
-			case agent.StreamEventToolCompleted:
-				if ev.ToolCall != nil {
-					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "completed")}
-				}
-			case agent.StreamEventToolFailed, agent.StreamEventPermissionDenied, agent.StreamEventHookBlocked:
-				if ev.ToolCall != nil {
-					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "failed")}
-				}
-			case agent.StreamEventError:
-				// 错误是终止性的：处理后退出 goroutine（触发 defer 清理），与旧 a.Run 行为一致。
-				s.handleStreamRunError(ctx, sessionID, session.AgentID, streamSessionProvider, ch, errors.New(ev.Error))
-				return
-			case agent.StreamEventDone:
-				// RunEvents 的文本已通过 Delta 增量下发，这里仅从 trace 派生
-				// input_required / confirm_required 事件（ask_user / execute_write / skill_manage / terminal / workspace_file / browser）。
-				if ev.Trace != nil {
-					s.persistTurnTrace(runCtx, sessionID, session.AgentID, ev.Trace)
-					s.persistCompactBoundary(runCtx, sessionID, ev.Trace)
-					s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, ev.Messages, ev.Trace)
-					resp := &agent.Response{Metadata: map[string]any{"trace": ev.Trace}}
-					for _, item := range inputRequestsFromResponse(resp) {
-						input := item
-						ch <- ChatStreamEvent{Type: ChatStreamEventInputRequired, Input: &input}
-					}
-					for _, item := range confirmationRequestsFromResponse(resp) {
-						confirmation := item
-						// Drop skill_manage cards whose pending was already consumed (e.g. race
-						// or stale trace) so the UI never offers an already_used token.
-						if confirmation.Kind == "skill_manage" {
-							store := chat.SkillManagePendingStore()
-							if store != nil {
-								p, _ := store.GetPending(ctx, sessionID, confirmation.Token)
-								if p == nil {
-									continue
-								}
-							}
-						}
-						ch <- ChatStreamEvent{Type: ChatStreamEventConfirmRequired, Confirmation: &confirmation}
-					}
-				}
-			}
 		}
 	}()
 	return ch, sessionID, nil

@@ -96,6 +96,7 @@ func bizRuntimeToolsToModel(c biz.RuntimeToolsConfig) model.RuntimeToolsConfig {
 		TerminalLocalEnabled:      c.TerminalLocalEnabled,
 		CronjobToolEnabled:        c.CronjobToolEnabled,
 		BrowserEnabled:            c.BrowserEnabled,
+		MEAEnabled:                c.MEAEnabled,
 	}
 	if c.HybridRecall != nil {
 		v := *c.HybridRecall
@@ -126,6 +127,7 @@ func modelRuntimeToolsToBiz(c model.RuntimeToolsConfig) biz.RuntimeToolsConfig {
 		TerminalLocalEnabled:      c.TerminalLocalEnabled,
 		CronjobToolEnabled:        c.CronjobToolEnabled,
 		BrowserEnabled:            c.BrowserEnabled,
+		MEAEnabled:                c.MEAEnabled,
 	}
 	if c.HybridRecall != nil {
 		v := *c.HybridRecall

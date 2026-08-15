@@ -124,6 +124,8 @@ message RuntimeToolsConfig {
   optional string hub_knowledge = 11;
   // §3.5.1 读路径运输错误时是否回落到 defaults 治理面
   optional bool hub_fallback_to_default_on_read_error = 12;
+  // MEA（Manage-Execute-Audit）最小子集；与 SATH_MEA / SATH_MEA_PILOT_AGENTS OR 合并
+  bool mea_enabled = 13;
 }
 
 message CreateAgentRequest {

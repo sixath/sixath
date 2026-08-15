@@ -28,9 +28,10 @@
 ```
 用户消息
   │
+  ├─ 取 session / agentMeta → BuildModel
   ├─ 解析 ```mea-checks``` / ```mea-acceptance```
   │     （仅 ok=true 且非空才算「有验收块」；非法 JSON / 空数组不算）
-  ├─ 装 Agent（model + tools + skills + MCP）
+  ├─ 装 tools + skills + MCP + ReAct Agent
   ├─ 落库 user message（ok 时已剥 fence；解析失败时 fence 可能仍在正文）
   │
   ▼
@@ -46,7 +47,7 @@ useMEA = (成功解析出非空验收)
             SSE: chunk / tool_call / model_call
 ```
 
-说明：上图顺序与 `SendMessageStream` 实现一致（先装 Agent，再 `CreateMessage`）；分流决策不依赖「先落库」。
+说明：上图顺序与 `SendMessageStream` 实现一致（`BuildModel` 在首次解析之前；Registry/ReAct 在解析之后、`CreateMessage` 之前）；分流决策不依赖「先落库」。
 
 ### 关键结论
 
@@ -64,10 +65,10 @@ useMEA = (成功解析出非空验收)
 | 步骤 | 做什么 | 关键位置 |
 |------|--------|----------|
 | 1 | HTTP/SSE 进入流式发送 | `SendMessageStream` |
-| 2 | 取 session、agentMeta（含 `Workspace`、`RuntimeTools.MEAEnabled`） | chat UC / agent UC |
+| 2 | 取 session、agentMeta（含 `Workspace`、`RuntimeTools.MEAEnabled`）；`BuildModel` | chat UC / agent UC / `BuildModel` |
 | 3 | 解析验收块：`ok=true` 才剥离并采用；非法 JSON / 空数组 / 无有效 `type` → `ok=false`，不进 MEA | `portal/internal/chat/mea_parse.go` |
 | 4 | 本轮工具面 + Registry + MCP | `PrepareTurnToolSurface` 等 |
-| 5 | 装 model + ReAct Agent；本轮私有 `events.Bus` → SSE relay | `BuildReActAgent` / bus 订阅 |
+| 5 | 装 ReAct Agent；本轮私有 `events.Bus` → SSE relay | `BuildReActAgent` / bus 订阅 |
 | 6 | 落库 user message（仅解析成功时正文无 fence） | `CreateMessage` |
 | 7 | `useMEA` 三条件分流 | `chat.go` 中 `useMEA := ...` |
 | 8 | 写出 SSE | `portal/internal/chatsse/sse.go` |

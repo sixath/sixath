@@ -97,6 +97,10 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 				timeline.ApplyModelCall(event.ModelCall)
 				WriteEvent(w, "model_call", map[string]any{"model_call": event.ModelCall})
 			}
+		case service.ChatStreamEventMEA:
+			if event.MEA != nil {
+				WriteEvent(w, "mea", map[string]any{"mea": event.MEA})
+			}
 		default:
 			if event.Content != "" {
 				out := event.Content
@@ -183,7 +187,7 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 			res.Failed = true
 			res.Error = event.Error
 		case service.ChatStreamEventDebug, service.ChatStreamEventToolCall, service.ChatStreamEventModelCall,
-			service.ChatStreamEventConfirmResult:
+			service.ChatStreamEventConfirmResult, service.ChatStreamEventMEA:
 			// Observability / HITL side-channels — never part of the assistant answer body.
 		default:
 			// Unknown types: ignore non-chunk content to avoid leaking protocol payloads into IM replies.
