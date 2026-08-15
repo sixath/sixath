@@ -2,6 +2,7 @@ package chat
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"backend/internal/biz"
@@ -55,20 +56,50 @@ func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, agentTools 
 		}
 		_ = tool.RegisterJaegerTool(reg, queryURL)
 	case "es_log_query":
+		endpoint, _ := rcaMap["endpoint"].(string)
 		dsID, _ := rcaMap["datasource_id"].(string)
-		if dsID == "" {
-			slog.Warn("rca: es_log_query has no datasource_id, skip")
+		endpoint = strings.TrimSpace(endpoint)
+		dsID = strings.TrimSpace(dsID)
+		if (endpoint != "") == (dsID != "") {
+			slog.Warn("rca: es_log_query need exactly one of endpoint or datasource_id, skip")
 			return
 		}
-		reader, ok := buildESReaderFromAgentTools(agentTools, dsID)
-		if !ok {
-			slog.Warn("rca: es_log_query datasource not found among agent tools, skip", "datasource_id", dsID)
-			return
+		var reader executor.Reader
+		var ok bool
+		queryDSID := dsID
+		if endpoint != "" {
+			const inlineID = "rca-es"
+			dsCfg := datasource.Config{
+				ID:   inlineID,
+				Type: datasource.TypeElasticsearch,
+				DSN:  endpoint,
+			}
+			if u, _ := rcaMap["user"].(string); strings.TrimSpace(u) != "" {
+				dsCfg.User = u
+				if p, _ := rcaMap["password"].(string); p != "" {
+					dsCfg.Password = p
+				}
+			}
+			dsReg := datasource.NewRegistry()
+			datasource.RegisterElasticsearch(dsReg)
+			if _, err := dsReg.Register(dsCfg); err != nil {
+				slog.Warn("rca: inline es register failed", "err", err)
+				return
+			}
+			reader = executor.NewESExecutor(dsReg)
+			ok = true
+			queryDSID = inlineID
+		} else {
+			reader, ok = buildESReaderFromAgentTools(agentTools, dsID)
+			if !ok {
+				slog.Warn("rca: es_log_query datasource not found among agent tools, skip", "datasource_id", dsID)
+				return
+			}
 		}
 		defaultIndex, _ := rcaMap["default_index"].(string)
 		traceIDField, _ := rcaMap["trace_id_field"].(string)
 		_ = tool.RegisterESLogTool(reg, reader, tool.ESLogConfig{
-			DatasourceID: dsID,
+			DatasourceID: queryDSID,
 			DefaultIndex: defaultIndex,
 			TraceIDField: traceIDField,
 		})

@@ -111,6 +111,29 @@ func TestRegisterRCATool_ESEmptyDatasourceIDSkips(t *testing.T) {
 	}
 }
 
+func TestRegisterRCATool_ESInlineEndpoint(t *testing.T) {
+	reg := tool.NewRegistry()
+	cfg := map[string]any{"rca": map[string]any{
+		"func_path":     "es_log_query",
+		"endpoint":      "http://localhost:9200",
+		"default_index": "app-*",
+	}}
+	registerRCATool(reg, cfg, nil)
+	if !rcaHas(reg, "es_log_query") {
+		t.Fatal("inline endpoint should register es_log_query without agent datasource")
+	}
+}
+
+func TestRegisterRCATool_ESBothSkip(t *testing.T) {
+	reg := tool.NewRegistry()
+	registerRCATool(reg, map[string]any{"rca": map[string]any{
+		"func_path": "es_log_query", "endpoint": "http://es:9200", "datasource_id": "es-logs",
+	}}, nil)
+	if rcaHas(reg, "es_log_query") {
+		t.Fatal("both endpoint and datasource_id must skip")
+	}
+}
+
 func TestRegisterRCATool_NoRCASection(t *testing.T) {
 	reg := tool.NewRegistry()
 	registerRCATool(reg, map[string]any{"func_path": "jaeger_trace"}, nil) // top-level, no "rca" wrapper

@@ -65,3 +65,36 @@ func TestRegisterRCATools_Empty(t *testing.T) {
 		t.Fatal("no RCA tools should register with empty config")
 	}
 }
+
+func TestRegisterRCATools_ESInlineEndpoint(t *testing.T) {
+	cfg := config.Config{
+		RCA: config.RCAConfig{
+			ES: config.RCAESConfig{Endpoint: "http://localhost:9200", DefaultIndex: "app-*"},
+		},
+	}
+	reg := tool.NewRegistry()
+	if err := registerRCATools(reg, cfg); err != nil {
+		t.Fatalf("registerRCATools: %v", err)
+	}
+	if !hasTool(reg, "es_log_query") {
+		t.Fatal("inline endpoint should register es_log_query")
+	}
+}
+
+func TestRegisterRCATools_ESBothSkip(t *testing.T) {
+	cfg := config.Config{
+		DataSources: []datasource.Config{
+			{ID: "es-logs", Type: "elasticsearch", DSN: "http://localhost:9200"},
+		},
+		RCA: config.RCAConfig{
+			ES: config.RCAESConfig{Endpoint: "http://localhost:9200", DatasourceID: "es-logs"},
+		},
+	}
+	reg := tool.NewRegistry()
+	if err := registerRCATools(reg, cfg); err != nil {
+		t.Fatalf("registerRCATools: %v", err)
+	}
+	if hasTool(reg, "es_log_query") {
+		t.Fatal("both endpoint and datasource_id must skip es_log_query")
+	}
+}

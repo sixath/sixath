@@ -69,9 +69,12 @@ message RCAConfig {
   string func_path = 1;          // rca_code | jaeger_trace | es_log_query
   repeated string roots = 2;     // rca_code: 仓库根路径白名单
   string query_url = 3;          // jaeger_trace: Jaeger Query URL
-  string datasource_id = 4;      // es_log_query: 依赖的 datasource 工具 id
+  string datasource_id = 4;      // es_log_query: 依赖的 datasource 工具 id（与 endpoint 互斥）
   string default_index = 5;      // es_log_query: 默认索引
   string trace_id_field = 6;     // es_log_query: trace 关联字段名
+  string endpoint = 7;           // es_log_query: 内联 ES URL（DSN）
+  string user = 8;               // es_log_query: 可选 Basic 用户名
+  string password = 9;           // es_log_query: 可选 Basic 密码
 }
 
 // 工具配置：内置用 func_path/parameters，MCP 用 mcp 或 mcp_* 字段，数据源用 datasource

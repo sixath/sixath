@@ -153,6 +153,15 @@ func structToToolConfig(s *structpb.Struct) *toolv1.ToolConfig {
 		if x, ok := rc["trace_id_field"]; ok {
 			c.Rca.TraceIdField = x.GetStringValue()
 		}
+		if x, ok := rc["endpoint"]; ok {
+			c.Rca.Endpoint = x.GetStringValue()
+		}
+		if x, ok := rc["user"]; ok {
+			c.Rca.User = x.GetStringValue()
+		}
+		if x, ok := rc["password"]; ok {
+			c.Rca.Password = x.GetStringValue()
+		}
 	}
 	return c
 }
@@ -213,6 +222,9 @@ func protoToolConfigToStruct(c *toolv1.ToolConfig) *structpb.Struct {
 			"datasource_id":  c.Rca.DatasourceId,
 			"default_index":  c.Rca.DefaultIndex,
 			"trace_id_field": c.Rca.TraceIdField,
+			"endpoint":       c.Rca.Endpoint,
+			"user":           c.Rca.User,
+			"password":       c.Rca.Password,
 		}
 		roots := make([]interface{}, 0, len(c.Rca.Roots))
 		for _, r := range c.Rca.Roots {

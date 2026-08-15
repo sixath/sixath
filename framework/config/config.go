@@ -107,8 +107,11 @@ type RCAJaegerConfig struct {
 	QueryURL string `json:"query_url" yaml:"query_url"`
 }
 
-// RCAESConfig ELK 日志查询配置;复用已注册的 ES datasource(密钥走 datasource 的 env)。
+// RCAESConfig ELK 日志查询配置;可内联 endpoint，或复用已注册的 ES datasource（二者互斥）。
 type RCAESConfig struct {
+	Endpoint     string `json:"endpoint" yaml:"endpoint"`
+	User         string `json:"user" yaml:"user"`
+	Password     string `json:"password" yaml:"password"`
 	DatasourceID string `json:"datasource_id" yaml:"datasource_id"`
 	DefaultIndex string `json:"default_index" yaml:"default_index"`
 	TraceIDField string `json:"trace_id_field" yaml:"trace_id_field"`

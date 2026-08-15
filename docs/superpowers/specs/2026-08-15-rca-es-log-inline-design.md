@@ -1,8 +1,9 @@
 # RCA `es_log_query` 内联 ES 配置
 
-> 状态：设计已确认（待实现）  
+> 状态：已实现  
 > 日期：2026-08-15  
 > 分支：`feature/mea-minimal-subset`（或后续独立 feature 分支）  
+> 操作说明：[portal/docs/rca-es-log-query.md](../../../portal/docs/rca-es-log-query.md)  
 > 动机：运营误把 ES URL 填进「数据源工具 ID」，导致 `es_log_query` 未注册、模型只能「建议查日志」无法实查。与 `jaeger_trace` 的 `query_url` 体验对齐。
 
 ## 1. 目标与非目标

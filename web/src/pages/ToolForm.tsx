@@ -134,10 +134,21 @@ export default function ToolForm() {
     } else if (type === 'rca') {
       // 下拉框用 || 'rca_code' 展示默认值，但未改动时 config.rca.func_path 可能仍为空；
       // 提交必须显式写入，否则运行时 registerRCATool 会因空 func_path 静默跳过。
+      const funcPath = config.rca?.func_path || 'rca_code'
+      if (funcPath === 'es_log_query') {
+        const ep = (config.rca?.endpoint || '').trim()
+        const ds = (config.rca?.datasource_id || '').trim()
+        if ((ep && ds) || (!ep && !ds)) {
+          setError(ep && ds
+            ? 'ES 地址与 datasource 工具名互斥，请只保留其一'
+            : '请填写 ES 地址，或填写已绑定的 datasource 工具名（二选一）')
+          return
+        }
+      }
       submitConfig = {
         rca: {
           ...(config.rca || {}),
-          func_path: config.rca?.func_path || 'rca_code',
+          func_path: funcPath,
         },
       }
     }
@@ -408,7 +419,34 @@ export default function ToolForm() {
             {config.rca?.func_path === 'es_log_query' && (
               <>
                 <div className="form-group">
-                  <label>ES 数据源工具 ID(需先创建 datasource 工具并绑定给同一 Agent)</label>
+                  <label>ES 地址（推荐直接填写）</label>
+                  <input
+                    value={config.rca?.endpoint || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), endpoint: e.target.value } }))}
+                    placeholder="http://host:9200"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>用户（可选）</label>
+                  <input
+                    value={config.rca?.user || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), user: e.target.value } }))}
+                    placeholder="basic auth user"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>密码（可选）</label>
+                  <input
+                    type="password"
+                    value={config.rca?.password || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), password: e.target.value } }))}
+                    placeholder="basic auth password"
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>或：引用已绑定 datasource 工具名（与上方地址二选一）</label>
                   <input
                     value={config.rca?.datasource_id || ''}
                     onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), datasource_id: e.target.value } }))}
