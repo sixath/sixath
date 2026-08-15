@@ -12,7 +12,7 @@
 1. 在 RCA 工具（`func_path=es_log_query`）上支持**直接配置** ES 连接信息（endpoint + 可选认证）。
 2. **保留**既有 `datasource_id` 引用路径（同绑 Agent 的 datasource 工具名）。
 3. **互斥**：内联与 `datasource_id` 不可同时配置；冲突在 **Create/Update 保存时拒绝**（前端同步校验）。
-4. 缺任一侧时亦拒绝保存；运行时对脏配置仍 skip + warn（防御）。
+4. **二者皆空**时亦拒绝保存；运行时对脏配置仍 skip + warn（防御）。
 
 ### 非目标
 
@@ -63,7 +63,7 @@ Web `ToolForm` 在 `es_log_query` 下：
 若 endpoint 与 datasource_id 皆非空或皆空 → skip + warn（防御）
 否则若仅 endpoint:
   构建 datasource.Config{
-    ID:       合成 id（固定 "rca-es" 或 RCA 工具名）,
+    ID:       "rca-es"（固定合成 id，仅供内部 Query）,
     Type:     elasticsearch,
     DSN:      endpoint,
     User/Password: 可选,
@@ -81,7 +81,7 @@ Web `ToolForm` 在 `es_log_query` 下：
 - `portal/api/tool/v1/tool.proto`：`RCAConfig` 增加 `endpoint`、`user`、`password`。
 - 生成 pb；`portal/internal/service/tool.go` 的 RCA map ↔ proto 编解码补字段。
 - OpenAPI / `web/src/api/client.ts` 类型同步（若由手写维护）。
-- CreateTool / UpdateTool：在写入前调用共享校验函数（如 `ValidateRCAESLogConfig`），失败返回业务错误。
+- CreateTool / UpdateTool：在写入前，**仅当** `type` 为 RCA 且 `rca.func_path=es_log_query` 时调用共享校验（如 `ValidateRCAESLogConfig`），失败返回业务错误；勿对 `jaeger_trace` / `rca_code` 套用该校验。
 
 ## 5. 测试
 
