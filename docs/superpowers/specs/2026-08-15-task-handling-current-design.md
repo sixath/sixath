@@ -29,11 +29,12 @@
 用户消息
   │
   ├─ 解析 ```mea-checks``` / ```mea-acceptance```
-  ├─ 落库 user message（已剥 fence）
+  │     （仅 ok=true 且非空才算「有验收块」；非法 JSON / 空数组不算）
   ├─ 装 Agent（model + tools + skills + MCP）
+  ├─ 落库 user message（ok 时已剥 fence；解析失败时 fence 可能仍在正文）
   │
   ▼
-useMEA = (有非空验收块)
+useMEA = (成功解析出非空验收)
        AND MEAEnabledForAgent(...)
        AND workspace 非空
   │
@@ -45,13 +46,15 @@ useMEA = (有非空验收块)
             SSE: chunk / tool_call / model_call
 ```
 
+说明：上图顺序与 `SendMessageStream` 实现一致（先装 Agent，再 `CreateMessage`）；分流决策不依赖「先落库」。
+
 ### 关键结论
 
 | 结论 | 含义 |
 |------|------|
 | 入口互斥 | 一次 turn 只走 MEA 外层 **或** 纯 ReAct 外层 |
 | 内部不互斥 | MEA 的 Execute 仍是现有 ReAct（`RunEvents`） |
-| 验收必需 | 无 `mea-checks` / `mea-acceptance` → 永不进 MEA（即使 UI 勾了） |
+| 验收必需 | 须 **成功解析** 出非空 `mea-checks` 或 `mea-acceptance`；仅有 fence 外观不够。无有效验收 → 永不进 MEA（即使 UI 勾了） |
 | MEA 不是工具 | 没有名为 `Manage-Execute-Audit` 的可调用 tool；MEA 是编排 |
 
 ## 3. Portal 逐步走读
@@ -62,10 +65,10 @@ useMEA = (有非空验收块)
 |------|--------|----------|
 | 1 | HTTP/SSE 进入流式发送 | `SendMessageStream` |
 | 2 | 取 session、agentMeta（含 `Workspace`、`RuntimeTools.MEAEnabled`） | chat UC / agent UC |
-| 3 | 解析并剥离验收块 | `portal/internal/chat/mea_parse.go`（`ParseMEAChecks` / `ParseMEAAcceptance`） |
+| 3 | 解析验收块：`ok=true` 才剥离并采用；非法 JSON / 空数组 / 无有效 `type` → `ok=false`，不进 MEA | `portal/internal/chat/mea_parse.go` |
 | 4 | 本轮工具面 + Registry + MCP | `PrepareTurnToolSurface` 等 |
 | 5 | 装 model + ReAct Agent；本轮私有 `events.Bus` → SSE relay | `BuildReActAgent` / bus 订阅 |
-| 6 | 落库 user message（正文已无 fence） | `CreateMessage` |
+| 6 | 落库 user message（仅解析成功时正文无 fence） | `CreateMessage` |
 | 7 | `useMEA` 三条件分流 | `chat.go` 中 `useMEA := ...` |
 | 8 | 写出 SSE | `portal/internal/chatsse/sse.go` |
 
@@ -152,7 +155,11 @@ MEA payload 形状见 `service.MEAStreamPayload`（`portal/internal/service/chat
 流里是否出现 event: mea ?
   ├─ 有 → 已进 MEA；看 phase / reason / pending|completed
   └─ 无 → 同时检查（任一否都不进）:
-        ① 消息是否含非空 ```mea-checks``` 或 ```mea-acceptance```？
+        ① 验收是否「解析成功且非空」？
+           - 看得见 ```mea-checks``` / ```mea-acceptance``` 不够
+           - JSON 非法、空数组、checks 无有效 type、acceptance 全空字符串
+             → ParseMEA* 返回 ok=false → 不进 MEA（设计如此）
+           - 调用方仅在 ok=true 时用 clean 替换正文；失败时 fence 可能仍留在落库消息里
         ② MEAEnabledForAgent？（UI / SATH_MEA / PILOT）
         ③ agent.workspace 是否非空？
         → 否则走纯 ReAct（设计如此，不是故障）
