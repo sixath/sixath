@@ -93,6 +93,8 @@ useMEA = (成功解析出非空验收)
 
 Executor 会把当前 `Contract.Goal` 与 acceptance 摘要写回本轮 user 消息（`messagesForMEAContract`），再交给 ReAct。
 
+`mea-checks` 与 `mea-acceptance` 可同条消息并存；有结构化 checks 时 Cascade Auditor 优先走 Rules（文字 acceptance 主要用于无 checks 时的 LLM 路径，见 M1）。
+
 ## 4. Framework：MEA 外环 + ReAct 内环
 
 ### 4.1 MEA 外环
@@ -172,7 +174,7 @@ MEA payload 形状见 `service.MEAStreamPayload`（`portal/internal/service/chat
 | 有 `tool_call` 无最终 `chunk` | 护栏 halt、MaxSteps、HITL confirm/input |
 | `mea` finished 但验收未过 | Auditor（Rules vs LLM cascade）、workspace 相对路径、checks 是否可在 WorkDir 机检 |
 | 企微长时间「处理中」 | 工具超时/内网连通；与入口分流无关 |
-| 勾了 MEA 仍像普通聊天 | 缺验收块或 workspace 空 → 见 6.1 |
+| 勾了 MEA 仍像普通聊天 | 缺有效验收（含解析失败）、开关未开、或 workspace 空 → 见 6.1 |
 
 ### 6.3 验收块示例（便于对照）
 
