@@ -38,6 +38,7 @@ export default function AgentForm() {
   const [workspace, setWorkspace] = useState('')
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('subdir')
   const [selectedTarget, setSelectedTarget] = useState('')
+  const [existingLinkTarget, setExistingLinkTarget] = useState('')
   const [codeRoots, setCodeRoots] = useState<string[]>([])
   const [browseRoot, setBrowseRoot] = useState('')
   const [browsePath, setBrowsePath] = useState('')
@@ -109,6 +110,18 @@ export default function AgentForm() {
         setClearBindingsOnSave(false)
         setWecomChannelId(a.wecom_channel_id || '')
       }).catch((e) => setError(e.message))
+      agentApi
+        .workspaceLinkStatus(id)
+        .then((st) => {
+          const target = (st.target || '').trim()
+          if (st.exists && target) {
+            setExistingLinkTarget(target)
+            setSelectedTarget((prev) => prev || target)
+          } else {
+            setExistingLinkTarget('')
+          }
+        })
+        .catch(() => setExistingLinkTarget(''))
     }
   }, [id, isEdit])
 
@@ -141,7 +154,8 @@ export default function AgentForm() {
       return
     }
     if (workspaceMode === 'subdir') {
-      if (!selectedTarget.trim()) {
+      // Create: must pick a code dir to mount. Edit: keep existing workspace/code if not re-selected.
+      if (!isEdit && !selectedTarget.trim()) {
         setError('请先浏览并选择要挂载的代码目录')
         return
       }
@@ -172,11 +186,18 @@ export default function AgentForm() {
           await memoryHubApi.clearBindings(id)
         }
         if (workspaceMode === 'subdir' && selectedTarget.trim()) {
-          try {
-            await agentApi.workspaceLink(id, selectedTarget.trim())
-          } catch (linkErr) {
-            setError(`Agent 已更新，但 workspace/code 链接失败：${(linkErr as Error).message}`)
-            return
+          const next = selectedTarget.trim()
+          const prev = existingLinkTarget.trim()
+          const same =
+            prev !== '' &&
+            next.replace(/[/\\]+$/, '').toLowerCase() === prev.replace(/[/\\]+$/, '').toLowerCase()
+          if (!same) {
+            try {
+              await agentApi.workspaceLink(id, next)
+            } catch (linkErr) {
+              setError(`Agent 已更新，但 workspace/code 链接失败：${(linkErr as Error).message}`)
+              return
+            }
           }
         }
       } else {
@@ -251,7 +272,8 @@ export default function AgentForm() {
                 </small>
               ) : (
                 <small style={{ display: 'block', marginTop: 8 }}>
-                  可写 workspace 由服务端默认；所选代码目录将 symlink 到 workspace/code
+                  可写 workspace 由服务端默认；所选代码目录将 symlink 到 workspace/code。
+                  {isEdit ? ' 编辑时可不重选，将保留已有挂载。' : ''}
                 </small>
               )}
             </div>
@@ -339,6 +361,15 @@ export default function AgentForm() {
                   {selectedTarget ? (
                     <p style={{ marginTop: 8, fontSize: '0.85rem', wordBreak: 'break-all' }}>
                       已选：{selectedTarget}
+                      {existingLinkTarget &&
+                      selectedTarget.replace(/[/\\]+$/, '').toLowerCase() ===
+                        existingLinkTarget.replace(/[/\\]+$/, '').toLowerCase()
+                        ? '（当前已挂载）'
+                        : ''}
+                    </p>
+                  ) : isEdit && existingLinkTarget ? (
+                    <p style={{ marginTop: 8, fontSize: '0.85rem', wordBreak: 'break-all' }}>
+                      当前已挂载：{existingLinkTarget}（保存时可不改）
                     </p>
                   ) : null}
                 </div>

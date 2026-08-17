@@ -458,52 +458,58 @@ func inputRequestsFromResponse(resp *agent.Response) []ChatInputRequest {
 	}
 	items := make([]ChatInputRequest, 0, 1)
 	for _, call := range trace.ToolCalls {
-		if call.ToolName != "ask_user" {
-			continue
+		if item := inputRequestFromToolRecord(call); item != nil {
+			items = append(items, *item)
 		}
-		result, ok := call.Result.(map[string]any)
-		if !ok {
-			continue
-		}
-		status, _ := result["status"].(string)
-		token, _ := result["token"].(string)
-		requestID, _ := result["request_id"].(string)
-		if status != "pending" || token == "" || requestID == "" {
-			continue
-		}
-		kind, _ := result["kind"].(string)
-		field, _ := result["field"].(string)
-		prompt, _ := result["prompt"].(string)
-		title, _ := result["title"].(string)
-		required, _ := result["required"].(bool)
-		var options []string
-		if raw, ok := result["options"].([]any); ok {
-			for _, item := range raw {
-				if s, ok := item.(string); ok && s != "" {
-					options = append(options, s)
-				}
-			}
-		}
-		severity := "default"
-		if kind == "password" {
-			severity = "warning"
-		}
-		items = append(items, ChatInputRequest{
-			ID:         fmt.Sprintf("%s:%s", call.ToolCallID, token),
-			ToolCallID: call.ToolCallID,
-			RequestID:  requestID,
-			Token:      token,
-			Kind:       kind,
-			Field:      field,
-			Title:      title,
-			Prompt:     prompt,
-			Options:    options,
-			Required:   required,
-			ExpiresIn:  intFromAny(result["expires_in"]),
-			Severity:   severity,
-		})
 	}
 	return items
+}
+
+func inputRequestFromToolRecord(call agent.ToolCallRecord) *ChatInputRequest {
+	if call.ToolName != "ask_user" {
+		return nil
+	}
+	result, ok := call.Result.(map[string]any)
+	if !ok {
+		return nil
+	}
+	status, _ := result["status"].(string)
+	token, _ := result["token"].(string)
+	requestID, _ := result["request_id"].(string)
+	if status != "pending" || token == "" || requestID == "" {
+		return nil
+	}
+	kind, _ := result["kind"].(string)
+	field, _ := result["field"].(string)
+	prompt, _ := result["prompt"].(string)
+	title, _ := result["title"].(string)
+	required, _ := result["required"].(bool)
+	var options []string
+	if raw, ok := result["options"].([]any); ok {
+		for _, item := range raw {
+			if s, ok := item.(string); ok && s != "" {
+				options = append(options, s)
+			}
+		}
+	}
+	severity := "default"
+	if kind == "password" {
+		severity = "warning"
+	}
+	return &ChatInputRequest{
+		ID:         fmt.Sprintf("%s:%s", call.ToolCallID, token),
+		ToolCallID: call.ToolCallID,
+		RequestID:  requestID,
+		Token:      token,
+		Kind:       kind,
+		Field:      field,
+		Title:      title,
+		Prompt:     prompt,
+		Options:    options,
+		Required:   required,
+		ExpiresIn:  intFromAny(result["expires_in"]),
+		Severity:   severity,
+	}
 }
 
 func streamEventsFromResponse(resp *agent.Response) []ChatStreamEvent {

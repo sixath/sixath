@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"backend/internal/biz"
@@ -106,6 +107,28 @@ func matchConfiguredRoot(codeRoots []string, rootParam string) (string, error) {
 	return "", kratosErrors.BadRequest("INVALID_ARGUMENT", "root not in code_roots")
 }
 
+// AgentWorkspaceLinkGetHandler serves GET /api/v1/agents/{agent_id}/workspace-link.
+// Returns whether workspace/code exists and its resolved target (for edit-form hydrate).
+func AgentWorkspaceLinkGetHandler(agentUC *biz.AgentUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		agentID := strings.TrimSpace(ctx.Vars().Get("agent_id"))
+		if agentID == "" {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "agent_id required")
+		}
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			agent, err := agentUC.GetForEdit(c, agentID)
+			if err != nil {
+				return nil, err
+			}
+			return workspaceCodeLinkStatus(agent.Workspace)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
+
 // AgentWorkspaceLinkHandler serves POST /api/v1/agents/{agent_id}/workspace-link.
 // Body: {"target":"/abs/path/under/code/root"} — creates workspace/code → target symlink.
 func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string) func(kratoshttp.Context) error {
@@ -134,6 +157,31 @@ func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string) fu
 		}
 		return ctx.JSON(200, out)
 	}
+}
+
+func workspaceCodeLinkStatus(workspace string) (map[string]any, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return map[string]any{"exists": false}, nil
+	}
+	link := filepath.Join(workspace, chat.WorkspaceCodeLink)
+	fi, err := os.Lstat(link)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{"exists": false, "link": link}, nil
+		}
+		return nil, kratosErrors.InternalServer("INTERNAL", err.Error())
+	}
+	target, resolveErr := resolveLinkTarget(link)
+	out := map[string]any{
+		"exists": true,
+		"link":   link,
+		"is_dir": fi.IsDir() || fi.Mode()&os.ModeSymlink != 0,
+	}
+	if resolveErr == nil && target != "" {
+		out["target"] = target
+	}
+	return out, nil
 }
 
 // linkWorkspaceCode creates {workspace}/code → absTarget under code_roots.
@@ -198,13 +246,46 @@ func resolveTargetUnderCodeRoots(target string, codeRoots []string) (string, err
 }
 
 func sameSymlinkTarget(link, wantTarget string) (bool, error) {
-	existing, err := filepath.EvalSymlinks(link)
+	existing, err := resolveLinkTarget(link)
 	if err != nil {
 		return false, err
 	}
-	want := filepath.Clean(wantTarget)
-	if evalWant, err := filepath.EvalSymlinks(wantTarget); err == nil {
-		want = filepath.Clean(evalWant)
+	want, err := resolveLinkTarget(wantTarget)
+	if err != nil {
+		return false, err
 	}
-	return filepath.Clean(existing) == want, nil
+	return normalizePathForCompare(existing) == normalizePathForCompare(want), nil
+}
+
+func resolveLinkTarget(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", os.ErrNotExist
+	}
+	if eval, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(eval), nil
+	}
+	// Windows directory junctions often fail EvalSymlinks; Readlink still works.
+	if rl, err := os.Readlink(path); err == nil {
+		rl = strings.TrimSpace(rl)
+		if abs, absErr := filepath.Abs(rl); absErr == nil {
+			return filepath.Clean(abs), nil
+		}
+		return filepath.Clean(rl), nil
+	}
+	// Plain directory / file path (wantTarget side).
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func normalizePathForCompare(p string) string {
+	p = filepath.Clean(strings.TrimSpace(p))
+	p = strings.TrimPrefix(p, `\\?\`)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(p)
+	}
+	return p
 }

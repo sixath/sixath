@@ -102,6 +102,11 @@ func (s *ChatService) streamAgentEvents(
 		case agent.StreamEventToolCompleted:
 			if ev.ToolCall != nil {
 				ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "completed")}
+				// Surface ask_user cards as soon as the tool returns pending (before turn Done).
+				if item := inputRequestFromToolRecord(*ev.ToolCall); item != nil {
+					input := *item
+					ch <- ChatStreamEvent{Type: ChatStreamEventInputRequired, Input: &input}
+				}
 			}
 		case agent.StreamEventToolFailed, agent.StreamEventPermissionDenied, agent.StreamEventHookBlocked:
 			if ev.ToolCall != nil {

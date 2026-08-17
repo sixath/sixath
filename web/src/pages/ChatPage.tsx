@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { agentApi, chatApi, DEFAULT_SESSION_TITLE, type Agent, type ChatMessage } from '../api/client'
-import { buildConfirmSubmitBody, buildInputSubmitBody, inputProvidedLabel, type ChatConfirmationRequest, type ChatInputRequest, type ConfirmResultPayload, type WebSourceItem } from '../api/chatStream'
+import {
+  buildConfirmSubmitBody,
+  buildInputSubmitBody,
+  inputProvidedLabel,
+  restoreConfirmationsFromMessages,
+  restoreInputsFromMessages,
+  type ChatConfirmationRequest,
+  type ChatInputRequest,
+  type ConfirmResultPayload,
+  type WebSourceItem,
+} from '../api/chatStream'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
 import { SourcesPanel } from '../components/SourcesPanel'
@@ -46,7 +56,7 @@ interface ChatConfirmationItem extends ChatConfirmationRequest {
 
 interface ChatInputItem extends ChatInputRequest {
   messageKey: string
-  status: 'pending' | 'submitting' | 'submitted' | 'cancelled'
+  status: 'pending' | 'submitting' | 'submitted' | 'cancelled' | 'expired'
   draft: string
   error?: string
 }
@@ -369,8 +379,8 @@ export default function ChatPage(props?: ChatPageProps) {
         setMessageTimelines({})
         setMessageSources({})
         setCollapsedBoundaries(new Set())
-        setConfirmations([])
-        setInputs([])
+        setConfirmations(restoreConfirmationsFromMessages(res.items))
+        setInputs(restoreInputsFromMessages(res.items))
         setError('')
       })
       .catch((e) => {
@@ -395,8 +405,8 @@ export default function ChatPage(props?: ChatPageProps) {
     setMessageTimelines({})
     setMessageSources({})
     setCollapsedBoundaries(new Set())
-    setConfirmations([])
-    setInputs([])
+    setConfirmations(restoreConfirmationsFromMessages(res.items))
+    setInputs(restoreInputsFromMessages(res.items))
   }, [])
 
   const handleRewind = useCallback(async (messageId: string) => {
@@ -644,10 +654,13 @@ export default function ChatPage(props?: ChatPageProps) {
           opts?.onConfirmResult?.(result)
         },
         onInputRequired: (inputRequest) => {
-          setInputs((prev) => [
-            ...prev,
-            { ...inputRequest, messageKey: assistantKey, status: 'pending', draft: '' },
-          ])
+          setInputs((prev) => {
+            if (prev.some((c) => c.token === inputRequest.token)) return prev
+            return [
+              ...prev,
+              { ...inputRequest, messageKey: assistantKey, status: 'pending', draft: '' },
+            ]
+          })
         },
         onSourcesBrowsed: (payload) => {
           setMessageSources((prev) => {
@@ -918,7 +931,15 @@ export default function ChatPage(props?: ChatPageProps) {
                             <MarkdownContent showCursor={streaming && idx === messages.length - 1}>
                               {m.content}
                             </MarkdownContent>
-                            {inputs.filter((c) => c.messageKey === messageKey).map((c) => (
+                            {(() => {
+                              const messageInputs = inputs.filter((c) => {
+                                if (c.messageKey === messageKey) return true
+                                return (
+                                  isLastAssistant &&
+                                  (c.status === 'pending' || c.status === 'submitting')
+                                )
+                              })
+                              return messageInputs.map((c) => (
                               <div key={`${c.messageKey}-${c.token}`} className={`chat-input-card chat-input-card-${c.severity || 'default'}`}>
                                 <div className="chat-input-title">{c.title}</div>
                                 <div className="chat-input-description">{c.prompt}</div>
@@ -953,7 +974,7 @@ export default function ChatPage(props?: ChatPageProps) {
                                     disabled={c.status !== 'pending' || streaming}
                                     onClick={() => handleInputSubmit(c)}
                                   >
-                                    {c.status === 'submitting' ? 'Submitting...' : c.status === 'submitted' ? 'Submitted' : c.kind === 'confirm' ? 'Confirm' : 'Submit'}
+                                    {c.status === 'submitting' ? 'Submitting...' : c.status === 'submitted' ? 'Submitted' : c.status === 'expired' ? 'Expired' : c.kind === 'confirm' ? 'Confirm' : 'Submit'}
                                   </button>
                                   <button
                                     type="button"
@@ -965,7 +986,8 @@ export default function ChatPage(props?: ChatPageProps) {
                                   </button>
                                 </div>
                               </div>
-                            ))}
+                              ))
+                            })()}
                             {messageConfirmations.map((c) => {
                               const remaining = remainingConfirmSeconds(c, nowMs)
                               const inactive = c.status !== 'pending'

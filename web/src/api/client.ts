@@ -748,6 +748,11 @@ export const agentApi = {
       method: 'POST',
       body: JSON.stringify({ target }),
     }),
+  /** Current workspace/code link status (edit hydrate). */
+  workspaceLinkStatus: (id: string) =>
+    request<{ exists?: boolean; link?: string; target?: string; is_dir?: boolean }>(
+      `/agents/${id}/workspace-link`,
+    ),
   bindTools: async (id: string, toolIds: string[]) => {
     const res = await request<{ ret?: BaseResponse }>(`/agents/${id}/tools`, {
       method: 'POST',

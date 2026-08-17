@@ -2,8 +2,10 @@ package data
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	"backend/internal/conf"
 	"backend/internal/data/model"
@@ -12,6 +14,15 @@ import (
 	"github.com/google/wire"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+)
+
+// MySQL pool defaults: recycle before typical server wait_timeout so idle
+// connections are not reused after the server already closed them.
+const (
+	defaultMaxOpenConns    = 25
+	defaultMaxIdleConns    = 5
+	defaultConnMaxLifetime = 5 * time.Minute
+	defaultConnMaxIdleTime = 3 * time.Minute
 )
 
 // ProviderSet is data providers.
@@ -61,6 +72,11 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 	if err != nil {
 		return nil, nil, err
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, nil, err
+	}
+	configureSQLPool(sqlDB)
 
 	// AutoMigrate 创建/更新表结构（按架构设计 docs/architecture_design.md）
 	if err := db.AutoMigrate(
@@ -113,4 +129,14 @@ func (d *Data) Ping(ctx context.Context) error {
 		return err
 	}
 	return sqlDB.PingContext(ctx)
+}
+
+func configureSQLPool(sqlDB *sql.DB) {
+	if sqlDB == nil {
+		return
+	}
+	sqlDB.SetMaxOpenConns(defaultMaxOpenConns)
+	sqlDB.SetMaxIdleConns(defaultMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(defaultConnMaxLifetime)
+	sqlDB.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 }

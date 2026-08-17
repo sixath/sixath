@@ -96,6 +96,7 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	// Code roots browse + agent workspace/code symlink (hand-written).
 	r.GET("/api/v1/code-roots", CodeRootsListHandler(codeRoots))
 	r.GET("/api/v1/code-roots/browse", CodeRootsBrowseHandler(codeRoots))
+	r.GET("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkGetHandler(agentUC))
 	r.POST("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkHandler(agentUC, codeRoots))
 	r.GET("/api/v1/agents/{agent_id}/insights", InsightsHandler(chat))
 	r.POST("/api/v1/sessions/{session_id}/rewind", RewindHandler(chat))
