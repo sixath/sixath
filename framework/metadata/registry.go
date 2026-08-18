@@ -41,11 +41,11 @@ func mysqlFetcherResolver(ds datasource.DataSource) (func(context.Context) (*Sch
 }
 
 func esFetcherResolver(ds datasource.DataSource) (func(context.Context) (*Schema, error), error) {
-	p, ok := ds.(datasource.ESClientProvider)
+	p, ok := ds.(datasource.ESHTTPProvider)
 	if !ok {
 		return nil, ErrUnsupportedDataSource
 	}
-	client := p.ESClient()
+	client := p.ESHTTP()
 	return func(ctx context.Context) (*Schema, error) {
 		return FetchSchemaElasticsearch(ctx, client)
 	}, nil

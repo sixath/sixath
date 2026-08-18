@@ -48,7 +48,7 @@ func RegisterRCASymbolTool(reg *Registry, roots []string, opts RCASymbolOpts) er
 
 	return reg.Register(Tool{
 		Name:               "rca_symbol",
-		Description: "Navigate Go source symbols (definition/references) via gopls across configured RCA repositories. " +
+		Description: "Navigate Go source symbols (definition/references) via gopls across configured code roots. " +
 			"For module/call-chain analysis: rca_glob/rca_grep to locate entries, then rca_symbol with file+line (preferred) or a unique symbol. " +
 			"Prefer file+line over symbol-only in large multi-module repos. character is optional (0-based; 0 snaps to the identifier on that line). " +
 			"LSP attaches to the nearest go.mod under the repo root. max_results defaults to 50.",

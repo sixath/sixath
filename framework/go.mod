@@ -8,13 +8,13 @@ require (
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
-	github.com/elastic/go-elasticsearch/v8 v8.19.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/metoro-io/mcp-golang v0.16.1
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.1
 	github.com/pkg/sftp v1.13.10
 	github.com/prometheus/client_golang v1.19.0
 	github.com/qdrant/go-client v1.18.3
@@ -43,7 +43,6 @@ require (
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/elastic/elastic-transport-go/v8 v8.7.0 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/gin-gonic/gin v1.8.1 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
@@ -69,7 +68,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/neo4j/neo4j-go-driver/v5 v5.28.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect

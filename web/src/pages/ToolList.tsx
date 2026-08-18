@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toolApi, type Tool } from '../api/client'
+import { copyTool } from '../utils/toolCopy'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import {
   downloadToolsJson,
@@ -13,6 +14,7 @@ import {
 } from '../utils/toolImportExport'
 
 export default function ToolList() {
+  const navigate = useNavigate()
   const [tools, setTools] = useState<Tool[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -28,6 +30,7 @@ export default function ToolList() {
   const pendingImportRef = useRef<{ items: Awaited<ReturnType<typeof parseToolsImportJson>>; mode: ImportDuplicateMode } | null>(null)
   const [dupDialogOpen, setDupDialogOpen] = useState(false)
   const [dupCount, setDupCount] = useState(0)
+  const [copyingId, setCopyingId] = useState<string | null>(null)
 
   const selectedCount = selectedIds.size
   const pageSelectedCount = useMemo(
@@ -85,6 +88,22 @@ export default function ToolList() {
       }
       return next
     })
+  }
+
+  const handleCopy = async (tool: Tool) => {
+    setCopyingId(tool.id)
+    setImportSummary('')
+    try {
+      const full = await toolApi.get(tool.id)
+      const created = await copyTool(full, tools.map((t) => t.name))
+      setImportSummary(`已复制为 ${created.name}`)
+      await reload()
+      navigate(`/tools/${created.id}/edit`)
+    } catch (e) {
+      alert((e as Error).message)
+    } finally {
+      setCopyingId(null)
+    }
   }
 
   const confirmDelete = async () => {
@@ -318,6 +337,14 @@ export default function ToolList() {
                   <td>
                     <div className="actions">
                       <Link to={`/tools/${tool.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={copyingId === tool.id}
+                        onClick={() => void handleCopy(tool)}
+                      >
+                        {copyingId === tool.id ? '复制中…' : '复制'}
+                      </button>
                       <button className="btn btn-danger btn-sm" onClick={() => setPendingDelete({ id: tool.id, name: tool.name })}>Delete</button>
                     </div>
                   </td>

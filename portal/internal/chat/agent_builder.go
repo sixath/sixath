@@ -161,7 +161,7 @@ func filterToolsForSurface(tools []*biz.ToolMeta, active map[string]struct{}) []
 		}
 		switch t.Type {
 		case biz.ToolTypeRCA:
-			if FamilyActive(active, FamilyRCA) {
+			if FamilyActive(active, familyForRCATool(t)) {
 				out = append(out, t)
 			}
 		case biz.ToolTypeMCP:
@@ -455,7 +455,7 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 		maxHistory = 20
 	}
 	opts := []agent.ReActOption{
-		agent.WithReActMaxSteps(40),
+		agent.WithReActMaxSteps(80),
 		agent.WithReActMaxHistory(maxHistory),
 		agent.WithReActMaxContextRunes(model.DefaultMaxContextRunes),
 		agent.WithReActMaxOutputTokens(DefaultMaxOutputTokens),
@@ -491,4 +491,24 @@ func ShouldEnableEvidenceGate(reg *tool.Registry) bool {
 		return true
 	}
 	return false
+}
+
+// ShouldApplyEvidenceGate is true only when this turn is an RCA investigation.
+// Bound ES/Jaeger tools must not force log evidence on unrelated lookups (e.g. Mongo).
+func ShouldApplyEvidenceGate(active map[string]struct{}, userText string) bool {
+	if active != nil {
+		_, ok := active[FamilyRCA]
+		return ok
+	}
+	scores := scoreFamilies(strings.TrimSpace(userText), familySet([]string{FamilyRCA}), nil)
+	return scores[FamilyRCA] > 0
+}
+
+// EvidenceGateTurnOption disables Soft EvidenceGate when this turn is not RCA.
+// Last option wins over BuildReActAgent's auto-enable.
+func EvidenceGateTurnOption(reg *tool.Registry, active map[string]struct{}, userText string) agent.ReActOption {
+	if !ShouldEnableEvidenceGate(reg) || ShouldApplyEvidenceGate(active, userText) {
+		return func(*agent.ReActConfig) {}
+	}
+	return agent.WithReActEvidenceGate(agent.EvidenceGateConfig{Enabled: false})
 }

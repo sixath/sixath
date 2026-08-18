@@ -3,47 +3,39 @@ package datasource
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
-
-	elasticsearch "github.com/elastic/go-elasticsearch/v8"
 )
 
-// ESClientProvider 由可提供 Elasticsearch 客户端的数据源实现，供 metadata 与 executor 使用。
-type ESClientProvider interface {
-	ESClient() *elasticsearch.Client
-}
-
-// esDataSource 实现 DataSource 与 ESClientProvider。
+// esDataSource 实现 DataSource 与 ESHTTPProvider。
 type esDataSource struct {
-	id     string
-	client *elasticsearch.Client
+	id   string
+	http *ESHTTP
 }
 
 func (e *esDataSource) ID() string   { return e.id }
 func (e *esDataSource) Type() string { return TypeElasticsearch }
 
 func (e *esDataSource) Ping(ctx context.Context) error {
-	res, err := e.client.Ping(e.client.Ping.WithContext(ctx))
+	status, body, err := e.http.Do(ctx, http.MethodGet, "/", nil)
 	if err != nil {
 		return fmt.Errorf("elasticsearch ping: %w", err)
 	}
-	defer res.Body.Close()
-	if res.IsError() {
-		return fmt.Errorf("elasticsearch ping: %s", res.String())
+	if status >= 400 {
+		return fmt.Errorf("elasticsearch ping: HTTP %d %s", status, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
 
 func (e *esDataSource) Close() error {
-	// go-elasticsearch v8 Client 无 Close，连接由 http.Client 管理，此处无操作
 	return nil
 }
 
-func (e *esDataSource) ESClient() *elasticsearch.Client { return e.client }
+func (e *esDataSource) ESHTTP() *ESHTTP { return e.http }
 
 // NewElasticsearchDataSource 根据 Config 创建 Elasticsearch 数据源。
 // 使用 DSN 作为完整 URL（如 http://localhost:9200），若为空则用 Host:Port（默认 9200）。
-// 可选 User/Password 用于 Basic 认证。
+// 可选 User/Password 用于 Basic 认证。走裸 HTTP，不依赖官方 go-elasticsearch 客户端。
 func NewElasticsearchDataSource(cfg Config) (*esDataSource, error) {
 	if cfg.ID == "" {
 		return nil, fmt.Errorf("elasticsearch datasource: missing id")
@@ -64,20 +56,15 @@ func NewElasticsearchDataSource(cfg Config) (*esDataSource, error) {
 		addr = "http://" + addr
 	}
 
-	clientCfg := elasticsearch.Config{
-		Addresses: []string{addr},
-	}
-	if cfg.User != "" {
-		clientCfg.Username = cfg.User
-		clientCfg.Password = cfg.Password
-	}
-
-	client, err := elasticsearch.NewClient(clientCfg)
-	if err != nil {
-		return nil, fmt.Errorf("elasticsearch datasource: new client: %w", err)
-	}
-
-	return &esDataSource{id: cfg.ID, client: client}, nil
+	return &esDataSource{
+		id: cfg.ID,
+		http: &ESHTTP{
+			BaseURL:  strings.TrimRight(addr, "/"),
+			Username: cfg.User,
+			Password: cfg.Password,
+			Client:   &http.Client{Timeout: defaultESHTTPTimeout},
+		},
+	}, nil
 }
 
 // RegisterElasticsearch 在 Registry 上注册 "elasticsearch" 类型的数据源工厂。

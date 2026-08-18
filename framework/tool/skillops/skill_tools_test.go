@@ -94,6 +94,22 @@ func TestRegisterSkillsListViewTools(t *testing.T) {
 	if fileMap["content"] != "# Guide" {
 		t.Fatalf("file content: %q", fileMap["content"])
 	}
+
+	again, err := viewTool.Execute(context.Background(), map[string]any{"name": "alpha-skill"})
+	if err != nil {
+		t.Fatalf("skill_view second body call: %v", err)
+	}
+	againMap, ok := again.(map[string]any)
+	if !ok {
+		t.Fatalf("skill_view second type %T", again)
+	}
+	if againMap["already_loaded"] != true {
+		t.Fatalf("expected already_loaded, got %#v", againMap)
+	}
+	content2, _ := againMap["content"].(string)
+	if strings.Contains(content2, "Alpha body") {
+		t.Fatal("repeat skill_view must not return full SKILL.md")
+	}
 }
 
 func TestRegisterLoadSkillTool_AndReadSkillFile(t *testing.T) {
@@ -150,9 +166,52 @@ func TestRegisterLoadSkillTool_AndReadSkillFile(t *testing.T) {
 		t.Fatalf("read_skill_file content: %q", content)
 	}
 
+	again, err := loadTool.Execute(context.Background(), map[string]any{"name": "my-skill"})
+	if err != nil {
+		t.Fatalf("load_skill second call: %v", err)
+	}
+	notice, ok := again.(string)
+	if !ok || !strings.Contains(notice, "already loaded") {
+		t.Fatalf("expected already-loaded notice, got %#v", again)
+	}
+	if strings.Contains(notice, "# Body") {
+		t.Fatal("repeat load_skill must not return full SKILL.md")
+	}
+
 	_, err = readTool.Execute(context.Background(), map[string]any{"name": "my-skill", "path": "../other/skip"})
 	if err == nil {
 		t.Fatal("expected error for .. path in read_skill_file")
+	}
+}
+
+func TestLoadSkill_UnknownNameDoesNotBlockLaterLoad(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "ok-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := "---\nname: ok-skill\ndescription: ok\n---\n# OK"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := skills.NewIndex([]string{dir}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := core.NewRegistry()
+	if err := RegisterLoadSkillTool(reg, idx, nil); err != nil {
+		t.Fatal(err)
+	}
+	loadTool, _ := reg.Get("load_skill")
+	if _, err := loadTool.Execute(context.Background(), map[string]any{"name": "missing-skill"}); err == nil {
+		t.Fatal("expected error for missing skill")
+	}
+	body, err := loadTool.Execute(context.Background(), map[string]any{"name": "ok-skill"})
+	if err != nil {
+		t.Fatalf("load after miss: %v", err)
+	}
+	if body.(string) != skillContent {
+		t.Fatalf("got %q", body)
 	}
 }
 

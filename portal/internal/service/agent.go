@@ -356,6 +356,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	}
 	effectivePrompt += chat.BuildEffectiveSystemPromptForTurn(agentMeta.SystemPrompt, skillsIdx, content)
 	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
+	effectivePrompt = chat.AppendCodeAnalysisPromptIf(nil, effectivePrompt)
 	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
 		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
 	}

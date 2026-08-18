@@ -13,6 +13,15 @@ import (
 	"github.com/sixath/gateway/internal/runtimeclient"
 )
 
+func TestFormatPendingSwitchInvalidPrompt(t *testing.T) {
+	out := formatPendingSwitchInvalidPrompt(5)
+	for _, want := range []string{"没有发给 Agent", "1–5", "/who", "/switch", "选完后再发一次"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %q", want, out)
+		}
+	}
+}
+
 func TestFormatSwitchPrompt_Bound(t *testing.T) {
 	agents := []pendingswitch.Agent{
 		{ID: "a1", Name: "Alpha"},
@@ -173,5 +182,114 @@ func TestParseDigitChoice(t *testing.T) {
 		if ok != tc.match || idx != tc.idx {
 			t.Fatalf("parseDigitChoice(%q) = (%d, %v) want (%d, %v)", tc.in, idx, ok, tc.idx, tc.match)
 		}
+	}
+}
+
+func TestFormatCurrentBinding_Bound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/channels/ch1/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "a1",
+				"agents": []map[string]string{
+					{"id": "a1", "name": "Alpha"},
+					{"id": "a2", "name": "Ops Bot"},
+				},
+			})
+		case "/runtime/v1/sessions/binding":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "ch1",
+				"peer_id":    "peer1",
+				"session_id": "sess-bound-xyz",
+				"agent_id":   "a2",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	rt := runtimeclient.New(srv.URL, "token")
+	store := pendingswitch.New()
+	msg, err := formatCurrentBinding(context.Background(), rt, store, "ch1", "peer1")
+	if err != nil {
+		t.Fatalf("formatCurrentBinding: %v", err)
+	}
+	for _, want := range []string{"当前绑定：Ops Bot", "session …", "/switch"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing %q in %q", want, msg)
+		}
+	}
+	if strings.Contains(msg, "不影响选号") {
+		t.Fatalf("unexpected pending hint: %q", msg)
+	}
+	if _, ok := store.Get("ch1", "peer1", time.Now()); ok {
+		t.Fatal("/who must not put pending")
+	}
+}
+
+func TestFormatCurrentBinding_Unbound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/channels/ch1/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "a1",
+				"agents":        []map[string]string{{"id": "a1", "name": "Alpha"}},
+			})
+		case "/runtime/v1/sessions/binding":
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	rt := runtimeclient.New(srv.URL, "token")
+	msg, err := formatCurrentBinding(context.Background(), rt, nil, "ch1", "peer1")
+	if err != nil {
+		t.Fatalf("formatCurrentBinding: %v", err)
+	}
+	for _, want := range []string{"当前未绑定", "default：Alpha (a1)", "/agents", "/switch"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("missing %q in %q", want, msg)
+		}
+	}
+}
+
+func TestFormatCurrentBinding_PendingHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/runtime/v1/channels/ch1/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"agents": []map[string]string{{"id": "a1", "name": "Alpha"}},
+			})
+		case "/runtime/v1/sessions/binding":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "ch1",
+				"peer_id":    "peer1",
+				"session_id": "sess-1",
+				"agent_id":   "a1",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	rt := runtimeclient.New(srv.URL, "token")
+	store := pendingswitch.New()
+	store.Put("ch1", "peer1", pendingswitch.Entry{
+		Agents:    []pendingswitch.Agent{{ID: "a1", Name: "Alpha"}},
+		ExpiresAt: time.Now().Add(2 * time.Minute),
+	})
+	msg, err := formatCurrentBinding(context.Background(), rt, store, "ch1", "peer1")
+	if err != nil {
+		t.Fatalf("formatCurrentBinding: %v", err)
+	}
+	if !strings.Contains(msg, "不影响选号") {
+		t.Fatalf("missing pending hint: %q", msg)
+	}
+	if _, ok := store.Get("ch1", "peer1", time.Now()); !ok {
+		t.Fatal("pending must remain after /who")
 	}
 }

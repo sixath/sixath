@@ -11,7 +11,7 @@ func TestIntentResolver_RulesUniqueGitLab(t *testing.T) {
 	r := IntentResolver{}
 	servers := []*biz.McpServerMeta{{ID: "gitlab", Name: "GitLab"}}
 	bound := BoundFamiliesFrom(nil, servers, false, false)
-	bound = append(bound, FamilyRCA)
+	bound = append(bound, FamilyRCA, FamilyCode)
 	res := r.Resolve(context.Background(), IntentResolveInput{
 		UserText:      "帮我查一下 GitLab 上有哪些项目",
 		BoundFamilies: bound,
@@ -29,6 +29,57 @@ func TestIntentResolver_RulesUniqueGitLab(t *testing.T) {
 	}
 	if _, ok := set[FamilyRCA]; ok {
 		t.Fatal("rca must not be active for gitlab-only query")
+	}
+	if _, ok := set[FamilyCode]; ok {
+		t.Fatal("code must not be active for gitlab-only query")
+	}
+}
+
+func TestIntentResolver_CodeAnalysisActivatesCodeNotRCA(t *testing.T) {
+	r := IntentResolver{}
+	bound := []string{FamilyCore, FamilyCode, FamilyRCA, "mcp:gitlab"}
+	res := r.Resolve(context.Background(), IntentResolveInput{
+		UserText:      "根据代码分析 存档迁移整体流程梳理",
+		BoundFamilies: bound,
+	})
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set[FamilyCode]; !ok {
+		t.Fatalf("code must be active, got %v source=%s reason=%s", res.ActiveFamilies, res.Source, res.Reason)
+	}
+	if _, ok := set[FamilyRCA]; ok {
+		t.Fatalf("rca must not activate for code-flow question, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set["mcp:gitlab"]; ok {
+		t.Fatal("gitlab must not activate")
+	}
+}
+
+func TestIntentResolver_JaegerUnionsCodeWhenBound(t *testing.T) {
+	r := IntentResolver{}
+	bound := []string{FamilyCore, FamilyCode, FamilyRCA}
+	res := r.Resolve(context.Background(), IntentResolveInput{
+		UserText:      "看下这条 Jaeger trace",
+		BoundFamilies: bound,
+	})
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set[FamilyRCA]; !ok {
+		t.Fatalf("rca missing: %v", res.ActiveFamilies)
+	}
+	if _, ok := set[FamilyCode]; !ok {
+		t.Fatalf("code should be unioned: %v", res.ActiveFamilies)
+	}
+}
+
+func TestIntentResolver_JaegerDoesNotInventCode(t *testing.T) {
+	r := IntentResolver{}
+	bound := []string{FamilyCore, FamilyRCA}
+	res := r.Resolve(context.Background(), IntentResolveInput{
+		UserText:      "看下这条 Jaeger trace",
+		BoundFamilies: bound,
+	})
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set[FamilyCode]; ok {
+		t.Fatal("must not invent code family")
 	}
 }
 

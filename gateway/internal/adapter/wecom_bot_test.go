@@ -83,6 +83,23 @@ func assertFastPathNoProgressTicker(t *testing.T, calls []respondCall) {
 	}
 }
 
+func assertFinishedCardOnly(t *testing.T, calls []respondCall, substr string) {
+	t.Helper()
+	if len(calls) != 1 {
+		t.Fatalf("respond calls=%d want 1: %+v", len(calls), calls)
+	}
+	if !calls[0].finish {
+		t.Fatalf("expected finish=true: %+v", calls[0])
+	}
+	if calls[0].content == "处理中…" {
+		t.Fatalf("must not leave 处理中…: %+v", calls[0])
+	}
+	if substr != "" && !strings.Contains(calls[0].content, substr) {
+		t.Fatalf("missing %q in %q", substr, calls[0].content)
+	}
+	assertFastPathNoProgressTicker(t, calls)
+}
+
 func TestWecomBot_TextTurn_ReplyCard(t *testing.T) {
 	var turns int32
 	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
@@ -348,13 +365,10 @@ func TestWecomBot_AgentListCommand_NoTurn(t *testing.T) {
 		t.Fatalf("list command should not resolve, got %d", resolveCalls)
 	}
 	calls := conn.snapshot()
-	if len(calls) != 2 || !calls[1].finish {
-		t.Fatalf("respond calls=%+v", calls)
+	assertFinishedCardOnly(t, calls, "可用 Agent")
+	if !strings.Contains(calls[0].content, "Ops") {
+		t.Fatalf("list reply=%q", calls[0].content)
 	}
-	if !strings.Contains(calls[1].content, "可用 Agent") || !strings.Contains(calls[1].content, "Ops") {
-		t.Fatalf("list reply=%q", calls[1].content)
-	}
-	assertFastPathNoProgressTicker(t, calls)
 }
 
 func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
@@ -400,10 +414,7 @@ func TestWecomBot_AgentSwitchCommand_ForceNew_NoTurn(t *testing.T) {
 		t.Fatalf("resolve=%v", gotResolve)
 	}
 	calls := conn.snapshot()
-	if len(calls) != 2 || !strings.Contains(calls[1].content, "已切换到") {
-		t.Fatalf("respond=%+v", calls)
-	}
-	assertFastPathNoProgressTicker(t, calls)
+	assertFinishedCardOnly(t, calls, "已切换到")
 }
 
 func TestWecomBot_HITL_FailureCard(t *testing.T) {
@@ -522,10 +533,7 @@ func TestWecomBot_SwitchThenDigit_ForceNew_NoTurn(t *testing.T) {
 		t.Fatalf("after /switch resolve=%d want 0", resolveCalls)
 	}
 	calls := conn.snapshot()
-	if len(calls) != 2 || !strings.Contains(calls[1].content, "Ops Bot  ← 当前") {
-		t.Fatalf("switch list=%+v", calls)
-	}
-	assertFastPathNoProgressTicker(t, calls)
+	assertFinishedCardOnly(t, calls, "Ops Bot  ← 当前")
 	if _, ok := deps.PendingSwitch.Get(ch.ID, nSwitch.PeerID, time.Now()); !ok {
 		t.Fatal("expected pending after /switch")
 	}
@@ -544,10 +552,7 @@ func TestWecomBot_SwitchThenDigit_ForceNew_NoTurn(t *testing.T) {
 		t.Fatalf("resolve=%v", gotResolve)
 	}
 	digitCalls := conn2.snapshot()
-	if len(digitCalls) != 2 || !strings.Contains(digitCalls[1].content, "已切换到") {
-		t.Fatalf("digit reply=%+v", digitCalls)
-	}
-	assertFastPathNoProgressTicker(t, digitCalls)
+	assertFinishedCardOnly(t, digitCalls, "已切换到")
 	if _, ok := deps.PendingSwitch.Get(ch.ID, nDigit.PeerID, time.Now()); ok {
 		t.Fatal("pending should be cleared after digit bind")
 	}
@@ -578,7 +583,8 @@ func TestWecomBot_SwitchThenInvalidThenDigit(t *testing.T) {
 		t.Fatalf("after hello turns=%d want 0", turns)
 	}
 	helloCalls := connHello.snapshot()
-	if len(helloCalls) != 2 || !strings.Contains(helloCalls[1].content, "请回复 1–3") {
+	assertFinishedCardOnly(t, helloCalls, "没有发给 Agent")
+	if !strings.Contains(helloCalls[0].content, "请回复 1–3") {
 		t.Fatalf("hello prompt=%+v", helloCalls)
 	}
 	if _, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now()); !ok {
@@ -670,13 +676,10 @@ func TestWecomBot_SwitchShowsCurrentBinding(t *testing.T) {
 		t.Fatalf("binding calls=%d want 1", bindingCalls)
 	}
 	calls := conn.snapshot()
-	if len(calls) != 2 || !strings.Contains(calls[1].content, "当前：Ops Bot") {
-		t.Fatalf("switch card=%+v", calls)
+	assertFinishedCardOnly(t, calls, "当前：Ops Bot")
+	if !strings.Contains(calls[0].content, "2. Ops Bot  ← 当前") {
+		t.Fatalf("missing current marker: %q", calls[0].content)
 	}
-	if !strings.Contains(calls[1].content, "2. Ops Bot  ← 当前") {
-		t.Fatalf("missing current marker: %q", calls[1].content)
-	}
-	assertFastPathNoProgressTicker(t, calls)
 }
 
 func TestWecomBot_PendingUnbind_ClearsAndUnbinds(t *testing.T) {
@@ -734,10 +737,7 @@ func TestWecomBot_PendingUnbind_ClearsAndUnbinds(t *testing.T) {
 		t.Fatal("pending should be cleared after /unbind")
 	}
 	unbindCalls := connUnbind.snapshot()
-	if len(unbindCalls) != 2 || !strings.Contains(unbindCalls[1].content, "已解除绑定") {
-		t.Fatalf("unbind reply=%+v", unbindCalls)
-	}
-	assertFastPathNoProgressTicker(t, unbindCalls)
+	assertFinishedCardOnly(t, unbindCalls, "已解除绑定")
 }
 
 func TestWecomBot_TwoSwitch_RefreshesPending(t *testing.T) {
@@ -779,6 +779,114 @@ func TestWecomBot_TwoSwitch_RefreshesPending(t *testing.T) {
 	}
 	if !ent2.ExpiresAt.After(exp1) {
 		t.Fatalf("expires not refreshed: %v vs %v", ent2.ExpiresAt, exp1)
+	}
+}
+
+func TestWecomBot_Who_ShowsBindingNoPending(t *testing.T) {
+	var turns int32
+	var resolveCalls int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent": "agent-1",
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/binding":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "xiaotiancai",
+				"peer_id":    "user:alice",
+				"session_id": "sess-bound",
+				"agent_id":   "agent-2",
+			})
+		case r.URL.Path == "/runtime/v1/sessions/resolve":
+			atomic.AddInt32(&resolveCalls, 1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-1",
+				"agent_id":   "agent-1",
+				"user_id":    "u1",
+				"created":    true,
+			})
+		case r.URL.Path == "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			writeRuntimeSSEOK(w, "nope")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	conn := &fakeWecomConn{}
+	n := mustNormalize(t, `{"msgid":"M-who","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/who"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), conn, "req-who", ch, n, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("turns=%d want 0", turns)
+	}
+	if atomic.LoadInt32(&resolveCalls) != 0 {
+		t.Fatalf("resolve=%d want 0", resolveCalls)
+	}
+	if _, ok := deps.PendingSwitch.Get(ch.ID, "user:alice", time.Now()); ok {
+		t.Fatal("/who must not put pending")
+	}
+	calls := conn.snapshot()
+	assertFinishedCardOnly(t, calls, "当前绑定：Ops Bot")
+}
+
+func TestWecomBot_Who_KeepsPending(t *testing.T) {
+	var turns int32
+	portal := newWecomPortal(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/agents"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"agents": []map[string]any{
+					{"id": "agent-1", "name": "Default"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.URL.Path == "/runtime/v1/sessions/binding":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"channel_id": "xiaotiancai",
+				"peer_id":    "user:alice",
+				"session_id": "sess-bound",
+				"agent_id":   "agent-2",
+			})
+		case r.URL.Path == "/runtime/v1/turns":
+			atomic.AddInt32(&turns, 1)
+			writeRuntimeSSEOK(w, "nope")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer portal.Close()
+
+	deps, ch := newWecomBotFixture(t, portal.URL)
+	peer := "user:alice"
+
+	nSwitch := mustNormalize(t, `{"msgid":"M-who-sw","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/switch"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), &fakeWecomConn{}, "req-who-sw", ch, nSwitch, deps)
+	if _, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now()); !ok {
+		t.Fatal("expected pending after /switch")
+	}
+
+	connWho := &fakeWecomConn{}
+	nWho := mustNormalize(t, `{"msgid":"M-who-keep","aibotid":"BOT","chatid":"","chattype":"single","from":{"userid":"alice"},"msgtype":"text","text":{"content":"/who"}}`)
+	adapter.HandleWecomMsgCallback(context.Background(), connWho, "req-who-keep", ch, nWho, deps)
+
+	if atomic.LoadInt32(&turns) != 0 {
+		t.Fatalf("turns=%d want 0", turns)
+	}
+	if _, ok := deps.PendingSwitch.Get(ch.ID, peer, time.Now()); !ok {
+		t.Fatal("pending should remain after /who")
+	}
+	calls := connWho.snapshot()
+	assertFinishedCardOnly(t, calls, "当前绑定：Ops Bot")
+	if !strings.Contains(calls[0].content, "不影响选号") {
+		t.Fatalf("missing pending hint: %q", calls[0].content)
 	}
 }
 

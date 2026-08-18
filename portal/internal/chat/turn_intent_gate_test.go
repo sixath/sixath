@@ -246,6 +246,9 @@ func TestAppendTurnIntentPrompt_ContainsBoundary(t *testing.T) {
 	if !strings.Contains(got, "任务边界") {
 		t.Fatalf("missing hint: %q", got)
 	}
+	if !strings.Contains(got, "立即作答结束") {
+		t.Fatalf("missing stop-after-lookup hint: %q", got)
+	}
 }
 
 func TestLooksLikeFinalAnswer(t *testing.T) {

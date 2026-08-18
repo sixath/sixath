@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sixath/gateway/internal/channel"
+	"github.com/sixath/gateway/internal/command"
 	"github.com/sixath/gateway/internal/idempotency"
 	"github.com/sixath/gateway/internal/pendingswitch"
 	"github.com/sixath/gateway/internal/runtimeclient"
@@ -208,51 +209,21 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	}
 
 	streamID := streamIDFromMsgID(n.MsgID)
-	if err := conn.RespondStream(ctx, reqID, streamID, wecomProcessingContent, false); err != nil {
-		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
-	}
 
-	if deps.PendingSwitch != nil {
-		if ent, ok := deps.PendingSwitch.Get(ch.ID, n.PeerID, time.Now()); ok {
-			text := strings.TrimSpace(n.QuestionText)
-			if strings.HasPrefix(text, "/") {
-				deps.PendingSwitch.Delete(ch.ID, n.PeerID)
-			} else if idx, isDigit := parseDigitChoice(text); isDigit {
-				if idx < 1 || idx > len(ent.Agents) {
-					reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
-					card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
-					_ = conn.RespondStream(ctx, reqID, streamID, card, true)
-					deps.Idempotency.Complete(n.MsgID, card)
-					return
-				}
-				agentID := ent.Agents[idx-1].ID
-				deps.PendingSwitch.Delete(ch.ID, n.PeerID)
-				msg, err := switchChannelAgent(ctx, deps.Runtime, deps.Sessions, ch.ID, n.PeerID, agentID)
-				if err != nil {
-					failMsg := mapRuntimeUserError(err)
-					_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
-					deps.Idempotency.Complete(n.MsgID, failMsg)
-					return
-				}
-				card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, msg)
-				_ = conn.RespondStream(ctx, reqID, streamID, card, true)
-				deps.Idempotency.Complete(n.MsgID, card)
-				return
-			} else {
-				reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
-				card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
-				_ = conn.RespondStream(ctx, reqID, streamID, card, true)
-				deps.Idempotency.Complete(n.MsgID, card)
-				return
-			}
-		}
+	// Local intercepts (switch window / slash commands) must finish in one shot.
+	// Sending 处理中… first leaves WeCom stuck if the follow-up finish=true is dropped.
+	if handled := replyPendingSwitch(ctx, conn, reqID, streamID, ch, n, deps); handled {
+		return
 	}
-
 	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, deps.PendingSwitch, ch.ID, n.PeerID, n.QuestionText); isCmd {
 		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, cmdReply)
-		_ = conn.RespondStream(ctx, reqID, streamID, card, true)
+		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
 		deps.Idempotency.Complete(n.MsgID, card)
 		return
+	}
+
+	if err := conn.RespondStream(ctx, reqID, streamID, wecomProcessingContent, false); err != nil {
+		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
 	}
 
 	// Portal owns default/allowlist; do not send yaml default_agent.
@@ -262,7 +233,8 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	})
 	if err != nil {
 		failMsg := mapRuntimeUserError(err)
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
@@ -277,7 +249,8 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	})
 	if err != nil {
 		failMsg := mapRuntimeUserError(err)
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
 		deps.Idempotency.Complete(n.MsgID, failMsg)
 		return
 	}
@@ -311,6 +284,59 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		return
 	}
 	deps.Idempotency.Complete(n.MsgID, card)
+}
+
+func finishWecomReply(ctx context.Context, conn WecomConn, reqID, streamID, channelID, content string) {
+	if err := conn.RespondStream(ctx, reqID, streamID, content, true); err != nil {
+		log.Printf("wecom_bot %s respond finish: %v", channelID, err)
+	}
+}
+
+// replyPendingSwitch consumes a /switch window reply. Slash commands fall through.
+func replyPendingSwitch(ctx context.Context, conn WecomConn, reqID, streamID string, ch channel.Channel, n wecom.Normalized, deps WecomBotDeps) bool {
+	if deps.PendingSwitch == nil {
+		return false
+	}
+	ent, ok := deps.PendingSwitch.Get(ch.ID, n.PeerID, time.Now())
+	if !ok {
+		return false
+	}
+	text := strings.TrimSpace(n.QuestionText)
+	if strings.HasPrefix(text, "/") {
+		if cmd, isCmd := command.Parse(text); isCmd && command.PreservesPending(cmd.Kind) {
+			return false
+		}
+		deps.PendingSwitch.Delete(ch.ID, n.PeerID)
+		return false
+	}
+	if idx, isDigit := parseDigitChoice(text); isDigit {
+		if idx < 1 || idx > len(ent.Agents) {
+			reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
+			card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
+			finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
+			deps.Idempotency.Complete(n.MsgID, card)
+			return true
+		}
+		agentID := ent.Agents[idx-1].ID
+		deps.PendingSwitch.Delete(ch.ID, n.PeerID)
+		msg, err := switchChannelAgent(ctx, deps.Runtime, deps.Sessions, ch.ID, n.PeerID, agentID)
+		if err != nil {
+			failMsg := mapRuntimeUserError(err)
+			card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
+			finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
+			deps.Idempotency.Complete(n.MsgID, failMsg)
+			return true
+		}
+		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, msg)
+		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
+		deps.Idempotency.Complete(n.MsgID, card)
+		return true
+	}
+	reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
+	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
+	finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
+	deps.Idempotency.Complete(n.MsgID, card)
+	return true
 }
 
 func streamIDFromMsgID(msgID string) string {

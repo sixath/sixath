@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { toolApi, type CreateToolRequest, type ToolConfig } from '../api/client'
+import { copyTool } from '../utils/toolCopy'
 
 function linesToStringArray(text: string): string[] {
   return text.split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean)
@@ -835,6 +836,32 @@ export default function ToolForm() {
         {error && <div className="error">{error}</div>}
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
           <button type="submit" className="btn" disabled={loading}>{loading ? '提交中...' : '保存'}</button>
+          {isEdit && id ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={loading}
+              onClick={async () => {
+                setError('')
+                setLoading(true)
+                try {
+                  const created = await copyTool({
+                    name,
+                    description,
+                    type,
+                    config,
+                  })
+                  navigate(`/tools/${created.id}/edit`)
+                } catch (e) {
+                  setError((e as Error).message)
+                } finally {
+                  setLoading(false)
+                }
+              }}
+            >
+              复制为新工具
+            </button>
+          ) : null}
           <Link to="/tools" className="btn btn-secondary">取消</Link>
         </div>
         </form>

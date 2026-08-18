@@ -18,6 +18,7 @@ import (
 
 const (
 	workspaceFileScopeHint = "For workspace files use read_file/write_file/patch/search_files; " +
+		"for source / call-chain analysis prefer rca_grep/rca_glob/rca_read when those tools are available; " +
 		"for datasource/SQL use execute_read/execute_write/list_tables/describe_table."
 
 	readFileDefaultLimit = 500

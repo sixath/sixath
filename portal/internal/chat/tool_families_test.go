@@ -11,6 +11,8 @@ import (
 
 func TestToolSurfaceEnabled_DefaultOn(t *testing.T) {
 	t.Setenv("SATH_TURN_TOOL_SURFACE", "")
+	resetTurnToolSurfaceOverride()
+	t.Cleanup(resetTurnToolSurfaceOverride)
 	if !ToolSurfaceEnabled() {
 		t.Fatal("default should be enabled")
 	}
@@ -20,6 +22,77 @@ func TestToolSurfaceEnabled_Off(t *testing.T) {
 	t.Setenv("SATH_TURN_TOOL_SURFACE", "0")
 	if ToolSurfaceEnabled() {
 		t.Fatal("0 should disable")
+	}
+}
+
+func TestToolSurfaceEnabled_YAMLOffWhenEnvUnset(t *testing.T) {
+	t.Setenv("SATH_TURN_TOOL_SURFACE", "")
+	resetTurnToolSurfaceOverride()
+	t.Cleanup(resetTurnToolSurfaceOverride)
+	SetTurnToolSurfaceEnabled(false)
+	if ToolSurfaceEnabled() {
+		t.Fatal("yaml false should disable when env unset")
+	}
+}
+
+func TestToolSurfaceEnabled_EnvOverridesYAML(t *testing.T) {
+	resetTurnToolSurfaceOverride()
+	t.Cleanup(resetTurnToolSurfaceOverride)
+	SetTurnToolSurfaceEnabled(false)
+	t.Setenv("SATH_TURN_TOOL_SURFACE", "1")
+	if !ToolSurfaceEnabled() {
+		t.Fatal("env 1 should win over yaml false")
+	}
+}
+
+func TestFamilyForBuiltinToolName_CodeVsRCA(t *testing.T) {
+	if FamilyForBuiltinToolName("rca_grep") != FamilyCode {
+		t.Fatal("rca_grep → code")
+	}
+	if FamilyForBuiltinToolName("rca_glob") != FamilyCode {
+		t.Fatal("rca_glob → code")
+	}
+	if FamilyForBuiltinToolName("rca_read") != FamilyCode {
+		t.Fatal("rca_read → code")
+	}
+	if FamilyForBuiltinToolName("rca_symbol") != FamilyCode {
+		t.Fatal("rca_symbol → code")
+	}
+	if FamilyForBuiltinToolName("jaeger_trace") != FamilyRCA {
+		t.Fatal("jaeger → rca")
+	}
+	if FamilyForBuiltinToolName("es_log_query") != FamilyRCA {
+		t.Fatal("es_log_query → rca")
+	}
+}
+
+func mustRCAStruct(t *testing.T, funcPath string, extra map[string]any) *structpb.Struct {
+	t.Helper()
+	rca := map[string]any{"func_path": funcPath}
+	for k, v := range extra {
+		rca[k] = v
+	}
+	st, err := structpb.NewStruct(map[string]any{"rca": rca})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestBoundFamiliesFrom_SplitsRCACodeAndLogs(t *testing.T) {
+	codeTool := &biz.ToolMeta{Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
+		"roots": []any{"D:\\workspace\\migu"},
+	})}
+	esTool := &biz.ToolMeta{Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "es_log_query", map[string]any{
+		"endpoint": "http://es",
+	})}
+	bound := BoundFamiliesFrom([]*biz.ToolMeta{codeTool, esTool}, nil, false, false)
+	set := familySet(bound)
+	if _, ok := set[FamilyCode]; !ok {
+		t.Fatalf("want code, got %v", bound)
+	}
+	if _, ok := set[FamilyRCA]; !ok {
+		t.Fatalf("want rca, got %v", bound)
 	}
 }
 

@@ -13,6 +13,7 @@ const (
 	KindNew
 	KindUnbind
 	KindSwitch
+	KindWho
 	KindUnknown
 )
 
@@ -45,6 +46,8 @@ func Parse(text string) (Command, bool) {
 		return Command{Kind: KindUnbind}, true
 	case "switch":
 		return Command{Kind: KindSwitch}, true
+	case "who":
+		return Command{Kind: KindWho}, true
 	case "agent", "agents":
 		if rest == "" || strings.EqualFold(rest, "list") {
 			return Command{Kind: KindAgentList}, true
@@ -53,4 +56,9 @@ func Parse(text string) (Command, bool) {
 	default:
 		return Command{Kind: KindUnknown}, true
 	}
+}
+
+// PreservesPending is true for read-only commands that must not cancel a /switch window.
+func PreservesPending(k Kind) bool {
+	return k == KindWho
 }

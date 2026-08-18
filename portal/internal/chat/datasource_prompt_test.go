@@ -40,6 +40,9 @@ func TestFormatDatasourcePrompt(t *testing.T) {
 	if !strings.Contains(p, "禁止通过 ask_user") {
 		t.Fatal("missing ask_user prohibition when datasource available")
 	}
+	if !strings.Contains(p, "立即作答结束") {
+		t.Fatal("missing stop-after-execute_read hint")
+	}
 }
 
 func TestFormatDatasourcePrompt_SkipsESAndAddsRoutingHint(t *testing.T) {

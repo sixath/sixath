@@ -31,8 +31,8 @@ func RegisterRCACodeTools(reg *Registry, roots []string) error {
 func registerRCAGrepTool(reg *Registry, roots []string) error {
 	return reg.Register(Tool{
 		Name: "rca_grep",
-		Description: "Search source code by regex across configured RCA repository roots (multi-repo). " +
-			"Prefer this over terminal/rg for code exploration inside RCA roots. " +
+		Description: "Search source code by regex across configured code roots (multi-repo). " +
+			"Prefer this over workspace search_files and over terminal/rg for source / call-chain analysis. " +
 			"Optionally limit to one repo. Returns file, line and snippet with the owning repo.",
 		Toolset: ToolsetRCA,
 		Parameters: map[string]any{
@@ -94,9 +94,9 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 func registerRCAGlobTool(reg *Registry, roots []string) error {
 	return reg.Register(Tool{
 		Name: "rca_glob",
-		Description: "Find files by glob across configured RCA repository roots (multi-repo). " +
+		Description: "Find files by glob across configured code roots (multi-repo). " +
 			"Supports basename patterns (go.mod, *.go) and path patterns (**/go.mod, pkg/**/*.go). " +
-			"Prefer this over terminal find/dir for locating files inside RCA roots. " +
+			"Prefer this over workspace search_files and over terminal find/dir for locating source files. " +
 			"Optionally limit to one repo. Returns matching file paths with the owning repo.",
 		Toolset: ToolsetRCA,
 		Parameters: map[string]any{
@@ -151,7 +151,7 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 			}
 			payload := map[string]any{"matches": matches, "truncated": truncated}
 			if len(matches) == 0 {
-				payload["hint"] = "No matches. Roots may be unset, or try basename (go.mod) / path (**/go.mod). Empty does not mean RCA is unconfigured."
+				payload["hint"] = "No matches. Roots may be unset, or try basename (go.mod) / path (**/go.mod)."
 			}
 			return rcaOK(toolName, payload), nil
 		},
@@ -162,8 +162,8 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 func registerRCAReadTool(reg *Registry, roots []string) error {
 	return reg.Register(Tool{
 		Name: "rca_read",
-		Description: "Read a source file from a specific RCA repository with line numbers (LINE_NUM|CONTENT). " +
-			"Prefer this over terminal/type/cat and over workspace read_file when the path is under an RCA root. " +
+		Description: "Read a source file from a specific configured code root with line numbers (LINE_NUM|CONTENT). " +
+			"Prefer this over terminal/type/cat and over workspace read_file when the path is under a code root. " +
 			"Path is guarded to stay inside the repository root.",
 		Toolset: ToolsetRCA,
 		Parameters: map[string]any{

@@ -211,3 +211,38 @@ func TestBuildRegistry_RegisterSSHExecBuiltin(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 }
+
+func TestFilterToolsForSurface_CodeVsRCA(t *testing.T) {
+	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
+		"roots": []any{"D:\\workspace\\migu"},
+	})}
+	esTool := &biz.ToolMeta{Name: "mg-rca-es", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "es_log_query", map[string]any{
+		"endpoint": "http://es",
+	})}
+	tools := []*biz.ToolMeta{codeTool, esTool}
+
+	codeOnly := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode}))
+	if len(codeOnly) != 1 || codeOnly[0].Name != "migu-rca" {
+		t.Fatalf("code surface want only rca_code tool, got %+v", namesOf(codeOnly))
+	}
+
+	rcaOnly := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyRCA}))
+	if len(rcaOnly) != 1 || rcaOnly[0].Name != "mg-rca-es" {
+		t.Fatalf("rca surface want only es tool, got %+v", namesOf(rcaOnly))
+	}
+
+	both := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode, FamilyRCA}))
+	if len(both) != 2 {
+		t.Fatalf("both families want 2 tools, got %+v", namesOf(both))
+	}
+}
+
+func namesOf(tools []*biz.ToolMeta) []string {
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		if t != nil {
+			out = append(out, t.Name)
+		}
+	}
+	return out
+}

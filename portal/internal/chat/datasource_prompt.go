@@ -80,6 +80,7 @@ func FormatDatasourcePrompt(bindings []DatasourceBinding, defaultID string) stri
 		}
 		if hasAvailable {
 			b.WriteString("\n至少有一个数据源**已可用**：禁止通过 ask_user 向用户索取数据库 host/端口/账号/密码或连接串；请直接用 list_tables → describe_table → execute_read。\n")
+			b.WriteString("查库/查记录在 execute_read 返回结果后立即作答结束；不要再调 es_log_query 或历史会话中的排障流程，除非本轮用户明确要求查日志/链路。\n")
 			b.WriteString("若表不在已绑定库中，说明库名/类型不匹配，应提示用户在 Agent 绑定正确的数据源工具，而不是让用户手填连接信息。\n")
 		}
 	}

@@ -60,9 +60,10 @@ func (r IntentResolver) Resolve(ctx context.Context, in IntentResolveInput) Inte
 		clf = in.Classifier
 	}
 
+	var res IntentResolveResult
 	switch {
 	case len(hits) == 1:
-		return IntentResolveResult{
+		res = IntentResolveResult{
 			ActiveFamilies: ensureCore(hits),
 			Confidence:     "high",
 			Source:         "rules",
@@ -70,10 +71,12 @@ func (r IntentResolver) Resolve(ctx context.Context, in IntentResolveInput) Inte
 			Reason:         "unique_rule_hit",
 		}
 	case len(hits) == 0:
-		return r.classifyOrNarrow(ctx, in.UserText, bound, nil, clf, "no_rule_hit")
+		res = r.classifyOrNarrow(ctx, in.UserText, bound, nil, clf, "no_rule_hit")
 	default:
-		return r.classifyOrNarrow(ctx, in.UserText, bound, hits, clf, "multi_rule_hit")
+		res = r.classifyOrNarrow(ctx, in.UserText, bound, hits, clf, "multi_rule_hit")
 	}
+	res.ActiveFamilies = unionCodeWhenRCA(res.ActiveFamilies, in.BoundFamilies)
+	return res
 }
 
 func (r IntentResolver) classifyOrNarrow(ctx context.Context, user string, bound map[string]struct{}, candidates []string, clf FamilyClassifier, reason string) IntentResolveResult {
@@ -170,6 +173,23 @@ func withCore(ids []string) []string {
 	s[FamilyCore] = struct{}{}
 	out := make([]string, 0, len(s))
 	for id := range s {
+		out = append(out, id)
+	}
+	return out
+}
+
+// unionCodeWhenRCA adds FamilyCode when RCA is active and code is bound (trace → source).
+func unionCodeWhenRCA(active, bound []string) []string {
+	a, b := familySet(active), familySet(bound)
+	if _, rca := a[FamilyRCA]; !rca {
+		return active
+	}
+	if _, has := b[FamilyCode]; !has {
+		return active
+	}
+	a[FamilyCode] = struct{}{}
+	out := make([]string, 0, len(a))
+	for id := range a {
 		out = append(out, id)
 	}
 	return out

@@ -74,8 +74,9 @@ aibot_msg_callback
     → Normalize（去 @bot、peer、问题正文）
     → 可选 Directory：userid → 通讯录显示名（corp_id + corp_secret）
     → Idempotency(msgid)
-    → respond finish=false「处理中…」
-    → Runtime resolve + turns(reply_mode=final)
+    → pending /switch 或 slash：直接 finish=true 卡片（不发「处理中…」）
+    → 业务 Turn：respond finish=false「处理中…」
+    → Runtime resolve + turns(reply_mode=stream)
     → respond finish=true 卡片（发起人 / 问题 / 答复）
 ```
 
@@ -143,12 +144,13 @@ Web Channels 列表 / 编辑页展示连接态。Gateway 上报 `connected` / `d
 | 指令 | 行为 |
 |------|------|
 | `/switch` | 列出白名单（标注**当前**绑定）；**2 分钟内**回复纯数字序号完成 `force_new` 改绑；本条不 Turn |
+| `/who` | 只读查看当前 `channel+peer` 绑定（名/id + 短 session）；不 Put pending、本条不 Turn |
 | `/agent <id\|name>` | `force_new=true`，切到白名单内 Agent 并新开 session |
 | `/agent` 或 `/agents` | 列出本渠道 default + allowed（Portal） |
 | `/new` | `force_new=true`，沿用当前映射 Agent 或 default，新开 session |
 | `/unbind` | 清除 `channel+peer` 映射；下一条普通消息按 default 新建 |
 
-**`/switch` 两步绑定（企微优先）：** 发 `/switch` 后，下一条仅接受 `1`/`2`/…（`/1` 不算序号）。非法输入会提示并继续等待；超时后 pending 取消，消息按普通入站处理。处理顺序：**pending 序号 → slash → Resolve/Turn**。设计见 [企微 /switch 两步绑定](../docs/superpowers/specs/2026-08-11-wecom-switch-agent-design.md)。
+**`/switch` 两步绑定（企微优先）：** 发 `/switch` 后，下一条仅接受 `1`/`2`/…（`/1` 不算序号）。非法输入立刻 `finish=true` 提示「没有发给 Agent」，pending 保留；超时后 pending 取消，消息按普通入站处理。处理顺序：**pending 序号 → slash → Resolve/Turn**。只想看当前绑了谁请用 `/who`（不进入选号窗口；窗口内发 `/who` 也不取消选号）。设计见 [企微 /switch 两步绑定](../docs/superpowers/specs/2026-08-11-wecom-switch-agent-design.md)。
 
 Webhook body 可选 `agent_id` / `force_new`（与指令等价；白名单仍由 Portal 校验）。详见 [Agent 路由设计](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md)。
 

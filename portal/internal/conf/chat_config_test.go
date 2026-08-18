@@ -66,3 +66,45 @@ chat:
 		t.Fatal("env should override yaml to true")
 	}
 }
+
+func TestLoadChatFromConfigPath_turnToolSurfaceDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	const yaml = `
+chat:
+  public_inbound_enabled: true
+  turn_tool_surface_enabled: false
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SATH_TURN_TOOL_SURFACE", "")
+	t.Setenv("SATH_CHAT_PUBLIC_INBOUND_ENABLED", "")
+	cfg, err := LoadChatFromConfigPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TurnToolSurfaceEnabled == nil || *cfg.TurnToolSurfaceEnabled {
+		t.Fatalf("got TurnToolSurfaceEnabled=%v, want false", cfg.TurnToolSurfaceEnabled)
+	}
+}
+
+func TestLoadChatFromConfigPath_turnToolSurfaceEnvOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	const yaml = `
+chat:
+  turn_tool_surface_enabled: true
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SATH_TURN_TOOL_SURFACE", "0")
+	cfg, err := LoadChatFromConfigPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TurnToolSurfaceEnabled == nil || *cfg.TurnToolSurfaceEnabled {
+		t.Fatalf("env 0 should force false, got %v", cfg.TurnToolSurfaceEnabled)
+	}
+}

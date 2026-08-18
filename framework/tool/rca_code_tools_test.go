@@ -351,3 +351,22 @@ func TestRCAToolsetDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestRCAGrepDescriptionPrefersCodeRoots(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := newRCARegistry(t, []string{repoA})
+	tl, ok := reg.Get("rca_grep")
+	if !ok {
+		t.Fatal("rca_grep missing")
+	}
+	if !strings.Contains(tl.Description, "code roots") {
+		t.Fatalf("description should mention code roots, got %q", tl.Description)
+	}
+	if strings.Contains(tl.Description, "inside RCA roots") {
+		t.Fatalf("description should not treat RCA as the only use, got %q", tl.Description)
+	}
+}

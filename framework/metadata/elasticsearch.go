@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 
-	elasticsearch "github.com/elastic/go-elasticsearch/v8"
+	"github.com/sixath/framework/datasource"
 )
 
 // 日期后缀：索引名形如 base-2026.01.02 或 base.2026-01-02，将 base 视为模式前缀，模式名为 base-*。
@@ -87,27 +88,23 @@ func groupIndicesByPattern(indexNames []string) []*esIndexGroup {
 
 // FetchSchemaElasticsearch 从 ES 拉取索引列表并按「索引模式」分组，每个模式只对代表索引拉一次 mapping，
 // 得到逻辑表（Table.Name = 模式名，Table.Comment = 示例索引 + 时间约定），减少请求数与重复 mapping。
-func FetchSchemaElasticsearch(ctx context.Context, client *elasticsearch.Client) (*Schema, error) {
+func FetchSchemaElasticsearch(ctx context.Context, client *datasource.ESHTTP) (*Schema, error) {
 	if client == nil {
 		return nil, fmt.Errorf("metadata: elasticsearch client is nil")
 	}
 
-	indicesRes, err := client.Cat.Indices(
-		client.Cat.Indices.WithContext(ctx),
-		client.Cat.Indices.WithFormat("json"),
-	)
+	status, body, err := client.Do(ctx, http.MethodGet, "/_cat/indices?format=json", nil)
 	if err != nil {
 		return nil, fmt.Errorf("metadata: cat indices: %w", err)
 	}
-	defer indicesRes.Body.Close()
-	if indicesRes.IsError() {
-		return nil, fmt.Errorf("metadata: cat indices: %s", indicesRes.String())
+	if status >= 400 {
+		return nil, fmt.Errorf("metadata: cat indices: HTTP %d %s", status, strings.TrimSpace(string(body)))
 	}
 
 	var catRows []struct {
 		Index string `json:"index"`
 	}
-	if err := json.NewDecoder(indicesRes.Body).Decode(&catRows); err != nil {
+	if err := json.Unmarshal(body, &catRows); err != nil {
 		return nil, fmt.Errorf("metadata: decode cat indices: %w", err)
 	}
 
@@ -132,15 +129,8 @@ func FetchSchemaElasticsearch(ctx context.Context, client *elasticsearch.Client)
 	}
 	schema.IndexToPattern = indexToPattern
 
-	type indexMapping struct {
-		Mappings struct {
-			Properties map[string]interface{} `json:"properties"`
-		} `json:"mappings"`
-	}
-
 	for _, g := range groups {
 		tbl := Table{Name: g.Pattern}
-		// Comment：示例索引（最多 3 个）+ 时间约定
 		var parts []string
 		n := len(g.Indices)
 		if n > 3 {
@@ -154,33 +144,57 @@ func FetchSchemaElasticsearch(ctx context.Context, client *elasticsearch.Client)
 			tbl.Comment += "。 " + g.TimeComment
 		}
 
-		mappingRes, err := client.Indices.GetMapping(
-			client.Indices.GetMapping.WithContext(ctx),
-			client.Indices.GetMapping.WithIndex(g.Representative),
-		)
+		mapPath := "/" + g.Representative + "/_mapping"
+		st, mapBody, err := client.Do(ctx, http.MethodGet, mapPath, nil)
 		if err != nil {
 			return nil, fmt.Errorf("metadata: get mapping for index %q: %w", g.Representative, err)
 		}
-		if mappingRes.IsError() {
-			mappingRes.Body.Close()
-			return nil, fmt.Errorf("metadata: get mapping for index %q: %s", g.Representative, mappingRes.String())
+		if st >= 400 {
+			return nil, fmt.Errorf("metadata: get mapping for index %q: HTTP %d %s", g.Representative, st, strings.TrimSpace(string(mapBody)))
 		}
-		var single map[string]indexMapping
-		if err := json.NewDecoder(mappingRes.Body).Decode(&single); err != nil {
-			mappingRes.Body.Close()
+		var raw map[string]any
+		if err := json.Unmarshal(mapBody, &raw); err != nil {
 			return nil, fmt.Errorf("metadata: decode mapping for index %q: %w", g.Representative, err)
 		}
-		mappingRes.Body.Close()
-		if m, ok := single[g.Representative]; ok && m.Mappings.Properties != nil {
-			for name := range m.Mappings.Properties {
-				tbl.Columns = append(tbl.Columns, Column{
-					Name:       name,
-					Type:       "keyword",
-					IsNullable: true,
-				})
+		entry, _ := raw[g.Representative].(map[string]any)
+		if entry == nil && len(raw) == 1 {
+			for _, v := range raw {
+				entry, _ = v.(map[string]any)
+				break
 			}
+		}
+		props := mappingProperties(entry)
+		for name := range props {
+			tbl.Columns = append(tbl.Columns, Column{
+				Name:       name,
+				Type:       "keyword",
+				IsNullable: true,
+			})
 		}
 		schema.Tables = append(schema.Tables, tbl)
 	}
 	return schema, nil
+}
+
+func mappingProperties(indexEntry map[string]any) map[string]any {
+	if indexEntry == nil {
+		return nil
+	}
+	mappings, _ := indexEntry["mappings"].(map[string]any)
+	if mappings == nil {
+		return nil
+	}
+	if props, ok := mappings["properties"].(map[string]any); ok {
+		return props
+	}
+	for _, inner := range mappings {
+		m, ok := inner.(map[string]any)
+		if !ok {
+			continue
+		}
+		if props, ok := m["properties"].(map[string]any); ok {
+			return props
+		}
+	}
+	return nil
 }

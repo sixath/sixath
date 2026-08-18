@@ -115,6 +115,79 @@ func TestBuildReActAgent_noEvidenceGateWithoutRCATools(t *testing.T) {
 	}
 }
 
+func TestShouldApplyEvidenceGate(t *testing.T) {
+	mongo := "查询mongodb下uu=193218288的记录"
+	if ShouldApplyEvidenceGate(nil, mongo) {
+		t.Fatal("surface-off Mongo lookup must not apply EvidenceGate")
+	}
+	if !ShouldApplyEvidenceGate(nil, "用 elasticsearch 查一下错误日志") {
+		t.Fatal("surface-off ES/log query should apply EvidenceGate")
+	}
+	if ShouldApplyEvidenceGate(familySet([]string{FamilyCore}), "why down?") {
+		t.Fatal("core-only surface must not apply EvidenceGate")
+	}
+	if !ShouldApplyEvidenceGate(familySet([]string{FamilyCore, FamilyRCA}), mongo) {
+		t.Fatal("RCA-active surface should apply EvidenceGate even if text is a lookup")
+	}
+}
+
+func TestEvidenceGateTurnOption_DisablesOnMongoLookup(t *testing.T) {
+	reg := tool.NewRegistry()
+	if err := reg.Register(tool.Tool{
+		Name:        "es_log_query",
+		Description: "es",
+		Parameters:  map[string]any{"type": "object"},
+		Execute: func(ctx context.Context, params map[string]any) (any, error) {
+			return nil, nil
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	fake := &builderGateFake{finalReply: "found 2 rows"}
+	a := BuildReActAgent(fake, reg, "", 10,
+		agent.WithReActMaxSteps(2),
+		EvidenceGateTurnOption(reg, nil, "查询mongodb下uu=193218288的记录"),
+	)
+	react := a.(*agent.ReActAgent)
+	if react.EvidenceGateEnabled() {
+		t.Fatal("Mongo lookup turn must disable EvidenceGate even when es_log_query is bound")
+	}
+
+	resp, err := react.Run(context.Background(), &agent.Request{
+		Messages: []model.Message{{Role: "user", Content: "查询mongodb下uu=193218288的记录"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	tr, _ := resp.Metadata["trace"].(*agent.RunTrace)
+	if tr != nil && tr.EvidenceNudges != 0 {
+		t.Fatalf("Mongo lookup must not Soft-inject ES, nudges=%d", tr.EvidenceNudges)
+	}
+}
+
+func TestEvidenceGateTurnOption_KeepsGateOnLogQuery(t *testing.T) {
+	reg := tool.NewRegistry()
+	if err := reg.Register(tool.Tool{
+		Name:        "es_log_query",
+		Description: "es",
+		Parameters:  map[string]any{"type": "object"},
+		Execute: func(ctx context.Context, params map[string]any) (any, error) {
+			return nil, nil
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	fake := &builderGateFake{finalReply: "root cause is timeout"}
+	a := BuildReActAgent(fake, reg, "", 10,
+		agent.WithReActMaxSteps(3),
+		EvidenceGateTurnOption(reg, nil, "用 elasticsearch 查错误日志"),
+	)
+	react := a.(*agent.ReActAgent)
+	if !react.EvidenceGateEnabled() {
+		t.Fatal("log query turn must keep EvidenceGate")
+	}
+}
+
 type builderGateFake struct {
 	finalReply string
 	toolCalls  int

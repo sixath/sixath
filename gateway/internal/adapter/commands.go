@@ -65,8 +65,14 @@ func runSlashCommand(ctx context.Context, rt *runtimeclient.Client, sessions *se
 			sessions.Invalidate(channelID, peerID)
 		}
 		return "已解除绑定，下一条消息将按默认 Agent 新建会话", true
+	case command.KindWho:
+		msg, err := formatCurrentBinding(ctx, rt, store, channelID, peerID)
+		if err != nil {
+			return mapRuntimeUserError(err), true
+		}
+		return msg, true
 	default:
-		return "未知指令。支持：/agent、/agents、/new、/unbind、/switch", true
+		return "未知指令。支持：/agent、/agents、/who、/new、/unbind、/switch", true
 	}
 }
 
@@ -92,10 +98,13 @@ func parseDigitChoice(text string) (index int, ok bool) {
 }
 
 func formatPendingSwitchInvalidPrompt(agentCount int) string {
-	if agentCount < 1 {
-		return "请回复有效序号，或发送 /switch 重新选择。"
+	rangeHint := "有效序号"
+	if agentCount >= 1 {
+		rangeHint = fmt.Sprintf("1–%d 的序号", agentCount)
 	}
-	return fmt.Sprintf("请回复 1–%d 的序号，或发送 /switch 重新选择。", agentCount)
+	return "这条消息没有发给 Agent（仍在选择 Agent，2 分钟内有效）。\n" +
+		fmt.Sprintf("请回复 %s 完成切换，发送 /who 查看当前绑定，或 /switch 重新选择。\n", rangeHint) +
+		"刚才的问题不会自动重试，选完后再发一次。"
 }
 
 func formatSwitchPrompt(agents []pendingswitch.Agent, currentID string, currentMode string) string {
@@ -177,6 +186,64 @@ func startSwitch(ctx context.Context, rt *runtimeclient.Client, store *pendingsw
 		ExpiresAt: time.Now().Add(2 * time.Minute),
 	})
 	return formatSwitchPrompt(agents, currentID, currentMode), nil
+}
+
+func formatCurrentBinding(ctx context.Context, rt *runtimeclient.Client, store *pendingswitch.Store, channelID, peerID string) (string, error) {
+	binding, err := rt.GetBinding(ctx, channelID, peerID)
+	var b strings.Builder
+	if err != nil {
+		var he *runtimeclient.HTTPError
+		if !errors.As(err, &he) || he == nil || he.StatusCode != 404 {
+			return "", err
+		}
+		b.WriteString("当前未绑定。下一条消息将使用 default Agent。")
+		if list, lerr := rt.ListChannelAgents(ctx, channelID); lerr == nil {
+			if label := channelDefaultLabel(list); label != "" {
+				fmt.Fprintf(&b, "\ndefault：%s", label)
+			}
+		}
+		b.WriteString("\n查看白名单请用 /agents；改绑请用 /switch。")
+	} else {
+		label := strings.TrimSpace(binding.AgentID)
+		if list, lerr := rt.ListChannelAgents(ctx, channelID); lerr == nil && list != nil {
+			for _, a := range list.Agents {
+				if strings.TrimSpace(a.ID) == strings.TrimSpace(binding.AgentID) {
+					label = agentLabel(a)
+					break
+				}
+			}
+		}
+		if label == "" {
+			label = "未知"
+		}
+		fmt.Fprintf(&b, "当前绑定：%s", label)
+		if suffix := shortID(binding.SessionID); suffix != "" {
+			fmt.Fprintf(&b, "（session …%s）", suffix)
+		}
+		b.WriteString("\n改绑请用 /switch 或 /agent <名>。")
+	}
+	if store != nil {
+		if _, ok := store.Get(channelID, peerID, time.Now()); ok {
+			b.WriteString("\n仍在选择 Agent（2 分钟内回复序号才会切换）；本查询不影响选号。")
+		}
+	}
+	return b.String(), nil
+}
+
+func channelDefaultLabel(list *runtimeclient.ChannelAgentsReply) string {
+	if list == nil {
+		return ""
+	}
+	def := strings.TrimSpace(list.DefaultAgent)
+	if def == "" {
+		return ""
+	}
+	for _, a := range list.Agents {
+		if strings.TrimSpace(a.ID) == def {
+			return agentLabel(a)
+		}
+	}
+	return def
 }
 
 func formatChannelAgentList(ctx context.Context, rt *runtimeclient.Client, channelID string) (string, error) {

@@ -78,6 +78,40 @@ func TestParse_Switch(t *testing.T) {
 	}
 }
 
+func TestParse_Who(t *testing.T) {
+	c, ok := Parse("/who")
+	if !ok {
+		t.Fatal("expected slash command")
+	}
+	if c.Kind != KindWho {
+		t.Fatalf("Kind=%v want KindWho", c.Kind)
+	}
+	if c.Target != "" {
+		t.Fatalf("Target=%q want empty", c.Target)
+	}
+
+	c, ok = Parse("/WHO")
+	if !ok || c.Kind != KindWho || c.Target != "" {
+		t.Fatalf("/WHO: ok=%v cmd=%+v", ok, c)
+	}
+
+	c, ok = Parse("/who extra-arg")
+	if !ok || c.Kind != KindWho || c.Target != "" {
+		t.Fatalf("/who with rest ignored: ok=%v cmd=%+v", ok, c)
+	}
+}
+
+func TestPreservesPending(t *testing.T) {
+	if !PreservesPending(KindWho) {
+		t.Fatal("KindWho should preserve pending")
+	}
+	for _, k := range []Kind{KindSwitch, KindAgentList, KindAgentSwitch, KindNew, KindUnbind, KindUnknown} {
+		if PreservesPending(k) {
+			t.Fatalf("Kind %v should not preserve pending", k)
+		}
+	}
+}
+
 func TestParse_Unbind(t *testing.T) {
 	c, ok := Parse("/unbind")
 	if !ok {

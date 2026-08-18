@@ -10,16 +10,37 @@ import (
 )
 
 const (
-	FamilyCore           = "core"
-	FamilyRCA            = "rca"
-	FamilyWeb            = "web"
-	FamilyKnowledge      = "knowledge"
-	turnToolSurfaceEnv   = "SATH_TURN_TOOL_SURFACE"
+	FamilyCore         = "core"
+	FamilyCode         = "code"
+	FamilyRCA          = "rca"
+	FamilyWeb          = "web"
+	FamilyKnowledge    = "knowledge"
+	turnToolSurfaceEnv = "SATH_TURN_TOOL_SURFACE"
 )
+
+// turnToolSurfaceOverride is set from chat.turn_tool_surface_enabled in config.yaml.
+// nil → follow env / default on. Env SATH_TURN_TOOL_SURFACE always wins when set.
+var turnToolSurfaceOverride *bool
+
+// SetTurnToolSurfaceEnabled applies the YAML switch (nil pointer = leave default).
+func SetTurnToolSurfaceEnabled(enabled bool) {
+	v := enabled
+	turnToolSurfaceOverride = &v
+}
+
+func resetTurnToolSurfaceOverride() {
+	turnToolSurfaceOverride = nil
+}
 
 func ToolSurfaceEnabled() bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(turnToolSurfaceEnv)))
-	return !(v == "0" || v == "false" || v == "off" || v == "no")
+	if v != "" {
+		return !(v == "0" || v == "false" || v == "off" || v == "no")
+	}
+	if turnToolSurfaceOverride != nil {
+		return *turnToolSurfaceOverride
+	}
+	return true
 }
 
 func MCPFamilyID(serverID string) string {
@@ -32,14 +53,14 @@ func LegacyMCPFamilyID(toolID string) string {
 
 // builtinToolFamily maps known non-MCP tool names → family.
 var builtinToolFamily = map[string]string{
-	"jaeger_trace":  FamilyRCA,
-	"es_log_query":  FamilyRCA,
-	"rca_grep":      FamilyRCA,
-	"rca_glob":      FamilyRCA,
-	"rca_read":      FamilyRCA,
-	"rca_symbol":    FamilyRCA,
-	"web_search":    FamilyWeb,
-	"web_extract":   FamilyWeb,
+	"jaeger_trace":      FamilyRCA,
+	"es_log_query":      FamilyRCA,
+	"rca_grep":          FamilyCode,
+	"rca_glob":          FamilyCode,
+	"rca_read":          FamilyCode,
+	"rca_symbol":        FamilyCode,
+	"web_search":        FamilyWeb,
+	"web_extract":       FamilyWeb,
 	"knowledge_search":  FamilyKnowledge,
 	"knowledge_read":    FamilyKnowledge,
 	"knowledge_write":   FamilyKnowledge,
@@ -48,6 +69,7 @@ var builtinToolFamily = map[string]string{
 
 // familyKeywords: family → aliases (lowercase). MCP families also match server id/name at resolve time.
 var familyKeywords = map[string][]string{
+	FamilyCode:      {"源码", "代码分析", "代码", "调用链", "模块关系", "流程梳理", "谁调用", "仓库", "grep", "go.mod"},
 	FamilyRCA:       {"jaeger", "trace", "span", "opentelemetry", "otel", "es_log", "elasticsearch", "日志排查", "链路"},
 	FamilyWeb:       {"联网", "搜索网页", "web_search", "http://", "https://"},
 	FamilyKnowledge: {"wiki", "knowledge", "知识库", "文档库"},
@@ -83,7 +105,7 @@ func BoundFamiliesFrom(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, webE
 		}
 		switch t.Type {
 		case biz.ToolTypeRCA:
-			set[FamilyRCA] = struct{}{}
+			set[familyForRCATool(t)] = struct{}{}
 		case biz.ToolTypeMCP:
 			mc := tool.McpConfigFromMap(toolConfigToMap(t.Config))
 			if mc != nil && mc.Id != "" {
@@ -106,6 +128,36 @@ func BoundFamiliesFrom(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, webE
 		out = append(out, id)
 	}
 	return out
+}
+
+// familyForRCATool maps a bound RCA tool to code vs rca by rca.func_path.
+// Unknown or missing path stays on FamilyRCA for backward compatibility.
+func familyForRCATool(t *biz.ToolMeta) string {
+	if t == nil {
+		return FamilyRCA
+	}
+	switch rcaFuncPath(t) {
+	case "rca_code", "rca_symbol":
+		return FamilyCode
+	default:
+		return FamilyRCA
+	}
+}
+
+func rcaFuncPath(t *biz.ToolMeta) string {
+	if t == nil {
+		return ""
+	}
+	cfg := toolConfigToMap(t.Config)
+	if cfg == nil {
+		return ""
+	}
+	rcaMap, _ := cfg["rca"].(map[string]interface{})
+	if rcaMap == nil {
+		return ""
+	}
+	fp, _ := rcaMap["func_path"].(string)
+	return strings.TrimSpace(fp)
 }
 
 func familySet(ids []string) map[string]struct{} {

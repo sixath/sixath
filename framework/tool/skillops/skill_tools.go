@@ -4,17 +4,60 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sixath/framework/events"
-	"github.com/sixath/framework/growth"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/sixath/framework/events"
+	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
+
+// skillBodyLoadOnce de-duplicates full SKILL.md loads within one Registry (one ReAct turn).
+type skillBodyLoadOnce struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}
+
+func newSkillBodyLoadOnce() *skillBodyLoadOnce {
+	return &skillBodyLoadOnce{seen: make(map[string]struct{})}
+}
+
+func skillLoadKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func (s *skillBodyLoadOnce) claim(name string) (already bool) {
+	key := skillLoadKey(name)
+	if s == nil || key == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.seen[key]; ok {
+		return true
+	}
+	s.seen[key] = struct{}{}
+	return false
+}
+
+func (s *skillBodyLoadOnce) unclaim(name string) {
+	key := skillLoadKey(name)
+	if s == nil || key == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.seen, key)
+	s.mu.Unlock()
+}
+
+func skillAlreadyLoadedNotice(name string) string {
+	return fmt.Sprintf("Skill %q is already loaded in this turn. Do not call load_skill or skill_view again for this name. Continue the workflow using the SKILL.md already in the transcript; call other tools next.", name)
+}
 
 // McpServerEntry 描述一个可用的 MCP 服务配置（与 config.MCPServerEntry 对齐），用于在 load_skill 时按 Skill 声明按需注册。
 type McpServerEntry struct {
@@ -38,9 +81,11 @@ func RegisterLoadSkillTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 		return errors.New("load_skill: index is nil")
 	}
 
+	once := newSkillBodyLoadOnce()
 	err := reg.Register(tool.Tool{
-		Name:        "load_skill",
-		Description: "Load full SKILL.md content by skill name.",
+		Name: "load_skill",
+		Description: "Load full SKILL.md content by skill name. Call at most once per skill per turn; " +
+			"repeats return a short already-loaded notice instead of the full body.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -57,11 +102,16 @@ func RegisterLoadSkillTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 				return nil, errors.New("load_skill: name is required")
 			}
 			name, _ := raw.(string)
+			name = strings.TrimSpace(name)
 			if name == "" {
 				return nil, errors.New("load_skill: name is empty")
 			}
+			if once.claim(name) {
+				return skillAlreadyLoadedNotice(name), nil
+			}
 			body, err := idx.LoadSkillBody(name)
 			if err != nil {
+				once.unclaim(name)
 				return nil, err
 			}
 			// 明确使用该 Skill 时，将该 Skill 声明的 MCP 能力注册到当前上下文（仅注册配置中存在的服务）。
@@ -370,10 +420,12 @@ func registerSkillsListTool(reg *tool.Registry, idx *skills.Index) error {
 }
 
 func registerSkillViewTool(reg *tool.Registry, idx *skills.Index, mcpServers []McpServerEntry) error {
+	once := newSkillBodyLoadOnce()
 	return reg.Register(tool.Tool{
 		Name: "skill_view",
 		Description: "Load a skill's full SKILL.md content or a linked file under references/, templates/, scripts/, docs/, or assets/. " +
-			"First call with name only returns content plus linked_files; call again with file_path to read a linked file.",
+			"First call with name only returns content plus linked_files; call again with file_path to read a linked file. " +
+			"Do not reload the same skill body in one turn.",
 		Toolset: tool.ToolsetSkills,
 		Parameters: map[string]any{
 			"type": "object",
@@ -410,8 +462,16 @@ func registerSkillViewTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 				}, nil
 			}
 
+			if once.claim(name) {
+				return map[string]any{
+					"name":           name,
+					"already_loaded": true,
+					"content":        skillAlreadyLoadedNotice(name),
+				}, nil
+			}
 			body, err := idx.LoadSkillBody(name)
 			if err != nil {
+				once.unclaim(name)
 				return nil, err
 			}
 			if err := growth.ScanUserContent(body); err != nil {
@@ -426,6 +486,7 @@ func registerSkillViewTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 			skillRoot := filepath.Dir(meta.Path)
 			linked, lerr := listSkillLinkedFiles(skillRoot)
 			if lerr != nil {
+				once.unclaim(name)
 				return nil, lerr
 			}
 			return map[string]any{

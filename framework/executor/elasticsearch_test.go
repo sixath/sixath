@@ -12,34 +12,32 @@ import (
 	"strings"
 	"testing"
 
-	elasticsearch "github.com/elastic/go-elasticsearch/v8"
 	"github.com/sixath/framework/datasource"
 )
 
 type esStubDS struct {
-	id     string
-	client *elasticsearch.Client
+	id   string
+	http *datasource.ESHTTP
 }
 
-func (e *esStubDS) ID() string                      { return e.id }
-func (e *esStubDS) Type() string                    { return datasource.TypeElasticsearch }
-func (e *esStubDS) Ping(ctx context.Context) error  { return nil }
-func (e *esStubDS) Close() error                    { return nil }
-func (e *esStubDS) ESClient() *elasticsearch.Client { return e.client }
+func (e *esStubDS) ID() string                     { return e.id }
+func (e *esStubDS) Type() string                   { return datasource.TypeElasticsearch }
+func (e *esStubDS) Ping(ctx context.Context) error { return nil }
+func (e *esStubDS) Close() error                   { return nil }
+func (e *esStubDS) ESHTTP() *datasource.ESHTTP     { return e.http }
 
-func mockESClient(t *testing.T, body string) (*elasticsearch.Client, *httptest.Server) {
+func mockESHTTP(t *testing.T, handler http.HandlerFunc) (*datasource.ESHTTP, *httptest.Server) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Elastic-Product", "Elasticsearch")
+	srv := httptest.NewServer(handler)
+	return &datasource.ESHTTP{BaseURL: srv.URL, Client: srv.Client()}, srv
+}
+
+func mockESBody(t *testing.T, body string) (*datasource.ESHTTP, *httptest.Server) {
+	t.Helper()
+	return mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(body))
-	}))
-	cfg := elasticsearch.Config{Addresses: []string{srv.URL}}
-	client, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("new es client: %v", err)
-	}
-	return client, srv
+	})
 }
 
 // 异构文档:首行无 error_code,后行有
@@ -53,11 +51,11 @@ const heterogeneousHits = `{
   }
 }`
 
-func registerESExecutor(t *testing.T, client *elasticsearch.Client) *ESExecutor {
+func registerESExecutor(t *testing.T, client *datasource.ESHTTP) *ESExecutor {
 	t.Helper()
 	reg := datasource.NewRegistry()
 	reg.RegisterType(datasource.TypeElasticsearch, func(cfg datasource.Config) (datasource.DataSource, error) {
-		return &esStubDS{id: cfg.ID, client: client}, nil
+		return &esStubDS{id: cfg.ID, http: client}, nil
 	})
 	if _, err := reg.Register(datasource.Config{ID: "ds1", Type: datasource.TypeElasticsearch}); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -73,7 +71,7 @@ const basicSearchHits = `{
 }`
 
 func TestESExecutor_BasicSearch(t *testing.T) {
-	client, srv := mockESClient(t, basicSearchHits)
+	client, srv := mockESBody(t, basicSearchHits)
 	defer srv.Close()
 	ex := registerESExecutor(t, client)
 	res, err := ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{})
@@ -88,8 +86,47 @@ func TestESExecutor_BasicSearch(t *testing.T) {
 	}
 }
 
+func TestESExecutor_ES6TotalNoProductHeader(t *testing.T) {
+	const es6 = `{
+  "hits": {
+    "total": 2,
+    "hits": [
+      {"_source": {"name": "alice"}},
+      {"_source": {"name": "bob"}}
+    ]
+  }
+}`
+	var gotPath string
+	client, srv := mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Header.Get("X-Elastic-Product") != "" {
+			t.Errorf("client must not require product header")
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(es6))
+	})
+	defer srv.Close()
+	ex := registerESExecutor(t, client)
+	res, err := ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{
+		MaxRows: 10,
+		Params:  map[string]any{"index": "app-logs-*"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotPath != "/app-logs-*/_search" {
+		t.Fatalf("path=%q", gotPath)
+	}
+	if res.EstimatedTotal != 2 {
+		t.Fatalf("total=%d want 2", res.EstimatedTotal)
+	}
+	if len(res.Rows) != 2 {
+		t.Fatalf("rows=%d", len(res.Rows))
+	}
+}
+
 func TestESExecutor_HeterogeneousColumnsUnion(t *testing.T) {
-	client, srv := mockESClient(t, heterogeneousHits)
+	client, srv := mockESBody(t, heterogeneousHits)
 	defer srv.Close()
 
 	ex := registerESExecutor(t, client)
@@ -115,7 +152,7 @@ func TestESExecutor_HeterogeneousColumnsUnion(t *testing.T) {
 }
 
 func TestESExecutor_StableColumnOrder(t *testing.T) {
-	client, srv := mockESClient(t, heterogeneousHits)
+	client, srv := mockESBody(t, heterogeneousHits)
 	defer srv.Close()
 
 	ex := registerESExecutor(t, client)
@@ -138,27 +175,20 @@ func TestESExecutor_StableColumnOrder(t *testing.T) {
 const queryShardException = `{"error":{"type":"query_shard_exception","reason":"No mapping found for [foo]"},"status":400}`
 const clusterBlockException = `{"error":{"type":"cluster_block_exception","reason":"blocked"},"status":403}`
 
-func mockESClientErr(t *testing.T, body string, status int) (*elasticsearch.Client, *httptest.Server) {
+func mockESHTTPErr(t *testing.T, body string, status int) (*datasource.ESHTTP, *httptest.Server) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Elastic-Product", "Elasticsearch")
+	return mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
-	}))
-	cfg := elasticsearch.Config{Addresses: []string{srv.URL}}
-	client, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("new es client: %v", err)
-	}
-	return client, srv
+	})
 }
 
 func TestESExecutor_SchemaErrorByType(t *testing.T) {
-	client, srv := mockESClientErr(t, queryShardException, http.StatusBadRequest)
+	client, srv := mockESHTTPErr(t, queryShardException, http.StatusBadRequest)
 	defer srv.Close()
 	reg := datasource.NewRegistry()
 	reg.RegisterType("es", func(cfg datasource.Config) (datasource.DataSource, error) {
-		return &esStubDS{id: cfg.ID, client: client}, nil
+		return &esStubDS{id: cfg.ID, http: client}, nil
 	})
 	_, _ = reg.Register(datasource.Config{ID: "ds1", Type: "es"})
 
@@ -174,31 +204,16 @@ func TestESExecutor_SchemaErrorByType(t *testing.T) {
 
 func TestESExecutor_InjectSize(t *testing.T) {
 	var gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, srv := mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
-		w.Header().Set("X-Elastic-Product", "Elasticsearch")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
-	}))
+	})
 	defer srv.Close()
 
-	cfg := elasticsearch.Config{Addresses: []string{srv.URL}}
-	client, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("new es client: %v", err)
-	}
-
-	reg := datasource.NewRegistry()
-	reg.RegisterType("es", func(cfg datasource.Config) (datasource.DataSource, error) {
-		return &esStubDS{id: cfg.ID, client: client}, nil
-	})
-	if _, err := reg.Register(datasource.Config{ID: "ds1", Type: "es"}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	ex := NewESExecutor(reg)
-	_, err = ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{MaxRows: 25})
+	ex := registerESExecutor(t, client)
+	_, err := ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{MaxRows: 25})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -219,19 +234,13 @@ func TestESExecutor_MaxRows(t *testing.T) {
 		hits[i] = `{"_source":{"n":` + strconv.Itoa(i) + `}}`
 	}
 	respBody := `{"hits":{"total":{"value":100},"hits":[` + strings.Join(hits, ",") + `]}}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, srv := mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
-		w.Header().Set("X-Elastic-Product", "Elasticsearch")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(respBody))
-	}))
+	})
 	defer srv.Close()
-	cfg := elasticsearch.Config{Addresses: []string{srv.URL}}
-	client, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
 	ex := registerESExecutor(t, client)
 	res, err := ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{MaxRows: 10})
 	if err != nil {
@@ -269,7 +278,7 @@ func TestESExecutor_UnsupportedDataSource(t *testing.T) {
 }
 
 func TestESExecutor_InvalidJSON(t *testing.T) {
-	client, srv := mockESClient(t, `{"hits":{"total":{"value":0},"hits":[]}}`)
+	client, srv := mockESBody(t, `{"hits":{"total":{"value":0},"hits":[]}}`)
 	defer srv.Close()
 	ex := registerESExecutor(t, client)
 	_, err := ex.Execute(context.Background(), "ds1", `{invalid`, ExecuteOptions{MaxRows: 1})
@@ -278,22 +287,37 @@ func TestESExecutor_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestESExecutor_QueryForwardsIndex(t *testing.T) {
+	var path string
+	client, srv := mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"hits":{"total":0,"hits":[]}}`))
+	})
+	defer srv.Close()
+	ex := registerESExecutor(t, client)
+	_, err := ex.Query(context.Background(), "ds1", `{"query":{"match_all":{}}}`, QueryOptions{
+		MaxRows: 5,
+		Extras:  map[string]any{"index": "backend-union-*"},
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if path != "/backend-union-*/_search" {
+		t.Fatalf("path=%q", path)
+	}
+}
+
 func TestESExecutor_IndexParam(t *testing.T) {
 	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, srv := mockESHTTP(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
-		w.Header().Set("X-Elastic-Product", "Elasticsearch")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
-	}))
+	})
 	defer srv.Close()
-	cfg := elasticsearch.Config{Addresses: []string{srv.URL}}
-	client, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
 	ex := registerESExecutor(t, client)
-	_, err = ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{
+	_, err := ex.Execute(context.Background(), "ds1", `{"query":{"match_all":{}}}`, ExecuteOptions{
 		Params: map[string]any{"index": "logs-2024,metrics"},
 	})
 	if err != nil {
@@ -305,11 +329,11 @@ func TestESExecutor_IndexParam(t *testing.T) {
 }
 
 func TestESExecutor_NonSchemaError(t *testing.T) {
-	client, srv := mockESClientErr(t, clusterBlockException, http.StatusForbidden)
+	client, srv := mockESHTTPErr(t, clusterBlockException, http.StatusForbidden)
 	defer srv.Close()
 	reg := datasource.NewRegistry()
 	reg.RegisterType("es", func(cfg datasource.Config) (datasource.DataSource, error) {
-		return &esStubDS{id: cfg.ID, client: client}, nil
+		return &esStubDS{id: cfg.ID, http: client}, nil
 	})
 	_, _ = reg.Register(datasource.Config{ID: "ds1", Type: "es"})
 

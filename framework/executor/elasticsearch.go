@@ -1,17 +1,16 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 
-	elasticsearch "github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/sixath/framework/datasource"
 )
 
@@ -32,6 +31,7 @@ func (e *ESExecutor) Query(ctx context.Context, datasourceID string, dsl string,
 		Timeout: opts.Timeout,
 		MaxRows: opts.MaxRows,
 		Params:  opts.Params,
+		Extras:  opts.Extras,
 	})
 	return queryResultFromResult(res), err
 }
@@ -44,13 +44,13 @@ func (e *ESExecutor) Execute(ctx context.Context, datasourceID string, dsl strin
 		e.finishES(ctx, rec, datasourceID, "search", dsl, nil, err)
 		return nil, err
 	}
-	ep, ok := ds.(datasource.ESClientProvider)
+	ep, ok := ds.(datasource.ESHTTPProvider)
 	if !ok {
 		err := ErrUnsupportedDataSource
 		e.finishES(ctx, rec, datasourceID, "search", dsl, nil, err)
 		return nil, err
 	}
-	client := ep.ESClient()
+	client := ep.ESHTTP()
 
 	if !opts.AllowsWrite() && isESWriteDSL(dsl) {
 		e.finishES(ctx, rec, datasourceID, "readonly_reject", dsl, nil, ErrReadOnlyViolation)
@@ -118,39 +118,56 @@ func isESWriteDSL(dsl string) bool {
 	return false
 }
 
-func (e *ESExecutor) execSearch(ctx context.Context, client *elasticsearch.Client, body string, maxRows int, index string) (*Result, error) {
+func esSearchPath(index string) string {
+	var indices []string
+	for _, s := range strings.Split(index, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			indices = append(indices, s)
+		}
+	}
+	if len(indices) == 0 {
+		return "/_search"
+	}
+	return "/" + strings.Join(indices, ",") + "/_search"
+}
+
+func parseESHitsTotal(raw json.RawMessage) int64 {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	if raw[0] == '{' {
+		var obj struct {
+			Value int64 `json:"value"`
+		}
+		if json.Unmarshal(raw, &obj) == nil {
+			return obj.Value
+		}
+		return 0
+	}
+	var n int64
+	if json.Unmarshal(raw, &n) == nil {
+		return n
+	}
+	return 0
+}
+
+func (e *ESExecutor) execSearch(ctx context.Context, client *datasource.ESHTTP, body string, maxRows int, index string) (*Result, error) {
+	if client == nil {
+		return nil, fmt.Errorf("executor: search: elasticsearch http client is nil")
+	}
 	searchBody, err := injectESSearchSize(body, maxRows)
 	if err != nil {
 		return nil, err
 	}
-	opts := []func(*esapi.SearchRequest){
-		client.Search.WithContext(ctx),
-		client.Search.WithBody(strings.NewReader(searchBody)),
-	}
-	if index != "" {
-		var indices []string
-		for _, s := range strings.Split(index, ",") {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				indices = append(indices, s)
-			}
-		}
-		if len(indices) > 0 {
-			opts = append(opts, client.Search.WithIndex(indices...))
-		}
-	}
-	res, err := client.Search(opts...)
+	status, respBody, err := client.Do(ctx, http.MethodPost, esSearchPath(index), []byte(searchBody))
 	if err != nil {
 		return nil, fmt.Errorf("executor: search: %w", err)
 	}
-	defer res.Body.Close()
-	if res.IsError() {
-		bodyBytes, readErr := io.ReadAll(res.Body)
-		if readErr != nil {
-			bodyBytes = []byte("<body read error: " + readErr.Error() + ">")
-		}
-		baseErr := fmt.Errorf("executor: search: %s %s", res.Status(), string(bodyBytes))
-		if isESSchemaRelatedBody(bodyBytes) {
+	if status >= 400 {
+		baseErr := fmt.Errorf("executor: search: HTTP %d %s", status, string(respBody))
+		if isESSchemaRelatedBody(respBody) {
 			return nil, &SchemaRelatedError{Err: baseErr}
 		}
 		return nil, baseErr
@@ -158,18 +175,16 @@ func (e *ESExecutor) execSearch(ctx context.Context, client *elasticsearch.Clien
 
 	var out struct {
 		Hits struct {
-			Total struct {
-				Value int64 `json:"value"`
-			} `json:"total"`
-			Hits []struct {
+			Total json.RawMessage `json:"total"`
+			Hits  []struct {
 				Source map[string]interface{} `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(respBody, &out); err != nil {
 		return nil, fmt.Errorf("executor: decode search response: %w", err)
 	}
-	estimatedTotal := out.Hits.Total.Value
+	estimatedTotal := parseESHitsTotal(out.Hits.Total)
 
 	hits := out.Hits.Hits
 	truncated := false

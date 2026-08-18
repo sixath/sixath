@@ -27,6 +27,7 @@ type Config struct {
 	User            string `json:"user" yaml:"user"`
 	Password        string `json:"password" yaml:"password"`
 	DBName          string `json:"dbname" yaml:"dbname"`
+	AuthSource      string `json:"auth_source" yaml:"auth_source"` // MongoDB 认证库，缺省 admin
 	MaxOpenConns    int    `json:"max_open_conns" yaml:"max_open_conns"`
 	MaxIdleConns    int    `json:"max_idle_conns" yaml:"max_idle_conns"`
 	ConnMaxLifetime int    `json:"conn_max_lifetime_sec" yaml:"conn_max_lifetime_sec"` // 秒
@@ -90,6 +91,14 @@ func ConfigFromMap(m map[string]interface{}) Config {
 	}
 	if v, ok := m["dbname"].(string); ok {
 		c.DBName = v
+	}
+	if v, ok := m["auth_source"].(string); ok {
+		c.AuthSource = v
+	}
+	if c.AuthSource == "" {
+		if v, ok := m["authSource"].(string); ok {
+			c.AuthSource = v
+		}
 	}
 	if p, ok := intFromAny(m["max_open_conns"]); ok {
 		c.MaxOpenConns = p
