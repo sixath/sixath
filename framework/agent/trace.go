@@ -68,6 +68,8 @@ type RunTrace struct {
 
 	// EvidenceNudges Soft EvidenceGate 已注入回压的次数（最多 1，见 Soft 策略）。
 	EvidenceNudges int `json:"evidence_nudges,omitempty"`
+	// CodeClaimNudges Soft Code Claim Auditor 已注入回压的次数（最多 1）。
+	CodeClaimNudges int `json:"code_claim_nudges,omitempty"`
 
 	// ParallelTools 为 true 表示本 Run 中至少有一轮 tool_calls 走了并行执行（D2）。
 	ParallelTools bool `json:"parallel_tools,omitempty"`

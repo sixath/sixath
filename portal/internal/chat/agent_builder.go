@@ -512,3 +512,26 @@ func EvidenceGateTurnOption(reg *tool.Registry, active map[string]struct{}, user
 	}
 	return agent.WithReActEvidenceGate(agent.EvidenceGateConfig{Enabled: false})
 }
+
+// ShouldEnableCodeClaimGate is true when this turn can produce rca_read/rca_grep quotes.
+func ShouldEnableCodeClaimGate(reg *tool.Registry, active map[string]struct{}) bool {
+	if active != nil && FamilyActive(active, FamilyCode) {
+		return true
+	}
+	if reg == nil {
+		return false
+	}
+	if _, ok := reg.Get("rca_read"); ok {
+		return true
+	}
+	_, ok := reg.Get("rca_grep")
+	return ok
+}
+
+// CodeClaimGateTurnOption enables the source-claim cascade when code tools are in play.
+func CodeClaimGateTurnOption(reg *tool.Registry, active map[string]struct{}, m model.Model) agent.ReActOption {
+	if !ShouldEnableCodeClaimGate(reg, active) {
+		return func(*agent.ReActConfig) {}
+	}
+	return agent.WithReActCodeClaimGate(agent.CodeClaimGateConfig{Enabled: true, Auditor: m})
+}

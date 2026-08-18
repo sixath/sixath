@@ -369,4 +369,11 @@ func TestRCAGrepDescriptionPrefersCodeRoots(t *testing.T) {
 	if strings.Contains(tl.Description, "inside RCA roots") {
 		t.Fatalf("description should not treat RCA as the only use, got %q", tl.Description)
 	}
+	read, ok := reg.Get("rca_read")
+	if !ok {
+		t.Fatal("rca_read missing")
+	}
+	if !strings.Contains(read.Description, "verbatim") || !strings.Contains(read.Description, "enclosing function") {
+		t.Fatalf("rca_read should require whole-function verbatim quotes, got %q", read.Description)
+	}
 }

@@ -49,6 +49,8 @@ type ReActConfig struct {
 	ToolHooks []ToolHook
 	// EvidenceGate final-answer 证据门（默认 Enabled=false）。
 	EvidenceGate EvidenceGateConfig
+	// CodeClaimGate 源码声明审计（机检 + LLM）；默认 Enabled=false。
+	CodeClaimGate CodeClaimGateConfig
 	// PostModelPolicy 模型返回后、执行工具前的策略（可丢弃/过滤 tool_calls）；nil 为不启用。
 	PostModelPolicy PostModelPolicy
 	// ParallelTools 为 true 时，同轮多 tool 在无 RequiresSequential 时可并行执行（默认 false）。
@@ -212,6 +214,13 @@ func WithReActEvidenceGate(cfg EvidenceGateConfig) ReActOption {
 	}
 }
 
+// WithReActCodeClaimGate 配置源码声明审计；默认 Enabled=false。
+func WithReActCodeClaimGate(cfg CodeClaimGateConfig) ReActOption {
+	return func(c *ReActConfig) {
+		c.CodeClaimGate = cfg
+	}
+}
+
 // WithReActPostModelPolicy 注入模型返回后的工具执行策略；nil 清除。
 func WithReActPostModelPolicy(p PostModelPolicy) ReActOption {
 	return func(c *ReActConfig) {
@@ -236,6 +245,11 @@ func WithReActMaxParallel(n int) ReActOption {
 // EvidenceGateEnabled reports whether Soft/Hard EvidenceGate is enabled (for builders/tests).
 func (a *ReActAgent) EvidenceGateEnabled() bool {
 	return a != nil && a.config.EvidenceGate.Enabled
+}
+
+// CodeClaimGateEnabled reports whether the source-claim cascade is enabled.
+func (a *ReActAgent) CodeClaimGateEnabled() bool {
+	return a != nil && a.config.CodeClaimGate.Enabled
 }
 
 func (a *ReActAgent) memoryOrchestrator() *memory.Orchestrator {
@@ -374,14 +388,14 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 				messages = append(messages, model.Message{Role: "user", Content: redirect})
 				continue
 			}
-			gate := a.checkEvidenceGate(trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
+			gate := a.checkAnswerGates(ctx, req, messages, trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
 			if gate.HaltErr != nil {
 				trace.Errors = append(trace.Errors, gate.HaltErr.Error())
 				emit(events.RunError, map[string]any{"error": gate.HaltErr.Error(), "step": step, "evidence_gate_halt": true})
 				return nil, runError(gate.HaltErr, trace)
 			}
 			if gate.Inject {
-				trace.EvidenceNudges++
+				applyAnswerGateInject(trace, gate)
 				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
 				messages = append(messages, model.Message{Role: "user", Content: gate.Prompt})
 				continue
@@ -390,9 +404,7 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 			_ = a.storeAssistant(ctx, lastAnswer)
 			emit(events.RunCompleted, map[string]any{"text_length": len(lastAnswer), "tool_calls": len(trace.ToolCalls)})
 			resp := responseWithTrace(lastAnswer, gen.TokenUsage, trace, messages)
-			if gate.Incomplete {
-				markEvidenceIncomplete(resp)
-			}
+			applyAnswerGateMeta(resp, gate)
 			return resp, nil
 		}
 
@@ -699,13 +711,13 @@ func (a *ReActAgent) runToolEventsSync(
 				messages = append(messages, model.Message{Role: "user", Content: redirect})
 				continue
 			}
-			gate := a.checkEvidenceGate(trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
+			gate := a.checkAnswerGates(ctx, req, messages, trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
 			if gate.HaltErr != nil {
 				sendError(gate.HaltErr, step)
 				return
 			}
 			if gate.Inject {
-				trace.EvidenceNudges++
+				applyAnswerGateInject(trace, gate)
 				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
 				messages = append(messages, model.Message{Role: "user", Content: gate.Prompt})
 				continue
@@ -715,11 +727,7 @@ func (a *ReActAgent) runToolEventsSync(
 				return
 			}
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-			var doneMeta map[string]any
-			if gate.Incomplete {
-				doneMeta = map[string]any{"evidence_incomplete": true}
-			}
-			_ = send(streamDoneEvent(trace, messages, doneMeta))
+			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate)))
 			return
 		}
 
@@ -799,7 +807,13 @@ func (a *ReActAgent) runToolEvents(
 			sendError(err, step)
 			return
 		}
+		buffer := a.shouldBufferCodeClaim(trace)
+		var held strings.Builder
 		for s := range textCh {
+			if buffer {
+				held.WriteString(s)
+				continue
+			}
 			if !send(StreamEvent{Type: StreamEventDelta, Text: s, Trace: trace}) {
 				return
 			}
@@ -821,25 +835,32 @@ func (a *ReActAgent) runToolEvents(
 				messages = append(messages, model.Message{Role: "user", Content: redirect})
 				continue
 			}
-			gate := a.checkEvidenceGate(trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
+			gate := a.checkAnswerGates(ctx, req, messages, trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
 			if gate.HaltErr != nil {
 				sendError(gate.HaltErr, step)
 				return
 			}
 			if gate.Inject {
-				trace.EvidenceNudges++
+				applyAnswerGateInject(trace, gate)
 				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
 				messages = append(messages, model.Message{Role: "user", Content: gate.Prompt})
 				continue
 			}
+			if buffer && held.Len() > 0 {
+				if !send(StreamEvent{Type: StreamEventDelta, Text: held.String(), Trace: trace}) {
+					return
+				}
+			}
 			_ = a.storeAssistant(ctx, gen.Text)
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-			var doneMeta map[string]any
-			if gate.Incomplete {
-				doneMeta = map[string]any{"evidence_incomplete": true}
-			}
-			_ = send(streamDoneEvent(trace, messages, doneMeta))
+			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate)))
 			return
+		}
+
+		if buffer && held.Len() > 0 {
+			if !send(StreamEvent{Type: StreamEventDelta, Text: held.String(), Trace: trace}) {
+				return
+			}
 		}
 
 		for _, call := range toolCallsFromStep(stepInfo) {
@@ -923,7 +944,7 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, messages []model.Mes
 		return nil, nil
 	}
 	// Soft: only Metadata + event; never inject/continue. HardHalt → error.
-	gate := a.checkEvidenceGate(trace, text, false, false, emit)
+	gate := a.checkAnswerGates(ctx, nil, messages, trace, text, false, false, emit)
 	if gate.HaltErr != nil {
 		return nil, gate.HaltErr
 	}
@@ -934,9 +955,7 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, messages []model.Mes
 		"forced_summary": true,
 	})
 	resp := responseWithTrace(text, gen.TokenUsage, trace, messages)
-	if gate.Incomplete {
-		markEvidenceIncomplete(resp)
-	}
+	applyAnswerGateMeta(resp, gate)
 	return resp, nil
 }
 
@@ -962,8 +981,15 @@ func (a *ReActAgent) forceFinalSummaryStream(
 	}
 	var doneMeta map[string]any
 	if resp.Metadata != nil {
+		doneMeta = map[string]any{}
 		if v, ok := resp.Metadata["evidence_incomplete"]; ok {
-			doneMeta = map[string]any{"evidence_incomplete": v}
+			doneMeta["evidence_incomplete"] = v
+		}
+		if v, ok := resp.Metadata["code_claim_mismatch"]; ok {
+			doneMeta["code_claim_mismatch"] = v
+		}
+		if len(doneMeta) == 0 {
+			doneMeta = nil
 		}
 	}
 	_ = send(streamDoneEvent(trace, resp.Messages, doneMeta))
@@ -1289,11 +1315,57 @@ func markEvidenceIncomplete(resp *Response) {
 	resp.Metadata["evidence_incomplete"] = true
 }
 
+func markCodeClaimMismatch(resp *Response) {
+	if resp == nil {
+		return
+	}
+	if resp.Metadata == nil {
+		resp.Metadata = map[string]any{}
+	}
+	resp.Metadata["code_claim_mismatch"] = true
+}
+
+func applyAnswerGateMeta(resp *Response, gate evidenceGateCheck) {
+	if gate.Incomplete {
+		markEvidenceIncomplete(resp)
+	}
+	if gate.CodeClaimMismatch {
+		markCodeClaimMismatch(resp)
+	}
+}
+
+func applyAnswerGateInject(trace *RunTrace, gate evidenceGateCheck) {
+	if trace == nil {
+		return
+	}
+	if gate.CodeClaim {
+		trace.CodeClaimNudges++
+		return
+	}
+	trace.EvidenceNudges++
+}
+
+func gateDoneMeta(gate evidenceGateCheck) map[string]any {
+	var m map[string]any
+	if gate.Incomplete {
+		m = map[string]any{"evidence_incomplete": true}
+	}
+	if gate.CodeClaimMismatch {
+		if m == nil {
+			m = map[string]any{}
+		}
+		m["code_claim_mismatch"] = true
+	}
+	return m
+}
+
 type evidenceGateCheck struct {
-	Inject     bool
-	Incomplete bool
-	HaltErr    error
-	Prompt     string
+	Inject            bool
+	Incomplete        bool
+	HaltErr           error
+	Prompt            string
+	CodeClaim         bool
+	CodeClaimMismatch bool
 }
 
 func collectEvidenceRefsFromTrace(trace *RunTrace) []tool.EvidenceRef {
@@ -1333,6 +1405,97 @@ func (a *ReActAgent) checkEvidenceGate(trace *RunTrace, finalText string, allowI
 		emit(events.EvidenceIncomplete, payload)
 	}
 	return evidenceGateCheck{Incomplete: true}
+}
+
+func (a *ReActAgent) checkAnswerGates(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
+	ev := a.checkEvidenceGate(trace, finalText, allowInject, hasStepRoom, emit)
+	if ev.HaltErr != nil || ev.Inject {
+		return ev
+	}
+	cc := a.checkCodeClaimGate(ctx, req, messages, trace, finalText, allowInject, hasStepRoom, emit)
+	if ev.Incomplete {
+		cc.Incomplete = true
+	}
+	return cc
+}
+
+func (a *ReActAgent) shouldBufferCodeClaim(trace *RunTrace) bool {
+	if a == nil || !a.config.CodeClaimGate.Enabled {
+		return false
+	}
+	if trace == nil {
+		return false
+	}
+	return len(CollectCodeQuoteSources(trace.ToolCalls)) > 0
+}
+
+func (a *ReActAgent) checkCodeClaimGate(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
+	if a == nil || !a.config.CodeClaimGate.Enabled {
+		return evidenceGateCheck{}
+	}
+	var records []ToolCallRecord
+	if trace != nil {
+		records = trace.ToolCalls
+	}
+	sources := CollectCodeQuoteSources(records)
+	if len(sources) == 0 {
+		return evidenceGateCheck{}
+	}
+	auditor := a.config.CodeClaimGate.Auditor
+	if auditor == nil {
+		auditor = a.model
+	}
+	timeout := a.config.CodeClaimGate.Timeout
+	if timeout <= 0 {
+		timeout = defaultCodeClaimAuditorTimeout
+	}
+	actx := ctx
+	cancel := func() {}
+	if ctx != nil {
+		actx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	userQ := originalUserQuestion(req, messages)
+	result := EvaluateCodeClaimCascade(actx, auditor, userQ, finalText, sources)
+	if result.Allow {
+		return evidenceGateCheck{}
+	}
+	if allowInject && result.Action == "inject" && trace != nil && trace.CodeClaimNudges == 0 && hasStepRoom {
+		return evidenceGateCheck{Inject: true, CodeClaim: true, Prompt: result.Prompt}
+	}
+	if emit != nil {
+		payload := map[string]any{"reason": result.Reason}
+		if trace != nil {
+			payload["code_claim_nudges"] = trace.CodeClaimNudges
+		}
+		emit(events.CodeClaimMismatch, payload)
+	}
+	return evidenceGateCheck{CodeClaimMismatch: true}
+}
+
+func requestUserText(req *Request) string {
+	if req == nil {
+		return ""
+	}
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			return req.Messages[i].Content
+		}
+	}
+	return ""
+}
+
+func originalUserQuestion(req *Request, messages []model.Message) string {
+	if t := requestUserText(req); t != "" {
+		return t
+	}
+	for _, m := range messages {
+		if m.Role == "user" && m.Content != forcedFinalSummaryPrompt {
+			return m.Content
+		}
+	}
+	return ""
 }
 
 func toolMessageContent(record ToolCallRecord) string {

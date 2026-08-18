@@ -362,7 +362,9 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	}
 	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, chat.ReActOptionsFromAgent(*agentMeta)...)
+	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, append(chat.ReActOptionsFromAgent(*agentMeta),
+		chat.CodeClaimGateTurnOption(reg, nil, m),
+	)...)
 
 	messages := make([]model.Message, 0, 3)
 	if effectivePrompt != "" {

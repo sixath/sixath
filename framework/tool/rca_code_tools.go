@@ -164,6 +164,7 @@ func registerRCAReadTool(reg *Registry, roots []string) error {
 		Name: "rca_read",
 		Description: "Read a source file from a specific configured code root with line numbers (LINE_NUM|CONTENT). " +
 			"Prefer this over terminal/type/cat and over workspace read_file when the path is under a code root. " +
+			"When claiming a call executes or a DB write happens, read the whole enclosing function including if/else/return; quote this output verbatim—do not reconstruct snippets. " +
 			"Path is guarded to stay inside the repository root.",
 		Toolset: ToolsetRCA,
 		Parameters: map[string]any{

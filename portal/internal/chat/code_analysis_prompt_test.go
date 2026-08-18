@@ -7,7 +7,7 @@ import (
 
 func TestAppendCodeAnalysisPrompt_Generic(t *testing.T) {
 	got := AppendCodeAnalysisPrompt("")
-	for _, want := range []string{"rca_grep", "code roots", "入边"} {
+	for _, want := range []string{"rca_grep", "code roots", "入边", "伪源码", "整个函数", "填结构体字段"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, got)
 		}

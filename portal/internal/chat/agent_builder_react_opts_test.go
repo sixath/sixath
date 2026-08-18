@@ -188,6 +188,82 @@ func TestEvidenceGateTurnOption_KeepsGateOnLogQuery(t *testing.T) {
 	}
 }
 
+func registerTestRCARead(t *testing.T) *tool.Registry {
+	t.Helper()
+	reg := tool.NewRegistry()
+	if err := reg.Register(tool.Tool{
+		Name:        "rca_read",
+		Description: "read",
+		Parameters:  map[string]any{"type": "object"},
+		Execute: func(ctx context.Context, params map[string]any) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register rca_read: %v", err)
+	}
+	return reg
+}
+
+func TestShouldEnableCodeClaimGate(t *testing.T) {
+	if ShouldEnableCodeClaimGate(nil, nil) {
+		t.Fatal("nil registry must be false")
+	}
+	empty := tool.NewRegistry()
+	if ShouldEnableCodeClaimGate(empty, nil) {
+		t.Fatal("surface-off without rca tools must not enable")
+	}
+	if ShouldEnableCodeClaimGate(empty, familySet([]string{FamilyCore, "mcp:gitlab"})) {
+		t.Fatal("gitlab-only must not enable code claim gate")
+	}
+	if !ShouldEnableCodeClaimGate(empty, familySet([]string{FamilyCode})) {
+		t.Fatal("code family must enable even before rca_read is listed")
+	}
+	reg := registerTestRCARead(t)
+	if !ShouldEnableCodeClaimGate(reg, nil) {
+		t.Fatal("rca_read in registry (surface off) must enable")
+	}
+}
+
+func TestCodeClaimGateTurnOption_enablesOnCodeFamily(t *testing.T) {
+	reg := registerTestRCARead(t)
+	fake := &builderGateFake{finalReply: "ok"}
+	active := familySet([]string{FamilyCore, FamilyCode})
+	a := BuildReActAgent(fake, reg, "", 10,
+		agent.WithReActMaxSteps(2),
+		CodeClaimGateTurnOption(reg, active, fake),
+	)
+	react, ok := a.(*agent.ReActAgent)
+	if !ok {
+		t.Fatalf("expected *ReActAgent, got %T", a)
+	}
+	if !react.CodeClaimGateEnabled() {
+		t.Fatal("code family turn must enable CodeClaimGate")
+	}
+}
+
+func TestCodeClaimGateTurnOption_skipsGitlabOnly(t *testing.T) {
+	reg := tool.NewRegistry()
+	if err := reg.Register(tool.Tool{
+		Name:        "gitlab_search",
+		Description: "gitlab",
+		Parameters:  map[string]any{"type": "object"},
+		Execute: func(ctx context.Context, params map[string]any) (any, error) {
+			return nil, nil
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	fake := &builderGateFake{finalReply: "ok"}
+	a := BuildReActAgent(fake, reg, "", 10,
+		agent.WithReActMaxSteps(2),
+		CodeClaimGateTurnOption(reg, familySet([]string{FamilyCore, "mcp:gitlab"}), fake),
+	)
+	react := a.(*agent.ReActAgent)
+	if react.CodeClaimGateEnabled() {
+		t.Fatal("gitlab-only turn must not enable CodeClaimGate")
+	}
+}
+
 type builderGateFake struct {
 	finalReply string
 	toolCalls  int
