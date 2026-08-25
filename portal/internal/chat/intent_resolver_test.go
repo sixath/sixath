@@ -115,10 +115,57 @@ func TestIntentResolver_NoHitFailNarrowCoreOnly(t *testing.T) {
 		t.Fatalf("source=%s", res.Source)
 	}
 	set := familySet(res.ActiveFamilies)
-	if len(set) != 1 {
-		t.Fatalf("want only core, got %v", res.ActiveFamilies)
-	}
 	if _, ok := set[FamilyCore]; !ok {
-		t.Fatalf("want only core, got %v", res.ActiveFamilies)
+		t.Fatalf("want core, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set[FamilyRCA]; !ok {
+		t.Fatalf("primary rca should remain on fail_narrow, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set["mcp:gitlab"]; ok {
+		t.Fatalf("gitlab must not activate, got %v", res.ActiveFamilies)
+	}
+}
+
+func TestIntentResolver_CodePathQuestionKeepsCodeDropsData(t *testing.T) {
+	r := IntentResolver{}
+	bound := []string{FamilyCore, FamilyCode, FamilyData, FamilySkills, FamilyMemory}
+	res := r.Resolve(context.Background(), IntentResolveInput{
+		UserText:      "区域侧有用户信息了，union在注册的时候会发生什么",
+		BoundFamilies: bound,
+	})
+	if res.Source != "fail_narrow" {
+		t.Fatalf("source=%s reason=%s", res.Source, res.Reason)
+	}
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set[FamilyCode]; !ok {
+		t.Fatalf("want code primary, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set[FamilyData]; ok {
+		t.Fatalf("data must not activate, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set[FamilySkills]; ok {
+		t.Fatalf("skills must not activate, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set[FamilyMemory]; ok {
+		t.Fatalf("memory must not activate, got %v", res.ActiveFamilies)
+	}
+}
+
+func TestIntentResolver_ExplicitMongoActivatesData(t *testing.T) {
+	r := IntentResolver{}
+	bound := []string{FamilyCore, FamilyCode, FamilyData}
+	res := r.Resolve(context.Background(), IntentResolveInput{
+		UserText:      "查 mongo 里有没有这个用户",
+		BoundFamilies: bound,
+	})
+	if res.Source != "rules" {
+		t.Fatalf("source=%s reason=%s active=%v", res.Source, res.Reason, res.ActiveFamilies)
+	}
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set[FamilyData]; !ok {
+		t.Fatalf("want data, got %v", res.ActiveFamilies)
+	}
+	if _, ok := set[FamilyCode]; ok {
+		t.Fatalf("unique data hit must not add code, got %v", res.ActiveFamilies)
 	}
 }

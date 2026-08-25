@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/sixath/framework/tool"
 )
 
 const (
@@ -15,13 +17,13 @@ const (
 
 // CodeQuoteSource is one rca_read / rca_grep payload used as ground truth.
 type CodeQuoteSource struct {
-	Path    string
-	Content string
+	Path        string
+	Content     string
+	ControlFlow []tool.ControlFlowFunc
 }
 
-const codeQuoteGateSoftPrompt = `源码引用与 rca_read 原文不一致（伪源码或漏掉了 if/else/return）。请从下面的工具原文连续摘抄，不要把不相邻的语句拼在一起；声称会调用/写库时必须带上包围它的条件。
-
-The quoted code dropped a control-flow guard. Re-quote rca_read verbatim including the enclosing if/else/return.
+const codeQuoteGateSoftPrompt = `源码引用与 rca_read 原文不一致（伪源码、漏掉了控制流门，或正文声称会执行受控调用）。
+先保留面向用户的中文结论，不要改成路径表或 P1/P2 报告。只修正结论对错和 fenced 代码：代码必须从工具原文连续摘抄。若正文点名会执行某次调用，用一句话说明前提（对应 control_flow 的 when），或写明「不会执行/跳过」。不要为过闸把整张路径表贴进回答。
 
 Missing context:
 %s`
@@ -38,37 +40,35 @@ var skipCallNames = map[string]struct{}{
 	"fmt": {}, "strings": {}, "strconv": {}, "errors": {},
 }
 
-// EvaluateCodeQuoteGate checks fenced quotes in finalText against rca_read/grep sources.
-// No sources or no fences → allow. Reconstructed / dropped-if quotes → Soft inject.
+// EvaluateCodeQuoteGate checks the final answer against rca_read/grep sources.
+// Fence quotes must be contiguous excerpts. Gated calls from control_flow must
+// cite a path when (or skip wording). No sources / no CFG and no fences → allow.
 func EvaluateCodeQuoteGate(sources []CodeQuoteSource, finalText string) EvidenceGateResult {
 	if len(sources) == 0 {
 		return EvidenceGateResult{Allow: true}
 	}
-	fences := extractCodeFences(finalText)
-	if len(fences) == 0 {
-		return EvidenceGateResult{Allow: true}
-	}
-
-	parsed := make([]parsedSource, 0, len(sources))
-	for _, src := range sources {
-		p := parseCodeQuoteSource(src)
-		if len(p.lines) == 0 {
-			continue
-		}
-		parsed = append(parsed, p)
-	}
-	if len(parsed) == 0 {
-		return EvidenceGateResult{Allow: true}
-	}
 
 	var missing []string
-	for _, fence := range fences {
-		if reason, ok := fenceMatchesSources(fence, parsed); !ok {
-			if reason != "" {
+	fences := extractCodeFences(finalText)
+	if len(fences) > 0 {
+		parsed := make([]parsedSource, 0, len(sources))
+		for _, src := range sources {
+			p := parseCodeQuoteSource(src)
+			if len(p.lines) == 0 {
+				continue
+			}
+			parsed = append(parsed, p)
+		}
+		for _, fence := range fences {
+			if len(parsed) == 0 {
+				break
+			}
+			if reason, ok := fenceMatchesSources(fence, parsed); !ok && reason != "" {
 				missing = append(missing, reason)
 			}
 		}
 	}
+	missing = append(missing, gatedCallClaimMismatches(finalText, sources)...)
 	if len(missing) == 0 {
 		return EvidenceGateResult{Allow: true}
 	}
@@ -78,6 +78,266 @@ func EvaluateCodeQuoteGate(sources []CodeQuoteSource, finalText string) Evidence
 		Reason: "code quote mismatch",
 		Prompt: fmt.Sprintf(codeQuoteGateSoftPrompt, strings.Join(uniqueStrings(missing), "\n")),
 	}
+}
+
+var gatedCallSkipPhrases = []string{
+	"跳过", "被跳过", "不会执行", "未执行", "不调用", "不会调用", "不写入", "未写入", "不会写",
+	"条件不成立", "不满足", "不会进", "不会进入", "走不到", "不会走", "不进入", "进不去",
+	"skipped", "not called", "does not call", "will not call", "won't call",
+	"not executed", "does not execute",
+}
+
+func gatedCallClaimMismatches(final string, sources []CodeQuoteSource) []string {
+	type key struct{ name, path string }
+	seen := map[key]struct{}{}
+	var out []string
+	for _, src := range sources {
+		if len(src.ControlFlow) == 0 {
+			continue
+		}
+		for _, fn := range src.ControlFlow {
+			for _, name := range gatedCallsIn(fn) {
+				k := key{name, fn.File}
+				if _, ok := seen[k]; ok {
+					continue
+				}
+				seen[k] = struct{}{}
+				if !strings.Contains(final, name) {
+					continue
+				}
+				exclusive := exclusiveWhenForCall(fn, name)
+				if len(exclusive) == 0 {
+					continue
+				}
+				if answerAcknowledgesCFG(final, name, exclusive, fn) {
+					continue
+				}
+				out = append(out, fmt.Sprintf("%s: %s is gated by %s — cite control_flow when or say it is skipped",
+					fn.File, name, strings.Join(exclusive, "; ")))
+			}
+		}
+	}
+	return out
+}
+
+func gatedCallsIn(fn tool.ControlFlowFunc) []string {
+	if len(fn.Paths) == 0 {
+		return nil
+	}
+	total := len(fn.Paths)
+	count := map[string]int{}
+	order := make([]string, 0)
+	for _, p := range fn.Paths {
+		seen := map[string]struct{}{}
+		for _, c := range p.Calls {
+			if _, ok := seen[c]; ok {
+				continue
+			}
+			seen[c] = struct{}{}
+			if count[c] == 0 {
+				order = append(order, c)
+			}
+			count[c]++
+		}
+	}
+	var out []string
+	for _, name := range order {
+		if count[name] < total {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func exclusiveWhenForCall(fn tool.ControlFlowFunc, name string) []string {
+	var with, without []tool.ControlFlowPath
+	for _, p := range fn.Paths {
+		if pathCalls(p, name) {
+			with = append(with, p)
+		} else {
+			without = append(without, p)
+		}
+	}
+	if len(with) == 0 || len(without) == 0 {
+		return nil
+	}
+	withoutSet := map[string]struct{}{}
+	for _, p := range without {
+		for _, w := range p.When {
+			withoutSet[compactCodeText(w)] = struct{}{}
+		}
+	}
+	inter := map[string]int{}
+	for _, p := range with {
+		seen := map[string]struct{}{}
+		for _, w := range p.When {
+			c := compactCodeText(w)
+			if c == "" {
+				continue
+			}
+			if _, ok := seen[c]; ok {
+				continue
+			}
+			seen[c] = struct{}{}
+			inter[c]++
+		}
+	}
+	var exclusive []string
+	seenRaw := map[string]struct{}{}
+	for _, p := range with {
+		for _, w := range p.When {
+			c := compactCodeText(w)
+			if inter[c] != len(with) {
+				continue
+			}
+			if _, ok := withoutSet[c]; ok {
+				continue
+			}
+			if _, ok := seenRaw[c]; ok {
+				continue
+			}
+			seenRaw[c] = struct{}{}
+			exclusive = append(exclusive, w)
+		}
+	}
+	if len(exclusive) > 0 {
+		return exclusive
+	}
+	var fallback []string
+	for _, p := range with {
+		for _, w := range p.When {
+			c := compactCodeText(w)
+			if c == "" {
+				continue
+			}
+			if _, ok := seenRaw[c]; ok {
+				continue
+			}
+			seenRaw[c] = struct{}{}
+			fallback = append(fallback, w)
+		}
+	}
+	return fallback
+}
+
+func pathCalls(p tool.ControlFlowPath, name string) bool {
+	for _, c := range p.Calls {
+		if c == name {
+			return true
+		}
+	}
+	return false
+}
+
+func answerAcknowledgesCFG(final, name string, exclusive []string, fn tool.ControlFlowFunc) bool {
+	for _, w := range exclusive {
+		if condMentionedIn(final, w) {
+			return true
+		}
+		if acknowledgeRangeOrElse(final, w) {
+			return true
+		}
+	}
+	for _, p := range fn.Paths {
+		if pathCalls(p, name) && condMentionedIn(final, p.ID) {
+			return true
+		}
+	}
+	for _, idx := range allStringIndexes(final, name) {
+		win := runeWindowAround(final, idx, len(name), 240)
+		for _, phrase := range gatedCallSkipPhrases {
+			if strings.Contains(win, phrase) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func acknowledgeRangeOrElse(final, cond string) bool {
+	c := strings.TrimSpace(cond)
+	if strings.HasPrefix(c, "range ") {
+		rest := strings.TrimSpace(strings.TrimPrefix(c, "range "))
+		if strings.Contains(final, "遍历") && (rest == "" || strings.Contains(final, rest) || strings.Contains(compactCodeText(final), compactCodeText(rest))) {
+			return true
+		}
+		if rest != "" && strings.Contains(compactCodeText(final), compactCodeText(rest)) {
+			return true
+		}
+	}
+	if strings.HasPrefix(c, "!") || strings.HasPrefix(c, "!(") {
+		for _, p := range []string{"否则", "不然", "else"} {
+			if strings.Contains(final, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func condMentionedIn(final, cond string) bool {
+	condCompact := compactCodeText(cond)
+	if condCompact == "" {
+		return false
+	}
+	blob := compactCodeText(final)
+	if strings.Contains(blob, condCompact) {
+		return true
+	}
+	if alt := strings.ReplaceAll(condCompact, "==", "="); alt != condCompact && strings.Contains(blob, alt) {
+		return true
+	}
+	if alt := strings.ReplaceAll(condCompact, "!=", "≠"); alt != condCompact && strings.Contains(blob, alt) {
+		return true
+	}
+	return false
+}
+
+func compactCodeText(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\t", "")
+	return strings.ReplaceAll(s, " ", "")
+}
+
+func allStringIndexes(s, sub string) []int {
+	if sub == "" {
+		return nil
+	}
+	var out []int
+	from := 0
+	for {
+		i := strings.Index(s[from:], sub)
+		if i < 0 {
+			return out
+		}
+		pos := from + i
+		out = append(out, pos)
+		from = pos + len(sub)
+	}
+}
+
+func runeWindowAround(s string, byteIdx, byteLen, radius int) string {
+	if byteIdx < 0 {
+		byteIdx = 0
+	}
+	if byteIdx > len(s) {
+		byteIdx = len(s)
+	}
+	endByte := byteIdx + byteLen
+	if endByte > len(s) {
+		endByte = len(s)
+	}
+	runes := []rune(s)
+	start := len([]rune(s[:byteIdx])) - radius
+	if start < 0 {
+		start = 0
+	}
+	end := len([]rune(s[:endByte])) + radius
+	if end > len(runes) {
+		end = len(runes)
+	}
+	return string(runes[start:end])
 }
 
 type srcLine struct {
@@ -578,7 +838,11 @@ func CollectCodeQuoteSources(records []ToolCallRecord) []CodeQuoteSource {
 			if content == "" {
 				continue
 			}
-			out = append(out, CodeQuoteSource{Path: path, Content: content})
+			out = append(out, CodeQuoteSource{
+				Path:        path,
+				Content:     content,
+				ControlFlow: parseControlFlowField(m["control_flow"]),
+			})
 		case toolRCAGrep:
 			out = append(out, grepSnippetsAsSources(m)...)
 		}
@@ -648,4 +912,29 @@ func anyString(v any) string {
 		return s
 	}
 	return ""
+}
+
+func parseControlFlowField(v any) []tool.ControlFlowFunc {
+	if v == nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case []tool.ControlFlowFunc:
+		return x
+	case tool.ControlFlowFunc:
+		return []tool.ControlFlowFunc{x}
+	}
+	b, err := json.Marshal(v)
+	if err != nil || len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	var out []tool.ControlFlowFunc
+	if err := json.Unmarshal(b, &out); err == nil && len(out) > 0 {
+		return out
+	}
+	var one tool.ControlFlowFunc
+	if err := json.Unmarshal(b, &one); err == nil && one.Function != "" {
+		return []tool.ControlFlowFunc{one}
+	}
+	return nil
 }

@@ -42,6 +42,19 @@ func BuildEffectiveSystemPromptForTurn(userPrompt string, skillsIdx *skills.Inde
 
 // BuildEffectiveSystemPromptForTurnScoped also merges persisted procedural units for the session (P3-E).
 func BuildEffectiveSystemPromptForTurnScoped(userPrompt string, skillsIdx *skills.Index, userQuery, agentID, sessionID string) string {
+	return BuildEffectiveSystemPromptForTurnOnSurface(userPrompt, skillsIdx, userQuery, agentID, sessionID, nil)
+}
+
+// BuildEffectiveSystemPromptForTurnOnSurface skips the skills catalog/auto-route when the
+// skills family is not in this turn's tool surface.
+func BuildEffectiveSystemPromptForTurnOnSurface(userPrompt string, skillsIdx *skills.Index, userQuery, agentID, sessionID string, active map[string]struct{}) string {
+	if ToolFamilySplitEnabled() && !FamilyActive(active, FamilySkills) {
+		return userPrompt
+	}
+	return BuildEffectiveSystemPromptForTurnScopedAlways(userPrompt, skillsIdx, userQuery, agentID, sessionID)
+}
+
+func BuildEffectiveSystemPromptForTurnScopedAlways(userPrompt string, skillsIdx *skills.Index, userQuery, agentID, sessionID string) string {
 	base := BuildEffectiveSystemPrompt(userPrompt, skillsIdx)
 	userQuery = strings.TrimSpace(userQuery)
 	base = appendProceduralBindingHints(base, userQuery, skillsIdx, agentID, sessionID)
@@ -57,6 +70,24 @@ func BuildEffectiveSystemPromptForTurnScoped(userPrompt string, skillsIdx *skill
 	if !ok {
 		return base
 	}
+	minScore := skillRouteSettings.MinScore
+	if minScore <= 0 {
+		minScore = 5
+	}
+	qLower := strings.ToLower(userQuery)
+	name := strings.ToLower(strings.TrimSpace(match.Name))
+	nameSpaced := strings.ReplaceAll(name, "-", " ")
+	nameInQuery := name != "" && (strings.Contains(qLower, name) || strings.Contains(qLower, nameSpaced))
+	high := nameInQuery || (match.RunnerUpScore > 0 && match.Score >= minScore && match.Score-match.RunnerUpScore >= 2)
+	if !high {
+		desc := skillMetaDescription(skillsIdx, match.Name)
+		desc = truncateRunes(desc, 200)
+		block := fmt.Sprintf("【候选 Skill: %s】%s", match.Name, desc)
+		if base == "" {
+			return block
+		}
+		return base + "\n\n---\n\n" + block
+	}
 	body, err := skillsIdx.LoadSkillBody(match.Name)
 	if err != nil || strings.TrimSpace(body) == "" {
 		return base
@@ -68,14 +99,26 @@ func BuildEffectiveSystemPromptForTurnScoped(userPrompt string, skillsIdx *skill
 	body = truncateRunes(body, maxRunes)
 	block := fmt.Sprintf(
 		"【已自动匹配 Skill: %s（得分 %d）】\n"+
-			"本轮用户问题与该技能高度相关。以下内容来自 SKILL.md，请**优先遵循**此工作流；"+
-			"无需再调用 load_skill 加载该技能（除非需要 read_skill_file 或 execute_skill_script）。\n\n%s",
+			"以下内容来自 SKILL.md。无需再调用 load_skill 加载该技能（除非需要 read_skill_file 或 execute_skill_script）。\n\n%s\n\n"+
+			"此手册不得替换【本轮任务锁】中的用户问题；上下文已有取值禁止再向用户索取。",
 		match.Name, match.Score, body,
 	)
 	if base == "" {
 		return block
 	}
 	return base + "\n\n---\n\n" + block
+}
+
+func skillMetaDescription(idx *skills.Index, name string) string {
+	if idx == nil {
+		return ""
+	}
+	for _, m := range idx.All() {
+		if m.Name == name {
+			return strings.TrimSpace(m.Description)
+		}
+	}
+	return ""
 }
 
 func appendProceduralBindingHints(base, userQuery string, skillsIdx *skills.Index, agentID, sessionID string) string {

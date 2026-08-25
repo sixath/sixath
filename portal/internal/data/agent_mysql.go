@@ -40,6 +40,10 @@ func modelConfigToBiz(m model.ModelConfig) biz.ModelConfig {
 		APIKey:          getStr(m, "api_key"),
 		BaseURL:         getStr(m, "base_url"),
 		MaxOutputTokens: getInt(m, "max_output_tokens"),
+		CodeProvider:    getStr(m, "code_provider"),
+		CodeModel:       getStr(m, "code_model"),
+		CodeAPIKey:      getStr(m, "code_api_key"),
+		CodeBaseURL:     getStr(m, "code_base_url"),
 	}
 }
 
@@ -59,6 +63,18 @@ func bizModelConfigToMap(c biz.ModelConfig) model.ModelConfig {
 	}
 	if c.MaxOutputTokens > 0 {
 		m["max_output_tokens"] = c.MaxOutputTokens
+	}
+	if c.CodeProvider != "" {
+		m["code_provider"] = c.CodeProvider
+	}
+	if c.CodeModel != "" {
+		m["code_model"] = c.CodeModel
+	}
+	if c.CodeAPIKey != "" {
+		m["code_api_key"] = c.CodeAPIKey
+	}
+	if c.CodeBaseURL != "" {
+		m["code_base_url"] = c.CodeBaseURL
 	}
 	return m
 }

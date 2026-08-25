@@ -16,11 +16,21 @@ import (
 
 type fakeOpenAIClient struct {
 	toolSteps        []model.ToolStep
+	plainReplies     []string
 	finalReply       string
 	err              error
 	chatCalls        int
 	toolCalls        int
 	lastToolMessages []model.Message
+}
+
+func (f *fakeOpenAIClient) nextPlainReply() string {
+	if len(f.plainReplies) > 0 {
+		s := f.plainReplies[0]
+		f.plainReplies = f.plainReplies[1:]
+		return s
+	}
+	return f.finalReply
 }
 
 func (f *fakeOpenAIClient) Generate(ctx context.Context, prompt string, opts ...model.Option) (*model.Generation, error) {
@@ -59,13 +69,14 @@ func (f *fakeOpenAIClient) ChatWithTools(ctx context.Context, messages []model.M
 	if f.err != nil {
 		return nil, f.err
 	}
+	text := f.nextPlainReply()
 	if len(f.toolSteps) > 0 {
 		step := f.toolSteps[0]
 		f.toolSteps = f.toolSteps[1:]
-		return &model.Generation{Text: f.finalReply, Raw: step}, nil
+		return &model.Generation{Text: text, Raw: step}, nil
 	}
 	return &model.Generation{
-		Text: f.finalReply,
+		Text: text,
 		Raw:  model.ToolStep{Used: false},
 	}, nil
 }

@@ -7,8 +7,9 @@ import (
 
 // RouteMatch 表示一次技能路由命中结果。
 type RouteMatch struct {
-	Name  string
-	Score int
+	Name          string
+	Score         int
+	RunnerUpScore int
 }
 
 // RouteOptions 控制关键词路由行为。
@@ -53,12 +54,16 @@ func Route(userQuery string, metas []SkillMeta, opts RouteOptions) []RouteMatch 
 
 // RouteBest 返回得分最高且达阈值的技能；无命中时 ok=false。
 func RouteBest(userQuery string, metas []SkillMeta, opts RouteOptions) (RouteMatch, bool) {
-	opts.MaxResults = 1
+	opts.MaxResults = 2
 	matches := Route(userQuery, metas, opts)
 	if len(matches) == 0 {
 		return RouteMatch{}, false
 	}
-	return matches[0], true
+	m := matches[0]
+	if len(matches) >= 2 {
+		m.RunnerUpScore = matches[1].Score
+	}
+	return m, true
 }
 
 func scoreSkill(q string, qTokens map[string]struct{}, m SkillMeta) int {
@@ -91,10 +96,14 @@ func scoreSkill(q string, qTokens map[string]struct{}, m SkillMeta) int {
 	}
 	for _, tag := range m.Tags {
 		tag = strings.ToLower(strings.TrimSpace(tag))
-		if tag == "" {
+		if tag == "" || len(tag) < 3 {
 			continue
 		}
-		if strings.Contains(q, tag) || tagContainedInTokens(tag, qTokens) {
+		hit := tagContainedInTokens(tag, qTokens)
+		if !hit && len(tag) >= 4 && strings.Contains(q, tag) {
+			hit = true
+		}
+		if hit {
 			score += 5
 		}
 	}
@@ -104,21 +113,38 @@ func scoreSkill(q string, qTokens map[string]struct{}, m SkillMeta) int {
 func tokenize(s string) map[string]struct{} {
 	out := make(map[string]struct{})
 	var b strings.Builder
+	lastClass := 0
 	flush := func() {
 		if b.Len() >= 3 {
 			out[b.String()] = struct{}{}
 		}
 		b.Reset()
+		lastClass = 0
 	}
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-		} else {
+		c := tokenClass(r)
+		if c == 0 {
+			flush()
+			continue
+		}
+		if lastClass != 0 && c != lastClass {
 			flush()
 		}
+		b.WriteRune(r)
+		lastClass = c
 	}
 	flush()
 	return out
+}
+
+func tokenClass(r rune) int {
+	if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+		return 1
+	}
+	if unicode.IsLetter(r) {
+		return 2
+	}
+	return 0
 }
 
 func tagContainedInTokens(tag string, tokens map[string]struct{}) bool {

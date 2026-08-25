@@ -21,9 +21,10 @@ func registerFakeRCARead(t *testing.T) *tool.Registry {
 		Parameters:  map[string]any{"type": "object"},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			return map[string]any{
-				"ok":      true,
-				"file":    "helper.go",
-				"content": helperReadContent,
+				"ok":           true,
+				"file":         "helper.go",
+				"content":      helperReadContent,
+				"control_flow": c304ControlFlow(),
 			}, nil
 		},
 	}); err != nil {
@@ -91,7 +92,7 @@ func TestReActCodeClaimGate_machineVetoSoftInject(t *testing.T) {
 	}
 }
 
-func TestReActCodeClaimGate_proseFailInjectsLLM(t *testing.T) {
+func TestReActCodeClaimGate_proseGuardedCallMachineVeto(t *testing.T) {
 	mem := memory.NewBufferMemory(5)
 	fake := &fakeOpenAIClient{
 		toolSteps: []model.ToolStep{{
@@ -99,10 +100,10 @@ func TestReActCodeClaimGate_proseFailInjectsLLM(t *testing.T) {
 			ToolName:  "rca_read",
 			Arguments: map[string]any{"file": "helper.go"},
 		}},
-		finalReply: "区域已有用户时，union-access 会把 UID 写入本地 DBUnionUserAreaInfo 映射表。",
+		finalReply: "区域返回 1105 后，union 把 1105 当成功，调用 InsertUnionUserAreaInfo 回填 t_union_user_area_info 映射表。",
 	}
 	reg := registerFakeRCARead(t)
-	stub := &stubClaimModel{reply: `{"verdict":"fail","issues":[{"kind":"dropped_guard","path":"helper.go","symbol":"InsertUnionUserAreaInfo","guard":"errcode == 0","claim":"会写入本地映射"}]}`}
+	stub := &stubClaimModel{reply: `{"verdict":"pass","issues":[]}`}
 	react := NewReActAgent(fake, mem, reg,
 		WithReActMaxSteps(4),
 		WithReActCodeClaimGate(CodeClaimGateConfig{Enabled: true, Auditor: stub}),
@@ -113,8 +114,42 @@ func TestReActCodeClaimGate_proseFailInjectsLLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if stub.last == nil {
-		t.Fatal("prose claim must reach LLM auditor")
+	if stub.last != nil {
+		t.Fatal("prose naming a gated call must be a machine veto, skip LLM")
+	}
+	tr, _ := resp.Metadata["trace"].(*RunTrace)
+	if tr == nil || tr.CodeClaimNudges != 1 {
+		t.Fatalf("CodeClaimNudges want 1, got %#v", tr)
+	}
+	if resp.Metadata["code_claim_mismatch"] != true {
+		t.Fatalf("expected code_claim_mismatch after second fail, got %#v", resp.Metadata)
+	}
+}
+
+func TestReActCodeClaimGate_proseWriteScenarioMachineVeto(t *testing.T) {
+	mem := memory.NewBufferMemory(5)
+	fake := &fakeOpenAIClient{
+		toolSteps: []model.ToolStep{{
+			Used:      true,
+			ToolName:  "rca_read",
+			Arguments: map[string]any{"file": "helper.go"},
+		}},
+		finalReply: "区域已有用户时，union-access 会把 UID 写入本地 DBUnionUserAreaInfo 映射表。",
+	}
+	reg := registerFakeRCARead(t)
+	stub := &stubClaimModel{reply: `{"verdict":"pass","issues":[]}`}
+	react := NewReActAgent(fake, mem, reg,
+		WithReActMaxSteps(4),
+		WithReActCodeClaimGate(CodeClaimGateConfig{Enabled: true, Auditor: stub}),
+	)
+	resp, err := react.Run(context.Background(), &Request{
+		Messages: []model.Message{{Role: "user", Content: "区域已有用户时会怎样"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stub.last != nil {
+		t.Fatal("unnamed write under 已有用户/1105 must be a machine scenario veto, skip LLM")
 	}
 	tr, _ := resp.Metadata["trace"].(*RunTrace)
 	if tr == nil || tr.CodeClaimNudges != 1 {
@@ -128,7 +163,7 @@ func TestReActCodeClaimGate_proseFailInjectsLLM(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("inject prompt should mention the failed symbol")
+		t.Fatal("inject prompt should mention the unreachable write")
 	}
 }
 

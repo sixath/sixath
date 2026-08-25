@@ -10,4 +10,6 @@ const (
 	OriginGuardrailHalt     = "guardrail_halt"
 	OriginL2Handoff         = "l2_handoff"
 	OriginCompactBoundary   = "compact_boundary"
+	OriginCodeWorkset       = "code_workset"
+	OriginCodePin           = "code_pin"
 )

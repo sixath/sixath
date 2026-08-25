@@ -132,6 +132,46 @@ func TestBoundFamiliesFromBindings(t *testing.T) {
 	}
 }
 
+func TestFamilyForBuiltinToolName_SplitDataSkillsMemory(t *testing.T) {
+	t.Setenv(toolFamilySplitEnv, "1")
+	if FamilyForBuiltinToolName("list_tables") != FamilyData {
+		t.Fatal("list_tables → data")
+	}
+	if FamilyForBuiltinToolName("skill_view") != FamilySkills {
+		t.Fatal("skill_view → skills")
+	}
+	if FamilyForBuiltinToolName("memory_recall") != FamilyMemory {
+		t.Fatal("memory_recall → memory")
+	}
+	t.Setenv(toolFamilySplitEnv, "0")
+	if FamilyForBuiltinToolName("list_tables") != FamilyCore {
+		t.Fatal("split off: list_tables → core")
+	}
+}
+
+func TestBoundFamiliesFrom_DatasourceIsData(t *testing.T) {
+	t.Setenv(toolFamilySplitEnv, "1")
+	tools := []*biz.ToolMeta{{Name: "migu_mongodb", Type: biz.ToolTypeDatasource}}
+	set := familySet(BoundFamiliesFrom(tools, nil, false, false))
+	if _, ok := set[FamilyData]; !ok {
+		t.Fatalf("want data, got %v", set)
+	}
+}
+
+func TestInferPrimaryFamilies(t *testing.T) {
+	got := familySet(InferPrimaryFamilies([]string{FamilyCore, FamilyCode, FamilyData}))
+	if _, ok := got[FamilyCode]; !ok {
+		t.Fatal("code primary")
+	}
+	if _, ok := got[FamilyData]; ok {
+		t.Fatal("data is not primary when code is bound")
+	}
+	got = familySet(InferPrimaryFamilies([]string{FamilyCore, FamilyData}))
+	if _, ok := got[FamilyData]; !ok {
+		t.Fatal("data-only agent primary is data")
+	}
+}
+
 func TestFamilyForRegisteredTool_MCPBinding(t *testing.T) {
 	tl := tool.Tool{Name: "list_projects", Bindings: map[string]string{"mcp_server": "gitlab"}}
 	if FamilyForRegisteredTool(tl) != "mcp:gitlab" {

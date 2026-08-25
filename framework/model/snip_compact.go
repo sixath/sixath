@@ -102,7 +102,7 @@ func isProtectedRuntimeMessage(m Message) bool {
 	}
 	origin, _ := m.Metadata[MetadataKeySixathOrigin].(string)
 	switch origin {
-	case OriginL2Handoff, OriginMemoryFence, OriginCompressionNotice, OriginCompactBoundary, OriginGuardrailHalt:
+	case OriginL2Handoff, OriginMemoryFence, OriginCompressionNotice, OriginCompactBoundary, OriginGuardrailHalt, OriginCodeWorkset, OriginCodePin:
 		return true
 	default:
 		return false

@@ -174,8 +174,11 @@ func filterToolsForSurface(tools []*biz.ToolMeta, active map[string]struct{}) []
 				out = append(out, t)
 			}
 		default:
-			// datasource + builtin → core lane
-			if FamilyActive(active, FamilyCore) {
+			fam := FamilyCore
+			if t.Type == biz.ToolTypeDatasource && ToolFamilySplitEnabled() {
+				fam = FamilyData
+			}
+			if FamilyActive(active, fam) {
 				out = append(out, t)
 			}
 		}
@@ -471,6 +474,9 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 	if ShouldEnableEvidenceGate(reg) {
 		opts = append(opts, agent.WithReActEvidenceGate(agent.EvidenceGateConfig{Enabled: true}))
 	}
+	if ShouldEnableParallelTools(reg) {
+		opts = append(opts, agent.WithReActParallelTools(true))
+	}
 	if gate := NewTurnIntentGate(); gate != nil {
 		opts = append(opts, agent.WithReActPostModelPolicy(gate))
 	}
@@ -489,6 +495,20 @@ func ShouldEnableEvidenceGate(reg *tool.Registry) bool {
 	}
 	if _, ok := reg.Get("es_log_query"); ok {
 		return true
+	}
+	return false
+}
+
+// ShouldEnableParallelTools is true when the registry has code-root tools that
+// are safe to run together in one ReAct step (grep/read/symbol).
+func ShouldEnableParallelTools(reg *tool.Registry) bool {
+	if reg == nil {
+		return false
+	}
+	for _, name := range []string{"rca_read", "rca_grep", "rca_glob", "rca_symbol"} {
+		if _, ok := reg.Get(name); ok {
+			return true
+		}
 	}
 	return false
 }

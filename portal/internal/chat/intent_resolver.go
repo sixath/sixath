@@ -13,10 +13,11 @@ type FamilyClassifier interface {
 }
 
 type IntentResolveInput struct {
-	UserText      string
-	BoundFamilies []string
-	Servers       []*biz.McpServerMeta // for id/name keyword boost
-	Classifier    FamilyClassifier     // optional; also set on IntentResolver
+	UserText        string
+	BoundFamilies   []string
+	PrimaryFamilies []string // optional; empty → InferPrimaryFamilies(BoundFamilies)
+	Servers         []*biz.McpServerMeta
+	Classifier      FamilyClassifier
 }
 
 type IntentResolveResult struct {
@@ -71,15 +72,15 @@ func (r IntentResolver) Resolve(ctx context.Context, in IntentResolveInput) Inte
 			Reason:         "unique_rule_hit",
 		}
 	case len(hits) == 0:
-		res = r.classifyOrNarrow(ctx, in.UserText, bound, nil, clf, "no_rule_hit")
+		res = r.classifyOrNarrow(ctx, in.UserText, bound, nil, clf, "no_rule_hit", in.PrimaryFamilies)
 	default:
-		res = r.classifyOrNarrow(ctx, in.UserText, bound, hits, clf, "multi_rule_hit")
+		res = r.classifyOrNarrow(ctx, in.UserText, bound, hits, clf, "multi_rule_hit", in.PrimaryFamilies)
 	}
 	res.ActiveFamilies = unionCodeWhenRCA(res.ActiveFamilies, in.BoundFamilies)
 	return res
 }
 
-func (r IntentResolver) classifyOrNarrow(ctx context.Context, user string, bound map[string]struct{}, candidates []string, clf FamilyClassifier, reason string) IntentResolveResult {
+func (r IntentResolver) classifyOrNarrow(ctx context.Context, user string, bound map[string]struct{}, candidates []string, clf FamilyClassifier, reason string, primary []string) IntentResolveResult {
 	boundList := make([]string, 0, len(bound))
 	for id := range bound {
 		boundList = append(boundList, id)
@@ -99,7 +100,10 @@ func (r IntentResolver) classifyOrNarrow(ctx context.Context, user string, bound
 			}
 		}
 	}
-	narrow := filterBoundOnly(candidates, bound)
+	if len(primary) == 0 {
+		primary = InferPrimaryFamilies(boundList)
+	}
+	narrow := filterBoundOnly(mergeFamilyIDs(candidates, primary...), bound)
 	if len(narrow) == 0 {
 		narrow = []string{FamilyCore}
 	} else {

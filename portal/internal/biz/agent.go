@@ -12,6 +12,11 @@ type ModelConfig struct {
 	APIKey          string
 	BaseURL         string
 	MaxOutputTokens int // 单次回复 max_tokens；<=0 使用 Portal 默认
+	// Code* 可选：FamilyCode 激活时覆盖会话模型（也可用 SATH_CODE_* env）。
+	CodeProvider string
+	CodeModel    string
+	CodeAPIKey   string
+	CodeBaseURL  string
 }
 
 // AgentMeta represents an agent entity

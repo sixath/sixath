@@ -134,33 +134,60 @@ func MatchCredentialSolicitation(cat ToolCatalog, text string) (ToolCatalogEntry
 	if text == "" {
 		return ToolCatalogEntry{}, false
 	}
-	cfg := DefaultAskUserGuardConfig()
-	if match, ok := MatchAskUserIntent(cat, cfg, text, "text"); ok {
-		return match, true
+	if deniesCredentialSolicitation(text) {
+		return ToolCatalogEntry{}, false
 	}
 	if !looksLikeCredentialSolicitation(text) {
 		return ToolCatalogEntry{}, false
 	}
-	return fallbackBoundCredentialTool(cat)
+	cfg := DefaultAskUserGuardConfig()
+	if match, ok := MatchAskUserIntent(cat, cfg, text, "text"); ok {
+		if isSkillsFamilyTool(match.Name) {
+			return fallbackBoundCredentialTool(cat)
+		}
+		return match, true
+	}
+	match, ok := fallbackBoundCredentialTool(cat)
+	if !ok || isSkillsFamilyTool(match.Name) {
+		return ToolCatalogEntry{}, false
+	}
+	return match, true
 }
 
-func looksLikeCredentialSolicitation(text string) bool {
-	lower := strings.ToLower(text)
+func deniesCredentialSolicitation(text string) bool {
 	for _, phrase := range []string{
-		"请提供", "请给出", "需要你提供", "请回复", "尚未保存", "连接信息", "连接串",
+		"未向用户索取",
+		"不会再向用户索取",
+		"未索取任何连接",
+		"不需要你提供任何连接",
+		"已由 Agent 绑定",
+		"已绑定",
 	} {
 		if strings.Contains(text, phrase) {
 			return true
 		}
 	}
-	keywords := []string{"host", "端口", "port", "password", "密码", "webhook", "用户名", "qyapi.weixin", "mysql", "数据库"}
-	hits := 0
-	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
-			hits++
+	return false
+}
+
+// looksLikeCredentialSolicitation 仅检测祈使子串。连接信息/连接串与双关键词
+// 不再单独开火：规格要求它们必须同时带祈使，而祈使已覆盖该路径。
+func looksLikeCredentialSolicitation(text string) bool {
+	for _, phrase := range []string{"请提供", "请给出", "需要你提供", "请回复", "尚未保存"} {
+		if strings.Contains(text, phrase) {
+			return true
 		}
 	}
-	return hits >= 2
+	return false
+}
+
+func isSkillsFamilyTool(name string) bool {
+	switch name {
+	case "skills_list", "load_skill", "skill_view", "skill_manage", "read_skill_file", "execute_skill_script":
+		return true
+	default:
+		return false
+	}
 }
 
 // FormatCredentialSolicitationRedirect 生成注入对话的纠正指令，引导模型改用已绑定工具。

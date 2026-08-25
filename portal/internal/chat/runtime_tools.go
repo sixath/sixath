@@ -43,12 +43,15 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 		SetSkillManageConfirmCreateDelete(flags.SkillManageConfirmCreateDelete)
 	}
 
-	if err := RegisterCoreSkillTools(reg, opts.SkillsIdx, opts.McpServers, opts.AllowScript); err != nil {
-		return err
-	}
-	if flags.SkillRuntimeManageEnabled {
-		if err := RegisterSkillRuntimeTools(reg, opts.SkillsIdx, opts.McpServers); err != nil {
+	registerSkills := !ToolFamilySplitEnabled() || FamilyActive(opts.ActiveFamilies, FamilySkills)
+	if registerSkills {
+		if err := RegisterCoreSkillTools(reg, opts.SkillsIdx, opts.McpServers, opts.AllowScript); err != nil {
 			return err
+		}
+		if flags.SkillRuntimeManageEnabled {
+			if err := RegisterSkillRuntimeTools(reg, opts.SkillsIdx, opts.McpServers); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -56,10 +59,13 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 	if store == nil {
 		store = BuildMemoryStore(nil, opts.MemoryCfg, opts.SessionProvider, DefaultMemoryStoreOptions())
 	}
-	if err := toolmem.RegisterMemoryStoreTools(reg, store, toolmem.StoreToolsOptions{
-		AgentWriteEnabled: flags.MemoryWriteEnabled,
-	}); err != nil {
-		return err
+	registerMemory := !ToolFamilySplitEnabled() || FamilyActive(opts.ActiveFamilies, FamilyMemory)
+	if registerMemory {
+		if err := toolmem.RegisterMemoryStoreTools(reg, store, toolmem.StoreToolsOptions{
+			AgentWriteEnabled: flags.MemoryWriteEnabled,
+		}); err != nil {
+			return err
+		}
 	}
 
 	if flags.TodoEnabled {

@@ -2,11 +2,14 @@ package chat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
 
@@ -48,7 +51,7 @@ func TestTurnIntentGate_BuiltinFamilyWhenNotInToolFamilyIndex(t *testing.T) {
 			ID: "1", Name: "jaeger_trace", Arguments: map[string]any{"service": "gitlab"},
 		}}},
 	})
-	if onlyRCA.Decision != agent.PostModelFinish || onlyRCA.Reason != "family_not_active" {
+	if onlyRCA.Decision != agent.PostModelRetry || onlyRCA.Reason != "family_dropped_all" {
 		t.Fatalf("jaeger only: %v %q", onlyRCA.Decision, onlyRCA.Reason)
 	}
 	partial := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
@@ -79,7 +82,7 @@ func TestTurnIntentGate_FamilyNotActive(t *testing.T) {
 			ID: "1", Name: "jaeger_trace", Arguments: map[string]any{"service": "gitlab"},
 		}}},
 	})
-	if res.Decision != agent.PostModelFinish || res.Reason != "family_not_active" {
+	if res.Decision != agent.PostModelRetry || res.Reason != "family_dropped_all" {
 		t.Fatalf("%v %q", res.Decision, res.Reason)
 	}
 }
@@ -108,7 +111,7 @@ func TestTurnIntentGate_FinalAnswerDiscardsTools(t *testing.T) {
 		t.Fatalf("fixture text should look like final answer (runes=%d)", utf8RuneCount(text))
 	}
 	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
-		Req: &agent.Request{Messages: []model.Message{{Role: "user", Content: "分析 cloudgame 仓库模块"}}},
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "分析 cloudgame 仓库模块"}}},
 		AssistantText: text,
 		ToolStep: model.ToolStep{
 			Used: true,
@@ -130,7 +133,7 @@ func TestTurnIntentGate_FinalAnswerDiscardsTools(t *testing.T) {
 func TestTurnIntentGate_TopicDriftDropsWebSearch(t *testing.T) {
 	gate := TurnIntentGate{}
 	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
-		Req: &agent.Request{Messages: []model.Message{{Role: "user", Content: "分析 cloudgame 仓库模块调用关系"}}},
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "分析 cloudgame 仓库模块调用关系"}}},
 		AssistantText: "继续查找资料",
 		ToolStep: model.ToolStep{
 			Used: true,
@@ -152,7 +155,7 @@ func TestTurnIntentGate_TopicDriftDropsWebSearch(t *testing.T) {
 func TestTurnIntentGate_OnTopicWebSearchContinues(t *testing.T) {
 	gate := TurnIntentGate{}
 	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
-		Req: &agent.Request{Messages: []model.Message{{Role: "user", Content: "查一下七日无理由退货的法律规定"}}},
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "查一下七日无理由退货的法律规定"}}},
 		AssistantText: "正在检索",
 		ToolStep: model.ToolStep{
 			Used: true,
@@ -171,7 +174,7 @@ func TestTurnIntentGate_OnTopicWebSearchContinues(t *testing.T) {
 func TestTurnIntentGate_NonSensitiveToolsNotFiltered(t *testing.T) {
 	gate := TurnIntentGate{}
 	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
-		Req: &agent.Request{Messages: []model.Message{{Role: "user", Content: "分析 cloudgame"}}},
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "分析 cloudgame"}}},
 		AssistantText: "读取文件",
 		ToolStep: model.ToolStep{
 			Used: true,
@@ -238,6 +241,85 @@ func TestRegisterAgentRuntimeTools_WebDisabledNoBochaFallback(t *testing.T) {
 	}
 	if _, ok := reg.Get("web_search"); ok {
 		t.Fatal("web_search must not register when WebToolsEnabled=false")
+	}
+}
+
+func TestRegisterAgentRuntimeTools_CodeSurfaceOmitsSkillsAndMemory(t *testing.T) {
+	t.Setenv(toolFamilySplitEnv, "1")
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "skills", "demo")
+	_ = os.MkdirAll(skillDir, 0o755)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: demo\ndescription: d\n---\n# D\n"), 0o644)
+	idx, err := skills.NewIndex([]string{filepath.Join(dir, "skills")}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	flags := HermesP0ToolFlags{SkillRuntimeManageEnabled: true, MemoryWriteEnabled: true}
+	if err := RegisterAgentRuntimeTools(reg, AgentRuntimeToolsOptions{
+		Flags:          &flags,
+		SkillsIdx:      idx,
+		ActiveFamilies: familySet([]string{FamilyCore, FamilyCode}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"skill_view", "load_skill", "memory_recall", "memory_search"} {
+		if _, ok := reg.Get(name); ok {
+			t.Fatalf("%s must not register on code-only surface", name)
+		}
+	}
+}
+
+func TestTurnIntentGate_SkillViewDroppedOnCodeSurface(t *testing.T) {
+	gate := TurnIntentGate{
+		ActiveFamilies: familySet([]string{FamilyCore, FamilyCode}),
+	}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "union在注册的时候会发生什么"}}},
+		AssistantText: "先加载技能",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "rca_grep", Arguments: map[string]any{"pattern": "Register"}},
+			{ID: "2", Name: "skill_view", Arguments: map[string]any{"name": "migu-cloud-game-vm-allocate"}},
+			{ID: "3", Name: "list_tables", Arguments: map[string]any{"datasource_id": "migu_mongodb"}},
+		}},
+	})
+	if res.Decision != agent.PostModelFilter || res.Reason != "family_partial" {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
+	}
+	if len(res.ToolCalls) != 1 || res.ToolCalls[0].Name != "rca_grep" {
+		t.Fatalf("keep only rca_grep, got %#v", res.ToolCalls)
+	}
+}
+
+func TestTurnIntentGate_OnlySkillViewRetries(t *testing.T) {
+	gate := TurnIntentGate{ActiveFamilies: familySet([]string{FamilyCore, FamilyCode})}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "会发生什么"}}},
+		AssistantText: "加载手册",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "skill_view", Arguments: map[string]any{"name": "demo"}},
+		}},
+	})
+	if res.Decision != agent.PostModelRetry || res.Reason != "family_dropped_all" {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
+	}
+	if !strings.Contains(res.Prompt, FamilyCode) {
+		t.Fatalf("prompt=%q", res.Prompt)
+	}
+}
+
+func TestTurnIntentGate_ParallelRCAGrepKept(t *testing.T) {
+	gate := TurnIntentGate{ActiveFamilies: familySet([]string{FamilyCore, FamilyCode})}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "union注册"}}},
+		AssistantText: "搜索",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "rca_grep", Arguments: map[string]any{"pattern": "Register"}},
+			{ID: "2", Name: "rca_grep", Arguments: map[string]any{"pattern": "1105"}},
+		}},
+	})
+	if res.Decision != agent.PostModelContinue {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
 	}
 }
 

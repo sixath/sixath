@@ -237,6 +237,23 @@ func TestFilterToolsForSurface_CodeVsRCA(t *testing.T) {
 	}
 }
 
+func TestFilterToolsForSurface_DatasourceNeedsDataFamily(t *testing.T) {
+	t.Setenv(toolFamilySplitEnv, "1")
+	ds := &biz.ToolMeta{Name: "migu_mongodb", Type: biz.ToolTypeDatasource}
+	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
+		"roots": []any{"D:\\workspace\\migu"},
+	})}
+	tools := []*biz.ToolMeta{ds, codeTool}
+	codeOnly := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode}))
+	if len(codeOnly) != 1 || codeOnly[0].Name != "migu-rca" {
+		t.Fatalf("code surface must drop datasource, got %+v", namesOf(codeOnly))
+	}
+	withData := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode, FamilyData}))
+	if len(withData) != 2 {
+		t.Fatalf("data+code want 2, got %+v", namesOf(withData))
+	}
+}
+
 func namesOf(tools []*biz.ToolMeta) []string {
 	out := make([]string, 0, len(tools))
 	for _, t := range tools {

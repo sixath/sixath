@@ -29,6 +29,23 @@ func baseFail(code int32, msg string) *common.BaseResponse {
 	return &common.BaseResponse{Code: code, Message: msg}
 }
 
+func protoToBizModelConfig(mc *agentv1.ModelConfig) biz.ModelConfig {
+	if mc == nil {
+		return biz.ModelConfig{}
+	}
+	return biz.ModelConfig{
+		Provider:        mc.GetProvider(),
+		Model:           mc.GetModel(),
+		APIKey:          mc.GetApiKey(),
+		BaseURL:         mc.GetBaseUrl(),
+		MaxOutputTokens: int(mc.GetMaxOutputTokens()),
+		CodeProvider:    mc.GetCodeProvider(),
+		CodeModel:       mc.GetCodeModel(),
+		CodeAPIKey:      mc.GetCodeApiKey(),
+		CodeBaseURL:     mc.GetCodeBaseUrl(),
+	}
+}
+
 // AgentService implements agent.v1.AgentHTTPServer and agent.v1.AgentServer
 type AgentService struct {
 	agentv1.UnimplementedAgentServer
@@ -92,6 +109,10 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 			ApiKey:          m.ModelConfig.APIKey,
 			BaseUrl:         m.ModelConfig.BaseURL,
 			MaxOutputTokens: int32(m.ModelConfig.MaxOutputTokens),
+			CodeProvider:    m.ModelConfig.CodeProvider,
+			CodeModel:       m.ModelConfig.CodeModel,
+			CodeApiKey:      m.ModelConfig.CodeAPIKey,
+			CodeBaseUrl:     m.ModelConfig.CodeBaseURL,
 		},
 		Workspace:      m.Workspace,
 		ToolIds:        m.ToolIDs,
@@ -107,13 +128,7 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 // CreateAgent implements agent.v1.AgentHTTPServer
 func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgentRequest) (*agentv1.AgentReply, error) {
 	mc := req.GetModelConfig()
-	modelConfig := biz.ModelConfig{
-		Provider:        mc.GetProvider(),
-		Model:           mc.GetModel(),
-		APIKey:          mc.GetApiKey(),
-		BaseURL:         mc.GetBaseUrl(),
-		MaxOutputTokens: int(mc.GetMaxOutputTokens()),
-	}
+	modelConfig := protoToBizModelConfig(mc)
 	if err := s.validateWecomChannel(ctx, req.GetWecomChannelId()); err != nil {
 		return nil, err
 	}
@@ -166,13 +181,7 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 		updates["system_prompt"] = *req.SystemPrompt
 	}
 	if req.ModelConfig != nil {
-		updates["model_config"] = biz.ModelConfig{
-			Provider:        req.ModelConfig.GetProvider(),
-			Model:           req.ModelConfig.GetModel(),
-			APIKey:          req.ModelConfig.GetApiKey(),
-			BaseURL:         req.ModelConfig.GetBaseUrl(),
-			MaxOutputTokens: int(req.ModelConfig.GetMaxOutputTokens()),
-		}
+		updates["model_config"] = protoToBizModelConfig(req.ModelConfig)
 	}
 	if req.Workspace != nil {
 		updates["workspace"] = *req.Workspace
@@ -362,6 +371,8 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	}
 	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
+	lock := chat.BuildTurnTaskLock(content, nil)
+	effectivePrompt = chat.AppendTaskLock(effectivePrompt, lock)
 	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, append(chat.ReActOptionsFromAgent(*agentMeta),
 		chat.CodeClaimGateTurnOption(reg, nil, m),
 	)...)
@@ -380,13 +391,14 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		runCtx = context.WithValue(runCtx, tool.ContextKeyToolSearchActive, true)
 	}
 	md := chat.RequestMetadataFromContext(runCtx)
-	if md != nil && agentMeta.Workspace != "" {
+	if md == nil {
+		md = map[string]any{}
+	}
+	if agentMeta.Workspace != "" {
 		md["workspace_root"] = agentMeta.Workspace
 	}
-	agentReq := &agent.Request{Messages: messages}
-	if md != nil {
-		agentReq.Metadata = md
-	}
+	md = chat.MergeTaskLockMetadata(md, lock)
+	agentReq := &agent.Request{Messages: messages, Metadata: md}
 	resp, err := a.Run(runCtx, agentReq)
 	if err != nil {
 		isH, vis, _, raw := chat.DecomposeGuardrailRunError(err)

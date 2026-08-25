@@ -300,6 +300,12 @@ export default function AgentDetail() {
             <p><strong>描述：</strong>{agent.description || '-'}</p>
             <p><strong>Workspace：</strong><code>{agent.workspace}</code></p>
             <p><strong>模型：</strong>{agent.model_config?.provider}/{agent.model_config?.model}</p>
+            <p>
+              <strong>源码分析模型：</strong>
+              {agent.model_config?.code_model || agent.model_config?.code_provider
+                ? `${agent.model_config?.code_provider || '跟随全局'}/${agent.model_config?.code_model || '跟随全局'}`
+                : '跟随全局'}
+            </p>
             <p><strong>最大输出 Token：</strong>{agent.model_config?.max_output_tokens && agent.model_config.max_output_tokens > 0 ? agent.model_config.max_output_tokens : '8192（默认）'}</p>
             <p><strong>调试运行：</strong>{agent.debug_run ? '是' : '否'}</p>
             <div data-testid="runtime-tools-section">

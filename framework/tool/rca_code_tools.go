@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 )
@@ -33,7 +32,8 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 		Name: "rca_grep",
 		Description: "Search source code by regex across configured code roots (multi-repo). " +
 			"Prefer this over workspace search_files and over terminal/rg for source / call-chain analysis. " +
-			"Optionally limit to one repo. Returns file, line and snippet with the owning repo.",
+			"Each hit includes ±3 lines of numbered context by default (set context=0 for the hit line only). " +
+			"Skips vendor/, *_gen.go, and *.txt. Optionally limit to one repo. Returns file, line and snippet with the owning repo.",
 		Toolset: ToolsetRCA,
 		Parameters: map[string]any{
 			"type": "object",
@@ -42,6 +42,7 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 				"repo":        map[string]any{"type": "string", "description": "Optional repo name to limit the search to a single repository root."},
 				"glob":        map[string]any{"type": "string", "description": "Optional file glob filter, e.g. '*.go' or '**/*.go'."},
 				"max_results": map[string]any{"type": "integer", "description": "Max results (default 100)."},
+				"context":     map[string]any{"type": "integer", "description": "Lines of context before and after each hit (default 3, max 8, 0 = hit line only)."},
 			},
 			"required": []string{"pattern"},
 		},
@@ -57,6 +58,7 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 			if maxResults <= 0 {
 				maxResults = rcaMaxResultsDefault
 			}
+			contextLines := rcaGrepContextLines(params)
 			sel, err := selectRoots(roots, repo)
 			if err != nil {
 				return rcaErr(toolName, err.Error(), ErrorPermanent), nil
@@ -68,10 +70,11 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 					break
 				}
 				remaining := maxResults - len(matches)
-				res, err := searchFileContents(root, root, pattern, glob, remaining+1, 0)
+				res, err := searchRCAFileContents(root, pattern, glob, remaining+1)
 				if err != nil {
 					return rcaErrFrom(toolName, err), nil
 				}
+				res = attachRCAGrepContext(root, res, contextLines)
 				name := repoNameFromRoot(root)
 				for _, cm := range res {
 					if len(matches) >= maxResults {
@@ -164,7 +167,9 @@ func registerRCAReadTool(reg *Registry, roots []string) error {
 		Name: "rca_read",
 		Description: "Read a source file from a specific configured code root with line numbers (LINE_NUM|CONTENT). " +
 			"Prefer this over terminal/type/cat and over workspace read_file when the path is under a code root. " +
-			"When claiming a call executes or a DB write happens, read the whole enclosing function including if/else/return; quote this output verbatim—do not reconstruct snippets. " +
+			"If the requested window sits inside a Go function of at most 400 lines, content expands to the whole function (requested_start_line/requested_end_line record the original window). " +
+			"For .go files, also returns control_flow path tables and a same-package call_graph (caller→callee, resolved when the callee is in this file or directory). Other languages omit those fields (fail-open). " +
+			"When claiming a call executes or a DB write happens, verify against control_flow path id or when, then tell the user in plain language; do not paste the path table into the final answer. Quote content verbatim in fenced blocks only when needed—do not reconstruct snippets from adjacent lines. " +
 			"Path is guarded to stay inside the repository root.",
 		Toolset: ToolsetRCA,
 		Parameters: map[string]any{
@@ -203,24 +208,91 @@ func registerRCAReadTool(reg *Registry, roots []string) error {
 			text := strings.TrimSuffix(string(b), "\n")
 			text = strings.TrimSuffix(text, "\r")
 			lines := strings.Split(text, "\n")
-			start := intFromParam(params["start_line"], 1)
-			if start < 1 {
-				start = 1
+			reqStart := intFromParam(params["start_line"], 1)
+			if reqStart < 1 {
+				reqStart = 1
 			}
-			end := intFromParam(params["end_line"], len(lines))
-			if end <= 0 || end > len(lines) {
-				end = len(lines)
+			reqEnd := intFromParam(params["end_line"], len(lines))
+			if reqEnd <= 0 || reqEnd > len(lines) {
+				reqEnd = len(lines)
 			}
-			var out strings.Builder
-			for i := start - 1; i < end && i < len(lines); i++ {
-				fmt.Fprintf(&out, "%d|%s\n", i+1, lines[i])
+			cf := ExtractControlFlow(b, file, reqStart, reqEnd)
+			start, end, expanded, tooLarge, sig := expandGoReadWindow(lines, cf, reqStart, reqEnd)
+			payload := map[string]any{
+				"repo":                 repo,
+				"file":                 file,
+				"content":              numberedSourceWindow(lines, start, end),
+				"total_lines":          len(lines),
+				"start_line":           start,
+				"end_line":             end,
+				"requested_start_line": reqStart,
+				"requested_end_line":   reqEnd,
 			}
-			return rcaOK(toolName, map[string]any{
-				"repo":        repo,
-				"file":        file,
-				"content":     strings.TrimSuffix(out.String(), "\n"),
-				"total_lines": len(lines),
-			}), nil
+			if expanded {
+				payload["expanded_to_function"] = true
+			}
+			if tooLarge {
+				payload["expanded_to_function"] = false
+				payload["function_too_large"] = true
+				if sig != "" {
+					payload["signature"] = sig
+				}
+			}
+			if len(cf) > 0 {
+				payload["control_flow"] = cf
+				if cg := BuildCallGraph(b, full, file, cf); cg != nil {
+					payload["call_graph"] = cg
+				}
+			}
+			return rcaOK(toolName, payload), nil
 		},
 	})
+}
+
+const rcaReadMaxExpandLines = 400
+
+// expandGoReadWindow expands a requested window to the enclosing Go function when the
+// window sits inside one function of at most rcaReadMaxExpandLines lines.
+func expandGoReadWindow(lines []string, cf []ControlFlowFunc, reqStart, reqEnd int) (start, end int, expanded, tooLarge bool, signature string) {
+	start, end = reqStart, reqEnd
+	encl, ok := enclosingGoFunc(cf, reqStart, reqEnd)
+	if !ok {
+		return start, end, false, false, ""
+	}
+	span := encl.EndLine - encl.StartLine + 1
+	if span > rcaReadMaxExpandLines {
+		sig := ""
+		if encl.StartLine >= 1 && encl.StartLine <= len(lines) {
+			sig = strings.TrimSpace(lines[encl.StartLine-1])
+		}
+		if sig == "" && encl.Function != "" {
+			sig = "func " + encl.Function
+		}
+		return start, end, false, true, sig
+	}
+	if encl.StartLine == reqStart && encl.EndLine == reqEnd {
+		return start, end, false, false, ""
+	}
+	ns, ne := encl.StartLine, encl.EndLine
+	if ns < 1 {
+		ns = 1
+	}
+	if ne > len(lines) {
+		ne = len(lines)
+	}
+	return ns, ne, true, false, ""
+}
+
+func enclosingGoFunc(cf []ControlFlowFunc, start, end int) (ControlFlowFunc, bool) {
+	var best ControlFlowFunc
+	found := false
+	for _, f := range cf {
+		if f.StartLine <= start && f.EndLine >= end {
+			if !found || (f.EndLine-f.StartLine) < (best.EndLine-best.StartLine) {
+				best = f
+				found = true
+			}
+		}
+	}
+	return best, found
 }

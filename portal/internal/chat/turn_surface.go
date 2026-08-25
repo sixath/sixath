@@ -30,6 +30,9 @@ func PrepareTurnToolSurface(
 	// gates actual registration via FamilyActive + ResolveForRuntimeTools.
 	knowledgeOn := true
 	bound := BoundFamiliesFrom(tools, servers, flags.WebToolsEnabled, knowledgeOn)
+	if ToolFamilySplitEnabled() {
+		bound = mergeFamilyIDs(bound, FamilySkills, FamilyMemory)
+	}
 	resolver := IntentResolver{
 		Classifier: ModelFamilyClassifier{Model: m, Timeout: 3 * time.Second},
 	}

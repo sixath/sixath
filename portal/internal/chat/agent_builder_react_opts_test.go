@@ -88,6 +88,9 @@ func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
 	if !react.EvidenceGateEnabled() {
 		t.Fatal("BuildReActAgent with jaeger_trace must enable EvidenceGate")
 	}
+	if react.ParallelToolsEnabled() {
+		t.Fatal("jaeger-only registry must not enable ParallelTools")
+	}
 
 	resp, err := react.Run(context.Background(), &agent.Request{
 		Messages: []model.Message{{Role: "user", Content: "why down?"}},
@@ -238,6 +241,9 @@ func TestCodeClaimGateTurnOption_enablesOnCodeFamily(t *testing.T) {
 	}
 	if !react.CodeClaimGateEnabled() {
 		t.Fatal("code family turn must enable CodeClaimGate")
+	}
+	if !react.ParallelToolsEnabled() {
+		t.Fatal("rca_read registry must enable ParallelTools")
 	}
 }
 

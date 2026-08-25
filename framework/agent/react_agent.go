@@ -252,6 +252,10 @@ func (a *ReActAgent) CodeClaimGateEnabled() bool {
 	return a != nil && a.config.CodeClaimGate.Enabled
 }
 
+func (a *ReActAgent) ParallelToolsEnabled() bool {
+	return a != nil && a.config.ParallelTools
+}
+
 func (a *ReActAgent) memoryOrchestrator() *memory.Orchestrator {
 	if a == nil {
 		return nil
@@ -379,9 +383,14 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
-		stepInfo = a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
+		stepInfo, retryPrompt := a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
+		if retryPrompt != "" {
+			messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
+			messages = append(messages, model.Message{Role: "user", Content: retryPrompt})
+			continue
+		}
 		if !stepInfo.Used {
-			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects); ok {
+			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
 				credentialRedirects++
 				trace.Errors = append(trace.Errors, "credential_solicitation_redirect:"+match.Name)
 				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
@@ -411,7 +420,7 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 		messages = append(messages, toolRequestMessage(gen.Text, stepInfo))
 		records, err := a.executeToolStep(ctx, req, step, stepInfo, trace, emit)
 		trace.ToolCalls = append(trace.ToolCalls, records...)
-		messages = appendToolResultMessages(messages, records)
+		messages = appendToolResultsWithWorkset(messages, records, trace.ToolCalls)
 		noProgress++
 		if a.guardrailEval().Evaluate(trace.ToolCalls, noProgress, emit).Halt {
 			trace.GuardrailHalt = true
@@ -433,7 +442,7 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 		return responseWithTrace(lastAnswer, nil, trace, messages), nil
 	}
 
-	resp, sumErr := a.forceFinalSummary(ctx, messages, trace, emit)
+	resp, sumErr := a.forceFinalSummary(ctx, req, messages, trace, emit)
 	if sumErr != nil {
 		trace.Errors = append(trace.Errors, sumErr.Error())
 		emit(events.RunError, map[string]any{"error": sumErr.Error(), "forced_summary": true})
@@ -702,9 +711,14 @@ func (a *ReActAgent) runToolEventsSync(
 		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
-		stepInfo = a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
+		stepInfo, retryPrompt := a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
+		if retryPrompt != "" {
+			messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
+			messages = append(messages, model.Message{Role: "user", Content: retryPrompt})
+			continue
+		}
 		if !stepInfo.Used {
-			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects); ok {
+			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
 				credentialRedirects++
 				trace.Errors = append(trace.Errors, "credential_solicitation_redirect:"+match.Name)
 				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
@@ -746,7 +760,7 @@ func (a *ReActAgent) runToolEventsSync(
 		messages = append(messages, toolRequestMessage(gen.Text, stepInfo))
 		records, err := a.executeToolStep(ctx, req, step, stepInfo, trace, emit)
 		trace.ToolCalls = append(trace.ToolCalls, records...)
-		messages = appendToolResultMessages(messages, records)
+		messages = appendToolResultsWithWorkset(messages, records, trace.ToolCalls)
 		for i := range records {
 			record := records[i]
 			eventType := StreamEventToolCompleted
@@ -776,7 +790,7 @@ func (a *ReActAgent) runToolEventsSync(
 		}
 	}
 
-	if handled, sumErr := a.forceFinalSummaryStream(ctx, messages, trace, emit, send); handled {
+	if handled, sumErr := a.forceFinalSummaryStream(ctx, req, messages, trace, emit, send); handled {
 		if sumErr != nil {
 			sendError(sumErr, a.config.MaxSteps)
 		}
@@ -826,9 +840,14 @@ func (a *ReActAgent) runToolEvents(
 		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
-		stepInfo = a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
+		stepInfo, retryPrompt := a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
+		if retryPrompt != "" {
+			messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
+			messages = append(messages, model.Message{Role: "user", Content: retryPrompt})
+			continue
+		}
 		if !stepInfo.Used {
-			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects); ok {
+			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
 				credentialRedirects++
 				trace.Errors = append(trace.Errors, "credential_solicitation_redirect:"+match.Name)
 				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
@@ -879,7 +898,7 @@ func (a *ReActAgent) runToolEvents(
 		records, err := a.executeToolStep(ctx, req, step, stepInfo, trace, emit)
 		// tools_stream 路径每轮在工具后不再强制 plain 收尾：按「连续仅工具」多轮计数 R3。
 		trace.ToolCalls = append(trace.ToolCalls, records...)
-		messages = appendToolResultMessages(messages, records)
+		messages = appendToolResultsWithWorkset(messages, records, trace.ToolCalls)
 		for i := range records {
 			record := records[i]
 			eventType := StreamEventToolCompleted
@@ -912,7 +931,7 @@ func (a *ReActAgent) runToolEvents(
 		// 直到模型不再调用工具（见循环顶部 !stepInfo.Used 分支）或达到 MaxSteps 后 forceFinalSummaryStream。
 	}
 
-	if ok, sumErr := a.forceFinalSummaryStream(ctx, messages, trace, emit, send); ok {
+	if ok, sumErr := a.forceFinalSummaryStream(ctx, req, messages, trace, emit, send); ok {
 		if sumErr != nil {
 			sendError(sumErr, a.config.MaxSteps)
 		}
@@ -923,15 +942,38 @@ func (a *ReActAgent) runToolEvents(
 	sendError(maxStreamErr, a.config.MaxSteps)
 }
 
-const forcedFinalSummaryPrompt = "You have finished collecting tool results. Do not call any tools. Reply directly with a complete answer to the user's original question—cover every section or numbered item they asked for; do not stop after the first few headings. Use Markdown tables where appropriate. Rules: (1) Only include facts present in tool outputs above—never infer hostname/IP patterns from the user's input table or naming conventions. (2) If a host or area was not successfully queried, say so explicitly; do not fill gaps with guessed rows. (3) When summarizing config files (e.g. YAML extra_hosts), list actual entries from stdout; do not collapse them into a simplified template unless every row is verified. (4) If web_search results are in the transcript, synthesize all of them with citations (title + URL), not just the first query."
+const ForcedFinalSummaryPrompt = "You have finished collecting tool results. Do not call any tools. Reply directly with a complete answer to the user's original question—cover every section or numbered item they asked for; do not stop after the first few headings. Use Markdown tables where appropriate. Rules: (1) Only include facts present in tool outputs above—never infer hostname/IP patterns from the user's input table or naming conventions. (2) If a host or area was not successfully queried, say so explicitly; do not fill gaps with guessed rows. (3) When summarizing config files (e.g. YAML extra_hosts), list actual entries from stdout; do not collapse them into a simplified template unless every row is verified. (4) If web_search results are in the transcript, synthesize all of them with citations (title + URL), not just the first query."
 
-func (a *ReActAgent) forceFinalSummary(ctx context.Context, messages []model.Message, trace *RunTrace, emit func(events.Kind, map[string]any)) (*Response, error) {
+// AnswerOriginalQuestionPrompt is the shared MaxSteps / idle-drift closer: facts-only answer of Q.
+func AnswerOriginalQuestionPrompt(q string) string {
+	return appendTaskLockToSummaryPrompt(ForcedFinalSummaryPrompt, q)
+}
+
+func appendTaskLockToSummaryPrompt(base, q string) string {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return base
+	}
+	return base + "\n\n【本轮任务锁】用户问题（不可改写）：" + q
+}
+
+func taskLockQFromRequest(req *Request) string {
+	if req == nil || req.Metadata == nil {
+		return ""
+	}
+	if q, ok := req.Metadata["task_lock_q"].(string); ok {
+		return strings.TrimSpace(q)
+	}
+	return ""
+}
+
+func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, emit func(events.Kind, map[string]any)) (*Response, error) {
 	if trace == nil || len(trace.ToolCalls) == 0 {
 		return nil, nil
 	}
 	msgs := append(append([]model.Message(nil), messages...), model.Message{
 		Role:    "user",
-		Content: forcedFinalSummaryPrompt,
+		Content: AnswerOriginalQuestionPrompt(taskLockQFromRequest(req)),
 	})
 	emit(events.ModelInvoked, map[string]any{"message_count": len(msgs), "step": -1, "mode": "plain_summary", "forced_summary": true})
 	beginModelInvocation(trace, "plain_summary")
@@ -944,7 +986,7 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, messages []model.Mes
 		return nil, nil
 	}
 	// Soft: only Metadata + event; never inject/continue. HardHalt → error.
-	gate := a.checkAnswerGates(ctx, nil, messages, trace, text, false, false, emit)
+	gate := a.checkAnswerGates(ctx, req, messages, trace, text, false, false, emit)
 	if gate.HaltErr != nil {
 		return nil, gate.HaltErr
 	}
@@ -961,6 +1003,7 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, messages []model.Mes
 
 func (a *ReActAgent) forceFinalSummaryStream(
 	ctx context.Context,
+	req *Request,
 	messages []model.Message,
 	trace *RunTrace,
 	emit func(events.Kind, map[string]any),
@@ -969,7 +1012,7 @@ func (a *ReActAgent) forceFinalSummaryStream(
 	if trace == nil || len(trace.ToolCalls) == 0 {
 		return false, nil
 	}
-	resp, err := a.forceFinalSummary(ctx, messages, trace, emit)
+	resp, err := a.forceFinalSummary(ctx, req, messages, trace, emit)
 	if err != nil {
 		return true, err
 	}
@@ -1426,7 +1469,15 @@ func (a *ReActAgent) shouldBufferCodeClaim(trace *RunTrace) bool {
 	if trace == nil {
 		return false
 	}
-	return len(CollectCodeQuoteSources(trace.ToolCalls)) > 0
+	if len(CollectCodeQuoteSources(trace.ToolCalls)) > 0 {
+		return true
+	}
+	for _, rec := range trace.ToolCalls {
+		if recordLooksLikeSurrogate(rec) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *ReActAgent) checkCodeClaimGate(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
@@ -1436,6 +1487,12 @@ func (a *ReActAgent) checkCodeClaimGate(ctx context.Context, req *Request, messa
 	var records []ToolCallRecord
 	if trace != nil {
 		records = trace.ToolCalls
+	}
+	if inbound := EvaluateInboundCompletenessGate(records, finalText); !inbound.Allow {
+		return a.finishCodeClaimGate(inbound, allowInject, hasStepRoom, trace, emit)
+	}
+	if surrogate := EvaluateSurrogateSourceGate(records, finalText); !surrogate.Allow {
+		return a.finishCodeClaimGate(surrogate, allowInject, hasStepRoom, trace, emit)
 	}
 	sources := CollectCodeQuoteSources(records)
 	if len(sources) == 0 {
@@ -1458,6 +1515,13 @@ func (a *ReActAgent) checkCodeClaimGate(ctx context.Context, req *Request, messa
 
 	userQ := originalUserQuestion(req, messages)
 	result := EvaluateCodeClaimCascade(actx, auditor, userQ, finalText, sources)
+	if result.Allow {
+		return evidenceGateCheck{}
+	}
+	return a.finishCodeClaimGate(result, allowInject, hasStepRoom, trace, emit)
+}
+
+func (a *ReActAgent) finishCodeClaimGate(result EvidenceGateResult, allowInject, hasStepRoom bool, trace *RunTrace, emit func(events.Kind, map[string]any)) evidenceGateCheck {
 	if result.Allow {
 		return evidenceGateCheck{}
 	}
@@ -1491,11 +1555,15 @@ func originalUserQuestion(req *Request, messages []model.Message) string {
 		return t
 	}
 	for _, m := range messages {
-		if m.Role == "user" && m.Content != forcedFinalSummaryPrompt {
+		if m.Role == "user" && !isForcedSummaryUser(m.Content) {
 			return m.Content
 		}
 	}
 	return ""
+}
+
+func isForcedSummaryUser(content string) bool {
+	return content == ForcedFinalSummaryPrompt || strings.HasPrefix(content, ForcedFinalSummaryPrompt)
 }
 
 func toolMessageContent(record ToolCallRecord) string {
@@ -1557,6 +1625,11 @@ func appendToolResultMessages(messages []model.Message, records []ToolCallRecord
 	return messages
 }
 
+func appendToolResultsWithWorkset(messages []model.Message, records, all []ToolCallRecord) []model.Message {
+	messages = appendToolResultMessages(messages, records)
+	return upsertCodeWorksetMessage(messages, CollectCodeWorkset(all))
+}
+
 func toolCallsFromStep(step model.ToolStep) []model.ToolCall {
 	if len(step.ToolCalls) > 0 {
 		return step.ToolCalls
@@ -1579,8 +1652,11 @@ func cloneArgs(in map[string]any) map[string]any {
 	return out
 }
 
-func credentialSolicitationRedirect(ctx context.Context, text string, retries int) (string, tool.ToolCatalogEntry, bool) {
+func credentialSolicitationRedirect(ctx context.Context, text string, retries int, trace *RunTrace, goalG string) (string, tool.ToolCatalogEntry, bool) {
 	if retries >= 1 {
+		return "", tool.ToolCatalogEntry{}, false
+	}
+	if HasSuccessfulBoundEvidence(trace) {
 		return "", tool.ToolCatalogEntry{}, false
 	}
 	cat, ok := ctx.Value(tool.ContextKeyToolCatalog).(tool.ToolCatalog)
@@ -1591,7 +1667,11 @@ func credentialSolicitationRedirect(ctx context.Context, text string, retries in
 	if !blocked {
 		return "", tool.ToolCatalogEntry{}, false
 	}
-	return tool.FormatCredentialSolicitationRedirect(match), match, true
+	prompt := tool.FormatCredentialSolicitationRedirect(match)
+	if g := strings.TrimSpace(goalG); g != "" {
+		prompt += "用已有或即将调用的绑定工具回答：" + g + "。禁止调用 skills_list / load_skill 交差，禁止向用户索取 host/密码/webhook。"
+	}
+	return prompt, match, true
 }
 
 func isPermissionDenied(err error) bool {

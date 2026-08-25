@@ -15,7 +15,7 @@ func PrepareChatContext(messages []Message, callCfg *CallConfig) []Message {
 	return PrepareChatContextCtx(context.Background(), messages, callCfg)
 }
 
-// PrepareChatContextCtx 与设计 §5.3 顺序对齐：L1 → L2 预剪枝（可选）→ L0 → strip → L2 摘要（可选）。
+// PrepareChatContextCtx 与设计 §5.3 顺序对齐：L1 → L2 预剪枝（可选）→ code pin → L0 → strip → L2 摘要（可选）。
 func PrepareChatContextCtx(ctx context.Context, messages []Message, callCfg *CallConfig) []Message {
 	out := messages
 	var tracef ContextTraceFunc
@@ -52,6 +52,7 @@ func PrepareChatContextCtx(ctx context.Context, messages []Message, callCfg *Cal
 		}
 		out = out2
 	}
+	out = ensureCodePinMessages(out)
 	if callCfg != nil && callCfg.MaxContextRunes > 0 {
 		before := len(out)
 		out = CompressMessagesByRunesBudget(out, callCfg.MaxContextRunes)

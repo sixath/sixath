@@ -385,6 +385,11 @@ export interface ModelConfig {
   base_url?: string
   /** 单次回复 max_tokens；0 或未设则用服务端默认 8192 */
   max_output_tokens?: number
+  /** 源码分析模型；全空则跟随全局设置 */
+  code_provider?: string
+  code_model?: string
+  code_api_key?: string
+  code_base_url?: string
 }
 
 export interface RuntimeToolsConfig {
@@ -540,6 +545,10 @@ function normalizeModelConfig(raw?: ModelConfig & Record<string, unknown>): Mode
     api_key: (cfg.api_key as string | undefined) ?? (cfg.apiKey as string | undefined),
     base_url: (cfg.base_url as string | undefined) ?? (cfg.baseUrl as string | undefined),
     max_output_tokens: maxOut && maxOut > 0 ? maxOut : undefined,
+    code_provider: (cfg.code_provider as string | undefined) ?? (cfg.codeProvider as string | undefined),
+    code_model: (cfg.code_model as string | undefined) ?? (cfg.codeModel as string | undefined),
+    code_api_key: (cfg.code_api_key as string | undefined) ?? (cfg.codeApiKey as string | undefined),
+    code_base_url: (cfg.code_base_url as string | undefined) ?? (cfg.codeBaseUrl as string | undefined),
   }
 }
 
@@ -708,6 +717,22 @@ export const codeRootsApi = {
     request<CodeRootBrowseResponse>(
       `/code-roots/browse?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`,
     ),
+}
+
+export interface GlobalCodeModelSettings {
+  provider?: string
+  model?: string
+  api_key?: string
+  base_url?: string
+}
+
+export const settingsApi = {
+  getCodeModel: () => request<GlobalCodeModelSettings>('/settings/code-model'),
+  putCodeModel: (body: GlobalCodeModelSettings) =>
+    request<GlobalCodeModelSettings>('/settings/code-model', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 }
 
 export const agentApi = {

@@ -437,6 +437,46 @@ export default function AgentForm() {
               />
               <small>控制单次模型回复长度；留空使用服务端默认 8192。过小会导致报告写到一半截断。</small>
             </div>
+            <h3 className="form-section__title" style={{ fontSize: '1rem', marginTop: '1.25rem' }}>源码分析模型（可选）</h3>
+            <p className="muted" style={{ marginBottom: '0.75rem' }}>
+              仅在代码分析（code 族）时使用。全部留空则跟随{' '}
+              <Link to="/settings">全局设置</Link>。只填模型名时，Key / Base URL 继承全局。
+            </p>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Code Provider</label>
+                <input
+                  value={modelConfig.code_provider || ''}
+                  onChange={(e) => setModelConfig((c) => ({ ...c, code_provider: e.target.value }))}
+                  placeholder="留空跟随全局"
+                />
+              </div>
+              <div className="form-group">
+                <label>Code 模型名称</label>
+                <input
+                  value={modelConfig.code_model || ''}
+                  onChange={(e) => setModelConfig((c) => ({ ...c, code_model: e.target.value }))}
+                  placeholder="留空跟随全局"
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Code API Key</label>
+              <input
+                type="password"
+                value={modelConfig.code_api_key || ''}
+                onChange={(e) => setModelConfig((c) => ({ ...c, code_api_key: e.target.value }))}
+                placeholder="留空跟随全局"
+              />
+            </div>
+            <div className="form-group">
+              <label>Code Base URL</label>
+              <input
+                value={modelConfig.code_base_url || ''}
+                onChange={(e) => setModelConfig((c) => ({ ...c, code_base_url: e.target.value }))}
+                placeholder="留空跟随全局"
+              />
+            </div>
           </section>
 
           <section className="form-section">

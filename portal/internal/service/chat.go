@@ -365,6 +365,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
 	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
 		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
+	m = chat.ResolveTurnModel(active, m, *agentMeta)
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
@@ -454,15 +455,19 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	if effectivePrompt != "" {
 		effectivePrompt += "\n\n---\n\n"
 	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnScoped(agentMeta.SystemPrompt, skillsIdx, content, session.AgentID, sessionID)
+	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnOnSurface(agentMeta.SystemPrompt, skillsIdx, content, session.AgentID, sessionID, active)
 	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
 	effectivePrompt = chat.AppendCodeAnalysisPromptIf(active, effectivePrompt)
 	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
 		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
 	}
 	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
+	if chat.FamilyActive(active, chat.FamilyData) {
+		effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
+	}
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
+	lock := buildTurnTaskLockFromHistory(content, history)
+	effectivePrompt = chat.AppendTaskLock(effectivePrompt, lock)
 	messages := make([]model.Message, 0, len(history)+2)
 	if effectivePrompt != "" {
 		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
@@ -495,7 +500,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	// 调用 Agent（附带记忆预取所需 metadata：session/agent/workspace/user_id/identity）
 	resp, err := a.Run(runCtx, &agent.Request{
 		Messages: messages,
-		Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
+		Metadata: chat.MergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
 	})
 	if err != nil {
 		isH, vis, persist, raw := chat.DecomposeGuardrailRunError(err)
@@ -622,6 +627,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
 	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
 		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
+	m = chat.ResolveTurnModel(active, m, *agentMeta)
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
@@ -819,15 +825,19 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	if effectivePrompt != "" {
 		effectivePrompt += "\n\n---\n\n"
 	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnScoped(agentMeta.SystemPrompt, skillsIdx, userContent, session.AgentID, sessionID)
+	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnOnSurface(agentMeta.SystemPrompt, skillsIdx, userContent, session.AgentID, sessionID, active)
 	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
 	effectivePrompt = chat.AppendCodeAnalysisPromptIf(active, effectivePrompt)
 	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
 		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
 	}
 	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
+	if chat.FamilyActive(active, chat.FamilyData) {
+		effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
+	}
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
+	lock := buildTurnTaskLockFromHistory(userContent, history)
+	effectivePrompt = chat.AppendTaskLock(effectivePrompt, lock)
 	messages := make([]model.Message, 0, len(history)+3)
 	if effectivePrompt != "" {
 		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
@@ -880,7 +890,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 
 		req := &agent.Request{
 			Messages: messages,
-			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
+			Metadata: chat.MergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
 		}
 
 		useMEA := (len(meaChecks) > 0 || len(meaAcceptance) > 0) &&
@@ -1015,6 +1025,24 @@ func messageToReply(m *biz.ChatMessage) *chatv1.MessageReply {
 		}
 	}
 	return reply
+}
+
+func buildTurnTaskLockFromHistory(userContent string, history []*biz.ChatMessage) chat.TurnTaskLock {
+	msgs := make([]model.Message, 0, len(history))
+	for _, h := range history {
+		if h == nil {
+			continue
+		}
+		role := strings.ToLower(strings.TrimSpace(h.Role))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		if strings.TrimSpace(h.Content) == "" {
+			continue
+		}
+		msgs = append(msgs, model.Message{Role: h.Role, Content: h.Content})
+	}
+	return chat.BuildTurnTaskLock(userContent, msgs)
 }
 
 func prefetchRequestMetadata(sessionID, agentID, workspace, userID string) map[string]any {

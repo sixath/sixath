@@ -70,12 +70,22 @@ type RunTrace struct {
 	EvidenceNudges int `json:"evidence_nudges,omitempty"`
 	// CodeClaimNudges Soft Code Claim Auditor 已注入回压的次数（最多 1）。
 	CodeClaimNudges int `json:"code_claim_nudges,omitempty"`
+	// GoalDriftNudges idle 改题回压次数（最多 1）。
+	GoalDriftNudges int `json:"goal_drift_nudges,omitempty"`
+	// DroppedProposals 本轮被 family/drift/intake 丢掉的工具提议。
+	DroppedProposals []DroppedProposal `json:"dropped_proposals,omitempty"`
 
 	// ParallelTools 为 true 表示本 Run 中至少有一轮 tool_calls 走了并行执行（D2）。
 	ParallelTools bool `json:"parallel_tools,omitempty"`
 
 	// invocationSeq 为单次 Run 内 model 调用序号，不序列化。
 	invocationSeq int `json:"-"`
+}
+
+// DroppedProposal records a tool call discarded by post-model policy (family/drift/intake).
+type DroppedProposal struct {
+	ToolName string `json:"tool_name,omitempty"`
+	ArgName  string `json:"arg_name,omitempty"`
 }
 
 type RunError struct {

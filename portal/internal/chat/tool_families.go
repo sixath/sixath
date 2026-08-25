@@ -15,7 +15,11 @@ const (
 	FamilyRCA          = "rca"
 	FamilyWeb          = "web"
 	FamilyKnowledge    = "knowledge"
+	FamilyData         = "data"
+	FamilySkills       = "skills"
+	FamilyMemory       = "memory"
 	turnToolSurfaceEnv = "SATH_TURN_TOOL_SURFACE"
+	toolFamilySplitEnv = "SATH_TOOL_FAMILY_SPLIT"
 )
 
 // turnToolSurfaceOverride is set from chat.turn_tool_surface_enabled in config.yaml.
@@ -43,6 +47,16 @@ func ToolSurfaceEnabled() bool {
 	return true
 }
 
+// ToolFamilySplitEnabled 为 true 时 data/skills/memory 独立成族（默认开）。
+// SATH_TOOL_FAMILY_SPLIT=0 回退 8-09：这些工具仍算 core。
+func ToolFamilySplitEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(toolFamilySplitEnv)))
+	if v == "" {
+		return true
+	}
+	return !(v == "0" || v == "false" || v == "off" || v == "no")
+}
+
 func MCPFamilyID(serverID string) string {
 	return "mcp:" + strings.TrimSpace(serverID)
 }
@@ -53,18 +67,33 @@ func LegacyMCPFamilyID(toolID string) string {
 
 // builtinToolFamily maps known non-MCP tool names → family.
 var builtinToolFamily = map[string]string{
-	"jaeger_trace":      FamilyRCA,
-	"es_log_query":      FamilyRCA,
-	"rca_grep":          FamilyCode,
-	"rca_glob":          FamilyCode,
-	"rca_read":          FamilyCode,
-	"rca_symbol":        FamilyCode,
-	"web_search":        FamilyWeb,
-	"web_extract":       FamilyWeb,
-	"knowledge_search":  FamilyKnowledge,
-	"knowledge_read":    FamilyKnowledge,
-	"knowledge_write":   FamilyKnowledge,
-	"knowledge_approve": FamilyKnowledge,
+	"jaeger_trace":         FamilyRCA,
+	"es_log_query":         FamilyRCA,
+	"rca_grep":             FamilyCode,
+	"rca_glob":             FamilyCode,
+	"rca_read":             FamilyCode,
+	"rca_symbol":           FamilyCode,
+	"web_search":           FamilyWeb,
+	"web_extract":          FamilyWeb,
+	"knowledge_search":     FamilyKnowledge,
+	"knowledge_read":       FamilyKnowledge,
+	"knowledge_write":      FamilyKnowledge,
+	"knowledge_approve":    FamilyKnowledge,
+	"list_tables":          FamilyData,
+	"describe_table":       FamilyData,
+	"execute_read":         FamilyData,
+	"execute_write":        FamilyData,
+	"skill_view":           FamilySkills,
+	"load_skill":           FamilySkills,
+	"skills_list":          FamilySkills,
+	"read_skill_file":      FamilySkills,
+	"execute_skill_script": FamilySkills,
+	"skill_manage":         FamilySkills,
+	"memory_recall":        FamilyMemory,
+	"memory_search":        FamilyMemory,
+	"memory_get":           FamilyMemory,
+	"memory_remember":      FamilyMemory,
+	"session_search":       FamilyMemory,
 }
 
 // familyKeywords: family → aliases (lowercase). MCP families also match server id/name at resolve time.
@@ -73,10 +102,16 @@ var familyKeywords = map[string][]string{
 	FamilyRCA:       {"jaeger", "trace", "span", "opentelemetry", "otel", "es_log", "elasticsearch", "日志排查", "链路"},
 	FamilyWeb:       {"联网", "搜索网页", "web_search", "http://", "https://"},
 	FamilyKnowledge: {"wiki", "knowledge", "知识库", "文档库"},
+	FamilyData:      {"查库", "查表", "集合", "mongo", "mongodb", "mysql", "sql", "实际数据", "有哪些记录", "线上数据", "这条数据"},
+	FamilySkills:    {"skill", "技能", "手册", "按技能", "load_skill", "skill_view"},
+	FamilyMemory:    {"上次", "记忆", "我们讨论过", "之前说过", "session 里"},
 }
 
 func FamilyForBuiltinToolName(name string) string {
 	if f, ok := builtinToolFamily[strings.TrimSpace(name)]; ok {
+		if !ToolFamilySplitEnabled() && (f == FamilyData || f == FamilySkills || f == FamilyMemory) {
+			return FamilyCore
+		}
 		return f
 	}
 	return FamilyCore
@@ -113,8 +148,12 @@ func BoundFamiliesFrom(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, webE
 			} else {
 				set[LegacyMCPFamilyID(t.Name)] = struct{}{}
 			}
-		case biz.ToolTypeDatasource, biz.ToolTypeBuiltin:
-			// phase-1: treat as core (always allowed when bound)
+		case biz.ToolTypeDatasource:
+			if ToolFamilySplitEnabled() {
+				set[FamilyData] = struct{}{}
+			}
+		case biz.ToolTypeBuiltin:
+			// runtime builtins (todo / files) stay core; split families are registered at runtime
 		}
 	}
 	if webEnabled {
@@ -174,6 +213,39 @@ func FamilyActive(active map[string]struct{}, family string) bool {
 	}
 	_, ok := active[family]
 	return ok
+}
+
+// InferPrimaryFamilies 低置信 Fail-narrow 用的主族：已绑定的 code/rca；二者都无则仅 data。
+func InferPrimaryFamilies(bound []string) []string {
+	s := familySet(bound)
+	var out []string
+	if _, ok := s[FamilyCode]; ok {
+		out = append(out, FamilyCode)
+	}
+	if _, ok := s[FamilyRCA]; ok {
+		out = append(out, FamilyRCA)
+	}
+	if len(out) == 0 {
+		if _, ok := s[FamilyData]; ok {
+			out = append(out, FamilyData)
+		}
+	}
+	return out
+}
+
+func mergeFamilyIDs(ids []string, extra ...string) []string {
+	s := familySet(ids)
+	for _, e := range extra {
+		if strings.TrimSpace(e) == "" {
+			continue
+		}
+		s[e] = struct{}{}
+	}
+	out := make([]string, 0, len(s))
+	for id := range s {
+		out = append(out, id)
+	}
+	return out
 }
 
 // BuildToolFamilyIndex maps registered tool names to family ids for TurnIntentGate.

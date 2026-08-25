@@ -176,6 +176,14 @@ func TestDeriveEvidenceRefs_RCASymbol_emptyLocations(t *testing.T) {
 	}
 }
 
+func TestDeriveEvidenceRefs_RCASymbol_emptyReferencesSummary(t *testing.T) {
+	payload := map[string]any{"action": "references", "repo": "svc", "locations": []any{}}
+	refs := deriveEvidenceRefs("rca_symbol", payload)
+	if len(refs) != 1 || refs[0].Summary != "no inbound callers" || refs[0].Repo != "svc" {
+		t.Fatalf("refs=%#v", refs)
+	}
+}
+
 func TestClassifyRCAError(t *testing.T) {
 	cases := []struct {
 		err  error

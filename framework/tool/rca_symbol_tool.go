@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -49,11 +50,13 @@ func RegisterRCASymbolTool(reg *Registry, roots []string, opts RCASymbolOpts) er
 	return reg.Register(Tool{
 		Name:               "rca_symbol",
 		Description: "Navigate Go source symbols (definition/references) via gopls across configured code roots. " +
-			"For module/call-chain analysis: rca_glob/rca_grep to locate entries, then rca_symbol with file+line (preferred) or a unique symbol. " +
+			"For call-chain analysis: after locating a function, call action=references to list inbound callers (file:line). " +
+			"Do not treat the first handler hit as the only source. Empty callers (inbound_empty) means no in-root callers — then you may conclude. " +
+			"If gopls fails, falls back to a name grep and sets symbol_ok=false. " +
 			"Prefer file+line over symbol-only in large multi-module repos. character is optional (0-based; 0 snaps to the identifier on that line). " +
 			"LSP attaches to the nearest go.mod under the repo root. max_results defaults to 50.",
 		Toolset:            ToolsetRCA,
-		RequiresSequential: true,
+		RequiresSequential: false,
 		CheckFn: func(context.Context) error {
 			if filepath.IsAbs(command) {
 				info, err := os.Stat(command)
@@ -171,16 +174,25 @@ func executeRCASymbol(ctx context.Context, roots []string, pool *lsp.Pool, param
 	}
 	if err != nil {
 		if lsp.IsPermanentCapabilityError(err) {
+			if action == "references" {
+				return rcaSymbolGrepFallback(toolName, roots, repo, repoRoot, full, file, line, preferName, maxResults, err)
+			}
 			return rcaErr(toolName, err.Error(), ErrorPermanent)
 		}
 		if shouldMarkDeadRCASymbolServer(err) {
 			pool.MarkDead(moduleRoot)
+		}
+		if action == "references" {
+			return rcaSymbolGrepFallback(toolName, roots, repo, repoRoot, full, file, line, preferName, maxResults, err)
 		}
 		return rcaErrFrom(toolName, err)
 	}
 
 	locations = remapLocationsToRepoRoot(repoRoot, moduleRoot, locations)
 	locations = filterRCASymbolLocations(roots, repo, locations)
+	if action == "references" {
+		return rcaSymbolReferencesOK(toolName, roots, repo, repoRoot, full, file, line, preferName, locations, maxResults, true, "")
+	}
 	if len(locations) == 0 {
 		return rcaErr(toolName, "no symbol locations found", ErrorPermanent)
 	}
@@ -237,4 +249,191 @@ func filterRCASymbolLocations(roots []string, repo string, locations []lsp.Locat
 		filtered = append(filtered, location)
 	}
 	return filtered
+}
+
+func rcaSymbolReferencesOK(toolName string, roots []string, repo, repoRoot, full, file string, line int, symbol string, locations []lsp.Location, maxResults int, symbolOK bool, fallback string) map[string]any {
+	locations = appendCrossRepoGrepCallers(roots, repo, full, line, symbol, locations, maxResults)
+	truncated := len(locations) > maxResults
+	if truncated {
+		locations = locations[:maxResults]
+	}
+	callers := callersFromLocations(repo, locations, file, line)
+	entry := map[string]any{"repo": repo, "file": file, "line": line}
+	if strings.TrimSpace(symbol) != "" {
+		entry["symbol"] = symbol
+	}
+	scanned := reposScanned(repo, callers)
+	payload := map[string]any{
+		"action":        "references",
+		"repo":          repo,
+		"symbol_ok":     symbolOK,
+		"entry":         entry,
+		"callers":       callers,
+		"locations":     locations,
+		"truncated":     truncated,
+		"inbound_empty": len(callers) == 0,
+		"repos_scanned": scanned,
+		"cross_repo":    len(roots) > 1,
+		"workset": map[string]any{
+			"entry":   entry,
+			"callers": callers,
+			"callees": []map[string]any{},
+		},
+	}
+	if fallback != "" {
+		payload["fallback"] = fallback
+	}
+	return rcaOK(toolName, payload)
+}
+
+func callersFromLocations(repo string, locations []lsp.Location, originFile string, originLine int) []map[string]any {
+	originFile = filepath.ToSlash(originFile)
+	out := make([]map[string]any, 0, len(locations))
+	for _, loc := range locations {
+		file := loc.File
+		if file == "" {
+			continue
+		}
+		locRepo := loc.Repo
+		if locRepo == "" {
+			locRepo = repo
+		}
+		if locRepo == repo && file == originFile && loc.Line == originLine {
+			continue
+		}
+		item := map[string]any{
+			"repo": loc.Repo,
+			"file": file,
+			"line": loc.Line,
+			"path": fmt.Sprintf("%s:%d", file, loc.Line),
+		}
+		if item["repo"] == "" {
+			item["repo"] = repo
+		}
+		if loc.Name != "" {
+			item["name"] = loc.Name
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func rcaSymbolGrepFallback(toolName string, roots []string, repo, repoRoot, full, file string, line int, preferName string, maxResults int, lspErr error) map[string]any {
+	name := strings.TrimSpace(preferName)
+	if name == "" {
+		name = goIdentifierOnLine(full, line)
+	}
+	if name == "" {
+		return rcaErrFrom(toolName, lspErr)
+	}
+	locations, err := grepSymbolCallers(roots, repo, repoRoot, name, maxResults+1)
+	if err != nil {
+		return rcaErrFrom(toolName, lspErr)
+	}
+	return rcaSymbolReferencesOK(toolName, roots, repo, repoRoot, full, file, line, name, locations, maxResults, false, "grep")
+}
+
+func grepSymbolCallers(roots []string, repo, repoRoot, name string, limit int) ([]lsp.Location, error) {
+	pattern := `\b` + regexp.QuoteMeta(name) + `\b`
+	matches, err := searchRCAFileContents(repoRoot, pattern, "*.go", limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]lsp.Location, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, lsp.Location{
+			Repo: repo,
+			File: m.Path,
+			Line: m.Line,
+			Name: name,
+		})
+	}
+	return filterRCASymbolLocations(roots, repo, out), nil
+}
+
+func appendCrossRepoGrepCallers(roots []string, repo, full string, line int, symbol string, locations []lsp.Location, maxResults int) []lsp.Location {
+	if len(roots) <= 1 {
+		return locations
+	}
+	name := strings.TrimSpace(symbol)
+	if name == "" {
+		name = goIdentifierOnLine(full, line)
+	}
+	if name == "" {
+		return locations
+	}
+	remain := maxResults
+	if remain <= 0 {
+		remain = rcaSymbolMaxResultsDefault
+	}
+	remain -= len(locations)
+	if remain < 8 {
+		remain = 8
+	}
+	extra, err := grepSymbolCallersOtherRoots(roots, repo, name, remain)
+	if err != nil || len(extra) == 0 {
+		return locations
+	}
+	return dedupeSymbolLocations(append(locations, extra...))
+}
+
+func grepSymbolCallersOtherRoots(roots []string, skipRepo, name string, limit int) ([]lsp.Location, error) {
+	var out []lsp.Location
+	remaining := limit
+	for _, root := range roots {
+		repo := repoNameFromRoot(root)
+		if repo == skipRepo {
+			continue
+		}
+		if remaining <= 0 {
+			break
+		}
+		locs, err := grepSymbolCallers(roots, repo, root, name, remaining)
+		if err != nil {
+			continue
+		}
+		out = append(out, locs...)
+		remaining = limit - len(out)
+	}
+	return out, nil
+}
+
+func dedupeSymbolLocations(locations []lsp.Location) []lsp.Location {
+	seen := map[string]struct{}{}
+	out := make([]lsp.Location, 0, len(locations))
+	for _, loc := range locations {
+		key := loc.Repo + "|" + filepath.ToSlash(loc.File) + "|" + fmt.Sprint(loc.Line)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, loc)
+	}
+	return out
+}
+
+func reposScanned(origin string, callers []map[string]any) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 1+len(callers))
+	add := func(r string) {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			return
+		}
+		if _, ok := seen[r]; ok {
+			return
+		}
+		seen[r] = struct{}{}
+		out = append(out, r)
+	}
+	add(origin)
+	for _, c := range callers {
+		add(anyStringTool(c["repo"]))
+	}
+	return out
+}
+
+func anyStringTool(v any) string {
+	s, _ := v.(string)
+	return s
 }

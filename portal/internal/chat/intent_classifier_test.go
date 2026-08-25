@@ -74,7 +74,10 @@ func TestIntentResolver_ClassifierErrorFailNarrow(t *testing.T) {
 		UserText:      "你好",
 		BoundFamilies: []string{FamilyCore, FamilyRCA},
 	})
-	if res.Source != "fail_narrow" || FamilyActive(familySet(res.ActiveFamilies), FamilyRCA) {
+	if res.Source != "fail_narrow" {
 		t.Fatalf("%+v", res)
+	}
+	if !FamilyActive(familySet(res.ActiveFamilies), FamilyRCA) {
+		t.Fatalf("primary rca should remain on classifier error, got %+v", res)
 	}
 }

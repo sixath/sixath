@@ -258,7 +258,7 @@ func pruneToolMessageBodies(msgs []Message, maxRunesEach int) []Message {
 			continue
 		}
 		cp := out[i]
-		cp.Content = TruncateMessageRunes(c, maxRunesEach, l2ToolPrePruneSuffix)
+		cp.Content = pruneToolBodyPreservingPinnedJSON(c, maxRunesEach)
 		out[i] = cp
 	}
 	return out

@@ -215,6 +215,13 @@ func deriveRCAMatchRefs(tool string, payload map[string]any) []EvidenceRef {
 func deriveRCASymbolRefs(tool string, payload map[string]any) []EvidenceRef {
 	locations := payload["locations"]
 	if !hasRCASymbolLocations(locations) {
+		if evidenceStringVal(payload["action"]) == "references" {
+			ref := EvidenceRef{Kind: tool, Summary: "no inbound callers"}
+			if repo := evidenceStringVal(payload["repo"]); repo != "" {
+				ref.Repo = repo
+			}
+			return []EvidenceRef{ref}
+		}
 		return nil
 	}
 	action := evidenceStringVal(payload["action"])

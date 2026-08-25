@@ -263,6 +263,42 @@ func firstGoIdentifierOffset(text string) int {
 	}
 }
 
+func firstGoIdentifierName(text string) string {
+	fileSet := token.NewFileSet()
+	file := fileSet.AddFile("", -1, len(text))
+	var lexer scanner.Scanner
+	lexer.Init(file, []byte(text), nil, 0)
+	for {
+		_, tok, lit := lexer.Scan()
+		if tok == token.EOF {
+			return ""
+		}
+		if tok == token.IDENT {
+			return lit
+		}
+	}
+}
+
+func goIdentifierOnLine(absFile string, line int) string {
+	if line < 1 || strings.TrimSpace(absFile) == "" {
+		return ""
+	}
+	f, err := os.Open(absFile)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), rcaSymbolScanMaxToken)
+	for current := 1; sc.Scan(); current++ {
+		if current != line {
+			continue
+		}
+		return firstGoIdentifierName(sc.Text())
+	}
+	return ""
+}
+
 // remapLocationsToRepoRoot converts module-relative (or absolute) LSP locations
 // into paths relative to the configured RCA repository root.
 func remapLocationsToRepoRoot(repoRoot, moduleRoot string, locations []lsp.Location) []lsp.Location {

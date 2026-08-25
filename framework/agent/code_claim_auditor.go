@@ -51,6 +51,9 @@ func EvaluateCodeClaimCascade(ctx context.Context, auditor model.Model, userQues
 	if !machine.Allow {
 		return machine
 	}
+	if scenario := EvaluateScenarioPathGate(userQuestion, finalText, sources); !scenario.Allow {
+		return scenario
+	}
 	return EvaluateCodeClaimAuditor(ctx, auditor, userQuestion, finalText, sources)
 }
 

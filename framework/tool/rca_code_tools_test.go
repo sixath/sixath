@@ -373,7 +373,227 @@ func TestRCAGrepDescriptionPrefersCodeRoots(t *testing.T) {
 	if !ok {
 		t.Fatal("rca_read missing")
 	}
-	if !strings.Contains(read.Description, "verbatim") || !strings.Contains(read.Description, "enclosing function") {
-		t.Fatalf("rca_read should require whole-function verbatim quotes, got %q", read.Description)
+	if !strings.Contains(read.Description, "verbatim") || !strings.Contains(read.Description, "control_flow") || !strings.Contains(read.Description, "call_graph") {
+		t.Fatalf("rca_read should mention control_flow, call_graph and verbatim quotes, got %q", read.Description)
+	}
+}
+
+func TestRCARead_AttachesControlFlowForGo(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	writeFile(t, filepath.Join(repoA, "handler", "helper.go"), c304RegisterSrc)
+	reg := newRCARegistry(t, []string{repoA})
+	tl, ok := reg.Get("rca_read")
+	if !ok {
+		t.Fatal("rca_read missing")
+	}
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"repo": "service-a", "file": "handler/helper.go",
+		"start_line": 12, "end_line": 13,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	cf, ok := m["control_flow"].([]ControlFlowFunc)
+	if !ok || len(cf) != 1 {
+		t.Fatalf("control_flow = %#v", m["control_flow"])
+	}
+	if cf[0].Function != "RegisterUnionUserToArea" {
+		t.Fatalf("function=%q", cf[0].Function)
+	}
+	found := false
+	for _, p := range cf[0].Paths {
+		if pathHasCall(p, "InsertUnionUserAreaInfo") && pathHasWhen(p, "errcode == 0") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("narrow rca_read must attach Insert under errcode==0: %#v", cf[0].Paths)
+	}
+	content := m["content"].(string)
+	if !strings.Contains(content, "if errcode == 0") || !strings.Contains(content, "func RegisterUnionUserToArea") {
+		t.Fatalf("content should expand to the whole function, got %q", content)
+	}
+	if m["expanded_to_function"] != true {
+		t.Fatalf("expanded_to_function=%v", m["expanded_to_function"])
+	}
+	if m["requested_start_line"] != 12 || m["requested_end_line"] != 13 {
+		t.Fatalf("requested range = %v-%v", m["requested_start_line"], m["requested_end_line"])
+	}
+	if m["start_line"].(int) > 12 || m["end_line"].(int) < 13 {
+		t.Fatalf("actual range %v-%v should cover requested 12-13", m["start_line"], m["end_line"])
+	}
+	cg, ok := m["call_graph"].(*CallGraph)
+	if !ok || cg == nil {
+		t.Fatalf("call_graph = %#v", m["call_graph"])
+	}
+	if !callGraphHasEdgeTo(cg, "InsertUnionUserAreaInfo") {
+		t.Fatalf("call_graph should include Insert callee, got %#v", cg)
+	}
+}
+
+func TestRCARead_NonGoOmitsControlFlow(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	writeFile(t, filepath.Join(repoA, "app.py"), "def insert_mapping():\n    return 1\n")
+	reg := newRCARegistry(t, []string{repoA})
+	tl, _ := reg.Get("rca_read")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"repo": "service-a", "file": "app.py",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	assertRCAEvidenceOK(t, m, "rca_read")
+	if _, ok := m["control_flow"]; ok {
+		t.Fatalf("python must omit control_flow, got %#v", m["control_flow"])
+	}
+	if _, ok := m["call_graph"]; ok {
+		t.Fatalf("python must omit call_graph, got %#v", m["call_graph"])
+	}
+	if !strings.Contains(m["content"].(string), "def insert_mapping") {
+		t.Fatalf("python content missing: %q", m["content"])
+	}
+}
+
+func TestRCARead_CallGraphResolvesSibling(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	writeFile(t, filepath.Join(repoA, "pkg", "helper.go"), `package pkg
+func Register() {
+	if errcode == 0 {
+		InsertUnionUserAreaInfo()
+	}
+}
+`)
+	writeFile(t, filepath.Join(repoA, "pkg", "db.go"), `package pkg
+func InsertUnionUserAreaInfo() {}
+`)
+	reg := newRCARegistry(t, []string{repoA})
+	tl, _ := reg.Get("rca_read")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"repo": "service-a", "file": "pkg/helper.go",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	cg, ok := m["call_graph"].(*CallGraph)
+	if !ok || cg == nil {
+		t.Fatalf("call_graph=%#v", m["call_graph"])
+	}
+	found := false
+	for _, n := range cg.Nodes {
+		if n.Name == "InsertUnionUserAreaInfo" && n.Resolved && n.File == "pkg/db.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected resolved sibling callee, nodes=%#v edges=%#v", cg.Nodes, cg.Edges)
+	}
+}
+
+func callGraphHasEdgeTo(cg *CallGraph, name string) bool {
+	if cg == nil {
+		return false
+	}
+	for _, e := range cg.Edges {
+		if strings.Contains(e.To, name) {
+			return true
+		}
+	}
+	for _, n := range cg.Nodes {
+		if n.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRCARead_TooLargeFunctionKeepsWindow(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	var src strings.Builder
+	src.WriteString("package p\nfunc Big() {\n")
+	for i := 0; i < rcaReadMaxExpandLines+20; i++ {
+		src.WriteString("\t_ = 1\n")
+	}
+	src.WriteString("\tInsertUnionUserAreaInfo()\n}\n")
+	writeFile(t, filepath.Join(repoA, "big.go"), src.String())
+	reg := newRCARegistry(t, []string{repoA})
+	tl, _ := reg.Get("rca_read")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"repo": "service-a", "file": "big.go",
+		"start_line": 10, "end_line": 12,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	content := m["content"].(string)
+	if strings.Count(content, "\n")+1 > 5 {
+		t.Fatalf("oversize function should keep requested window, got %q", content)
+	}
+	if m["function_too_large"] != true {
+		t.Fatalf("function_too_large=%v", m["function_too_large"])
+	}
+	if sig, _ := m["signature"].(string); !strings.Contains(sig, "func Big") {
+		t.Fatalf("signature=%v", m["signature"])
+	}
+	if _, ok := m["control_flow"]; !ok {
+		t.Fatal("control_flow must still be attached when function is too large")
+	}
+}
+
+func TestRCAGrep_DefaultContextIncludesSurroundingIf(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	writeFile(t, filepath.Join(repoA, "handler", "helper.go"), c304RegisterSrc)
+	reg := newRCARegistry(t, []string{repoA})
+	tl, _ := reg.Get("rca_grep")
+	out, err := tl.Execute(context.Background(), map[string]any{"pattern": "InsertUnionUserAreaInfo"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	matches := out.(map[string]any)["matches"].([]map[string]any)
+	if len(matches) != 1 {
+		t.Fatalf("want 1 match, got %#v", matches)
+	}
+	snippet := matches[0]["snippet"].(string)
+	if !strings.Contains(snippet, "if errcode == 0") {
+		t.Fatalf("default grep context should include surrounding if, got %q", snippet)
+	}
+	if !strings.Contains(snippet, "|") {
+		t.Fatalf("snippet should be numbered like rca_read, got %q", snippet)
+	}
+
+	out0, _ := tl.Execute(context.Background(), map[string]any{"pattern": "InsertUnionUserAreaInfo", "context": 0})
+	snip0 := out0.(map[string]any)["matches"].([]map[string]any)[0]["snippet"].(string)
+	if strings.Contains(snip0, "if errcode == 0") {
+		t.Fatalf("context=0 should be the hit line only, got %q", snip0)
+	}
+}
+
+func TestRCAGrep_SkipsVendorGenAndTxt(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	writeFile(t, filepath.Join(repoA, "pkg", "a.go"), "package a\nconst Token = \"UniqueTokenXYZ\"\n")
+	writeFile(t, filepath.Join(repoA, "vendor", "github.com", "x", "x.go"), "package x\nconst Token = \"UniqueTokenXYZ\"\n")
+	writeFile(t, filepath.Join(repoA, "pkg", "a_gen.go"), "package a\nconst Token = \"UniqueTokenXYZ\"\n")
+	writeFile(t, filepath.Join(repoA, "notes.txt"), "UniqueTokenXYZ\n")
+	reg := newRCARegistry(t, []string{repoA})
+	tl, _ := reg.Get("rca_grep")
+	out, err := tl.Execute(context.Background(), map[string]any{"pattern": "UniqueTokenXYZ"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	matches := out.(map[string]any)["matches"].([]map[string]any)
+	if len(matches) != 1 {
+		t.Fatalf("want only pkg/a.go, got %#v", matches)
+	}
+	if matches[0]["file"] != "pkg/a.go" {
+		t.Fatalf("file=%v", matches[0]["file"])
 	}
 }
