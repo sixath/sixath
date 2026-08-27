@@ -664,7 +664,7 @@ func (a *ReActAgent) runPlainEvents(
 			return
 		}
 		emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-		_ = send(streamDoneEvent(trace, messages, nil))
+		_ = send(streamDoneEvent(trace, messages, nil, gen.Text))
 		return
 	}
 
@@ -685,7 +685,7 @@ func (a *ReActAgent) runPlainEvents(
 	_ = a.storeAssistant(ctx, text)
 	emit(events.ModelResponded, map[string]any{"text_length": len(text), "step": -1})
 	emit(events.RunCompleted, map[string]any{"text_length": len(text), "stream": true})
-	_ = send(streamDoneEvent(trace, messages, nil))
+	_ = send(streamDoneEvent(trace, messages, nil, text))
 }
 
 func (a *ReActAgent) runToolEventsSync(
@@ -741,7 +741,7 @@ func (a *ReActAgent) runToolEventsSync(
 				return
 			}
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate)))
+			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate), gen.Text))
 			return
 		}
 
@@ -872,7 +872,7 @@ func (a *ReActAgent) runToolEvents(
 			}
 			_ = a.storeAssistant(ctx, gen.Text)
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate)))
+			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate), gen.Text))
 			return
 		}
 
@@ -1035,7 +1035,7 @@ func (a *ReActAgent) forceFinalSummaryStream(
 			doneMeta = nil
 		}
 	}
-	_ = send(streamDoneEvent(trace, resp.Messages, doneMeta))
+	_ = send(streamDoneEvent(trace, resp.Messages, doneMeta, resp.Text))
 	return true, nil
 }
 
@@ -1339,9 +1339,10 @@ func snapshotMessages(msgs []model.Message) []model.Message {
 	return out
 }
 
-func streamDoneEvent(trace *RunTrace, messages []model.Message, metadata map[string]any) StreamEvent {
+func streamDoneEvent(trace *RunTrace, messages []model.Message, metadata map[string]any, finalText string) StreamEvent {
 	return StreamEvent{
 		Type:     StreamEventDone,
+		Text:     finalText,
 		Trace:    trace,
 		Messages: snapshotMessages(messages),
 		Metadata: metadata,
@@ -1381,6 +1382,14 @@ func applyAnswerGateInject(trace *RunTrace, gate evidenceGateCheck) {
 	if trace == nil {
 		return
 	}
+	if gate.EmptyHit {
+		trace.EmptyHitNudges++
+		return
+	}
+	if gate.EmptyIdle {
+		trace.EmptyIdleNudges++
+		return
+	}
 	if gate.CodeClaim {
 		trace.CodeClaimNudges++
 		return
@@ -1409,6 +1418,8 @@ type evidenceGateCheck struct {
 	Prompt            string
 	CodeClaim         bool
 	CodeClaimMismatch bool
+	EmptyHit          bool
+	EmptyIdle         bool
 }
 
 func collectEvidenceRefsFromTrace(trace *RunTrace) []tool.EvidenceRef {
@@ -1451,13 +1462,31 @@ func (a *ReActAgent) checkEvidenceGate(trace *RunTrace, finalText string, allowI
 }
 
 func (a *ReActAgent) checkAnswerGates(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
+	eh := a.checkEmptyHitSpeakGate(trace, finalText, allowInject, hasStepRoom, emit)
+	if eh.HaltErr != nil || eh.Inject {
+		return eh
+	}
 	ev := a.checkEvidenceGate(trace, finalText, allowInject, hasStepRoom, emit)
 	if ev.HaltErr != nil || ev.Inject {
+		if eh.Incomplete {
+			ev.Incomplete = true
+		}
 		return ev
 	}
 	cc := a.checkCodeClaimGate(ctx, req, messages, trace, finalText, allowInject, hasStepRoom, emit)
+	if eh.Incomplete {
+		cc.Incomplete = true
+	}
 	if ev.Incomplete {
 		cc.Incomplete = true
+	}
+	if cc.HaltErr != nil || cc.Inject {
+		return cc
+	}
+	idle := a.checkEmptyIdleGate(req, messages, trace, finalText, allowInject, hasStepRoom)
+	if idle.Inject {
+		idle.Incomplete = cc.Incomplete
+		return idle
 	}
 	return cc
 }

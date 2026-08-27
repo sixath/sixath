@@ -1,8 +1,11 @@
 package tool
 
 import (
+	"context"
 	"strings"
 
+	"github.com/sixath/framework/executor"
+	"github.com/sixath/framework/obs"
 	"github.com/sixath/framework/tool/lsp"
 )
 
@@ -10,6 +13,80 @@ const (
 	ErrorTransient = "transient"
 	ErrorPermanent = "permanent"
 )
+
+const (
+	HitStatusHits  = "hits"
+	HitStatusEmpty = "empty"
+	HitStatusError = "error"
+)
+
+type HitStamp struct {
+	Status       string
+	QueriedIndex string
+	Repo         string
+	SetRepo      bool            // true：即使 Repo=="" 也写 "repo" 键（grep 0 击）
+	Tool         string          // obs
+	Ctx          context.Context // nil → Background
+}
+
+func HitStatusFromCount(ok bool, n int) string {
+	if !ok {
+		return HitStatusError
+	}
+	if n <= 0 {
+		return HitStatusEmpty
+	}
+	return HitStatusHits
+}
+
+func StampHitContract(payload map[string]any, s HitStamp) map[string]any {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if s.Status != "" {
+		payload["hit_status"] = s.Status
+	}
+	if s.QueriedIndex != "" {
+		payload["queried_index"] = s.QueriedIndex
+	}
+	if s.SetRepo || s.Repo != "" {
+		payload["repo"] = s.Repo
+	}
+	if s.Status != "" {
+		ctx := s.Ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		obs.LogHitContract(ctx, s.Tool, s.Status, s.QueriedIndex, s.Repo)
+	}
+	return payload
+}
+
+func HitContractFromResult(v any) (status, queriedIndex, repo string) {
+	switch x := v.(type) {
+	case map[string]any:
+		return hitStatusString(x["hit_status"]), evidenceStringVal(x["queried_index"]), evidenceStringVal(x["repo"])
+	case *executor.QueryResult:
+		if x == nil {
+			return "", "", ""
+		}
+		return hitStatusString(x.HitStatus), x.QueriedIndex, ""
+	case executor.QueryResult:
+		return hitStatusString(x.HitStatus), x.QueriedIndex, ""
+	default:
+		return "", "", ""
+	}
+}
+
+func hitStatusString(v any) string {
+	s := strings.TrimSpace(evidenceStringVal(v))
+	switch s {
+	case HitStatusHits, HitStatusEmpty, HitStatusError:
+		return s
+	default:
+		return ""
+	}
+}
 
 type EvidenceRef struct {
 	Kind    string `json:"kind"`

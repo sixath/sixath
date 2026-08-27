@@ -104,6 +104,81 @@ func TestReActAgent_ModelErrorReturnsRunErrorWithTrace(t *testing.T) {
 	}
 }
 
+func TestReActAgent_EmptyIdleAfterToolsInjectsThenAnswers(t *testing.T) {
+	mem := memory.NewBufferMemory(5)
+	fake := &fakeOpenAIClient{
+		toolSteps: []model.ToolStep{
+			{
+				Used:      true,
+				ToolName:  "calculator_add",
+				Arguments: map[string]any{"a": float64(1), "b": float64(1)},
+			},
+			{Used: false},
+			{Used: false},
+		},
+		plainReplies: []string{"", "\n\n", "没有远程暂停进程的工具"},
+	}
+	reg := tool.NewRegistry()
+	_ = tool.RegisterCalculatorTool(reg)
+
+	react := NewReActAgent(fake, mem, reg, WithReActMaxSteps(5))
+	resp, err := react.Run(context.Background(), &Request{
+		Messages: []model.Message{{Role: "user", Content: "暂停vmid=232451的实例cgvmagent进程"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected err=%v", err)
+	}
+	if resp == nil || resp.Text != "没有远程暂停进程的工具" {
+		t.Fatalf("expected retry to produce an answer, got %#v", resp)
+	}
+	if fake.toolCalls < 3 {
+		t.Fatalf("expected empty idle to inject another model round, toolCalls=%d", fake.toolCalls)
+	}
+	trace, _ := resp.Metadata["trace"].(*RunTrace)
+	if trace == nil || trace.EmptyIdleNudges != 1 {
+		t.Fatalf("EmptyIdleNudges=%v", trace)
+	}
+	foundNudge := false
+	for _, e := range trace.Errors {
+		if strings.Contains(e, "empty_idle") {
+			foundNudge = true
+		}
+	}
+	if !foundNudge {
+		t.Fatalf("trace.Errors=%v", trace.Errors)
+	}
+	saw := false
+	for _, m := range fake.lastToolMessages {
+		if m.Role == "user" && strings.Contains(m.Content, "没有写出给用户看的正文") {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Fatalf("expected empty-idle retry prompt, last=%#v", fake.lastToolMessages)
+	}
+}
+
+func TestReActAgent_EmptyIdleWithoutToolsFinishes(t *testing.T) {
+	mem := memory.NewBufferMemory(5)
+	fake := &fakeOpenAIClient{finalReply: "\n\n"}
+	reg := tool.NewRegistry()
+	_ = tool.RegisterCalculatorTool(reg)
+	react := NewReActAgent(fake, mem, reg)
+	resp, err := react.Run(context.Background(), &Request{
+		Messages: []model.Message{{Role: "user", Content: "你好"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil || resp.Text != "\n\n" {
+		t.Fatalf("empty idle without tools must not inject, got %#v", resp)
+	}
+	if fake.toolCalls != 1 {
+		t.Fatalf("toolCalls=%d want 1", fake.toolCalls)
+	}
+}
+
 func TestReActAgent_MaxStepsForcedSummary(t *testing.T) {
 	mem := memory.NewBufferMemory(5)
 	fake := &fakeOpenAIClient{
@@ -523,15 +598,22 @@ func TestReActAgent_RunEvents_PlainStreamDeltaAndDone(t *testing.T) {
 	var got strings.Builder
 	var types []StreamEventType
 	var doneTrace *RunTrace
+	var doneText string
 	for event := range ch {
 		types = append(types, event.Type)
-		got.WriteString(event.Text)
+		if event.Type == StreamEventDelta {
+			got.WriteString(event.Text)
+		}
 		if event.Type == StreamEventDone {
 			doneTrace = event.Trace
+			doneText = event.Text
 		}
 	}
 	if got.String() != "plain stream" {
 		t.Fatalf("got streamed text %q, want %q", got.String(), "plain stream")
+	}
+	if doneText != "plain stream" {
+		t.Fatalf("done Text %q, want gen.Text %q", doneText, "plain stream")
 	}
 	if !containsStreamEvent(types, StreamEventDelta) || !containsStreamEvent(types, StreamEventDone) {
 		t.Fatalf("expected delta and done events, got %#v", types)
@@ -570,15 +652,24 @@ func TestReActAgent_RunEvents_StreamedToolCall(t *testing.T) {
 	var got strings.Builder
 	var types []StreamEventType
 	var completed *ToolCallRecord
+	var doneText string
 	for event := range ch {
 		types = append(types, event.Type)
-		got.WriteString(event.Text)
+		if event.Type == StreamEventDelta {
+			got.WriteString(event.Text)
+		}
+		if event.Type == StreamEventDone {
+			doneText = event.Text
+		}
 		if event.Type == StreamEventToolCompleted {
 			completed = event.ToolCall
 		}
 	}
 	if got.String() != "the result is 4" {
 		t.Fatalf("got streamed text %q, want %q", got.String(), "the result is 4")
+	}
+	if doneText != "the result is 4" {
+		t.Fatalf("idle done Text %q, want gen.Text %q", doneText, "the result is 4")
 	}
 	for _, want := range []StreamEventType{StreamEventToolStarted, StreamEventToolCompleted, StreamEventDelta, StreamEventDone} {
 		if !containsStreamEvent(types, want) {
@@ -674,12 +765,21 @@ func TestReActAgent_RunEvents_NonStreamingToolModelEmitsLifecycleOnce(t *testing
 	}
 	var got strings.Builder
 	var types []StreamEventType
+	var doneText string
 	for event := range ch {
 		types = append(types, event.Type)
-		got.WriteString(event.Text)
+		if event.Type == StreamEventDelta {
+			got.WriteString(event.Text)
+		}
+		if event.Type == StreamEventDone {
+			doneText = event.Text
+		}
 	}
 	if got.String() != "direct answer" {
 		t.Fatalf("got streamed text %q, want %q", got.String(), "direct answer")
+	}
+	if doneText != "direct answer" {
+		t.Fatalf("idle done Text %q, want gen.Text %q", doneText, "direct answer")
 	}
 	if !containsStreamEvent(types, StreamEventDelta) || !containsStreamEvent(types, StreamEventDone) {
 		t.Fatalf("expected delta and done events, got %#v", types)
@@ -1443,8 +1543,14 @@ func TestReActAgent_RunEvents_StreamingMultiRoundToolCalls(t *testing.T) {
 
 	var got strings.Builder
 	var completed []string
+	var doneText string
 	for event := range ch {
-		got.WriteString(event.Text)
+		if event.Type == StreamEventDelta {
+			got.WriteString(event.Text)
+		}
+		if event.Type == StreamEventDone {
+			doneText = event.Text
+		}
 		if event.Type == StreamEventToolCompleted {
 			completed = append(completed, event.ToolCall.ToolName)
 		}
@@ -1457,6 +1563,9 @@ func TestReActAgent_RunEvents_StreamingMultiRoundToolCalls(t *testing.T) {
 	}
 	if got.String() != "final answer" {
 		t.Fatalf("expected final streamed text %q, got %q", "final answer", got.String())
+	}
+	if doneText != "final answer" {
+		t.Fatalf("idle done Text %q, want gen.Text %q", doneText, "final answer")
 	}
 }
 
@@ -1713,10 +1822,15 @@ func TestReActAgent_MessagesSnapshotOnStreamDone(t *testing.T) {
 		t.Fatalf("RunEvents error: %v", err)
 	}
 	var doneMsgs []model.Message
+	var doneText string
 	for event := range ch {
 		if event.Type == StreamEventDone {
 			doneMsgs = event.Messages
+			doneText = event.Text
 		}
+	}
+	if doneText != "the result is 4" {
+		t.Fatalf("idle done Text %q, want gen.Text %q", doneText, "the result is 4")
 	}
 	assertMessagesSnapshotHasToolTrajectory(t, doneMsgs)
 }

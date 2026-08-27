@@ -50,7 +50,11 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 			const toolName = "rca_grep"
 			pattern, _ := params["pattern"].(string)
 			if strings.TrimSpace(pattern) == "" {
-				return rcaErr(toolName, "pattern is required", ErrorPermanent), nil
+				return StampHitContract(rcaErr(toolName, "pattern is required", ErrorPermanent), HitStamp{
+					Status: HitStatusError,
+					Tool:   toolName,
+					Ctx:    ctx,
+				}), nil
 			}
 			repo, _ := params["repo"].(string)
 			glob, _ := params["glob"].(string)
@@ -61,7 +65,7 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 			contextLines := rcaGrepContextLines(params)
 			sel, err := selectRoots(roots, repo)
 			if err != nil {
-				return rcaErr(toolName, err.Error(), ErrorPermanent), nil
+				return stampRCAGrepErr(ctx, rcaErr(toolName, err.Error(), ErrorPermanent), repo), nil
 			}
 			matches := make([]map[string]any, 0, maxResults)
 			truncated := false
@@ -72,7 +76,7 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 				remaining := maxResults - len(matches)
 				res, err := searchRCAFileContents(root, pattern, glob, remaining+1)
 				if err != nil {
-					return rcaErrFrom(toolName, err), nil
+					return stampRCAGrepErr(ctx, rcaErrFrom(toolName, err), repo), nil
 				}
 				res = attachRCAGrepContext(root, res, contextLines)
 				name := repoNameFromRoot(root)
@@ -89,9 +93,29 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 					})
 				}
 			}
-			return rcaOK(toolName, map[string]any{"matches": matches, "truncated": truncated}), nil
+			topRepo := strings.TrimSpace(repo)
+			if topRepo == "" && len(sel) > 0 {
+				topRepo = repoNameFromRoot(sel[0])
+			}
+			payload := map[string]any{"matches": matches, "truncated": truncated}
+			payload = StampHitContract(payload, HitStamp{
+				Status:  HitStatusFromCount(true, len(matches)),
+				Repo:    topRepo,
+				SetRepo: true,
+				Tool:    toolName,
+				Ctx:     ctx,
+			})
+			return rcaOK(toolName, payload), nil
 		},
 	})
+}
+
+func stampRCAGrepErr(ctx context.Context, out map[string]any, repo string) map[string]any {
+	s := HitStamp{Status: HitStatusError, Tool: "rca_grep", Ctx: ctx}
+	if r := strings.TrimSpace(repo); r != "" {
+		s.Repo = r
+	}
+	return StampHitContract(out, s)
 }
 
 func registerRCAGlobTool(reg *Registry, roots []string) error {

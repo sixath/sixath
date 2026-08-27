@@ -43,6 +43,8 @@ type QueryResult struct {
 	Rows           [][]any
 	Truncated      bool
 	EstimatedTotal int64
+	HitStatus      string `json:"hit_status,omitempty"`
+	QueriedIndex   string `json:"queried_index,omitempty"`
 }
 
 func queryResultFromResult(r *Result) *QueryResult {

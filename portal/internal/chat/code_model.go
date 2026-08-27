@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -9,6 +11,27 @@ import (
 
 	"github.com/sixath/framework/model"
 )
+
+const codeModelRequiredMsg = "本轮是源码分析，需要配置 code 模型后才能继续，不会用对话模型代替。\n请在 Agent 的 code_model、门户全局 code 模型，或环境变量 SATH_CODE_MODEL 中填写模型名。"
+
+const codeModelBuildPrefix = "本轮是源码分析，code 模型创建失败，不会用对话模型代替。"
+
+var (
+	ErrCodeModelRequired = errors.New(codeModelRequiredMsg)
+	ErrCodeModelBuild    = errors.New(codeModelBuildPrefix)
+)
+
+func wrapCodeModelBuild(err error) error {
+	if err == nil {
+		return ErrCodeModelBuild
+	}
+	extra := err.Error()
+	r := []rune(extra)
+	if len(r) > 200 {
+		extra = string(r[:200])
+	}
+	return fmt.Errorf("%w %s", ErrCodeModelBuild, extra)
+}
 
 // CodeModelSpec is the optional stronger model used when FamilyCode is active.
 type CodeModelSpec struct {
@@ -48,17 +71,18 @@ func GlobalCodeModel() CodeModelSpec {
 
 // ResolveTurnModel returns a code-family model when FamilyCode is active.
 // Agent code_* overlays the global setting; empty agent fields inherit global
-// (and env if global is empty). Build failure fail-opens to the session model.
-func ResolveTurnModel(active map[string]struct{}, chatModel model.Model, meta biz.AgentMeta) model.Model {
+// (and env if global Model is empty). Missing code model name or BuildModel
+// failure returns an error; the session chat model is never used as a fallback.
+func ResolveTurnModel(active map[string]struct{}, chatModel model.Model, meta biz.AgentMeta) (model.Model, error) {
 	if chatModel == nil {
-		return nil
+		return nil, nil
 	}
 	if active == nil || !FamilyActive(active, FamilyCode) {
-		return chatModel
+		return chatModel, nil
 	}
 	spec := resolveCodeModelSpec(meta)
-	if !spec.Usable() {
-		return chatModel
+	if strings.TrimSpace(spec.Model) == "" {
+		return nil, ErrCodeModelRequired
 	}
 	provider := strings.TrimSpace(spec.Provider)
 	if provider == "" {
@@ -68,9 +92,6 @@ func ResolveTurnModel(active map[string]struct{}, chatModel model.Model, meta bi
 		provider = "openai"
 	}
 	modelName := strings.TrimSpace(spec.Model)
-	if modelName == "" {
-		modelName = strings.TrimSpace(meta.ModelConfig.Model)
-	}
 	apiKey := strings.TrimSpace(spec.APIKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(meta.ModelConfig.APIKey)
@@ -81,14 +102,14 @@ func ResolveTurnModel(active map[string]struct{}, chatModel model.Model, meta bi
 	}
 	m, err := BuildModel(provider, modelName, apiKey, baseURL)
 	if err != nil || m == nil {
-		return chatModel
+		return nil, wrapCodeModelBuild(err)
 	}
-	return m
+	return m, nil
 }
 
 func resolveCodeModelSpec(meta biz.AgentMeta) CodeModelSpec {
 	base := GlobalCodeModel()
-	if !base.Usable() {
+	if strings.TrimSpace(base.Model) == "" {
 		base = overlayCodeModel(base, CodeModelSpecFromEnv())
 	}
 	agent := agentCodeModelSpec(meta)
@@ -124,7 +145,7 @@ func overlayCodeModel(base, over CodeModelSpec) CodeModelSpec {
 	return out
 }
 
-// CodeModelSpecFromEnv reads SATH_CODE_* (used when global UI/DB is empty).
+// CodeModelSpecFromEnv reads SATH_CODE_* (used when global Model is empty).
 func CodeModelSpecFromEnv() CodeModelSpec {
 	return CodeModelSpec{
 		Provider: strings.TrimSpace(os.Getenv("SATH_CODE_PROVIDER")),

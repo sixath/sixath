@@ -365,7 +365,11 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
 	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
 		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
-	m = chat.ResolveTurnModel(active, m, *agentMeta)
+	m, err = chat.ResolveTurnModel(active, m, *agentMeta)
+	if err != nil {
+		s.log.Errorf("resolve turn model failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
+		return nil, err
+	}
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
@@ -627,7 +631,11 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
 	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
 		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
-	m = chat.ResolveTurnModel(active, m, *agentMeta)
+	m, err = chat.ResolveTurnModel(active, m, *agentMeta)
+	if err != nil {
+		s.log.Errorf("resolve turn model failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
+		return nil, "", err
+	}
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
@@ -893,11 +901,18 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			Metadata: chat.MergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
 		}
 
-		useMEA := (len(meaChecks) > 0 || len(meaAcceptance) > 0) &&
-			chat.MEAEnabledForAgent(session.AgentID, agentMeta.RuntimeTools.MEAEnabled) &&
-			strings.TrimSpace(agentMeta.Workspace) != ""
+		enabled := chat.MEAEnabledForAgent(session.AgentID, agentMeta.RuntimeTools.MEAEnabled)
+		g := strings.TrimSpace(lock.Q)
+		if g == "" {
+			g = userContent
+		}
+		checks := meaChecks
+		if enabled {
+			checks = chat.ResolveAcceptanceChecks(meaChecks, len(meaChecks) > 0, g)
+		}
+		useMEA := chat.ShouldUseMEA(enabled, agentMeta.Workspace, checks, meaAcceptance)
 		if useMEA {
-			s.streamWithRulesMEA(runCtx, sessionID, session.AgentID, agentMeta.Workspace, userContent, meaChecks, meaAcceptance, agentMeta.RuntimeTools.MEAEnabled, m, a, messages, req.Metadata, streamSessionProvider, ch)
+			s.streamWithRulesMEA(runCtx, sessionID, session.AgentID, agentMeta.Workspace, g, checks, meaAcceptance, agentMeta.RuntimeTools.MEAEnabled, m, a, messages, req.Metadata, streamSessionProvider, ch)
 			return
 		}
 

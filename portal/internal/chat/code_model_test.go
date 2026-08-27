@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"backend/internal/biz"
@@ -23,24 +24,14 @@ func (s stubTurnModel) Embed(_ context.Context, _ []string, _ ...model.Option) (
 
 func TestResolveTurnModel_nonCodeKeepsChat(t *testing.T) {
 	chat := stubTurnModel{name: "chat"}
-	got := ResolveTurnModel(familySet([]string{FamilyCore}), chat, biz.AgentMeta{
+	got, err := ResolveTurnModel(familySet([]string{FamilyCore}), chat, biz.AgentMeta{
 		ModelConfig: biz.ModelConfig{CodeModel: "gpt-code", CodeAPIKey: "k", CodeProvider: "openai", CodeBaseURL: "http://127.0.0.1:9"},
 	})
+	if err != nil {
+		t.Fatalf("non-code family must not error: %v", err)
+	}
 	if got != chat {
 		t.Fatal("non-code family must keep session model")
-	}
-}
-
-func TestResolveTurnModel_noSpecKeepsChat(t *testing.T) {
-	t.Setenv("SATH_CODE_MODEL", "")
-	t.Setenv("SATH_CODE_PROVIDER", "")
-	t.Setenv("SATH_CODE_API_KEY", "")
-	t.Setenv("SATH_CODE_BASE_URL", "")
-	SetGlobalCodeModel(CodeModelSpec{})
-	chat := stubTurnModel{name: "chat"}
-	got := ResolveTurnModel(familySet([]string{FamilyCode}), chat, biz.AgentMeta{})
-	if got != chat {
-		t.Fatal("missing code spec must keep session model")
 	}
 }
 
@@ -89,13 +80,58 @@ func TestResolveTurnModel_codeFamilyUsesAgentSpec(t *testing.T) {
 	t.Setenv("SATH_CODE_BASE_URL", "")
 	SetGlobalCodeModel(CodeModelSpec{})
 	chat := stubTurnModel{name: "chat"}
-	got := ResolveTurnModel(familySet([]string{FamilyCode}), chat, biz.AgentMeta{
+	got, err := ResolveTurnModel(familySet([]string{FamilyCode}), chat, biz.AgentMeta{
 		ModelConfig: biz.ModelConfig{
 			Provider: "openai", Model: "gpt-chat",
 			CodeProvider: "openai", CodeModel: "gpt-code", CodeAPIKey: "sk-test", CodeBaseURL: "http://127.0.0.1:9",
 		},
 	})
+	if err != nil {
+		t.Fatalf("configured code model must not error: %v", err)
+	}
 	if got == chat {
 		t.Fatal("code family with spec should swap model")
+	}
+}
+
+func TestResolveTurnModel_buildFail(t *testing.T) {
+	t.Setenv("SATH_CODE_MODEL", "")
+	t.Setenv("SATH_CODE_PROVIDER", "")
+	t.Setenv("SATH_CODE_API_KEY", "")
+	t.Setenv("SATH_CODE_BASE_URL", "")
+	SetGlobalCodeModel(CodeModelSpec{})
+	t.Cleanup(func() { SetGlobalCodeModel(CodeModelSpec{}) })
+	chat := stubTurnModel{name: "chat"}
+	got, err := ResolveTurnModel(familySet([]string{FamilyCode}), chat, biz.AgentMeta{
+		ModelConfig: biz.ModelConfig{CodeProvider: "not-a-provider", CodeModel: "x"},
+	})
+	if !errors.Is(err, ErrCodeModelBuild) || got != nil {
+		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestResolveCodeModelSpec_envWhenGlobalHasKeyOnly(t *testing.T) {
+	t.Setenv("SATH_CODE_MODEL", "env-code")
+	t.Setenv("SATH_CODE_API_KEY", "env-key")
+	t.Setenv("SATH_CODE_PROVIDER", "")
+	t.Setenv("SATH_CODE_BASE_URL", "")
+	SetGlobalCodeModel(CodeModelSpec{APIKey: "gk"})
+	t.Cleanup(func() { SetGlobalCodeModel(CodeModelSpec{}) })
+	got := resolveCodeModelSpec(biz.AgentMeta{})
+	if got.Model != "env-code" {
+		t.Fatalf("key-only global must still overlay env model: %#v", got)
+	}
+}
+
+func TestResolveTurnModel_apiKeyOnlyRequired(t *testing.T) {
+	t.Setenv("SATH_CODE_MODEL", "")
+	t.Setenv("SATH_CODE_PROVIDER", "")
+	t.Setenv("SATH_CODE_API_KEY", "sk-only")
+	t.Setenv("SATH_CODE_BASE_URL", "")
+	SetGlobalCodeModel(CodeModelSpec{})
+	t.Cleanup(func() { SetGlobalCodeModel(CodeModelSpec{}) })
+	got, err := ResolveTurnModel(familySet([]string{FamilyCode}), stubTurnModel{name: "chat"}, biz.AgentMeta{})
+	if !errors.Is(err, ErrCodeModelRequired) || got != nil {
+		t.Fatalf("api key is not a model name: got=%v err=%v", got, err)
 	}
 }

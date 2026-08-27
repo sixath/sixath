@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"backend/internal/chat"
@@ -29,17 +28,9 @@ func messagesForMEAContract(base []model.Message, c mea.Contract) []model.Messag
 	out := append([]model.Message(nil), base...)
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(c.Goal))
-	if len(c.AcceptanceChecks) > 0 {
-		b.WriteString("\n\n[MEA acceptance — produce environment state that passes these checks]\n")
-		for _, ck := range c.AcceptanceChecks {
-			fmt.Fprintf(&b, "- type=%s path=%s pattern=%s json_path=%s equals=%s\n",
-				ck.Type, ck.Path, ck.Pattern, ck.JSONPath, ck.Equals)
-		}
-	} else if len(c.Acceptance) > 0 {
-		b.WriteString("\n\n[MEA acceptance — satisfy these observable criteria]\n")
-		for _, line := range c.Acceptance {
-			fmt.Fprintf(&b, "- %s\n", line)
-		}
+	if prompt := chat.MEAAcceptancePrompt(c.AcceptanceChecks, c.Acceptance); prompt != "" {
+		b.WriteString("\n\n")
+		b.WriteString(prompt)
 	}
 	prompt := b.String()
 	for i := len(out) - 1; i >= 0; i-- {
@@ -51,8 +42,14 @@ func messagesForMEAContract(base []model.Message, c mea.Contract) []model.Messag
 	return append(out, model.Message{Role: "user", Content: prompt})
 }
 
+type streamEpisode struct {
+	Summary   string
+	FinalText string
+	Trace     *agent.RunTrace
+}
+
 // streamAgentEvents runs one agent episode and forwards events to ch.
-// Returns a short summary for MEA ExecutionReport (best-effort from deltas).
+// Returns episode (FinalText from Done.Text / last assistant / resp.Text, not deltas).
 func (s *ChatService) streamAgentEvents(
 	runCtx context.Context,
 	sessionID, agentID, workspace string,
@@ -60,15 +57,16 @@ func (s *ChatService) streamAgentEvents(
 	req *agent.Request,
 	provider *chat.ChatTranscriptProvider,
 	ch chan<- ChatStreamEvent,
-) (summary string, err error) {
+) (streamEpisode, error) {
 	var summaryBuilder strings.Builder
+	var ep streamEpisode
 
 	ea, ok := a.(agent.EventStreamableAgent)
 	if !ok {
 		resp, runErr := a.Run(runCtx, req)
 		if runErr != nil {
 			s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, runErr)
-			return "", runErr
+			return streamEpisode{}, runErr
 		}
 		tr := chat.RunTraceFromMetadata(resp.Metadata)
 		s.persistTurnTrace(runCtx, sessionID, agentID, tr)
@@ -80,13 +78,17 @@ func (s *ChatService) streamAgentEvents(
 			}
 			ch <- event
 		}
-		return summaryBuilder.String(), nil
+		return streamEpisode{
+			Summary:   summaryBuilder.String(),
+			FinalText: strings.TrimSpace(resp.Text),
+			Trace:     tr,
+		}, nil
 	}
 
 	evCh, runErr := ea.RunEvents(runCtx, req)
 	if runErr != nil {
 		ch <- ChatStreamEvent{Type: ChatStreamEventError, Error: runErr.Error()}
-		return "", runErr
+		return streamEpisode{}, runErr
 	}
 	for ev := range evCh {
 		switch ev.Type {
@@ -114,8 +116,14 @@ func (s *ChatService) streamAgentEvents(
 			}
 		case agent.StreamEventError:
 			s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, errors.New(ev.Error))
-			return summaryBuilder.String(), errors.New(ev.Error)
+			ep.Summary = summaryBuilder.String()
+			if ev.Trace != nil {
+				ep.Trace = ev.Trace
+			}
+			return ep, errors.New(ev.Error)
 		case agent.StreamEventDone:
+			ep.FinalText = chat.FinalTextFromDone(ev.Text, ev.Messages)
+			ep.Trace = ev.Trace
 			if ev.Trace != nil {
 				s.persistTurnTrace(runCtx, sessionID, agentID, ev.Trace)
 				s.persistCompactBoundary(runCtx, sessionID, ev.Trace)
@@ -141,7 +149,8 @@ func (s *ChatService) streamAgentEvents(
 			}
 		}
 	}
-	return summaryBuilder.String(), nil
+	ep.Summary = summaryBuilder.String()
+	return ep, nil
 }
 
 func (s *ChatService) streamWithRulesMEA(
@@ -167,7 +176,7 @@ func (s *ChatService) streamWithRulesMEA(
 		round++
 		msgs := messagesForMEAContract(baseMessages, c)
 		req := &agent.Request{Messages: msgs, Metadata: baseMeta}
-		summary, err := s.streamAgentEvents(ctx, sessionID, agentID, workspace, a, req, provider, ch)
+		ep, err := s.streamAgentEvents(ctx, sessionID, agentID, workspace, a, req, provider, ch)
 		pending, completed := countMEAStatuses(st)
 		ch <- ChatStreamEvent{Type: ChatStreamEventMEA, MEA: &MEAStreamPayload{
 			Phase:     "round",
@@ -179,15 +188,19 @@ func (s *ChatService) streamWithRulesMEA(
 		if err != nil {
 			return mea.ExecutionReport{
 				Round:         c.Round,
-				Summary:       summary,
+				Summary:       ep.Summary,
 				Issues:        []string{err.Error()},
 				ClaimComplete: false,
+				FinalText:     ep.FinalText,
+				ToolHits:      chat.ToolHitsFromTrace(ep.Trace),
 			}, err
 		}
 		return mea.ExecutionReport{
 			Round:         c.Round,
-			Summary:       summary,
+			Summary:       ep.Summary,
 			ClaimComplete: true,
+			FinalText:     ep.FinalText,
+			ToolHits:      chat.ToolHitsFromTrace(ep.Trace),
 		}, nil
 	})
 

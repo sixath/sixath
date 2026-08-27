@@ -70,6 +70,10 @@ type RunTrace struct {
 	EvidenceNudges int `json:"evidence_nudges,omitempty"`
 	// CodeClaimNudges Soft Code Claim Auditor 已注入回压的次数（最多 1）。
 	CodeClaimNudges int `json:"code_claim_nudges,omitempty"`
+	// EmptyHitNudges Soft empty-hit speak gate 已注入回压的次数（最多 1）。
+	EmptyHitNudges int `json:"empty_hit_nudges,omitempty"`
+	// EmptyIdleNudges 工具已跑但终答空白时的回压次数（最多 1）。
+	EmptyIdleNudges int `json:"empty_idle_nudges,omitempty"`
 	// GoalDriftNudges idle 改题回压次数（最多 1）。
 	GoalDriftNudges int `json:"goal_drift_nudges,omitempty"`
 	// DroppedProposals 本轮被 family/drift/intake 丢掉的工具提议。
@@ -148,7 +152,9 @@ const (
 )
 
 type StreamEvent struct {
-	Type     StreamEventType
+	Type StreamEventType
+	// Text is a delta chunk on StreamEventDelta, and the full final assistant
+	// text on StreamEventDone (idle answers are not always appended to Messages).
 	Text     string
 	ToolCall *ToolCallRecord
 	Error    string

@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sixath/framework/events"
+	"strings"
 	"time"
 
 	"github.com/sixath/framework/datasource"
+	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/obs"
 	"github.com/sixath/framework/tool"
@@ -178,6 +179,16 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 			RequestID: rid,
 			Payload:   invokedPayload,
 		})
+		n := 0
+		if res != nil {
+			n = len(res.Rows)
+			idx := ""
+			if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
+				idx = strings.TrimSpace(v)
+			}
+			res.HitStatus = tool.HitStatusFromCount(true, n)
+			res.QueriedIndex = idx
+		}
 		return res, nil
 	}
 }

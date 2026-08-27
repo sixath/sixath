@@ -49,16 +49,18 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			const toolName = "es_log_query"
 			traceID, _ := params["trace_id"].(string)
 			query, _ := params["query"].(string)
+			index := cfg.DefaultIndex
+			if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
+				index = v
+			}
 			if strings.TrimSpace(traceID) == "" && strings.TrimSpace(query) == "" {
-				return rcaErr(toolName, "either trace_id or query is required", ErrorPermanent), nil
+				return StampHitContract(rcaErr(toolName, "either trace_id or query is required", ErrorPermanent), HitStamp{
+					Status: HitStatusError, QueriedIndex: index, Tool: toolName, Ctx: ctx,
+				}), nil
 			}
 			limit := intFromParam(params["limit"], esLogDefaultLimit)
 			if limit <= 0 {
 				limit = esLogDefaultLimit
-			}
-			index := cfg.DefaultIndex
-			if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
-				index = v
 			}
 
 			var inner map[string]any
@@ -70,7 +72,9 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			dslObj := map[string]any{"size": limit, "query": inner}
 			dslBytes, err := json.Marshal(dslObj)
 			if err != nil {
-				return rcaErr(toolName, err.Error(), ErrorPermanent), nil
+				return StampHitContract(rcaErr(toolName, err.Error(), ErrorPermanent), HitStamp{
+					Status: HitStatusError, QueriedIndex: index, Tool: toolName, Ctx: ctx,
+				}), nil
 			}
 
 			res, err := reader.Query(ctx, cfg.DatasourceID, string(dslBytes), executor.QueryOptions{
@@ -78,7 +82,8 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				Extras:  map[string]any{"index": index},
 			})
 			if err != nil {
-				return rcaErrFrom(toolName, err), nil
+				out := rcaErrFrom(toolName, err)
+				return StampHitContract(out, HitStamp{Status: HitStatusError, QueriedIndex: index, Tool: toolName, Ctx: ctx}), nil
 			}
 			truncated := false
 			if res != nil {
@@ -92,6 +97,16 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			if tid := strings.TrimSpace(traceID); tid != "" {
 				payload["trace_id"] = tid
 			}
+			n := len(rowsToHits(res))
+			if t := totalFromResult(res); t > n {
+				n = t
+			}
+			payload = StampHitContract(payload, HitStamp{
+				Status:       HitStatusFromCount(true, n),
+				QueriedIndex: index,
+				Tool:         toolName,
+				Ctx:          ctx,
+			})
 			return rcaOK(toolName, payload), nil
 		},
 	})

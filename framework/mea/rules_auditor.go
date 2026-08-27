@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/sixath/framework/agent"
 )
 
 // Auditor verifies execution against a contract without mutating the environment.
@@ -25,7 +26,7 @@ var _ Auditor = RulesAuditor{}
 
 // Audit evaluates c.AcceptanceChecks against the filesystem under WorkDir.
 // It never runs shell commands. Path escape yields incomplete + integrity violation.
-func (a RulesAuditor) Audit(ctx context.Context, _ TaskState, c Contract, _ ExecutionReport) (AuditReport, error) {
+func (a RulesAuditor) Audit(ctx context.Context, _ TaskState, c Contract, o ExecutionReport) (AuditReport, error) {
 	report := AuditReport{
 		ID:         uuid.NewString(),
 		Round:      c.Round,
@@ -48,6 +49,40 @@ func (a RulesAuditor) Audit(ctx context.Context, _ TaskState, c Contract, _ Exec
 		case <-ctx.Done():
 			return AuditReport{}, ctx.Err()
 		default:
+		}
+
+		if check.Type == "trace_hit_status" || check.Type == "empty_hit_speak" {
+			ok, excerpt, checkErr := a.runTraceCheck(check, o)
+			if checkErr != nil {
+				report.Completion = CompletionIncomplete
+				if report.Integrity == IntegrityClean {
+					report.Integrity = IntegritySuspect
+				}
+				report.Evidence = append(report.Evidence, Evidence{
+					Type:    check.Type,
+					Ref:     check.Path,
+					Excerpt: checkErr.Error(),
+				})
+				continue
+			}
+			if !ok {
+				report.Completion = CompletionIncomplete
+				if report.Integrity == IntegrityClean {
+					report.Integrity = IntegritySuspect
+				}
+				report.Evidence = append(report.Evidence, Evidence{
+					Type:    check.Type,
+					Ref:     check.Path,
+					Excerpt: excerpt,
+				})
+				continue
+			}
+			report.Evidence = append(report.Evidence, Evidence{
+				Type:    check.Type,
+				Ref:     check.Path,
+				Excerpt: "pass",
+			})
+			continue
 		}
 
 		abs, err := a.resolvePath(check.Path)
@@ -200,6 +235,62 @@ func (a RulesAuditor) runCheck(check AcceptanceCheck, abs string) (ok bool, exce
 	default:
 		return false, fmt.Sprintf("unknown check type %q", check.Type), nil
 	}
+}
+
+func (a RulesAuditor) runTraceCheck(check AcceptanceCheck, o ExecutionReport) (ok bool, excerpt string, err error) {
+	switch check.Type {
+	case "trace_hit_status":
+		for _, h := range o.ToolHits {
+			if h.Error != "" || h.Blocked {
+				continue
+			}
+			switch h.ToolName {
+			case "es_log_query", "execute_read", "rca_grep":
+			default:
+				continue
+			}
+			switch h.HitStatus {
+			case "hits", "empty", "error":
+				return true, "pass", nil
+			}
+		}
+		return false, "no stamped es_log_query/execute_read/rca_grep hit_status", nil
+	case "empty_hit_speak":
+		got := agent.EvaluateEmptyHitSpeakGate(runTraceFromHits(o.ToolHits), o.FinalText)
+		if !got.Allow {
+			ex := got.Reason
+			if got.Prompt != "" {
+				ex = got.Prompt
+			}
+			return false, ex, nil
+		}
+		return true, "pass", nil
+	default:
+		return false, fmt.Sprintf("unknown check type %q", check.Type), nil
+	}
+}
+
+func runTraceFromHits(hits []ToolHit) *agent.RunTrace {
+	tr := &agent.RunTrace{}
+	for _, h := range hits {
+		res := map[string]any{}
+		if h.HitStatus != "" {
+			res["hit_status"] = h.HitStatus
+		}
+		if h.QueriedIndex != "" {
+			res["queried_index"] = h.QueriedIndex
+		}
+		if h.Repo != "" {
+			res["repo"] = h.Repo
+		}
+		tr.ToolCalls = append(tr.ToolCalls, agent.ToolCallRecord{
+			ToolName: h.ToolName,
+			Result:   res,
+			Error:    h.Error,
+			Blocked:  h.Blocked,
+		})
+	}
+	return tr
 }
 
 func jsonValueString(v any) string {

@@ -35,7 +35,7 @@ type TaskRecord struct {
 }
 
 type AcceptanceCheck struct {
-	Type     string `json:"type"` // path_exists | file_contains | json_path
+	Type     string `json:"type"` // path_exists | file_contains | json_path | trace_hit_status | empty_hit_speak
 	Path     string `json:"path,omitempty"`
 	Pattern  string `json:"pattern,omitempty"` // file_contains
 	JSONPath string `json:"json_path,omitempty"`
@@ -54,12 +54,23 @@ type Contract struct {
 	TargetRecordID   string            `json:"target_record_id,omitempty"`
 }
 
+type ToolHit struct {
+	ToolName     string `json:"tool_name"`
+	HitStatus    string `json:"hit_status,omitempty"`
+	QueriedIndex string `json:"queried_index,omitempty"`
+	Repo         string `json:"repo,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Blocked      bool   `json:"blocked,omitempty"`
+}
+
 type ExecutionReport struct {
-	Round            int      `json:"round"`
-	Summary          string   `json:"summary"`
-	ArtifactsTouched []string `json:"artifacts_touched,omitempty"`
-	Issues           []string `json:"issues,omitempty"`
-	ClaimComplete    bool     `json:"claim_complete,omitempty"` // ignored for state writes
+	Round            int       `json:"round"`
+	Summary          string    `json:"summary"`
+	ArtifactsTouched []string  `json:"artifacts_touched,omitempty"`
+	Issues           []string  `json:"issues,omitempty"`
+	ClaimComplete    bool      `json:"claim_complete,omitempty"` // ignored for state writes
+	FinalText        string    `json:"final_text,omitempty"`
+	ToolHits         []ToolHit `json:"tool_hits,omitempty"`
 }
 
 type ProposedUpdate struct {
