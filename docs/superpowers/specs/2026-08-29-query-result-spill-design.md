@@ -15,14 +15,16 @@
 | 项 | 选择 |
 |----|------|
 | 谁决定外置 | **平台**，不靠模型先 `write_file` |
-| 第一期工具 | `es_log_query`、`execute_read` |
+| 第一期工具 | `es_log_query`、`execute_read`；再处理 `result_stats` |
 | 阈值（或） | 压缩后行数 **> 50**，或压缩后 JSON **> 8192 字节**（与 `portal/internal/service/chat_stream.go` 的 `toolPayloadFieldLimit` 同量级） |
+| 默认页 | `es_log_query` 默认 `limit=50`，行数阈值通常不触发，**默认页主要靠 8KB** |
 | 文件 | NDJSON，一行一条记录；单文件 **32MiB** 硬顶 |
 | 分页 | 一次工具调用一个文件；`from=continue_from` 再生成新文件，**不**自动拼接 |
-| 再处理 | 新工具 `result_stats`（count / group-by / 去重）；统计结果再走同一溢出门 |
+| 再处理 | `result_stats`：`group_by` 与 `unique` **互斥**（见 §2.4）；统计过大则另写 jsonl |
 | Python | **第一期不开放**。以后若开：只能读 `tmp/results/`，stdout 同样限行 |
-| 展示 | 默认摘要 + 样例；气泡不展开 jsonl。下载 UI **第二期**；第一期用户要「全部」时用已有 `ask_user`（下载等到二期 / 确认后按页展开） |
+| 展示 | 默认摘要 + 样例；气泡不展开 jsonl。下载 UI **第二期**；第一期用户要「全部」时用已有 `ask_user` |
 | 写盘失败 | 查询仍成功；**不外置**，退回压缩后的整页结果，可带 `spill_error` |
+| Execute 返回类型（spill） | `*QuerySpillStub`（struct），**不**经 `rcaOK` 再包一层 `map[string]any` |
 | 与 L2 | 互补：L2 剪旧对话；Spill 管本步 tool 结果 |
 
 ---
@@ -44,7 +46,7 @@
 - `http_request`、terminal、`read_file` 输出、助手 markdown 表格的溢出。
 - 门户「下载 jsonl」按钮或独立下载 API（第二期）。
 - 改 `read_file` 硬拦 `tmp/results/`（第一期只在 `es_log_query` / `result_stats` 描述里写：不要 `read_file` 该 jsonl，用 `result_stats`）。`read_file` 现有 ~100K 字符上限保留。
-- 会话结束必删文件的新 cron；第一期用写盘时的惰性 TTL（见 §6）。
+- 会话结束必删文件的新 cron；第一期用写盘时的惰性 TTL（见 §5）。
 - 真实 496 条 DiscardUserArchive 的 CI e2e。
 
 ### 诚实上限
@@ -59,15 +61,20 @@
 
 ### 2.1 `MaybeSpill`（framework/tool）
 
-查询工具在**已经成功组好压缩后的行列表**之后调用。输入：`ctx`、工具名、行列表（`[]map[string]any`）、以及将返回给模型的 payload（`map[string]any`，已含分页、`extracted_ids`、`hit_status` 等）。
+查询工具在**已经成功组好压缩后的行列表**之后调用。
 
-判定用的字节数：对「含完整 hits 的 payload」做 `json.Marshal` 后的长度（`es_log_query` 在 `rcaOK` 之前对内层 payload 测；`execute_read` 对将要序列化给模型的结构测）。行数用压缩后的 `len(hits)` / 行数，不是 ES `total`。
+输入：`ctx`、工具名、行列表（`[]map[string]any`）、元数据（分页、`extracted_ids`、`hit_status`、`queried_index` 等，见 §2.3）。
 
-未超阈值：原样返回，payload 仍含 `hits`（或 `execute_read` 仍返回 `*executor.QueryResult`）。
+判定：
 
-超阈值：把每行写成 jsonl，从 payload **删除** `hits`（`execute_read` 见 §2.4），写入 spill 字段，返回 stub。
+- 行数 = `len(rows)`（压缩后），**不是** ES `total`。
+- 字节数 = `json.Marshal`「若把这些行放进 `hits` 后的查询 payload」的长度（未 spill 时 `es_log_query` 仍走今天的 map + `rcaOK`，测的是内层含 `hits` 的 map）。
 
-`MaybeSpill` 必须可单测：可注入 `workspaceRoot`（测试用临时目录）和时钟；生产从 `ctx.Value(tool.ContextKeyWorkspaceRoot)`、`ContextKeySessionID` 读取。
+未超阈值：不改返回类型。`es_log_query` 仍 `rcaOK(map)` 且含 `hits`；`execute_read` 仍 `*executor.QueryResult`。非溢出路径的 `count` **保持现网**（`es_log_query` 现网 `count` 等于 ES `total`，不要顺手改成 `len(hits)`）。
+
+超阈值：把**全部** `rows` 写入 jsonl（受 32MiB 截断），返回 `*QuerySpillStub`。Stub **没有** `hits`。`count` = 已写入文件的行数。
+
+`MaybeSpill` 必须可单测：可注入 `workspaceRoot` 和时钟；生产从 `ctx.Value(tool.ContextKeyWorkspaceRoot)`、`ContextKeySessionID` 读取。
 
 ### 2.2 文件布局
 
@@ -84,37 +91,53 @@ tmp/results/{session_id}/{unix_ms}_{tool}_{n}.jsonl
 - 目录不存在则 `MkdirAll`。
 - 路径必须 `filepath.Abs` 后仍落在 `{workspace}/tmp/results/` 下；写盘与 `result_stats` 共用同一守卫（可复用 `file_tools` 的 workspace join，但**额外**要求相对路径前缀为 `tmp/results/`）。
 
-jsonl：UTF-8，每行一个 JSON object，即压缩后的一行（ES hit 或 SQL 行的列名→值）。不含 stub 信封。
+查询 spill 的 jsonl：UTF-8，每行一个 JSON object，即压缩后的一行（ES hit 或 SQL 行的列名→值）。不含 stub 信封。
 
-单文件 32MiB（`32 << 20`）：写入时累计字节（含换行）达到上限则停止后续行，stub 设 `file_truncated=true` 且 `count` 为**已写入行数**（不是查询返回行数）。查询侧 `has_more` / `truncated` 仍按 ES/SQL 分页，不因文件顶而改写。
+`result_stats` spill 的 jsonl 见 §2.4（一行一个统计项，不是原始 hit）。
 
-### 2.3 Stub 契约
+单文件 32MiB（`32 << 20`）：写入时累计字节（含换行）达到上限则停止后续行，stub 设 `file_truncated=true` 且 `count` 为**已写入行数**。查询侧 `has_more` / `truncated` 仍按 ES/SQL 分页，不因文件顶而改写。
 
-Stub 用 **struct + 显式 `json` 标签**序列化（不要 `map[string]any` 随机键序），保证关键字段出现在序列化结果前部。必有字段：
+### 2.3 Stub 契约与 Execute 类型
 
-| JSON 键 | 含义 |
-|---------|------|
-| `spilled` | 恒为 `true` |
-| `path` | 工作区相对路径 |
-| `count` | 本文件行数（写入成功的条数） |
-| `columns` | 列名；ES 为 sample/首行键的稳定并集（实现可取首行键 + 后续出现的键，顺序稳定即可，测试锁一种：按首次出现顺序） |
-| `sample` | 最多 **5** 行，来自文件开头（与 jsonl 前 5 行一致） |
-| `hit_status` | 与外置前一致；有行则为 `hits`，不得因删 `hits` 改成 `empty` |
-| `queried_index` | `es_log_query` 必有；`execute_read` 仅当入参 `index` 非空（与 evidence spec 一致） |
+Go 类型名：`QuerySpillStub`。`Execute` 在 spill 路径返回 `*QuerySpillStub`。
 
-有则保留、无则省略：`extracted_ids`（**对全页 hits 计算**，再外置）、`has_more`、`continue_from`、`next_from`、`from`、`returned`、`truncated`、`total`（ES 估计总量，可与 `count` 不同）、`unknown_fields`、`similar_fields`、`mapping_error`、`query_rewritten`、`field_hints`、`trace_id`、`file_truncated`、`spill_error`。
+**不要**再调用 `rcaOK` / `NormalizeRCAResult` 把 stub 塞进 `map[string]any`。`json.Marshal(map)` 按键名排序，`extracted_ids` / `sample` 会排到 `spilled`/`path` 前面，少行大 payload 时 SSE 8KB 会先切掉元数据。
 
-**禁止**出现完整 `hits` 数组。`sample` 不是 `hits` 的别名。
+`encoding/json` 对 struct 按**字段声明顺序**输出。字段必须按下面顺序声明（`omitempty` 用于可选字段）：
 
-`extracted_ids` 仍走现有 `extractIDsFromHits`；在外置前对全页压缩 hits 计算，拷进 stub。
+| 顺序 | JSON 键 | 必有 | 含义 |
+|------|---------|------|------|
+| 1 | `spilled` | 是 | 恒为 `true` |
+| 2 | `path` | 是 | 本次写入的工作区相对路径（统计溢出时是**统计文件**，见 §2.4） |
+| 3 | `count` | 是 | 该 `path` 文件已写入行数 |
+| 4 | `ok` | 是 | `true`（替代 `rcaOK` 的信封） |
+| 5 | `hit_status` | 查询 spill 是 | 与外置前一致；有行则为 `hits`，不得因删 `hits` 改成 `empty` |
+| 6 | `queried_index` | `es_log_query` 是 | `execute_read` 仅当入参 `index` 非空 |
+| 7 | `has_more` | 若有 | 与外置前一致 |
+| 8 | `continue_from` | 若有 | 与外置前一致 |
+| 9 | `next_from` / `from` / `returned` / `truncated` / `total` | 若有 | `total` 仍是 ES 估计总量，可与 `count` 不同 |
+| 10 | `columns` | 查询 spill 是 | 按行内键**首次出现**顺序的并集 |
+| 11 | `extracted_ids` | 若有 | **对全页 hits** 调用现有 `extractIDsFromHits`，再外置 |
+| 12 | `source_path` | 统计 spill 是 | 被统计的原始查询 jsonl（`path` 此时指向统计文件） |
+| 13 | `unique_count` | unique 统计是 | 去重后的个数（文件被 32MiB 截断时仍报已写入条数对应的个数） |
+| 14 | `groups_truncated` | 若触发 10000 帽 | 见 §2.4 |
+| 15 | `file_truncated` | 若 32MiB | |
+| 16 | `sample` | 是 | 最多 5 行；放在**后部**，使 8KB 截断先丢掉 sample 而不是 path |
+| 17 | 其余可选 | 若有 | `unknown_fields`、`similar_fields`、`mapping_error`、`query_rewritten`、`field_hints`、`trace_id`、`spill_error`、`skipped_bad_lines` |
+
+**禁止**出现完整 `hits`、`Rows`、`groups`、`unique_values`。`sample` 不是这些数组的别名。
+
+`sample` 来自本次写入文件的前 5 行。单行 `json.Marshal` 超过 **512 字节**则该行再截成合法 JSON 字符串摘要（实现可改为只留若干标量键）；目的是 stub 在含 sample 时仍尽量 < 8KB。测试锁：前 2048 字节必须出现 `spilled`、`path`、`count`。
+
+读取 stub 字段（闸、证据）**禁止**只 `rec.Result.(map[string]any)`。提供 `SpillFields(v any)`（或等价）：接受 `*QuerySpillStub` 与 `map[string]any`，返回 `has_more` / `truncated` / `continue_from` / `hit_status`。`EvaluateTruncatedPageGate` 与 `HitContractFromResult` 改走这个 helper。
 
 ### 2.4 各工具接线
 
-**`es_log_query`**：现有流程不变直到 `compactESLogHits` + `extractIDsFromHits` + 分页字段 + `StampHitContract`。然后 `MaybeSpill`。再 `rcaOK`。失败 / 空击 / mapping 纠错路径**不**调用 Spill（0 行不会超行数阈值；若仅因异常大的 error 文案超 8KB，第一期忽略——纠错 payload 不外置）。
+**`es_log_query`**：现有流程不变直到 `compactESLogHits` + `extractIDsFromHits` + 分页字段 + `StampHitContract`。然后 `MaybeSpill`。未 spill：再 `rcaOK(map)`。spill：返回 `*QuerySpillStub`（含 `ok=true` 与盖章字段），**跳过** `rcaOK`。失败 / 空击 / mapping 纠错路径**不**调用 Spill。
 
-**`execute_read`**：成功且未 spill 时仍返回 `*executor.QueryResult`（现网类型不变）。spill 时改为返回 stub `map[string]any`：含 `spilled`/`path`/`count`/`columns`/`sample`（行转为列名 map）、`truncated`、`hit_status`。`Rows` 不出现在 stub 里。证据盖章：spill 路径对 map 调 `StampHitContract`，与现网 empty/hits 规则一致。
+**`execute_read`**：成功且未 spill 时仍返回 `*executor.QueryResult`。spill 时返回 `*QuerySpillStub`（不是 map）：`sample` 为列名 map；`Rows` 不出现。`hit_status` 与现网 empty/hits 规则一致（写在 stub 上，不必再 `StampHitContract` 进 map；可抽公共赋值）。
 
-**`result_stats`**：新只读工具，与上述两工具一起注册（有 workspace 的 agent 即可；不依赖 ES）。参数：
+**`result_stats`**：新只读工具，在已注册 workspace 文件工具的同一路径挂上。参数：
 
 | 参数 | 必填 | 含义 |
 |------|------|------|
@@ -122,11 +145,34 @@ Stub 用 **struct + 显式 `json` 标签**序列化（不要 `map[string]any` �
 | `group_by` | 否 | 点分路径，如 `operation`、`args.flowIds` |
 | `unique` | 否 | 点分路径；数组值**展开一层**再去重 |
 
-至少指定 `group_by` 或 `unique` 之一；都缺省则只返回 `{path, count}`（文件行数）。
+**互斥**：`group_by` 与 `unique` 不得同时出现；同时出现则永久错误（不读盘）。两者都缺省：只返回 `{path, count}`（输入文件行数），不写新文件。
 
-点分路径：从每行 JSON object 取值；中间缺失则该行跳过该字段。值为 JSON array 时 unique/group-by 把每个元素当一条键（`flowIds: ["a","b"]` → 两个值）。标量 `fmt` 成字符串；object 不当键（该行跳过）。
+点分路径：从每行 JSON object 取值；中间缺失则该行跳过该字段。值为 JSON array 时把每个元素当一条键（`flowIds: ["a","b"]` → 两个值）。标量格式化为字符串；object 不当键（该行跳过）。
 
-返回：`count`（输入行数）、`group_by` 时 `groups` 为 `[{value, count}, ...]` 按 count 降序；`unique` 时 `unique_count` + `unique_values`。`groups` / `unique_values` 再走 `MaybeSpill`（阈值同样 50 行 / 8KB）。未 spill 时 `groups`/`unique_values` 最多先截到 200 再测阈值（避免组数上万时先在内存里组完再 marshal 爆掉：实现按流式/单遍扫描文件，组数超过 **10000** 停止并 `groups_truncated=true`，只返回前 200 组 + stub 或未 spill 的截断列表）。
+聚合（单遍扫文件）：
+
+| 帽 | 值 | 作用 |
+|----|----|------|
+| 内存键数 | **10000** | 即将加入第 10001 个不同键时设 `groups_truncated=true`（unique 路径同一字段名），**停止读文件**；已见键的计数以停止前为准 |
+| 模型内联 | **50 项且 marshal ≤ 8192** | 不超过则结果里带完整 `groups` 或 `unique_values`，`spilled` 缺省 |
+| spill 写盘 | **内存里的全部键**（≤10000） | 不是只写 200 条。496 个 unique 应整份进统计 jsonl |
+
+`group_by` 未 spill 时：`count` = 输入行数，`groups` = `[{value, count}, ...]` 按 count 降序。  
+`unique` 未 spill 时：`count` = 输入行数，`unique_count`、`unique_values`（字符串列表，顺序：首次出现）。
+
+spill 时删除 `groups` / `unique_values`，返回 `*QuerySpillStub`：
+
+- `path` = **新**统计 jsonl
+- `source_path` = 入参那个查询 jsonl
+- `count` = 统计 jsonl 行数
+- `unique_count`：仅 `unique` 模式，等于去重个数（与文件行数相同，除非 32MiB 截断）
+- `sample`：统计 jsonl 前 5 行
+- 无 `hits`
+
+统计 jsonl 一行：
+
+- `group_by`：`{"value":"<key>","count":N}`
+- `unique`：`{"value":"<key>"}`
 
 `result_stats` 描述写明：处理溢出文件请用本工具，不要 `read_file` 整份 jsonl。
 
@@ -142,7 +188,7 @@ Stub 用 **struct + 显式 `json` 标签**序列化（不要 `map[string]any` �
 
 ### 2.6 翻页闸
 
-`EvaluateTruncatedPageGate` 继续从最后一次成功的 `es_log_query` 结果 map 读 `has_more`/`truncated` 与 `continue_from`。Stub 必须带这些键。**不要**把 `spilled=true` 当成已查完。
+`EvaluateTruncatedPageGate` 经 `SpillFields`（§2.3）读取最后一次成功的 `es_log_query` 结果。Stub 必须带 `has_more`/`continue_from`。**不要**把 `spilled=true` 当成已查完。
 
 闸的 inject 文案可补一句「上一页已写入 path，用 `result_stats` 做统计/去重，翻页请继续 `from=continue_from`」——允许改文案，逻辑条件不变。
 
@@ -152,15 +198,17 @@ Stub 用 **struct + 显式 `json` 标签**序列化（不要 `map[string]any` �
 
 ```
 查询成功 → 压缩 hits → extracted_ids / 分页字段 → StampHitContract
-    → 未超阈值：hits 进 tool 消息
-    → 超阈值：写 jsonl → 删除 hits → stub 进 tool 消息 / RunTrace / SSE / 落库
-模型 →（可选）result_stats(path) → 统计 stub 或小结果
+    → 未超阈值：hits 进 tool 消息（类型与现网相同）
+    → 超阈值：写 jsonl → Execute 返回 *QuerySpillStub
+模型 →（可选）result_stats(path)
+    → 未超阈值：groups / unique_values 内联
+    → 超阈值：写统计 jsonl → *QuerySpillStub（path=统计文件，source_path=原查询文件）
 用户要全量且 Q 命中闸 → 继续 es_log_query from=continue_from → 新文件
 ```
 
 Spill 发生在工具 `Execute` 返回之前，因此：
 
-- 模型当轮看到的 tool result 已是 stub（不只是 SSE 截断）。
+- 模型当轮看到的 tool result 已是 stub（不只是 SSE 截断）。`toolMessageContent` 对 `result` 做 `json.Marshal` 时，嵌套 struct 保持 §2.3 字段序。
 - L0/L2 之后也不会再出现该步的完整 hits（除非写盘失败走了回退）。
 
 权威日志仍在 ES/SQL。jsonl 丢失则 `result_stats` 报文件不存在，模型应重新查询，禁止平台静默回 ES。
@@ -171,21 +219,24 @@ Spill 发生在工具 `Execute` 返回之前，因此：
 
 | 情况 | 行为 |
 |------|------|
-| `workspace_root` 空 | 不外置；压缩后整页返回；`spill_error=workspace_root_missing`（仅当本应 spill 时附加，避免小结果也带这个键） |
-| `MkdirAll` / 写文件失败 | 不外置；整页返回；`spill_error` 为简短错误类名（不要把整段 OS 错误里的绝对路径塞给模型） |
+| `workspace_root` 空 | 不外置；压缩后整页返回；`spill_error=workspace_root_missing`（仅当本应 spill 时附加） |
+| `MkdirAll` / 写文件失败 | 不外置；整页返回；`spill_error` 为简短错误类名（不要把 OS 绝对路径塞给模型） |
 | jsonl 达到 32MiB | 停止写入；stub `file_truncated=true`；`count`=已写行数；`sample` 仍最多 5 行；查询分页字段不变 |
-| `result_stats` 路径不在 `tmp/results/` 或逃出 workspace | 返回错误 payload（`ok=false` 或 Go error，与同目录只读工具一致：**明确错误字符串**，不读盘） |
+| `result_stats` 路径不在 `tmp/results/` 或逃出 workspace | 明确错误，不读盘 |
+| `group_by` 与 `unique` 同时出现 | 明确错误，不读盘 |
 | 文件不存在或不是文件 | `file not found; re-query` 类错误；不打 ES |
 | 损坏 jsonl（某行非法 JSON） | 跳过坏行并在结果里给 `skipped_bad_lines`；其余行继续。全部坏则错误 |
-| 统计结果超阈值 | 再写一个 jsonl + stub，不得把完整 `unique_values` 送回模型 |
+| 统计结果超阈值 | 统计 jsonl 写入内存中的全部键（≤10000），stub 无 `unique_values`/`groups` |
 | 查询本身失败 | 不 Spill；现有 error / mapping 路径不变 |
+
+回退路径（未 spill）仍返回 map / `*QueryResult`，可把 `spill_error` 写在 map 上；不引入 stub struct。
 
 ---
 
 ## 5. 生命周期
 
 - jsonl 不是记忆、不是知识库，不进 memory index。
-- 第一期清理：**每次成功写入** `tmp/results/` 时，扫描该 session 目录（及可选的整个 `tmp/results/`）删除 **mtime 超过 24h** 的文件。失败只记日志，不影响本次 Spill。
+- 第一期清理：**每次成功写入**后，只扫描**当前 session 目录** `tmp/results/{session_id}/`，删除 **mtime 超过 24h** 的文件。不扫整个 `tmp/results/`。失败只记日志，不影响本次 Spill。
 - 不在第一期做「会话结束立刻 rm -rf」。
 
 ---
@@ -196,38 +247,41 @@ Spill 发生在工具 `Execute` 返回之前，因此：
 
 ### `MaybeSpill` / `es_log_query`
 
-- 行数 ≤ 50 且 marshal ≤ 8192：无文件、无 `spilled`、有 `hits`。
-- 行数 > 50：有 jsonl，行数=`count`，stub 无 `hits`，`sample`≤5，`extracted_ids` 与全页抽取一致（构造 `args.flowIds` 只出现在第 6 行之后，断言 stub 仍含该 id）。
+- 行数 ≤ 50 且 marshal ≤ 8192：无文件、无 `spilled`、有 `hits`；返回类型仍为 map（经 `rcaOK`）；`count` 仍等于 `total`（现网）。
+- 行数 > 50：返回 `*QuerySpillStub`，jsonl 行数=`count`，无 `hits`，`sample`≤5，`extracted_ids` 与全页抽取一致（构造 `args.flowIds` 只出现在第 6 行之后，断言 stub 仍含该 id）。
 - 行少但每行很大导致 marshal > 8192：仍 spill。
-- 压缩后低于阈值：不外置（hits 含已 drop 字段被去掉后变小）。
-- 无 workspace / 注入写失败：有 `hits`，有 `spill_error`，无 `spilled`。
+- 压缩后低于阈值：不外置。
+- 无 workspace / 注入写失败：有 `hits`，有 `spill_error`，无 `spilled`，类型仍为 map。
 - 路径守卫：workspace 外写不到。
-- 32MiB：可用短行重复写到上限；断言 `file_truncated` 与 `count`。
-- stub JSON 字节的前 2048 字节含 `spilled`、`path`、`count`（回归 8KB 截断看不到元数据）。
+- 32MiB：短行重复写到上限；断言 `file_truncated` 与 `count`。
+- `json.Marshal(stub)` 的前 2048 字节含 `"spilled"`、`"path"`、`"count"`。
 
 ### 闸
 
-- 最后一次 `es_log_query` 结果为 spilled stub 且 `has_more=true`、`continue_from=50`：`EvaluateTruncatedPageGate` 仍 inject，`from` 为 50。
+- 最后一次结果为 `*QuerySpillStub` 且 `has_more=true`、`continue_from=50`：仍 inject `from=50`。
+- 最后一次结果为含同样键的 `map[string]any`：行为不变（回归）。
 - `spilled=true` 且 `has_more` 缺省/false：不因 spilled 误 inject。
 
 ### `result_stats`
 
-- `group_by=operation` 计数正确。
+- `group_by=operation` 计数正确；未 spill 时结果含 `groups`，`path` 为入参路径。
 - `unique=args.flowIds` 展开数组、去重。
+- 同时传 `group_by` 与 `unique`：错误，不读文件。
 - 路径 `../` 或 `tmp/other/`：拒绝。
 - 缺文件：错误，且假 Reader 的 Query 调用次数为 0。
-- 唯一值 > 50 或体积 > 8KB：再 spill，返回无超长 `unique_values`。
+- 80 个 unique：spill；统计 jsonl **80 行**（不是 200）；stub 无 `unique_values`；有 `unique_count=80`、`source_path`、`path` 指向统计文件。
+- 10001 个不同 `group_by` 键：`groups_truncated=true`，统计文件最多 10000 行。
 
 ### `execute_read`
 
 - 未 spill：仍是 `*executor.QueryResult`。
-- 行数 > 50：返回 map stub，无 `Rows`/`hits` 全表。
+- 行数 > 50：`*QuerySpillStub`，无 `Rows`。
 - ES datasource 仍拒绝（现有测试不删）。
 
 ### 门户
 
-- SSE 截断函数作用在 spilled stub 上：截断后仍含 `path`（stub 远小于 8KB 时整段保留）。
-- 持久化 timeline 的 tool 节点 content 不含完整 hits 数组（可用 60 行假结果走聊天夹具，断言落库字符串无第 6 行之后的唯一 marker）。
+- SSE `truncateField` 作用在 stub 上：即使截断，字符串仍含 `path`（把 sample 做大以逼近 8KB 时，前部键仍在）。
+- 持久化 timeline 的 tool 节点 content 不含完整 hits（60 行假结果，落库字符串无第 6 行之后的唯一 marker）。
 
 ### 不进 CI
 
@@ -239,15 +293,14 @@ Spill 发生在工具 `Execute` 返回之前，因此：
 
 | 单位 | 职责 |
 |------|------|
-| `framework/tool/query_spill.go` | 阈值常量、路径守卫、写 jsonl、`MaybeSpill`、TTL 惰性删 |
+| `framework/tool/query_spill.go` | 阈值常量、`QuerySpillStub`、路径守卫、写 jsonl、`MaybeSpill`、`SpillFields`、TTL（仅 session 目录） |
 | `framework/tool/query_spill_test.go` | 溢出门与回退 |
 | `framework/tool/result_stats.go` | `result_stats` 注册与扫描 |
-| `framework/tool/es_log_tool.go` | 成功路径接 `MaybeSpill` |
+| `framework/tool/es_log_tool.go` | 成功路径接 `MaybeSpill`；spill 时不 `rcaOK` |
 | `framework/tool/data/execute_read.go` | 成功路径接 `MaybeSpill` |
-| `framework/agent/truncated_page_gate.go` | 仅文案可选；断言 stub 字段可读即可 |
+| `framework/tool/evidence.go` | `HitContractFromResult` 识别 `*QuerySpillStub` |
+| `framework/agent/truncated_page_gate.go` | 改走 `SpillFields`；文案可选 |
 | Portal SSE | 仅当现有渲染假定必有 `hits` 时补 spilled 分支；不新增下载 API |
-
-注册：`result_stats` 在已注册 workspace 文件工具的同一路径挂上（Portal 组 registry 处），避免无 workspace 的 agent 拿到只会失败的工具。
 
 ---
 
