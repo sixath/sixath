@@ -34,7 +34,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 	}
 	return reg.Register(Tool{
 		Name:        "es_log_query",
-		Description: "Query ELK application logs by trace_id (preferred) or keyword. Returns matching log lines. Read-only. Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file.",
+		Description: "Query ELK application logs by trace_id (preferred) or keyword. Returns matching log lines. Read-only. Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file).",
 		Toolset:     ToolsetRCA,
 		Parameters: map[string]any{
 			"type": "object",

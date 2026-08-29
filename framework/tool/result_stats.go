@@ -20,7 +20,7 @@ func RegisterResultStatsTool(reg *Registry) error {
 	}
 	return reg.Register(Tool{
 		Name:        "result_stats",
-		Description: "Aggregate a spilled query jsonl under tmp/results/. Do not read_file the whole file.",
+		Description: "Aggregate a spilled query jsonl under tmp/results/. Do not read_file the whole file. For transforms result_stats cannot do, use run_result_script on the same path.",
 		Toolset:     ToolsetFile,
 		Parameters: map[string]any{
 			"type": "object",

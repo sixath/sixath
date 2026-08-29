@@ -189,3 +189,14 @@ func TestESLogQuery_SmallPageUnchangedType(t *testing.T) {
 		t.Fatalf("non-spill must keep hits: %#v", m)
 	}
 }
+
+func TestESLogQueryDescriptionMentionsRunResultScript(t *testing.T) {
+	reg := NewRegistry()
+	if err := RegisterESLogTool(reg, &fakeReader{}, ESLogConfig{DatasourceID: "es-logs"}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("es_log_query")
+	if !strings.Contains(tl.Description, "run_result_script") {
+		t.Fatalf("%s", tl.Description)
+	}
+}

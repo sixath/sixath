@@ -257,3 +257,14 @@ func TestResultStats_SkipBadJSONLines(t *testing.T) {
 		t.Fatalf("all-bad jsonl must error, got %#v", bad)
 	}
 }
+
+func TestResultStatsDescriptionMentionsRunResultScript(t *testing.T) {
+	reg := NewRegistry()
+	if err := RegisterResultStatsTool(reg); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("result_stats")
+	if !strings.Contains(tl.Description, "run_result_script") {
+		t.Fatalf("%s", tl.Description)
+	}
+}
