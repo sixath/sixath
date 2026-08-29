@@ -136,7 +136,7 @@ Go 类型名：`QuerySpillStub`。`Execute` 在 spill 路径返回 `*QuerySpillS
 
 ### 2.4 各工具接线
 
-**`es_log_query`**：现有流程不变直到 `compactESLogHits` + `extractIDsFromHits` + 分页字段 + `StampHitContract`。然后 `MaybeSpill`。未 spill：再 `rcaOK(map)`。spill：返回 `*QuerySpillStub`（含 `ok=true`、盖章字段、以及与 `deriveESLogRefs` 等价的 `evidence_refs`），**跳过** `rcaOK`。失败 / 空击 / mapping 纠错路径**不**调用 Spill。
+**`es_log_query`**：现有流程不变直到 `compactESLogHits` + `extractIDsFromHits` + 分页字段 + `StampHitContract`。然后 `MaybeSpill`。未 spill：再 `rcaOK(map)`。spill：对**仍含 `hits` 的 payload**调用 `deriveESLogRefs`（或与之等价），把 refs 拷进 stub；**禁止**对外置后的 stub 再调现有 `deriveESLogRefs`（它会因无 `hits` 键打上 `Summary=no hits`）。返回 `*QuerySpillStub`（含 `ok=true`、盖章字段、`evidence_refs`），**跳过** `rcaOK`。失败 / 空击 / mapping 纠错路径**不**调用 Spill。
 
 **`execute_read`**：成功且未 spill 时仍返回 `*executor.QueryResult`。spill 时返回 `*QuerySpillStub`（不是 map）：`sample` 为列名 map；`Rows` 不出现。`hit_status` 与现网 empty/hits 规则一致（写在 stub 上，不必再 `StampHitContract` 进 map；可抽公共赋值）。
 
@@ -258,7 +258,7 @@ Spill 发生在工具 `Execute` 返回之前，因此：
 - 路径守卫：workspace 外写不到。
 - 32MiB：短行重复写到上限；断言 `file_truncated` 与 `count`。
 - `json.Marshal(stub)` 的前 2048 字节含 `"spilled"`、`"path"`、`"count"`。
-- `es_log_query` spill：`CollectEvidenceRefs(stub)` 含 `Kind=es_log_query`；EvidenceGate 不得因 spill 误判缺证据。
+- `es_log_query` spill：`CollectEvidenceRefs(stub)` 含 `Kind=es_log_query`，且 `Summary != "no hits"`；EvidenceGate 不得因 spill 误判缺证据。
 
 ### 闸
 
