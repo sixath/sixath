@@ -244,3 +244,25 @@ func TestHitStatusFromCount(t *testing.T) {
 		t.Fatal("HitStatusFromCount")
 	}
 }
+
+func TestHitContractFromResult_SpillStub(t *testing.T) {
+	st, idx, _ := HitContractFromResult(&QuerySpillStub{
+		HitStatus: HitStatusHits, QueriedIndex: "backend-cgsession-*",
+	})
+	if st != HitStatusHits || idx != "backend-cgsession-*" {
+		t.Fatalf("%q %q", st, idx)
+	}
+}
+
+func TestCollectEvidenceRefs_SpillStub(t *testing.T) {
+	stub := &QuerySpillStub{
+		Spilled: true, Path: "tmp/results/s/1.jsonl", Count: 51, OK: true,
+		HitStatus: HitStatusHits,
+		EvidenceRefs: []EvidenceRef{{Kind: "es_log_query", TraceID: "t1"}},
+		Sample: []map[string]any{{"i": 1}},
+	}
+	refs := CollectEvidenceRefs(stub)
+	if len(refs) != 1 || refs[0].Kind != "es_log_query" || refs[0].Summary == "no hits" {
+		t.Fatalf("%#v", refs)
+	}
+}
