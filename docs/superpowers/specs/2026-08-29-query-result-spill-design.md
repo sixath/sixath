@@ -3,10 +3,10 @@
 **日期**: 2026-08-29  
 **状态**: 已确认（brainstorming 分段批准）  
 **方案**: A — 平台自动把过大查询结果写成工作区临时文件，模型与落库只看 stub  
-**关联**: [session-context-compression](../../../framework/docs/superpowers/specs/2026-05-26-session-context-compression-design.md)（L0/L2 管旧消息，不管单次查询塞爆）；[industrial-evidence](./2026-08-25-industrial-evidence-design.md)（`hit_status` / `queried_index` 必须在 stub 上保留）  
-**禁止**: 第一期执行 Python/任意脚本；多页自动拼成一个文件；`http_request` / 终端 stdout / 助手长回复走溢出；改 ES mapping 纠错、空击盖章、`execute_read` 禁查 ES；把 jsonl 当权威数据源。
+**关联**: [session-context-compression](../../../framework/docs/superpowers/specs/2026-05-26-session-context-compression-design.md)（L0/L2 管旧消息，不管单次查询塞爆）；[industrial-evidence](./2026-08-25-industrial-evidence-design.md)（`hit_status` / `queried_index` 必须在 stub 上保留）；[run_result_script](./2026-08-29-run-result-script-design.md)（spill 之后的 Python 兜底，另规格）  
+**禁止**: 本规格第一期不实现 Python；多页自动拼成一个文件；`http_request` / 终端 stdout / 助手长回复走溢出；改 ES mapping 纠错、空击盖章、`execute_read` 禁查 ES；把 jsonl 当权威数据源。
 
-**一句话**：查询工具成功且结果过大时，全量只进 `{workspace}/tmp/results/` 的 jsonl；进模型上下文、RunTrace、SSE、消息落库的是固定 stub；再处理用只读 `result_stats`。
+**一句话**：查询工具成功且结果过大时，全量只进 `{workspace}/tmp/results/` 的 jsonl；进模型上下文、RunTrace、SSE、消息落库的是固定 stub；再处理用只读 `result_stats`；复杂转换见 `run_result_script` 规格。
 
 ---
 
@@ -21,7 +21,7 @@
 | 文件 | NDJSON，一行一条记录；单文件 **32MiB** 硬顶 |
 | 分页 | 一次工具调用一个文件；`from=continue_from` 再生成新文件，**不**自动拼接 |
 | 再处理 | `result_stats`：`group_by` 与 `unique` **互斥**（见 §2.4）；统计过大则另写 jsonl |
-| Python | **第一期不开放**。以后若开：只能读 `tmp/results/`，stdout 同样限行 |
+| Python | **本规格不实现**。后继：[run_result_script](./2026-08-29-run-result-script-design.md) |
 | 展示 | 默认摘要 + 样例；气泡不展开 jsonl。下载 UI **第二期**；第一期用户要「全部」时用已有 `ask_user` |
 | 写盘失败 | 查询仍成功；**不外置**，退回压缩后的整页结果，可带 `spill_error` |
 | Execute 返回类型（spill） | `*QuerySpillStub`（struct），**不**经 `rcaOK` 再包一层 `map[string]any` |
@@ -41,7 +41,7 @@
 
 ### 非目标（第一期不做）
 
-- Python / shell 跑用户脚本处理文件。
+- Python / shell 跑用户脚本处理文件（后继规格 [run_result_script](./2026-08-29-run-result-script-design.md)）。
 - 多页 jsonl 自动 concat 成「全量结果集」。
 - `http_request`、terminal、`read_file` 输出、助手 markdown 表格的溢出。
 - 门户「下载 jsonl」按钮或独立下载 API（第二期）。
@@ -119,12 +119,14 @@ Go 类型名：`QuerySpillStub`。`Execute` 在 spill 路径返回 `*QuerySpillS
 | 10 | `columns` | 查询 spill 是 | 按行内键**首次出现**顺序的并集 |
 | 11 | `extracted_ids` | 若有 | **对全页 hits** 调用现有 `extractIDsFromHits`，再外置 |
 | 12 | `evidence_refs` | `es_log_query` spill 是 | 与 `rcaOK`→`deriveESLogRefs` 等价：`Kind=es_log_query`；有 `trace_id` 则带上。有写入行则**不要** `Summary=no hits`（禁止因 stub 无 `hits` 键当成空击） |
-| 13 | `source_path` | 统计 spill 是 | 被统计的原始查询 jsonl（`path` 此时指向统计文件） |
+| 13 | `source_path` | 统计 spill 或 `run_result_script` 溢出是 | 被统计的原始查询 jsonl，或脚本读入的数据文件（`path` 此时指向统计/stdout 文件） |
 | 14 | `unique_count` | unique 统计是 | 去重后的个数（文件被 32MiB 截断时仍报已写入条数对应的个数） |
-| 15 | `groups_truncated` | 若触发 10000 帽 | 见 §2.4 |
-| 16 | `file_truncated` | 若 32MiB | |
-| 17 | `sample` | 是 | 最多 5 行；放在**后部**，使 8KB 截断先丢掉 sample 而不是 path |
-| 18 | 其余可选 | 若有 | `unknown_fields`、`similar_fields`、`mapping_error`、`query_rewritten`、`field_hints`、`trace_id`、`spill_error`、`skipped_bad_lines` |
+| 15 | `exit_code` | `run_result_script` 溢出是 | 进程退出码；查询/`result_stats` stub 不设 |
+| 16 | `timed_out` | 仅脚本超时 | |
+| 17 | `groups_truncated` | 若触发 10000 帽 | 见 §2.4 |
+| 18 | `file_truncated` | 若 32MiB | |
+| 19 | `sample` | 是 | 最多 5 行；放在**后部**，使 8KB 截断先丢掉 sample 而不是 path |
+| 20 | 其余可选 | 若有 | `unknown_fields`、`similar_fields`、`mapping_error`、`query_rewritten`、`field_hints`、`trace_id`、`spill_error`、`skipped_bad_lines` |
 
 **禁止**出现完整 `hits`、`Rows`、`groups`、`unique_values`。`sample` 不是这些数组的别名。
 
