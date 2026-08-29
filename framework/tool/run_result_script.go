@@ -67,10 +67,71 @@ func executeRunResultScript(ctx context.Context, params map[string]any) (any, er
 	if err != nil {
 		return nil, err
 	}
-	_ = scriptAbs
-	_ = dataAbs
-	_ = dataRel
-	return nil, fmt.Errorf("run_result_script: not implemented")
+	interp, err := pythonInterpreter()
+	if err != nil {
+		return nil, fmt.Errorf("run_result_script: python 3 required on PATH")
+	}
+	runCtx, cancel := context.WithTimeout(ctx, scriptTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, interp, scriptAbs, dataAbs)
+	cmd.Dir = filepath.Dir(dataAbs)
+	cmd.Env = scriptEnv(os.Environ())
+	out, err := cmd.CombinedOutput()
+	raw := string(out)
+	timedOut := runCtx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded)
+	exitCode := 0
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	} else if timedOut {
+		exitCode = -1
+	}
+	if timedOut && strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("run_result_script: timed out")
+	}
+	return assembleRunResult(ctx, dataRel, raw, exitCode, timedOut)
+}
+
+func scriptEnv(parent []string) []string {
+	out := make([]string, 0, len(parent)+2)
+	for _, e := range parent {
+		if strings.HasPrefix(e, "PYTHONNOUSERSITE=") || strings.HasPrefix(e, "PYTHONUNBUFFERED=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "PYTHONNOUSERSITE=1", "PYTHONUNBUFFERED=1")
+}
+
+func assembleRunResult(ctx context.Context, dataRel, raw string, exitCode int, timedOut bool) (any, error) {
+	lines := splitScriptOutput(raw)
+	rows := rowsFromScriptLines(lines)
+	inline := map[string]any{
+		"ok":         true,
+		"exit_code":  exitCode,
+		"path":       dataRel,
+		"line_count": len(lines),
+		"output":     raw,
+	}
+	if timedOut {
+		inline["timed_out"] = true
+	}
+	if len(lines) == 0 {
+		return inline, nil
+	}
+	meta := map[string]any{"ok": true}
+	stub, fallback := spillRowSet(ctx, runResultScriptName, rows, rows, meta, nil)
+	if stub != nil {
+		stub.SourcePath = dataRel
+		ec := exitCode
+		stub.ExitCode = &ec
+		stub.TimedOut = timedOut
+		return stub, nil
+	}
+	if se, ok := fallback["spill_error"].(string); ok && se != "" {
+		inline["output"] = truncateUTF8Bytes(raw, spillByteThreshold)
+		inline["spill_error"] = se
+	}
+	return inline, nil
 }
 
 func prepareRunResultScript(ctx context.Context, params map[string]any) (scriptAbs, dataAbs, dataRel string, err error) {
