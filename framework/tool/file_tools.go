@@ -47,7 +47,10 @@ func RegisterWorkspaceFileToolsWithConfig(reg *Registry, cfg *WorkspaceFileConfi
 	if err := registerPatchFileTool(reg, c); err != nil {
 		return err
 	}
-	return registerSearchFilesTool(reg)
+	if err := registerSearchFilesTool(reg); err != nil {
+		return err
+	}
+	return RegisterResultStatsTool(reg)
 }
 
 func workspaceFileConfigOrDefault(cfg *WorkspaceFileConfig) *WorkspaceFileConfig {
