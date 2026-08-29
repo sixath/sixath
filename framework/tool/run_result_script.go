@@ -1,10 +1,155 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
+
+const (
+	runResultScriptMaxCodeBytes = 65536
+	runResultScriptName         = "run_result_script"
+)
+
+var (
+	lookPathFn    = exec.LookPath
+	scriptTimeout = 15 * time.Second
+)
+
+func pythonInterpreter() (string, error) {
+	if p, err := lookPathFn("python"); err == nil {
+		return p, nil
+	}
+	return lookPathFn("python3")
+}
+
+func RegisterRunResultScriptTool(reg *Registry) error {
+	if reg == nil {
+		return errors.New("run_result_script: registry is nil")
+	}
+	return reg.Register(Tool{
+		Name: runResultScriptName,
+		Description: "Last-resort Python 3 over a spilled file under tmp/results/. " +
+			"Prefer query tools, then result_stats (count/group_by/unique), then this tool. " +
+			"Open the data file via sys.argv[1]; do not read_file the whole jsonl.",
+		Toolset: ToolsetFile,
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{
+					"type":        "string",
+					"description": "Workspace-relative data file under tmp/results/.",
+				},
+				"code": map[string]any{
+					"type":        "string",
+					"description": "Inline Python (mutually exclusive with script_path).",
+				},
+				"script_path": map[string]any{
+					"type":        "string",
+					"description": "Existing .py under tmp/results/ (mutually exclusive with code).",
+				},
+			},
+			"required": []string{"path"},
+		},
+		Execute: executeRunResultScript,
+	})
+}
+
+func executeRunResultScript(ctx context.Context, params map[string]any) (any, error) {
+	scriptAbs, dataAbs, dataRel, err := prepareRunResultScript(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	_ = scriptAbs
+	_ = dataAbs
+	_ = dataRel
+	return nil, fmt.Errorf("run_result_script: not implemented")
+}
+
+func prepareRunResultScript(ctx context.Context, params map[string]any) (scriptAbs, dataAbs, dataRel string, err error) {
+	ws, err := workspaceRootFromCtx(ctx)
+	if err != nil {
+		return "", "", "", fmt.Errorf("run_result_script: workspace_root_missing")
+	}
+	rel, _ := params["path"].(string)
+	if strings.TrimSpace(rel) == "" {
+		return "", "", "", fmt.Errorf("run_result_script: path is required")
+	}
+	dataAbs, dataRel, err = resolveResultsPath(ws, rel)
+	if err != nil {
+		return "", "", "", fmt.Errorf("run_result_script: %w", err)
+	}
+	st, err := os.Stat(dataAbs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", "", fmt.Errorf("run_result_script: file not found")
+		}
+		return "", "", "", fmt.Errorf("run_result_script: %w", err)
+	}
+	if st.IsDir() {
+		return "", "", "", fmt.Errorf("run_result_script: path is not a file")
+	}
+
+	code, _ := params["code"].(string)
+	scriptPath, _ := params["script_path"].(string)
+	hasCode := strings.TrimSpace(code) != ""
+	hasScript := strings.TrimSpace(scriptPath) != ""
+	if hasCode == hasScript {
+		return "", "", "", fmt.Errorf("run_result_script: provide exactly one of code or script_path")
+	}
+	if hasCode && len(code) > runResultScriptMaxCodeBytes {
+		return "", "", "", fmt.Errorf("run_result_script: code exceeds 64KiB")
+	}
+
+	if hasScript {
+		scriptAbs, _, err = resolveResultsPath(ws, scriptPath)
+		if err != nil {
+			return "", "", "", fmt.Errorf("run_result_script: %w", err)
+		}
+		if strings.ToLower(filepath.Ext(scriptAbs)) != ".py" {
+			return "", "", "", fmt.Errorf("run_result_script: script_path must be .py")
+		}
+		st, err := os.Stat(scriptAbs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", "", "", fmt.Errorf("run_result_script: script not found")
+			}
+			return "", "", "", fmt.Errorf("run_result_script: %w", err)
+		}
+		if st.IsDir() {
+			return "", "", "", fmt.Errorf("run_result_script: script_path is not a file")
+		}
+		return scriptAbs, dataAbs, dataRel, nil
+	}
+
+	sess, _ := ctx.Value(ContextKeySessionID).(string)
+	pyRel, scriptAbs, err := newSpillNamedFile(ws, sess, runResultScriptName, ".py")
+	if err != nil {
+		return "", "", "", fmt.Errorf("run_result_script: %w", err)
+	}
+	_ = pyRel
+	if filepath.Clean(scriptAbs) == filepath.Clean(dataAbs) {
+		pyRel, scriptAbs, err = newSpillNamedFile(ws, sess, runResultScriptName, ".py")
+		if err != nil {
+			return "", "", "", fmt.Errorf("run_result_script: %w", err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(scriptAbs), 0o755); err != nil {
+		return "", "", "", fmt.Errorf("run_result_script: %w", err)
+	}
+	if err := os.WriteFile(scriptAbs, []byte(code), 0o644); err != nil {
+		return "", "", "", fmt.Errorf("run_result_script: write script: %w", err)
+	}
+	expireSessionResults(filepath.Dir(scriptAbs), time.Now())
+	return scriptAbs, dataAbs, dataRel, nil
+}
 
 func splitScriptOutput(raw string) []string {
 	raw = strings.ReplaceAll(raw, "\r\n", "\n")

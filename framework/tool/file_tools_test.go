@@ -430,3 +430,10 @@ func TestWorkspaceFile_ConfirmErrorCode_Expired(t *testing.T) {
 		t.Fatalf("error: %#v", m)
 	}
 }
+
+func TestRegisterWorkspaceFileTools_IncludesRunResultScript(t *testing.T) {
+	reg := registerFileToolsForTest(t)
+	if _, ok := reg.Get("run_result_script"); !ok {
+		t.Fatal("run_result_script not registered")
+	}
+}
