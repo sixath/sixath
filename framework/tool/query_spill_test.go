@@ -108,13 +108,13 @@ func TestMaybeSpill_FileCap(t *testing.T) {
 	spillFileMaxBytes = 64
 	t.Cleanup(func() { spillFileMaxBytes = old })
 	ctx, _ := spillCtx(t)
-	rows := make([]map[string]any, 20)
+	rows := make([]map[string]any, 51)
 	for i := range rows {
 		rows[i] = map[string]any{"message": strings.Repeat("y", 20)}
 	}
 	payload := map[string]any{"hits": rows, "hit_status": HitStatusHits}
 	stub, _ := MaybeSpill(ctx, "es_log_query", rows, payload, nil)
-	if stub == nil || !stub.FileTruncated || stub.Count <= 0 || stub.Count >= 20 {
+	if stub == nil || !stub.FileTruncated || stub.Count <= 0 || stub.Count >= 51 {
 		t.Fatalf("file cap stub=%#v", stub)
 	}
 }

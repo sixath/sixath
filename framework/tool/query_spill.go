@@ -74,7 +74,7 @@ func MaybeSpill(ctx context.Context, toolName string, rows []map[string]any, pay
 	if len(rows) == 0 {
 		return nil, payload
 	}
-	if !exceedsSpillThreshold(len(rows), payload) && !rowsExceedFileCap(rows) {
+	if !exceedsSpillThreshold(len(rows), payload) {
 		return nil, payload
 	}
 	ws, _ := ctx.Value(ContextKeyWorkspaceRoot).(string)
@@ -114,21 +114,6 @@ func exceedsSpillThreshold(n int, marshalTarget any) bool {
 	}
 	b, err := json.Marshal(marshalTarget)
 	return err == nil && len(b) > spillByteThreshold
-}
-
-func rowsExceedFileCap(rows []map[string]any) bool {
-	var n int64
-	for _, row := range rows {
-		line, err := json.Marshal(row)
-		if err != nil {
-			continue
-		}
-		n += int64(len(line) + 1)
-		if n > spillFileMaxBytes {
-			return true
-		}
-	}
-	return false
 }
 
 func newSpillFilePath(ws, sessionID, toolName string) (rel string, full string, err error) {
