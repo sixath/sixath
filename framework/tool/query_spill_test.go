@@ -119,6 +119,48 @@ func TestMaybeSpill_FileCap(t *testing.T) {
 	}
 }
 
+func TestMaybeSpill_WriteFailureKeepsHits(t *testing.T) {
+	old := spillFileMaxBytes
+	spillFileMaxBytes = 0
+	t.Cleanup(func() { spillFileMaxBytes = old })
+	ctx, root := spillCtx(t)
+	rows := make([]map[string]any, 51)
+	for i := range rows {
+		rows[i] = map[string]any{"i": i}
+	}
+	payload := map[string]any{"hits": rows, "hit_status": HitStatusHits}
+	stub, out := MaybeSpill(ctx, "es_log_query", rows, payload, nil)
+	if stub != nil {
+		t.Fatal("write failure must not return stub")
+	}
+	if out["spill_error"] != "write_failed" || out["hits"] == nil {
+		t.Fatalf("out=%#v", out)
+	}
+	matches, _ := filepath.Glob(filepath.Join(root, "tmp", "results", "*", "*.jsonl"))
+	if len(matches) != 0 {
+		t.Fatalf("leftover spill files: %v", matches)
+	}
+}
+
+func TestMaybeSpill_ColumnsFromPayload(t *testing.T) {
+	ctx, _ := spillCtx(t)
+	rows := make([]map[string]any, 51)
+	for i := range rows {
+		rows[i] = map[string]any{"z": i, "a": i}
+	}
+	payload := map[string]any{
+		"hits": rows, "hit_status": HitStatusHits,
+		"columns": []string{"a", "z"},
+	}
+	stub, _ := MaybeSpill(ctx, "es_log_query", rows, payload, nil)
+	if stub == nil {
+		t.Fatal("expected spill")
+	}
+	if len(stub.Columns) != 2 || stub.Columns[0] != "a" || stub.Columns[1] != "z" {
+		t.Fatalf("columns=%v", stub.Columns)
+	}
+}
+
 func TestMaybeSpill_TTLOnlySessionDir(t *testing.T) {
 	ctx, root := spillCtx(t)
 	other := filepath.Join(root, "tmp", "results", "other-sess")

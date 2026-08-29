@@ -174,24 +174,30 @@ func writeJSONL(full string, rows []map[string]any) (n int, fileTruncated bool, 
 	if err != nil {
 		return 0, false, nil, err
 	}
-	defer f.Close()
+	remove := true
+	defer func() {
+		_ = f.Close()
+		if remove {
+			_ = os.Remove(full)
+		}
+	}()
 
 	w := bufio.NewWriter(f)
 	var written int64
 	for _, row := range rows {
 		line, err := json.Marshal(row)
 		if err != nil {
-			return n, fileTruncated, sample, err
+			return 0, false, nil, err
 		}
 		if int64(len(line))+1+written > spillFileMaxBytes {
 			fileTruncated = true
 			break
 		}
 		if _, err := w.Write(line); err != nil {
-			return n, fileTruncated, sample, err
+			return 0, false, nil, err
 		}
 		if err := w.WriteByte('\n'); err != nil {
-			return n, fileTruncated, sample, err
+			return 0, false, nil, err
 		}
 		written += int64(len(line) + 1)
 		n++
@@ -199,9 +205,13 @@ func writeJSONL(full string, rows []map[string]any) (n int, fileTruncated bool, 
 			sample = append(sample, sampleRow(row, line))
 		}
 	}
-	if err := w.Flush(); err != nil {
-		return n, fileTruncated, sample, err
+	if n == 0 && fileTruncated {
+		return 0, false, nil, fmt.Errorf("query_spill: first row exceeds file cap")
 	}
+	if err := w.Flush(); err != nil {
+		return 0, false, nil, err
+	}
+	remove = false
 	return n, fileTruncated, sample, nil
 }
 
@@ -237,6 +247,7 @@ func stubFromPayload(payload map[string]any, rel string, count int, sample []map
 	stub.Returned = intFromParam(payload["returned"], 0)
 	stub.Truncated = spillTruthy(payload["truncated"])
 	stub.Total = intFromParam(payload["total"], 0)
+	stub.Columns = spillStringSliceFromAny(payload["columns"])
 	stub.ExtractedIDs = spillStringSliceFromAny(payload["extracted_ids"])
 	stub.UnknownFields = payload["unknown_fields"]
 	stub.SimilarFields = payload["similar_fields"]
