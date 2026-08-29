@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sixath/framework/agent"
+	"github.com/sixath/framework/tool"
 )
 
 func TestToolCallPayloadFromRecord_MapsFields(t *testing.T) {
@@ -41,5 +42,35 @@ func TestToolCallPayloadFromRecord_TruncatesLargeResult(t *testing.T) {
 	s, _ := p.Result.(string)
 	if len(s) > toolPayloadFieldLimit+64 { // 允许截断标记的少量额外字节
 		t.Fatalf("result not truncated: len=%d", len(s))
+	}
+}
+
+func TestToolCallPayloadFromRecord_SpillStubKeepsPathWhenTruncated(t *testing.T) {
+	row := map[string]any{"z": strings.Repeat("z", 3000)}
+	sample := make([]map[string]any, 5)
+	for i := range sample {
+		sample[i] = row
+	}
+	rec := agent.ToolCallRecord{
+		ToolCallID: "call_spill",
+		ToolName:   "es_log_query",
+		Result: &tool.QuerySpillStub{
+			Spilled: true,
+			Path:    "tmp/results/sess/1_es_log_query_1.jsonl",
+			Count:   5,
+			OK:      true,
+			Sample:  sample,
+		},
+	}
+	p := toolCallPayloadFromRecord(rec, "completed")
+	if !p.Truncated {
+		t.Fatal("expected Truncated=true for fat spill sample")
+	}
+	s, ok := p.Result.(string)
+	if !ok {
+		t.Fatalf("expected truncated result string, got %T", p.Result)
+	}
+	if !strings.Contains(s, "tmp/results/sess") {
+		t.Fatalf("truncated result lost spill path: %s", s)
 	}
 }

@@ -179,18 +179,47 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 			RequestID: rid,
 			Payload:   invokedPayload,
 		})
-		n := 0
-		if res != nil {
-			n = len(res.Rows)
-			idx := ""
-			if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
-				idx = strings.TrimSpace(v)
-			}
-			res.HitStatus = tool.HitStatusFromCount(true, n)
-			res.QueriedIndex = idx
+		if res == nil {
+			return res, nil
+		}
+		n := len(res.Rows)
+		idx := ""
+		if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
+			idx = strings.TrimSpace(v)
+		}
+		res.HitStatus = tool.HitStatusFromCount(true, n)
+		res.QueriedIndex = idx
+
+		rows := queryResultRows(res)
+		payload := map[string]any{
+			"hits": rows, "truncated": res.Truncated, "hit_status": res.HitStatus, "queried_index": res.QueriedIndex,
+		}
+		if res.Columns != nil {
+			payload["columns"] = res.Columns
+		}
+		if stub, _ := tool.MaybeSpill(ctx, "execute_read", rows, payload, nil); stub != nil {
+			stub.Truncated = res.Truncated
+			return stub, nil
 		}
 		return res, nil
 	}
+}
+
+func queryResultRows(res *executor.QueryResult) []map[string]any {
+	if res == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		m := make(map[string]any, len(res.Columns))
+		for i, col := range res.Columns {
+			if i < len(row) {
+				m[col] = row[i]
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func sliceAny(v any) []any {

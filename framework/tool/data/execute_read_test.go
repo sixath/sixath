@@ -2,7 +2,9 @@ package tooldata
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sixath/framework/executor"
@@ -236,5 +238,59 @@ func TestExecuteRead_ExecutorErrorWrapped(t *testing.T) {
 	}
 	if !errors.Is(err, inner) {
 		t.Fatalf("expected wrapped inner error, got: %v", err)
+	}
+}
+
+func TestExecuteRead_SpillsOverFiftyRows(t *testing.T) {
+	rows := make([][]any, 51)
+	for i := range rows {
+		rows[i] = []any{int64(i)}
+	}
+	f := &fakeExecutor{
+		ret: &executor.Result{
+			Columns: []string{"id"},
+			Rows:    rows,
+		},
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		DefaultDatasourceID: "ds1",
+		DefaultTimeoutSec:   10,
+		DefaultMaxRows:      100,
+	}
+
+	reg := core.NewRegistry()
+	if err := RegisterExecuteReadTool(reg, cfg); err != nil {
+		t.Fatalf("RegisterExecuteReadTool: %v", err)
+	}
+	tl, ok := reg.Get("execute_read")
+	if !ok {
+		t.Fatal("execute_read not found")
+	}
+
+	root := t.TempDir()
+	ctx := context.WithValue(context.Background(), core.ContextKeyWorkspaceRoot, root)
+	ctx = context.WithValue(ctx, core.ContextKeySessionID, "sess-1")
+
+	out, err := tl.Execute(ctx, map[string]any{
+		"dsl": "SELECT id FROM t",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	stub, ok := out.(*core.QuerySpillStub)
+	if !ok {
+		t.Fatalf("unexpected result type: %T", out)
+	}
+	if stub.Count != 51 {
+		t.Fatalf("Count=%d", stub.Count)
+	}
+	raw, err := json.Marshal(stub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"Rows"`) {
+		t.Fatal("spill stub must not dump Rows")
 	}
 }

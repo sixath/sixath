@@ -73,6 +73,13 @@ func HitContractFromResult(v any) (status, queriedIndex, repo string) {
 		return hitStatusString(x.HitStatus), x.QueriedIndex, ""
 	case executor.QueryResult:
 		return hitStatusString(x.HitStatus), x.QueriedIndex, ""
+	case *QuerySpillStub:
+		if x == nil {
+			return "", "", ""
+		}
+		return hitStatusString(x.HitStatus), x.QueriedIndex, ""
+	case QuerySpillStub:
+		return hitStatusString(x.HitStatus), x.QueriedIndex, ""
 	default:
 		return "", "", ""
 	}
@@ -152,6 +159,12 @@ func collectEvidenceRefsFromValue(v any, out *[]EvidenceRef) {
 		for _, item := range x {
 			collectEvidenceRefsFromValue(item, out)
 		}
+	case *QuerySpillStub:
+		if x != nil {
+			*out = append(*out, x.EvidenceRefs...)
+		}
+	case QuerySpillStub:
+		*out = append(*out, x.EvidenceRefs...)
 	}
 }
 

@@ -136,3 +136,67 @@ func TestESLogQuery_EmptyHitsOK(t *testing.T) {
 		t.Fatalf("want empty-result summary, got %#v", refs[0])
 	}
 }
+
+func TestESLogQuery_SpillsOverFiftyRows(t *testing.T) {
+	rows := make([][]any, 51)
+	cols := []string{"operation", "args"}
+	for i := 0; i < 51; i++ {
+		rows[i] = []any{"DiscardUserArchive", nil}
+	}
+	rows[6] = []any{"DiscardUserArchive", map[string]any{"flowIds": []any{"flow-late"}}}
+	fr := &fakeReader{result: &executor.QueryResult{Columns: cols, Rows: rows, Truncated: true, EstimatedTotal: 400}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "backend-cgsession-*", TraceIDField: "trace_id"})
+	tl, _ := reg.Get("es_log_query")
+	root := t.TempDir()
+	ctx := context.WithValue(context.Background(), ContextKeyWorkspaceRoot, root)
+	ctx = context.WithValue(ctx, ContextKeySessionID, "sess-es")
+	out, err := tl.Execute(ctx, map[string]any{"query": "operation:DiscardUserArchive", "limit": 51})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub, ok := out.(*QuerySpillStub)
+	if !ok {
+		t.Fatalf("type %T", out)
+	}
+	if stub.Count != 51 {
+		t.Fatalf("count=%d want 51 %#v", stub.Count, stub)
+	}
+	if !stub.HasMore && !stub.Truncated {
+		t.Fatalf("want HasMore or Truncated, %#v", stub)
+	}
+	if refs := CollectEvidenceRefs(stub); len(refs) == 0 || refs[0].Kind != "es_log_query" || refs[0].Summary == "no hits" {
+		t.Fatalf("refs=%#v", refs)
+	}
+}
+
+func TestESLogQuery_SmallPageUnchangedType(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{
+		Columns: []string{"message"}, Rows: [][]any{{"a"}},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{"query": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("want map, got %T", out)
+	}
+	if m["hits"] == nil {
+		t.Fatalf("non-spill must keep hits: %#v", m)
+	}
+}
+
+func TestESLogQueryDescriptionMentionsRunResultScript(t *testing.T) {
+	reg := NewRegistry()
+	if err := RegisterESLogTool(reg, &fakeReader{}, ESLogConfig{DatasourceID: "es-logs"}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("es_log_query")
+	if !strings.Contains(tl.Description, "run_result_script") {
+		t.Fatalf("%s", tl.Description)
+	}
+}
