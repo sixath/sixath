@@ -34,7 +34,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 	}
 	return reg.Register(Tool{
 		Name:        "es_log_query",
-		Description: "Query ELK application logs by trace_id (preferred) or keyword. Returns matching log lines. Read-only.",
+		Description: "Query ELK application logs by trace_id (preferred) or keyword. Returns matching log lines. Read-only. Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file.",
 		Toolset:     ToolsetRCA,
 		Parameters: map[string]any{
 			"type": "object",
@@ -89,15 +89,22 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			if res != nil {
 				truncated = res.Truncated
 			}
+			hits := rowsToHits(res)
 			payload := map[string]any{
-				"hits":      rowsToHits(res),
+				"hits":      hits,
 				"total":     totalFromResult(res),
 				"truncated": truncated,
+			}
+			if truncated {
+				payload["has_more"] = true
+			}
+			if res != nil && res.Columns != nil {
+				payload["columns"] = res.Columns
 			}
 			if tid := strings.TrimSpace(traceID); tid != "" {
 				payload["trace_id"] = tid
 			}
-			n := len(rowsToHits(res))
+			n := len(hits)
 			if t := totalFromResult(res); t > n {
 				n = t
 			}
@@ -107,6 +114,12 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				Tool:         toolName,
 				Ctx:          ctx,
 			})
+			refs := deriveESLogRefs(payload) // must still contain hits
+			stub, fallback := MaybeSpill(ctx, toolName, hits, payload, refs)
+			if stub != nil {
+				return stub, nil
+			}
+			payload = fallback
 			return rcaOK(toolName, payload), nil
 		},
 	})
