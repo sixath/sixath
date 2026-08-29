@@ -11,6 +11,9 @@ type ChannelCreate struct {
 	Type          string // web, api, webhook, wxpusher, wecom, wecom_bot
 	DefaultAgent  string
 	AllowedAgents []string
+	AutoRouteEnabled    bool
+	AutoRouteMention    bool
+	AutoRouteClassifier bool
 	Enabled       bool
 	WebhookPath   string
 	WebhookSecret string
@@ -37,6 +40,9 @@ type ChannelMeta struct {
 	Type          string
 	DefaultAgent  string
 	AllowedAgents []string
+	AutoRouteEnabled    bool
+	AutoRouteMention    bool
+	AutoRouteClassifier bool
 	Enabled       bool
 	WebhookPath   string
 	WebhookSecret string

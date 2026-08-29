@@ -78,6 +78,9 @@ message CreateChannelRequest {
   string corp_id = 16;
   string corp_secret = 17;       // write-only; never returned in replies
   string default_reply_mode = 18; // async|sync (webhook)
+  optional bool auto_route_enabled = 19;
+  optional bool auto_route_mention = 20;
+  optional bool auto_route_classifier = 21;
 }
 
 message ListChannelsRequest {
@@ -169,4 +172,7 @@ message ChannelReply {
   string corp_id = 18;
   string default_reply_mode = 19;
   RuntimeStatus runtime_status = 20; // wecom_bot only; omitted/nil otherwise
+  bool auto_route_enabled = 21;
+  bool auto_route_mention = 22;
+  bool auto_route_classifier = 23;
 }

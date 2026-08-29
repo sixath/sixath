@@ -40,6 +40,9 @@ type Channel struct {
 	Type          string      `gorm:"column:type;size:16;not null"` // web, api, webhook, wxpusher, wecom, wecom_bot
 	DefaultAgent  string      `gorm:"column:default_agent;size:36"`
 	AllowedAgents StringSlice `gorm:"column:allowed_agents;type:json"`
+	AutoRouteEnabled    bool `gorm:"column:auto_route_enabled;not null;default:1"`
+	AutoRouteMention    bool `gorm:"column:auto_route_mention;not null;default:1"`
+	AutoRouteClassifier bool `gorm:"column:auto_route_classifier;not null;default:1"`
 	Enabled       bool        `gorm:"column:enabled;not null;default:true"`
 	WebhookPath   string      `gorm:"column:webhook_path;size:256"`
 	WebhookSecret string      `gorm:"column:webhook_secret;size:256"`

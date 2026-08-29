@@ -10,6 +10,7 @@ Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→sessi
 | [入站 Gateway 设计](../docs/superpowers/specs/2026-08-09-inbound-gateway-design.md) | Web / Webhook 契约 |
 | [Portal 入站 Agent 路由](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md) | default/白名单、改绑、指令 |
 | [企微 `/switch` 两步绑定](../docs/superpowers/specs/2026-08-11-wecom-switch-agent-design.md) | 序号选择 Agent、pending TTL |
+| [消息级自动路由](../docs/superpowers/specs/2026-08-10-gateway-message-auto-route-design.md) | `@Agent` + Portal 分类器 |
 | [企微智能机器人设计](../docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md) | 长连接 Adapter |
 | [渠道 Portal 真相源 + Runtime Status](../docs/superpowers/specs/2026-08-11-channel-portal-runtime-status-design.md) | 配置同步、连接态 |
 | 官方 | [智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463) |
@@ -154,6 +155,39 @@ Web Channels 列表 / 编辑页展示连接态。Gateway 上报 `connected` / `d
 
 Webhook body 可选 `agent_id` / `force_new`（与指令等价；白名单仍由 Portal 校验）。详见 [Agent 路由设计](../docs/superpowers/specs/2026-08-10-gateway-portal-agent-routing-design.md)。
 
+### 消息级自动路由（@Agent + 分类器）
+
+非 slash 普通消息在 Resolve 之前走 `prepareAutoRoute`（Webhook / 企微）：
+
+```text
+slash 指令？ → 现有行为（本条不 Turn）
+→ ListChannelAgents（flags + 候选）
+→ @Agent 命中白名单 name/id？ → strip mention → Resolve（冲突则 force_new）→ Turn(stripped)
+→ 否则 POST /runtime/v1/channels/{id}/route → confidence=high 换人则 force_new → Turn(原文)
+→ 否则普通 Resolve → Turn
+```
+
+| Portal 渠道字段 | 默认 | 含义 |
+|-----------------|------|------|
+| `auto_route_enabled` | true | 总开关 |
+| `auto_route_mention` | true | 允许 `@Agent` |
+| `auto_route_classifier` | true | 无合法 @ 时调用分类器 |
+
+- `@` 仅匹配本渠道白名单（支持带空格的 name；最长优先）；未知 `@foo` 视为未命中，可落入分类器。
+- 分类器 / `route` 超时或 5xx：**fail-open**（不强制换人，继续当前或 default）。
+- `channels.yaml` **不是**自动路由真相；开关与白名单在 Portal。
+
+本地冒烟：
+
+1. 应用 Portal migration `015_channel_auto_route_flags.sql`
+2. 渠道 ≥2 个 `allowed_agents`，三开关开启
+3. Webhook/企微：`@<name> ping` → 切到该 Agent 新 session，Turn 正文无 `@`
+4. 无 `@` 且分类器返回 high → 换人 Turn
+5. 关掉 LLM / 坏 key → 仍在当前 Agent 回复
+6. `auto_route_enabled=false` → 不自动换人
+
+设计全文：[消息级自动路由](../docs/superpowers/specs/2026-08-10-gateway-message-auto-route-design.md)。
+
 ---
 
 ## 本地运行
@@ -174,7 +208,9 @@ go build -o ./bin/gateway.exe ./cmd/gateway
 | Portal | `http://127.0.0.1:8000` |
 | Runtime token | `dev-runtime-token`（须与 Portal `runtime.service_token` 一致） |
 | 渠道配置 | Portal（`GET /runtime/v1/gateway/channels`） |
-| Turn 超时 | 120s |
+| Turn 超时 | 600s（企微/webhook `reply_mode=final` 的 context 截止；**不含** Web SSE） |
+
+Web 聊天经 Gateway 代理 `/api/v1/sessions/.../messages/stream` 时，Runtime 流式客户端**不设** `http.Client.Timeout`，仅随浏览器断开取消；否则长工具链会在约 120s 被掐断，时间线显示「模型推理 · 已中断」。
 
 依赖：Portal 已启动且 `/runtime/v1` 可用；渠道须已在 Portal 配置（或先跑 import）；Web 对话还需 Vite / 鉴权对齐（见仓库根 README）。
 

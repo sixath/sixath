@@ -1302,6 +1302,9 @@ export interface Channel {
   default_agent: string
   allowed_agents?: string[]
   enabled: boolean
+  auto_route_enabled?: boolean
+  auto_route_mention?: boolean
+  auto_route_classifier?: boolean
   webhook_path?: string
   webhook_url_masked?: string
   ip_whitelist?: string[]
@@ -1329,6 +1332,9 @@ export interface CreateChannelRequest {
   default_agent?: string
   allowed_agents?: string[]
   enabled?: boolean
+  auto_route_enabled?: boolean
+  auto_route_mention?: boolean
+  auto_route_classifier?: boolean
   webhook_path?: string
   webhook_secret?: string
   webhook_url?: string
@@ -1368,6 +1374,18 @@ function normalizeChannel(raw: Channel & Record<string, unknown>): Channel {
     allowed_agents:
       (raw.allowed_agents as string[] | undefined) ?? (raw.allowedAgents as string[] | undefined),
     enabled: (raw.enabled as boolean) ?? false,
+    auto_route_enabled:
+      (raw.auto_route_enabled as boolean | undefined) ??
+      (raw.autoRouteEnabled as boolean | undefined) ??
+      true,
+    auto_route_mention:
+      (raw.auto_route_mention as boolean | undefined) ??
+      (raw.autoRouteMention as boolean | undefined) ??
+      true,
+    auto_route_classifier:
+      (raw.auto_route_classifier as boolean | undefined) ??
+      (raw.autoRouteClassifier as boolean | undefined) ??
+      true,
     webhook_path: (raw.webhook_path as string) ?? (raw.webhookPath as string),
     webhook_url_masked: (raw.webhook_url_masked as string) ?? (raw.webhookUrlMasked as string),
     ip_whitelist: (raw.ip_whitelist as string[]) ?? (raw.ipWhitelist as string[]),

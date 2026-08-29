@@ -54,7 +54,7 @@ type WebhookHandler struct {
 // NewWebhookHandler builds an HTTP handler for webhook inbound.
 func NewWebhookHandler(deps WebhookDeps) http.Handler {
 	if deps.TurnTimeout <= 0 {
-		deps.TurnTimeout = 120 * time.Second
+		deps.TurnTimeout = 600 * time.Second
 	}
 	if deps.Idempotency == nil {
 		deps.Idempotency = idempotency.NewStore(0)
@@ -144,12 +144,41 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolved, err := h.deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
-		ChannelID: ev.ChannelID,
-		PeerID:    ev.PeerID,
-		AgentID:   ev.AgentID,
-		ForceNew:  ev.ForceNew,
-	})
+	plan := prepareAutoRoute(ctx, h.deps.Runtime, ev.ChannelID, ev.PeerID, ev.Content)
+	if plan.TurnText != "" {
+		ev.Content = plan.TurnText
+	}
+	agentID := plan.AgentID
+	forceNew := false
+	reason := plan.Reason
+	if agentID == "" {
+		agentID = ev.AgentID
+		forceNew = ev.ForceNew
+	}
+
+	var resolved *runtimeclient.ResolveReply
+	switch {
+	case forceNew:
+		resolved, err = h.deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
+			ChannelID: ev.ChannelID,
+			PeerID:    ev.PeerID,
+			AgentID:   agentID,
+			ForceNew:  true,
+			Reason:    reason,
+		})
+		if err == nil {
+			h.deps.Sessions.Invalidate(ev.ChannelID, ev.PeerID)
+		}
+	case plan.AgentID != "":
+		resolved, err = resolveMaybeRebind(ctx, h.deps.Sessions, ev.ChannelID, ev.PeerID, plan.AgentID, plan.Reason)
+	default:
+		resolved, err = h.deps.Sessions.Resolve(ctx, "", runtimeclient.ResolveRequest{
+			ChannelID: ev.ChannelID,
+			PeerID:    ev.PeerID,
+			AgentID:   agentID,
+			ForceNew:  false,
+		})
+	}
 	if err != nil {
 		log.Printf("webhook resolve: %v", err)
 		msg := mapRuntimeUserError(err)
@@ -172,9 +201,6 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 		return
-	}
-	if ev.ForceNew {
-		h.deps.Sessions.Invalidate(ev.ChannelID, ev.PeerID)
 	}
 	userID := resolved.UserID
 

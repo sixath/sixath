@@ -72,14 +72,32 @@ type ResolveRequest struct {
 
 // ChannelAgentItem is one agent in a channel allowlist response.
 type ChannelAgentItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ChannelAgentsReply is GET /runtime/v1/channels/{channel_id}/agents.
 type ChannelAgentsReply struct {
-	DefaultAgent string             `json:"default_agent"`
-	Agents       []ChannelAgentItem `json:"agents"`
+	DefaultAgent        string             `json:"default_agent"`
+	Agents              []ChannelAgentItem `json:"agents"`
+	AutoRouteEnabled    bool               `json:"auto_route_enabled"`
+	AutoRouteMention    bool               `json:"auto_route_mention"`
+	AutoRouteClassifier bool               `json:"auto_route_classifier"`
+}
+
+// RouteRequest is POST /runtime/v1/channels/{channel_id}/route body.
+type RouteRequest struct {
+	Text   string `json:"text"`
+	PeerID string `json:"peer_id,omitempty"`
+}
+
+// RouteReply is the classifier / route response.
+type RouteReply struct {
+	AgentID    string `json:"agent_id"`
+	Confidence string `json:"confidence"`
+	Source     string `json:"source"`
+	Reason     string `json:"reason"`
 }
 
 // BindingReply is GET /runtime/v1/sessions/binding.
@@ -252,6 +270,16 @@ func (c *Client) ListGatewayChannels(ctx context.Context) ([]channel.Channel, er
 func (c *Client) ReportChannelStatus(ctx context.Context, channelID string, body StatusBody) error {
 	path := "/runtime/v1/gateway/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/status"
 	return c.doJSON(ctx, http.MethodPost, path, "", nil, body, nil)
+}
+
+// RouteChannel asks Portal to classify which allowlisted agent should handle text.
+func (c *Client) RouteChannel(ctx context.Context, channelID string, req RouteRequest) (*RouteReply, error) {
+	path := "/runtime/v1/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/route"
+	var out RouteReply
+	if err := c.doJSON(ctx, http.MethodPost, path, "", nil, req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // CreateSession creates a web chat session.
