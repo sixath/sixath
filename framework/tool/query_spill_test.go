@@ -44,7 +44,7 @@ func TestMaybeSpill_RowCountWritesJSONL(t *testing.T) {
 	payload := map[string]any{
 		"hits": rows, "count": 51, "total": 51, "hit_status": HitStatusHits,
 		"queried_index": "idx", "has_more": true, "continue_from": 51,
-		"extracted_ids": extractIDsFromHits(rows),
+		"extracted_ids": []string{"flow-late"},
 	}
 	refs := deriveESLogRefs(payload)
 	stub, _ := MaybeSpill(ctx, "es_log_query", rows, payload, refs)

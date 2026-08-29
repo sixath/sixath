@@ -102,9 +102,6 @@ func MaybeSpill(ctx context.Context, toolName string, rows []map[string]any, pay
 	stub.FileTruncated = fileTrunc
 	stub.OK = true
 	stub.Spilled = true
-	if len(stub.ExtractedIDs) == 0 {
-		stub.ExtractedIDs = extractIDsFromHits(rows)
-	}
 	if len(stub.Columns) == 0 {
 		stub.Columns = columnsFromRows(rows)
 	}
