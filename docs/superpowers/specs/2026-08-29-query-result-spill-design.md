@@ -118,22 +118,25 @@ Go 类型名：`QuerySpillStub`。`Execute` 在 spill 路径返回 `*QuerySpillS
 | 9 | `next_from` / `from` / `returned` / `truncated` / `total` | 若有 | `total` 仍是 ES 估计总量，可与 `count` 不同 |
 | 10 | `columns` | 查询 spill 是 | 按行内键**首次出现**顺序的并集 |
 | 11 | `extracted_ids` | 若有 | **对全页 hits** 调用现有 `extractIDsFromHits`，再外置 |
-| 12 | `source_path` | 统计 spill 是 | 被统计的原始查询 jsonl（`path` 此时指向统计文件） |
-| 13 | `unique_count` | unique 统计是 | 去重后的个数（文件被 32MiB 截断时仍报已写入条数对应的个数） |
-| 14 | `groups_truncated` | 若触发 10000 帽 | 见 §2.4 |
-| 15 | `file_truncated` | 若 32MiB | |
-| 16 | `sample` | 是 | 最多 5 行；放在**后部**，使 8KB 截断先丢掉 sample 而不是 path |
-| 17 | 其余可选 | 若有 | `unknown_fields`、`similar_fields`、`mapping_error`、`query_rewritten`、`field_hints`、`trace_id`、`spill_error`、`skipped_bad_lines` |
+| 12 | `evidence_refs` | `es_log_query` spill 是 | 与 `rcaOK`→`deriveESLogRefs` 等价：`Kind=es_log_query`；有 `trace_id` 则带上。有写入行则**不要** `Summary=no hits`（禁止因 stub 无 `hits` 键当成空击） |
+| 13 | `source_path` | 统计 spill 是 | 被统计的原始查询 jsonl（`path` 此时指向统计文件） |
+| 14 | `unique_count` | unique 统计是 | 去重后的个数（文件被 32MiB 截断时仍报已写入条数对应的个数） |
+| 15 | `groups_truncated` | 若触发 10000 帽 | 见 §2.4 |
+| 16 | `file_truncated` | 若 32MiB | |
+| 17 | `sample` | 是 | 最多 5 行；放在**后部**，使 8KB 截断先丢掉 sample 而不是 path |
+| 18 | 其余可选 | 若有 | `unknown_fields`、`similar_fields`、`mapping_error`、`query_rewritten`、`field_hints`、`trace_id`、`spill_error`、`skipped_bad_lines` |
 
 **禁止**出现完整 `hits`、`Rows`、`groups`、`unique_values`。`sample` 不是这些数组的别名。
 
 `sample` 来自本次写入文件的前 5 行。单行 `json.Marshal` 超过 **512 字节**则该行再截成合法 JSON 字符串摘要（实现可改为只留若干标量键）；目的是 stub 在含 sample 时仍尽量 < 8KB。测试锁：前 2048 字节必须出现 `spilled`、`path`、`count`。
 
-读取 stub 字段（闸、证据）**禁止**只 `rec.Result.(map[string]any)`。提供 `SpillFields(v any)`（或等价）：接受 `*QuerySpillStub` 与 `map[string]any`，返回 `has_more` / `truncated` / `continue_from` / `hit_status`。`EvaluateTruncatedPageGate` 与 `HitContractFromResult` 改走这个 helper。
+读取 stub 字段（闸、证据）**禁止**只 `rec.Result.(map[string]any)`。提供 `SpillFields(v any)`（或等价）：接受 `*QuerySpillStub` 与 `map[string]any`，返回 `has_more` / `truncated` / `continue_from` / `hit_status` / `queried_index`。`EvaluateTruncatedPageGate` 与 `HitContractFromResult` 改走这个 helper。
+
+`CollectEvidenceRefs` 必须 type switch `*QuerySpillStub`，读取 `evidence_refs`。否则 EvidenceGate 会把大结果外置当成「没查过 ES」，误 inject「请先用 es_log_query」。`execute_read` / `result_stats` 的 stub **不**要求 `evidence_refs`。
 
 ### 2.4 各工具接线
 
-**`es_log_query`**：现有流程不变直到 `compactESLogHits` + `extractIDsFromHits` + 分页字段 + `StampHitContract`。然后 `MaybeSpill`。未 spill：再 `rcaOK(map)`。spill：返回 `*QuerySpillStub`（含 `ok=true` 与盖章字段），**跳过** `rcaOK`。失败 / 空击 / mapping 纠错路径**不**调用 Spill。
+**`es_log_query`**：现有流程不变直到 `compactESLogHits` + `extractIDsFromHits` + 分页字段 + `StampHitContract`。然后 `MaybeSpill`。未 spill：再 `rcaOK(map)`。spill：返回 `*QuerySpillStub`（含 `ok=true`、盖章字段、以及与 `deriveESLogRefs` 等价的 `evidence_refs`），**跳过** `rcaOK`。失败 / 空击 / mapping 纠错路径**不**调用 Spill。
 
 **`execute_read`**：成功且未 spill 时仍返回 `*executor.QueryResult`。spill 时返回 `*QuerySpillStub`（不是 map）：`sample` 为列名 map；`Rows` 不出现。`hit_status` 与现网 empty/hits 规则一致（写在 stub 上，不必再 `StampHitContract` 进 map；可抽公共赋值）。
 
@@ -169,10 +172,10 @@ spill 时删除 `groups` / `unique_values`，返回 `*QuerySpillStub`：
 - `sample`：统计 jsonl 前 5 行
 - 无 `hits`
 
-统计 jsonl 一行：
+统计 jsonl 一行（写入顺序锁定，禁止 `range map` 导致测试抖）：
 
-- `group_by`：`{"value":"<key>","count":N}`
-- `unique`：`{"value":"<key>"}`
+- `group_by`：`{"value":"<key>","count":N}`，按 **count 降序**（与未 spill 的 `groups` 一致）
+- `unique`：`{"value":"<key>"}`，按 **首次出现** 顺序
 
 `result_stats` 描述写明：处理溢出文件请用本工具，不要 `read_file` 整份 jsonl。
 
@@ -255,6 +258,7 @@ Spill 发生在工具 `Execute` 返回之前，因此：
 - 路径守卫：workspace 外写不到。
 - 32MiB：短行重复写到上限；断言 `file_truncated` 与 `count`。
 - `json.Marshal(stub)` 的前 2048 字节含 `"spilled"`、`"path"`、`"count"`。
+- `es_log_query` spill：`CollectEvidenceRefs(stub)` 含 `Kind=es_log_query`；EvidenceGate 不得因 spill 误判缺证据。
 
 ### 闸
 
@@ -298,7 +302,7 @@ Spill 发生在工具 `Execute` 返回之前，因此：
 | `framework/tool/result_stats.go` | `result_stats` 注册与扫描 |
 | `framework/tool/es_log_tool.go` | 成功路径接 `MaybeSpill`；spill 时不 `rcaOK` |
 | `framework/tool/data/execute_read.go` | 成功路径接 `MaybeSpill` |
-| `framework/tool/evidence.go` | `HitContractFromResult` 识别 `*QuerySpillStub` |
+| `framework/tool/evidence.go` | `HitContractFromResult` 与 `CollectEvidenceRefs` 识别 `*QuerySpillStub`；spill 合成 `evidence_refs` |
 | `framework/agent/truncated_page_gate.go` | 改走 `SpillFields`；文案可选 |
 | Portal SSE | 仅当现有渲染假定必有 `hits` 时补 spilled 分支；不新增下载 API |
 
