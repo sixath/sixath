@@ -44,6 +44,8 @@ type QuerySpillStub struct {
 	EvidenceRefs    []EvidenceRef    `json:"evidence_refs,omitempty"`
 	SourcePath      string           `json:"source_path,omitempty"`
 	UniqueCount     int              `json:"unique_count,omitempty"`
+	ExitCode        *int            `json:"exit_code,omitempty"`
+	TimedOut        bool            `json:"timed_out,omitempty"`
 	GroupsTruncated bool             `json:"groups_truncated,omitempty"`
 	FileTruncated   bool             `json:"file_truncated,omitempty"`
 	Sample          []map[string]any `json:"sample"`
@@ -68,13 +70,17 @@ type SpillView struct {
 }
 
 func MaybeSpill(ctx context.Context, toolName string, rows []map[string]any, payload map[string]any, refs []EvidenceRef) (*QuerySpillStub, map[string]any) {
+	return spillRowSet(ctx, toolName, rows, payload, payload, refs)
+}
+
+func spillRowSet(ctx context.Context, toolName string, rows []map[string]any, marshalTarget any, payload map[string]any, refs []EvidenceRef) (*QuerySpillStub, map[string]any) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
 	if len(rows) == 0 {
 		return nil, payload
 	}
-	if !exceedsSpillThreshold(len(rows), payload) {
+	if !exceedsSpillThreshold(len(rows), marshalTarget) {
 		return nil, payload
 	}
 	ws, _ := ctx.Value(ContextKeyWorkspaceRoot).(string)
@@ -117,9 +123,19 @@ func exceedsSpillThreshold(n int, marshalTarget any) bool {
 }
 
 func newSpillFilePath(ws, sessionID, toolName string) (rel string, full string, err error) {
+	return newSpillNamedFile(ws, sessionID, toolName, ".jsonl")
+}
+
+func newSpillNamedFile(ws, sessionID, toolName, ext string) (rel string, full string, err error) {
+	if ext == "" {
+		ext = ".jsonl"
+	}
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
 	sess := sanitizeSessionID(sessionID)
 	seq := atomic.AddUint64(&spillSeq, 1)
-	name := fmt.Sprintf("%d_%s_%d.jsonl", time.Now().UnixMilli(), toolName, seq)
+	name := fmt.Sprintf("%d_%s_%d%s", time.Now().UnixMilli(), toolName, seq, ext)
 	rel = filepath.ToSlash(filepath.Join("tmp", "results", sess, name))
 	full, rel, err = resolveResultsPath(ws, rel)
 	if err != nil {

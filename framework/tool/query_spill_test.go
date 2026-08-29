@@ -194,3 +194,45 @@ func TestResolveResultsPath_RejectsEscape(t *testing.T) {
 		t.Fatal("expected reject")
 	}
 }
+
+func TestQuerySpillStub_ExitCodeBeforeSample(t *testing.T) {
+	zero := 0
+	stub := &QuerySpillStub{
+		Spilled:    true,
+		Path:       "tmp/results/s/out.jsonl",
+		Count:      1,
+		OK:         true,
+		SourcePath: "tmp/results/s/in.jsonl",
+		ExitCode:   &zero,
+		TimedOut:   true,
+		Sample:     []map[string]any{{"line": "x"}},
+	}
+	b, err := json.Marshal(stub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	iExit := strings.Index(s, `"exit_code"`)
+	iTO := strings.Index(s, `"timed_out"`)
+	iSample := strings.Index(s, `"sample"`)
+	if iExit < 0 || iTO < 0 || iSample < 0 {
+		t.Fatalf("missing keys: %s", s)
+	}
+	if !(iExit < iTO && iTO < iSample) {
+		t.Fatalf("field order: %s", s)
+	}
+}
+
+func TestSpillRowSet_ByteThresholdUsesRows(t *testing.T) {
+	ctx, root := spillCtx(t)
+	row := map[string]any{"line": strings.Repeat("x", 9000)}
+	rows := []map[string]any{row}
+	payload := map[string]any{"ok": true}
+	stub, _ := spillRowSet(ctx, "run_result_script", rows, rows, payload, nil)
+	if stub == nil {
+		t.Fatal("want spill when rows marshal > 8192")
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(stub.Path))); err != nil {
+		t.Fatal(err)
+	}
+}
