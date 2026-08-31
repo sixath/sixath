@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
 
@@ -90,5 +91,44 @@ func TestEvaluateTruncatedPageGate_SampleQueryAllowsFinish(t *testing.T) {
 	got := EvaluateTruncatedPageGate(tr, q)
 	if !got.Allow {
 		t.Fatalf("exploratory sample must be allowed to finish, prompt=%q", got.Prompt)
+	}
+}
+
+func TestCheckTruncatedPageGate_InjectsOnSpillStub(t *testing.T) {
+	a := &ReActAgent{}
+	req := &Request{Messages: []model.Message{{Role: "user", Content: "请解析全部日志并统计分布"}}}
+	tr := &RunTrace{ToolCalls: []ToolCallRecord{{
+		ToolName: "es_log_query",
+		Result: &tool.QuerySpillStub{
+			Spilled:      true,
+			HasMore:      true,
+			ContinueFrom: 50,
+		},
+	}}}
+	got := a.checkTruncatedPageGate(req, nil, tr, true, true)
+	if !got.Inject || !got.TruncatedPage {
+		t.Fatalf("want inject truncated page, got %#v", got)
+	}
+	if !strings.Contains(got.Prompt, "50") {
+		t.Fatalf("prompt=%q", got.Prompt)
+	}
+}
+
+func TestCheckTruncatedPageGate_StopsAfterMaxNudges(t *testing.T) {
+	a := &ReActAgent{}
+	req := &Request{Messages: []model.Message{{Role: "user", Content: "请解析全部日志"}}}
+	tr := &RunTrace{
+		TruncatedPageNudges: maxTruncatedPageNudges,
+		ToolCalls: []ToolCallRecord{{
+			ToolName: "es_log_query",
+			Result:   map[string]any{"truncated": true, "continue_from": 50},
+		}},
+	}
+	got := a.checkTruncatedPageGate(req, nil, tr, true, true)
+	if got.Inject {
+		t.Fatal("must not inject after max nudges")
+	}
+	if !got.Incomplete {
+		t.Fatalf("want incomplete, got %#v", got)
 	}
 }

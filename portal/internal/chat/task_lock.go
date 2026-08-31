@@ -143,7 +143,9 @@ func isDeliveryUtterance(s string) bool {
 			return false
 		}
 	}
-	if n == "继续" {
+	if n == "继续" || n == "需要" || n == "请继续" || n == "需要请继续" ||
+		n == "接着" || n == "然后" || n == "然后呢" || n == "往下" || n == "没做完" ||
+		n == "剩下的" || n == "查完" {
 		return true
 	}
 	for _, hit := range deliveryHitSubstr {

@@ -103,6 +103,5 @@ func buildRCAESReader(cfg config.Config) (executor.Reader, bool) {
 		slog.Warn("rca: register es datasource failed", "err", err)
 		return nil, false
 	}
-	bundle := executor.NewBundle(dsReg)
-	return bundle.Reader, true
+	return executor.NewESExecutor(dsReg), true
 }

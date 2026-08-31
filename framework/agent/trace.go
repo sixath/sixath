@@ -74,6 +74,8 @@ type RunTrace struct {
 	EmptyHitNudges int `json:"empty_hit_nudges,omitempty"`
 	// EmptyIdleNudges 工具已跑但终答空白时的回压次数（最多 1）。
 	EmptyIdleNudges int `json:"empty_idle_nudges,omitempty"`
+	// TruncatedPageNudges es_log_query 未翻完就总结时的回压次数。
+	TruncatedPageNudges int `json:"truncated_page_nudges,omitempty"`
 	// GoalDriftNudges idle 改题回压次数（最多 1）。
 	GoalDriftNudges int `json:"goal_drift_nudges,omitempty"`
 	// DroppedProposals 本轮被 family/drift/intake 丢掉的工具提议。

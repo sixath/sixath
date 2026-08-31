@@ -135,6 +135,13 @@ func (g TurnIntentGate) Evaluate(_ context.Context, in agent.PostModelPolicyInpu
 		}
 	}
 	calls = keptAfterIntake
+	if allDiscoveryLoopCalls(calls) && hasSuccessfulDataQuery(in.Trace) {
+		return agent.PostModelPolicyResult{
+			Decision: agent.PostModelRetry,
+			Reason:   "discovery_loop",
+			Prompt:   discoveryLoopRetryPrompt(lock),
+		}
+	}
 	userToks := tokenizeForOverlap(q)
 	if len(userToks) == 0 {
 		if familyDropped > 0 || intakeDropped > 0 {
@@ -568,6 +575,57 @@ func intakeAskUserRetryPrompt(lock *TurnTaskLock) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("不要重新收集。用任务锁与上下文已有取值直接回答用户问题，不要调用 ask_user 再要一次。")
+	return b.String()
+}
+
+var discoveryLoopTools = map[string]struct{}{
+	"list_tools":     {},
+	"tool_search":    {},
+	"list_tables":    {},
+	"describe_table": {},
+	"skills_list":    {},
+}
+
+func isDiscoveryLoopTool(name string) bool {
+	_, ok := discoveryLoopTools[strings.TrimSpace(name)]
+	return ok
+}
+
+func allDiscoveryLoopCalls(calls []model.ToolCall) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	for _, c := range calls {
+		if !isDiscoveryLoopTool(c.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasSuccessfulDataQuery(trace *agent.RunTrace) bool {
+	if trace == nil {
+		return false
+	}
+	for _, rec := range trace.ToolCalls {
+		if rec.Error != "" || rec.Blocked {
+			continue
+		}
+		switch strings.TrimSpace(rec.ToolName) {
+		case "execute_read", "es_log_query":
+			return true
+		}
+	}
+	return false
+}
+
+func discoveryLoopRetryPrompt(lock *TurnTaskLock) string {
+	var b strings.Builder
+	if lock != nil {
+		b.WriteString(lock.Format())
+		b.WriteString("\n")
+	}
+	b.WriteString("已经有查询结果。不要再 list_tools / tool_search / list_tables / describe_table。用已有工具结果直接回答用户问题；0 击就写未查到。")
 	return b.String()
 }
 

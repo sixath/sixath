@@ -1,6 +1,8 @@
 package chatsse
 
 import (
+	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -59,6 +61,42 @@ func TestAggregateFinal_DeadlineErrorNotSuppressed(t *testing.T) {
 	}
 	if got.Error == "" {
 		t.Fatal("expected error message")
+	}
+}
+
+func TestWriteStream_PersistsTimelineOnFailedError(t *testing.T) {
+	ch := make(chan service.ChatStreamEvent, 8)
+	ch <- service.ChatStreamEvent{
+		Type:      service.ChatStreamEventModelCall,
+		ModelCall: &service.ModelCallPayload{Phase: "invoked", Step: 0, Model: "deepseek-v4-pro"},
+	}
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventError, Error: "model stream reset"}
+	close(ch)
+
+	var persisted struct {
+		content string
+		meta    map[string]any
+		called  bool
+	}
+	rec := httptest.NewRecorder()
+	res := WriteStream(context.Background(), rec, ch, "sess-1", func(_ context.Context, _, content string, meta map[string]any) error {
+		persisted.called = true
+		persisted.content = content
+		persisted.meta = meta
+		return nil
+	})
+	if !res.Failed {
+		t.Fatalf("expected Failed, got %+v", res)
+	}
+	if !persisted.called {
+		t.Fatal("failed stream must persist assistant so refresh is not an orphan user turn")
+	}
+	if !strings.Contains(persisted.content, "model stream reset") {
+		t.Fatalf("persist content=%q", persisted.content)
+	}
+	tl, _ := persisted.meta["timeline"].([]any)
+	if len(tl) == 0 {
+		t.Fatalf("expected timeline in metadata, meta=%#v", persisted.meta)
 	}
 }
 

@@ -138,7 +138,7 @@ func TestBuildTurnTaskLock_newOpaqueDoesNotInherit(t *testing.T) {
 }
 
 func TestIsDeliveryUtterance(t *testing.T) {
-	for _, s := range []string{"没有打印出来呀", "现在补查", "vm-manager的索引是vm_manager吧", "继续"} {
+	for _, s := range []string{"没有打印出来呀", "现在补查", "vm-manager的索引是vm_manager吧", "继续", "需要", "请继续", "需要请继续"} {
 		if !isDeliveryUtterance(s) {
 			t.Fatalf("want delivery: %q", s)
 		}
@@ -147,5 +147,21 @@ func TestIsDeliveryUtterance(t *testing.T) {
 		if isDeliveryUtterance(s) {
 			t.Fatalf("not delivery: %q", s)
 		}
+	}
+}
+
+func TestBuildTurnTaskLock_NeedContinueInheritsPriorQ(t *testing.T) {
+	orig := "查询最近7天 DiscardUserArchive 并解析 args 的 flowid，再用这些 flowId 查 vmid 和 gid"
+	hist := []model.Message{
+		{Role: "user", Content: orig},
+		{Role: "assistant", Content: "已获取 250/473 个 flowId，继续翻页中"},
+		{Role: "user", Content: "需要"},
+	}
+	lock := BuildTurnTaskLock("需要", hist)
+	if lock.Q != orig {
+		t.Fatalf("Q must stay the investigation, got %q", lock.Q)
+	}
+	if lock.Delivery != "需要" {
+		t.Fatalf("Delivery=%q", lock.Delivery)
 	}
 }

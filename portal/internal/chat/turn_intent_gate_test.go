@@ -190,6 +190,47 @@ func TestTurnIntentGate_NonSensitiveToolsNotFiltered(t *testing.T) {
 	}
 }
 
+func TestTurnIntentGate_DiscoveryLoopAfterExecuteReadRetries(t *testing.T) {
+	gate := TurnIntentGate{}
+	req := &agent.Request{Messages: []model.Message{{Role: "user", Content: "统计最近一天丢弃存档的量"}}}
+	trace := &agent.RunTrace{ToolCalls: []agent.ToolCallRecord{{
+		ToolName: "execute_read", Allowed: true,
+		Result: map[string]any{"Columns": []string{"cnt"}, "Rows": []any{[]any{0}}},
+	}}}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           req,
+		AssistantText: "再看表结构",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "describe_table", Arguments: map[string]any{"table_name": "t_user_archive_delete_record"}},
+			{ID: "2", Name: "list_tables", Arguments: map[string]any{"datasource_id": "cgarchive"}},
+		}},
+		Trace: trace,
+	})
+	if res.Decision != agent.PostModelRetry || res.Reason != "discovery_loop" {
+		t.Fatalf("decision=%v reason=%q", res.Decision, res.Reason)
+	}
+	if !strings.Contains(res.Prompt, "直接回答") {
+		t.Fatalf("prompt=%q", res.Prompt)
+	}
+}
+
+func TestTurnIntentGate_DescribeTableBeforeExecuteReadContinues(t *testing.T) {
+	gate := TurnIntentGate{}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "统计最近一天丢弃存档的量"}}},
+		AssistantText: "先看表",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{
+			{ID: "1", Name: "describe_table", Arguments: map[string]any{"table_name": "t_user_archive_delete_record"}},
+		}},
+		Trace: &agent.RunTrace{ToolCalls: []agent.ToolCallRecord{{
+			ToolName: "list_tables", Allowed: true,
+		}}},
+	})
+	if res.Decision != agent.PostModelContinue {
+		t.Fatalf("schema-before-query must continue, got %v %q", res.Decision, res.Reason)
+	}
+}
+
 func TestBuildReActAgent_TurnIntentGateOptionSetsActiveFamilies(t *testing.T) {
 	t.Setenv(turnIntentGateEnv, "1")
 	reg := tool.NewRegistry()

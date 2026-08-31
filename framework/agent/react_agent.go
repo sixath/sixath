@@ -1390,6 +1390,10 @@ func applyAnswerGateInject(trace *RunTrace, gate evidenceGateCheck) {
 		trace.EmptyIdleNudges++
 		return
 	}
+	if gate.TruncatedPage {
+		trace.TruncatedPageNudges++
+		return
+	}
 	if gate.CodeClaim {
 		trace.CodeClaimNudges++
 		return
@@ -1420,6 +1424,7 @@ type evidenceGateCheck struct {
 	CodeClaimMismatch bool
 	EmptyHit          bool
 	EmptyIdle         bool
+	TruncatedPage     bool
 }
 
 func collectEvidenceRefsFromTrace(trace *RunTrace) []tool.EvidenceRef {
@@ -1465,6 +1470,10 @@ func (a *ReActAgent) checkAnswerGates(ctx context.Context, req *Request, message
 	eh := a.checkEmptyHitSpeakGate(trace, finalText, allowInject, hasStepRoom, emit)
 	if eh.HaltErr != nil || eh.Inject {
 		return eh
+	}
+	tp := a.checkTruncatedPageGate(req, messages, trace, allowInject, hasStepRoom)
+	if tp.Inject {
+		return tp
 	}
 	ev := a.checkEvidenceGate(trace, finalText, allowInject, hasStepRoom, emit)
 	if ev.HaltErr != nil || ev.Inject {

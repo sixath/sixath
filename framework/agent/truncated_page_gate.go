@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
 
@@ -41,6 +42,25 @@ func EvaluateTruncatedPageGate(trace *RunTrace, q string) EvidenceGateResult {
 		Reason: truncatedPageReason,
 		Prompt: prompt,
 	}
+}
+
+func (a *ReActAgent) checkTruncatedPageGate(req *Request, messages []model.Message, trace *RunTrace, allowInject, hasStepRoom bool) evidenceGateCheck {
+	q := taskLockQFromRequest(req)
+	if q == "" {
+		q = originalUserQuestion(req, messages)
+	}
+	result := EvaluateTruncatedPageGate(trace, q)
+	if result.Allow {
+		return evidenceGateCheck{}
+	}
+	nudges := 0
+	if trace != nil {
+		nudges = trace.TruncatedPageNudges
+	}
+	if allowInject && result.Action == "inject" && hasStepRoom && nudges < maxTruncatedPageNudges {
+		return evidenceGateCheck{Inject: true, TruncatedPage: true, Prompt: result.Prompt}
+	}
+	return evidenceGateCheck{Incomplete: true, TruncatedPage: true}
 }
 
 func qWantsCompleteESPage(q string) bool {
