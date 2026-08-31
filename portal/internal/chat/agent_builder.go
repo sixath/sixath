@@ -440,7 +440,8 @@ func BuildEffectiveSystemPrompt(userPrompt string, skillsIdx *skills.Index) stri
 }
 
 // DefaultMaxOutputTokens Portal 对话默认单次回复 token 上限（框架 CallConfig 默认为 1024）。
-const DefaultMaxOutputTokens = 8192
+// 8192 会把「完整映射表（468 条）」这类长表截在约 350 行；RCA 明细需要更高上限。
+const DefaultMaxOutputTokens = 32768
 
 // ReActOptionsFromAgent 按 Agent 模型配置追加 ReAct 选项（如 max_output_tokens）。
 func ReActOptionsFromAgent(meta biz.AgentMeta) []agent.ReActOption {

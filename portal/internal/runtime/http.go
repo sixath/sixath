@@ -38,6 +38,7 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 	r.PUT("/runtime/v1/sessions/{id}", svc.wrap(svc.handleUpdate))
 	r.DELETE("/runtime/v1/sessions/{id}", svc.wrap(svc.handleDelete))
 	r.GET("/runtime/v1/sessions/{id}/messages", svc.wrap(svc.handleMessages))
+	r.GET("/runtime/v1/sessions/{id}/result-files", svc.wrap(svc.handleResultFile))
 	r.POST("/runtime/v1/sessions/{id}/rewind", svc.wrap(svc.handleRewind))
 	r.POST("/runtime/v1/turns", svc.wrap(svc.handleTurns))
 }
@@ -233,6 +234,16 @@ func (s *Service) handleDelete(ctx context.Context, hctx khttp.Context) error {
 func (s *Service) handleMessages(ctx context.Context, hctx khttp.Context) error {
 	id := strings.TrimSpace(hctx.Vars().Get("id"))
 	out, err := s.listMessages(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
+}
+
+func (s *Service) handleResultFile(ctx context.Context, hctx khttp.Context) error {
+	id := strings.TrimSpace(hctx.Vars().Get("id"))
+	rel := strings.TrimSpace(hctx.Query().Get("path"))
+	out, err := s.listResultFile(ctx, id, rel)
 	if err != nil {
 		return err
 	}

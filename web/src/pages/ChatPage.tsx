@@ -15,6 +15,7 @@ import {
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
 import { SourcesPanel } from '../components/SourcesPanel'
+import { SpillResultTable, useSpillTable } from '../components/SpillResultTable'
 import { isCompactBoundaryMessage, isMessageVisibleAtIndex } from '../utils/compactBoundary'
 import { applyToolCall, applyModelCall, finalizeTimeline, type TimelineNode } from './timelineReducer'
 import { toolVerb } from './toolVerbMap'
@@ -148,6 +149,32 @@ function confirmButtonLabel(status: ChatConfirmationItem['status']): string {
     default:
       return 'Confirm'
   }
+}
+
+function AssistantReplyBody({
+  sessionId,
+  content,
+  nodes,
+  showCursor,
+  interrupted,
+}: {
+  sessionId?: string
+  content: string
+  nodes: TimelineNode[]
+  showCursor: boolean
+  interrupted: boolean
+}) {
+  const spill = useSpillTable(sessionId, content, nodes)
+  const banner = spill.table
+    ? `标题写的行数多于对话里贴出的表格；下面已加载工具落盘的完整 ${spill.table.rows.length} 行。`
+    : spill.hint ?? (interrupted ? '这条回复在生成时被中断，内容可能不完整。' : null)
+  return (
+    <>
+      {banner && <p className="chat-truncated-banner">{banner}{spill.loading ? ' 正在加载…' : ''}{spill.error ? ` ${spill.error}` : ''}</p>}
+      {spill.table && <SpillResultTable columns={spill.table.columns} rows={spill.table.rows} />}
+      <MarkdownContent showCursor={showCursor}>{spill.displayContent}</MarkdownContent>
+    </>
+  )
 }
 
 function TimelineView({ nodes }: { nodes: TimelineNode[] }) {
@@ -928,9 +955,13 @@ export default function ChatPage(props?: ChatPageProps) {
                               <TimelineView nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []} />
                             )}
                             <SourcesPanel sources={sources} />
-                            <MarkdownContent showCursor={streaming && idx === messages.length - 1}>
-                              {m.content}
-                            </MarkdownContent>
+                            <AssistantReplyBody
+                              sessionId={sessionId}
+                              content={m.content}
+                              nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []}
+                              showCursor={streaming && idx === messages.length - 1}
+                              interrupted={(messageTimelines[messageKey] ?? m.metadata?.timeline ?? []).some((n) => n.phase === 'interrupted')}
+                            />
                             {(() => {
                               const messageInputs = inputs.filter((c) => {
                                 if (c.messageKey === messageKey) return true

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	stderrors "errors"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -524,6 +525,50 @@ func (s *Service) listMessages(ctx context.Context, sessionID string) (*chatv1.L
 	return &chatv1.ListMessagesReply{
 		Ret:   &common.BaseResponse{Code: 0, Message: "ok"},
 		Items: replies,
+	}, nil
+}
+
+type resultFileReply struct {
+	Ret   *common.BaseResponse `json:"ret"`
+	Path  string               `json:"path"`
+	Total int                  `json:"total"`
+	Items []map[string]any     `json:"items"`
+}
+
+func (s *Service) listResultFile(ctx context.Context, sessionID, rel string) (*resultFileReply, error) {
+	if err := s.requireSessionOwner(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if s.sessions == nil || s.agents == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "session store unavailable")
+	}
+	sess, err := s.sessions.GetByID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	agent, err := s.agents.GetForSession(ctx, sess.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := portalchat.ResolveSessionResultAbs(agent.Workspace, sessionID, rel)
+	if err != nil {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", err.Error())
+	}
+	items, err := portalchat.ReadJSONLResultFile(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.NotFound("NOT_FOUND", "result file not found")
+		}
+		if stderrors.Is(err, portalchat.ErrResultFileTooBig) {
+			return nil, errors.BadRequest("INVALID_ARGUMENT", err.Error())
+		}
+		return nil, err
+	}
+	return &resultFileReply{
+		Ret:   &common.BaseResponse{Code: 0, Message: "ok"},
+		Path:  rel,
+		Total: len(items),
+		Items: items,
 	}, nil
 }
 

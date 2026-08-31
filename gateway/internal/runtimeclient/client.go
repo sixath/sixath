@@ -322,6 +322,16 @@ func (c *Client) ListMessages(ctx context.Context, userID, sessionID string) (js
 	return c.doRawJSON(ctx, http.MethodGet, path, userID, nil, nil)
 }
 
+// ListResultFile reads a spilled jsonl under tmp/results/{sessionID}/.
+func (c *Client) ListResultFile(ctx context.Context, userID, sessionID, relPath string) (json.RawMessage, error) {
+	path := "/runtime/v1/sessions/" + url.PathEscape(sessionID) + "/result-files"
+	vals := url.Values{}
+	if relPath != "" {
+		vals.Set("path", relPath)
+	}
+	return c.doRawJSON(ctx, http.MethodGet, path, userID, vals, nil)
+}
+
 // SearchSessions searches sessions.
 func (c *Client) SearchSessions(ctx context.Context, userID string, q SearchSessionsQuery) (json.RawMessage, error) {
 	vals := url.Values{}

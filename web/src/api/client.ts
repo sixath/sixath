@@ -383,7 +383,7 @@ export interface ModelConfig {
   model: string
   api_key?: string
   base_url?: string
-  /** 单次回复 max_tokens；0 或未设则用服务端默认 8192 */
+  /** 单次回复 max_tokens；0 或未设则用服务端默认 32768 */
   max_output_tokens?: number
   /** 源码分析模型；全空则跟随全局设置 */
   code_provider?: string
@@ -1074,6 +1074,19 @@ export const chatApi = {
     return {
       ...data,
       items: (data.items ?? []).map((item) => normalizeChatMessage(item)),
+    }
+  },
+  listResultFile: async (sessionId: string, path: string) => {
+    const q = new URLSearchParams()
+    q.set('path', path)
+    const data = await request<{ ret?: BaseResponse; path?: string; total?: number; items?: Record<string, unknown>[] }>(
+      `/sessions/${sessionId}/result-files?${q.toString()}`
+    )
+    checkRet(data)
+    return {
+      path: data.path ?? path,
+      total: data.total ?? (data.items ?? []).length,
+      items: data.items ?? [],
     }
   },
   getSession: async (id: string) => {
