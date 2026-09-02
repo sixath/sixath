@@ -1,6 +1,6 @@
 # 多 ES 集群绑定与 `es_log_query` 路由
 
-> 状态：草稿  
+> 状态：已评审  
 > 日期：2026-09-02  
 > 关联：[2026-08-10-es-exclude-data-tools-design.md](./2026-08-10-es-exclude-data-tools-design.md)、[2026-08-15-rca-es-log-inline-design.md](./2026-08-15-rca-es-log-inline-design.md)  
 > 操作说明（落地后改）：[portal/docs/rca-es-log-query.md](../../../portal/docs/rca-es-log-query.md)
@@ -38,7 +38,7 @@ Agent 绑定表可挂多条 RCA「ELK 日志」（如 `zj-elk`、`zj-elk_flow`�
 - 不把 ES 重新放进 `list_tables` / `describe_table` / `execute_read`。
 - 不改 Jaeger / `rca_code` / `rca_symbol` 的 RCA 形态。
 - 不强制一次性迁移现网已保存的 RCA 内联 ES（运行时兼容，见 §8）。
-- 不把 `framework` YAML `rca.es` 改成多集群列表（仍单集群；见 §7.4）。
+- 不把 `framework` YAML `rca.es` 改成多集群列表（仍单集群；见 §5.2）。
 - 不新增第二个查询工具名（不注册 `zj-elk` 为独立 tool）。
 
 ## 3. 架构
@@ -78,13 +78,21 @@ Portal 工具 `type=datasource`，`config.datasource` 在既有连接字段之�
 
 运行时数据源 ID 仍 **等于工具目录名**（`canonicalDatasourceConfig` 不变）。`cluster` 必须与此名完全一致（大小写敏感，与现网工具名一致即可）。
 
-`purpose` / `default_index` / `trace_id_field` 放在 Portal 工具 config 上，装配时读入集群表。不必把 `purpose` 扩进 `framework/datasource.Config`（避免污染 MySQL 等类型）。连接仍走 `datasource.Config`。
+`purpose` / `default_index` / `trace_id_field` 只属于 Portal 工具 config，装配时读入集群表。**不要**扩 `framework/datasource.Config`（避免污染 MySQL 等类型）。连接仍走 `datasource.Config`。
+
+现网 `DatasourceConfig` 是 proto **逐字段**编解码（`portal/api/tool/v1/tool.proto` + `portal/internal/service/tool.go`），未知键在 Create/Update/读回时会被丢掉。因此必须：
+
+- proto `DatasourceConfig` 增加 `default_index`、`trace_id_field`、`purpose`（仅 ES 有意义；其它类型忽略）
+- `service/tool.go` 编解码补这三字段
+- `web/src/api/client.ts` 的 `DatasourceConfig` 同步，并对这三字段做与 RCA 相同的 camelCase 归一（`defaultIndex` → `default_index` 等），避免读回后再保存丢字段
+
+缺这三处则绑定表和 catalog 看不到用途/默认索引。
 
 ### 4.2 RCA `func_path=es_log_query`
 
-- **新建**：拒绝。提示改为创建 elasticsearch 数据源工具并绑定到 Agent。
+- **新建**：拒绝。提示改为创建 elasticsearch 数据源工具并绑定到 Agent。**不要**从 `ValidRCAFuncPath` 删除 `es_log_query`，否则与「更新仍允许」冲突。
 - **已存在的更新**：仍允许（避免运营改不了旧条目）；运行时按 §8 并入集群表。
-- **Web**：RCA 子工具下拉隐藏或禁用「ELK 日志」；elasticsearch 数据源表单展示默认索引 / trace 字段 / 用途。
+- **Web**：新建 RCA 时隐藏或禁用「ELK 日志」。**编辑已有** `func_path=es_log_query` 的工具时仍展示 endpoint / datasource_id / 默认索引 / trace 字段，否则与「更新仍允许」冲突。elasticsearch 数据源表单展示默认索引 / trace 字段 / 用途。
 
 ## 5. 运行时：集群表与 `es_log_query`
 
@@ -93,7 +101,7 @@ Portal 工具 `type=datasource`，`config.datasource` 在既有连接字段之�
 `BuildRegistry` 不要在遍历到每条 RCA 时立刻 `RegisterESLogTool`。改为：
 
 1. 收集绑定中的 elasticsearch 数据源 → 集群表（id=工具名）。
-2. 再收集过渡期 RCA 内联 ES（§8），同名则以数据源为准。
+2. 再按 §8 合并过渡期 RCA（连接：同名数据源优先；查询字段：数据源为空则用 RCA）。
 3. 集群表非空则 **一次** `RegisterESLogTool`。
 4. 其它 RCA（code / symbol / jaeger）保持逐条注册。
 
@@ -113,6 +121,7 @@ ESLogCluster{ ID, DefaultIndex, TraceIDField, Purpose }
 - `Execute`：无 `cluster` 或不在表内 → `ErrorPermanent`，文案列出全部 `id` / `default_index` / `purpose`。**禁止**回落第一套。
 - `index` 缺省用该集群 `DefaultIndex`；该集群无默认索引且调用未传 `index` → 永久错误（正路保存已要求 `default_index`）。
 - `reader.Query` 的 datasource id = `cluster`（与 ES registry 中的 Config.ID 一致）。
+- 空击 mapping / rewrite（`ESFieldMapper` / `mapperFromReader`）必须按**本次** `cluster` 查对应 DSN，禁止注册时绑死单个 `DatasourceID` 导致打到错集群。
 - 成功/空击/错误结果均带 `cluster`（及实际 `index`），供翻页闸与 spill 对齐。
 
 `framework/templates/rca_wiring.go`：YAML 仍单集群时，集群 ID = `datasource_id`（引用模式）或 `"rca-es"`（内联 endpoint）；同样要求调用传 `cluster`。单测补上该参数。
@@ -122,6 +131,20 @@ ESLogCluster{ ID, DefaultIndex, TraceIDField, Purpose }
 - `es_log_query` 的 catalog Bindings 或 SearchHints 含各集群 id、默认索引、用途。
 - `FormatDatasourcePrompt` 的 ES 提示改为：必须用 `es_log_query(cluster=<目录名>)`，并列出已绑 ES 集群（不要把 ES id 写进 data 三件套清单）。
 - 对 ES id 调用 `execute_read`：保持拒绝，文案改为带 `cluster=`。
+
+### 5.4 Turn Tool Surface（工具族）
+
+`es_log_query` 仍属 `FamilyRCA`（`builtinToolFamily` 不变）。现网 `BoundFamiliesFrom` 只把 `ToolTypeRCA` 计入 `FamilyRCA`；`filterToolsForSurface` 把 **所有** datasource 划到 `FamilyData`。若只绑 elasticsearch 数据源、不再绑 RCA ELK，日志轮次不会激活 RCA 表面，ES 连接也会在 RCA 表面上被滤掉，自动注册的 `es_log_query` 调不到。
+
+必须同时改：
+
+| 点 | 行为 |
+|----|------|
+| `BoundFamiliesFrom` | elasticsearch 数据源计入 **`FamilyRCA`**，**不**计入 `FamilyData`（MySQL/Hive/Mongo 仍是 Data）。此划分**不**跟 `ToolFamilySplitEnabled` 走。类型判断用现成 `isElasticsearchType`（`elasticsearch` / `es`） |
+| `filterToolsForSurface` | `FamilyRCA` 激活时保留 elasticsearch 数据源；`FamilyData` 激活时不保留它们 |
+| 过渡期 RCA ELK | 仍走现网 `familyForRCATool` → `FamilyRCA` |
+
+只绑 ES 数据源的 Agent，日志类问题必须仍能激活 RCA 表面并调用 `es_log_query`。
 
 ## 6. 同一任务切换与翻页
 
@@ -144,19 +167,21 @@ Agent 绑定表（`AgentDetail` 绑定工具）：列至少 **名称、类型、
 
 绑定表不需要展示原始 URL。
 
-## 8. 过渡期：旧 RCA 内联
+## 8. 过渡期：旧 RCA 配置
 
-现网 `zj-elk` 可能是 RCA + `endpoint`。目标态是 datasource，但不能上线即失查。
+现网常见两种旧形态：RCA + 内联 `endpoint`，或 RCA + `datasource_id`（默认索引/trace 字段写在 **RCA** 上，elasticsearch 数据源历史上只有 DSN）。目标态是数据源自带这些字段，但不能上线即失查。
 
-并入集群表规则：
+先收录全部 elasticsearch 数据源为集群行（连接 + 数据源上已有的 `default_index` / `trace_id_field` / `purpose`）。再扫绑定中的 RCA `es_log_query` **合并**，不覆盖已有非空数据源字段：
 
-| 来源 | 行为 |
-|------|------|
-| elasticsearch 数据源 | 主来源 |
-| RCA `es_log_query` + 内联 `endpoint` | 集群 ID = **RCA 工具名**；若已有同名数据源 → **丢弃 RCA、warn** |
-| RCA `es_log_query` + 仅 `datasource_id` | 不新增集群（应对应已绑数据源）；数据源未绑 → skip + warn（与现网一致） |
+| RCA 形态 | 集群 ID | 连接 | 查询字段（`default_index` / `trace_id_field`） | 用途 |
+|----------|---------|------|-----------------------------------------------|------|
+| 内联 `endpoint` | **RCA 工具名** | 向 ES 专用 registry `Register` `Config{ID: RCA工具名, DSN: endpoint, User, Password}`。**禁止**再用固定 `"rca-es"`（多套内联会撞 ID）。若已有同名数据源：保留数据源连接，内联 URL 丢弃并 warn | 集群行该字段为空时用 RCA 的值填上 | 空则用 RCA 工具 `description` |
+| 仅 `datasource_id` | 即该 `datasource_id`（须已是数据源集群行） | 不新增连接 | **合并进该行**：数据源字段为空时用 RCA 的 `default_index` / `trace_id_field`。现网索引在 RCA 上，不合并则未传 `index` 会误走 §5.2 永久错误 | 数据源 `purpose` 为空时用 RCA `description` |
+| 仅 `datasource_id` 但该数据源未绑 | — | skip + warn（与现网「找不到 datasource」一致） | — | — |
 
-不提供自动改写 DB 的迁移脚本（非目标）。运营把连接挪到 datasource、解绑 RCA ELK 即可。
+合并后仍无 `default_index` 的集群：调用必须显式传 `index`，否则永久错误。
+
+不提供自动改写 DB 的迁移脚本。运营把连接与索引/用途写到 datasource、解绑 RCA ELK 即离开过渡期。
 
 ## 9. 技能
 
@@ -177,7 +202,7 @@ Agent 绑定表（`AgentDetail` 绑定工具）：列至少 **名称、类型、
 
 ## 11. 测试
 
-装配：0 / 1 / 2 套数据源；不绑 RCA 也能注册 `es_log_query`；同名数据源优先于 RCA 内联。
+装配：0 / 1 / 2 套数据源；不绑 RCA 也能注册 `es_log_query`；同名数据源保留连接、RCA 内联 URL 丢弃；RCA 仅 `datasource_id` 且数据源无 `default_index` 时合并 RCA 上的默认索引。两套内联 RCA 使用各自工具名作 registry ID，不得撞 `"rca-es"`。只绑 ES 数据源、不绑 RCA ELK 时，RCA 表面仍能注册并调用 `es_log_query`（`BoundFamiliesFrom` / `filterToolsForSurface`）。
 
 路由：cluster 命中对应 DSN id；漏传/拼错含清单；默认索引与覆盖 `index` 不换集群。
 
@@ -194,12 +219,19 @@ Agent 绑定表（`AgentDetail` 绑定工具）：列至少 **名称、类型、
 | 区域 | 变更 |
 |------|------|
 | `framework/tool/es_log_tool.go` | 多集群、必填 `cluster`、结果盖章 cluster |
+| `framework/tool/es_log_mapping.go` | mapping 按本次 `cluster` 选 DSN |
 | `framework/templates/rca_wiring.go` | 单集群亦要求 `cluster` id |
 | `framework/agent/truncated_page_gate.go` | 催页按最近一次的 cluster/index；文案带名 |
-| `portal/internal/chat/agent_builder.go` / `rca_builder.go` | 收集集群表；自动注册；RCA 不再单独 RegisterESLogTool |
+| `portal/api/tool/v1/tool.proto` + 生成代码 | `DatasourceConfig` 增加三字段 |
+| `portal/internal/service/tool.go` | 三字段编解码 |
+| `web/src/api/client.ts` | `DatasourceConfig` 同步 + camelCase 归一 |
+| `web/src/utils/toolExportFormat.ts` | datasource 三字段同样归一，避免导入导出丢失 |
+| `portal/internal/chat/agent_builder.go` / `rca_builder.go` | 收集集群表并合并 §8；自动注册；RCA 不再单独 RegisterESLogTool |
+| `portal/internal/chat/tool_families.go` + `filterToolsForSurface` | ES 数据源计入 FamilyRCA，不计入 FamilyData |
 | `portal/internal/chat/datasource_prompt.go` | ES 清单 + `cluster=` |
 | `portal/internal/biz` | ES 数据源字段校验；禁止新建 RCA es_log_query |
-| `web` ToolForm / AgentDetail | ES 字段与绑定表列 |
+| `web` ToolForm / AgentDetail | ES 字段与绑定表列；编辑旧 RCA ELK 仍可改连接 |
+| `portal/docs/rca-es-log-query.md` | 正路改为绑 elasticsearch 数据源；废弃「不必建数据源」 |
 | 技能示例 | `cluster=` |
 
 ## 13. 成功标准
