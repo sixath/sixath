@@ -33,8 +33,8 @@ func EvaluateTruncatedPageGate(trace *RunTrace, q string) EvidenceGateResult {
 		from = view.NextFrom
 	}
 	prompt := fmt.Sprintf(
-		"上一页 es_log_query 还没翻完（truncated/has_more，continue_from=%d）。用户要查全量并解析，不要抽样后提前总结。请用 from=%d 继续翻页，直到 truncated=false；用 result_stats 读 spilled path，用 extracted_ids 收集全部 id。",
-		from, from,
+		"上一页 es_log_query%s 还没翻完（truncated/has_more，continue_from=%d）。用户要查全量并解析，不要抽样后提前总结。请用 from=%d 继续翻页，直到 truncated=false；用 result_stats 读 spilled path，用 extracted_ids 收集全部 id。",
+		truncatedPageScope(view), from, from,
 	)
 	return EvidenceGateResult{
 		Allow:  false,
@@ -42,6 +42,20 @@ func EvaluateTruncatedPageGate(trace *RunTrace, q string) EvidenceGateResult {
 		Reason: truncatedPageReason,
 		Prompt: prompt,
 	}
+}
+
+func truncatedPageScope(view tool.SpillView) string {
+	var parts []string
+	if c := strings.TrimSpace(view.Cluster); c != "" {
+		parts = append(parts, "cluster="+c)
+	}
+	if idx := strings.TrimSpace(view.QueriedIndex); idx != "" {
+		parts = append(parts, "index="+idx)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "（" + strings.Join(parts, "，") + "）"
 }
 
 func (a *ReActAgent) checkTruncatedPageGate(req *Request, messages []model.Message, trace *RunTrace, allowInject, hasStepRoom bool) evidenceGateCheck {

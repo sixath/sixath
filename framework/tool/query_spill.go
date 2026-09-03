@@ -31,6 +31,7 @@ type QuerySpillStub struct {
 	Count           int              `json:"count"`
 	OK              bool             `json:"ok"`
 	HitStatus       string           `json:"hit_status,omitempty"`
+	Cluster         string           `json:"cluster,omitempty"`
 	QueriedIndex    string           `json:"queried_index,omitempty"`
 	HasMore         bool             `json:"has_more,omitempty"`
 	ContinueFrom    int              `json:"continue_from,omitempty"`
@@ -66,6 +67,7 @@ type SpillView struct {
 	ContinueFrom int
 	NextFrom     int
 	HitStatus    string
+	Cluster      string
 	QueriedIndex string
 }
 
@@ -255,6 +257,7 @@ func stubFromPayload(payload map[string]any, rel string, count int, sample []map
 		return stub
 	}
 	stub.HitStatus = evidenceStringVal(payload["hit_status"])
+	stub.Cluster = evidenceStringVal(payload["cluster"])
 	stub.QueriedIndex = evidenceStringVal(payload["queried_index"])
 	stub.HasMore = spillTruthy(payload["has_more"])
 	stub.ContinueFrom = intFromParam(payload["continue_from"], 0)
@@ -366,6 +369,7 @@ func spillViewFromStub(s QuerySpillStub) SpillView {
 		ContinueFrom: s.ContinueFrom,
 		NextFrom:     s.NextFrom,
 		HitStatus:    s.HitStatus,
+		Cluster:      s.Cluster,
 		QueriedIndex: s.QueriedIndex,
 	}
 }
@@ -381,6 +385,7 @@ func spillViewFromMap(m map[string]any) SpillView {
 		ContinueFrom: spillIntFromAny(m["continue_from"]),
 		NextFrom:     spillIntFromAny(m["next_from"]),
 		HitStatus:    evidenceStringVal(m["hit_status"]),
+		Cluster:      evidenceStringVal(m["cluster"]),
 		QueriedIndex: evidenceStringVal(m["queried_index"]),
 	}
 }

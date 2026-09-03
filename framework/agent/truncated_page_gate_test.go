@@ -114,6 +114,39 @@ func TestCheckTruncatedPageGate_InjectsOnSpillStub(t *testing.T) {
 	}
 }
 
+func TestEvaluateTruncatedPageGate_PromptNamesCluster(t *testing.T) {
+	q := "请解析全部日志并统计分布"
+	tr := &RunTrace{ToolCalls: []ToolCallRecord{{
+		ToolName: "es_log_query",
+		Result: map[string]any{
+			"cluster":       "zj-elk",
+			"truncated":     true,
+			"has_more":      true,
+			"continue_from": 50,
+			"queried_index": "app-*",
+		},
+	}}}
+	got := EvaluateTruncatedPageGate(tr, q)
+	if got.Allow {
+		t.Fatal("truncated last page must inject")
+	}
+	if !strings.Contains(got.Prompt, "zj-elk") {
+		t.Fatalf("prompt must name cluster, got %q", got.Prompt)
+	}
+}
+
+func TestEvaluateTruncatedPageGate_LaterCompleteClusterAllowsFinish(t *testing.T) {
+	q := "请解析全部日志"
+	tr := &RunTrace{ToolCalls: []ToolCallRecord{
+		{ToolName: "es_log_query", Result: map[string]any{"cluster": "zj-elk", "truncated": true, "has_more": true, "continue_from": 50}},
+		{ToolName: "es_log_query", Result: map[string]any{"cluster": "zj-elk_flow", "truncated": false}},
+	}}
+	got := EvaluateTruncatedPageGate(tr, q)
+	if !got.Allow {
+		t.Fatal("latest successful es_log_query is complete; allow finish")
+	}
+}
+
 func TestCheckTruncatedPageGate_StopsAfterMaxNudges(t *testing.T) {
 	a := &ReActAgent{}
 	req := &Request{Messages: []model.Message{{Role: "user", Content: "请解析全部日志"}}}

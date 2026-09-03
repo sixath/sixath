@@ -223,6 +223,28 @@ func TestQuerySpillStub_ExitCodeBeforeSample(t *testing.T) {
 	}
 }
 
+func TestStubFromPayload_CopiesCluster(t *testing.T) {
+	payload := map[string]any{
+		"cluster":       "zj-elk",
+		"queried_index": "app-*",
+		"truncated":     true,
+		"has_more":      true,
+		"continue_from": 50,
+	}
+	stub := stubFromPayload(payload, "tmp/results/s/out.jsonl", 50, nil, nil)
+	if stub.Cluster != "zj-elk" {
+		t.Fatalf("stub.Cluster=%q want zj-elk", stub.Cluster)
+	}
+	view := SpillFields(stub)
+	if view.Cluster != "zj-elk" {
+		t.Fatalf("SpillFields stub cluster=%q want zj-elk", view.Cluster)
+	}
+	mapView := SpillFields(payload)
+	if mapView.Cluster != "zj-elk" {
+		t.Fatalf("SpillFields map cluster=%q want zj-elk", mapView.Cluster)
+	}
+}
+
 func TestSpillRowSet_ByteThresholdUsesRows(t *testing.T) {
 	ctx, root := spillCtx(t)
 	row := map[string]any{"line": strings.Repeat("x", 9000)}
