@@ -126,6 +126,9 @@ func structToToolConfig(s *structpb.Struct) *toolv1.ToolConfig {
 		if x, ok := ds["read_only"]; ok {
 			c.Datasource.ReadOnly = x.GetBoolValue()
 		}
+		c.Datasource.DefaultIndex = structFieldString(ds, "default_index", "defaultIndex")
+		c.Datasource.TraceIdField = structFieldString(ds, "trace_id_field", "traceIdField")
+		c.Datasource.Purpose = structFieldString(ds, "purpose")
 	}
 	// RCAConfig 嵌套
 	if v, ok := s.Fields["rca"]; ok && v.GetStructValue() != nil {
@@ -202,7 +205,7 @@ func protoToolConfigToStruct(c *toolv1.ToolConfig) *structpb.Struct {
 		fields["timeout_sec"], _ = structpb.NewValue(float64(c.TimeoutSec))
 	}
 	// DatasourceConfig：逐字段构建，避免 NewStruct(map) 对部分 key 的兼容问题导致结果为 nil
-	if c.Datasource != nil && (c.Datasource.Id != "" || c.Datasource.Type != "" || c.Datasource.Dsn != "") {
+	if c.Datasource != nil && datasourceShouldEmit(c.Datasource) {
 		dsFields := make(map[string]*structpb.Value)
 		dsFields["id"], _ = structpb.NewValue(c.Datasource.Id)
 		dsFields["type"], _ = structpb.NewValue(c.Datasource.Type)
@@ -213,6 +216,9 @@ func protoToolConfigToStruct(c *toolv1.ToolConfig) *structpb.Struct {
 		dsFields["password"], _ = structpb.NewValue(c.Datasource.Password)
 		dsFields["dbname"], _ = structpb.NewValue(c.Datasource.Dbname)
 		dsFields["read_only"], _ = structpb.NewValue(c.Datasource.ReadOnly)
+		dsFields["default_index"], _ = structpb.NewValue(c.Datasource.DefaultIndex)
+		dsFields["trace_id_field"], _ = structpb.NewValue(c.Datasource.TraceIdField)
+		dsFields["purpose"], _ = structpb.NewValue(c.Datasource.Purpose)
 		fields["datasource"] = structpb.NewStructValue(&structpb.Struct{Fields: dsFields})
 	}
 	if c.Rca != nil {
@@ -299,4 +305,20 @@ func (s *ToolService) DeleteTool(ctx context.Context, req *toolv1.DeleteToolRequ
 		return nil, err
 	}
 	return &toolv1.DeleteToolReply{Ret: &common.BaseResponse{Code: 0, Message: "ok"}}, nil
+}
+
+func structFieldString(fields map[string]*structpb.Value, keys ...string) string {
+	for _, k := range keys {
+		if x, ok := fields[k]; ok {
+			return x.GetStringValue()
+		}
+	}
+	return ""
+}
+
+func datasourceShouldEmit(ds *toolv1.DatasourceConfig) bool {
+	if ds == nil {
+		return false
+	}
+	return ds.Id != "" || ds.Type != "" || ds.Dsn != "" || ds.DefaultIndex != "" || ds.Purpose != "" || ds.TraceIdField != ""
 }

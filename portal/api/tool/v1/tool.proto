@@ -62,6 +62,9 @@ message DatasourceConfig {
   string password = 7;
   string dbname = 8;
   bool read_only = 9;
+  string default_index = 10;   // elasticsearch: default index/pattern
+  string trace_id_field = 11;  // elasticsearch: trace field, default trace_id
+  string purpose = 12;         // elasticsearch: human/model purpose
 }
 
 // RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
