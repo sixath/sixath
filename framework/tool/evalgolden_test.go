@@ -17,7 +17,7 @@ func TestEvalGolden_empty_hit_stamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{"query": "x", "index": "vm-manager-*"})
+	out, err := tl.Execute(context.Background(), map[string]any{"cluster": "es", "query": "x", "index": "vm-manager-*"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestEvalGolden_empty_hit_stamp(t *testing.T) {
 	}
 
 	fr.result = &executor.QueryResult{Columns: []string{"message"}, Rows: [][]any{{"a"}}}
-	out, _ = tl.Execute(context.Background(), map[string]any{"query": "x", "index": "vm-manager-*"})
+	out, _ = tl.Execute(context.Background(), map[string]any{"cluster": "es", "query": "x", "index": "vm-manager-*"})
 	if out.(map[string]any)["hit_status"] != HitStatusHits {
 		t.Fatalf("G2 %#v", out)
 	}
@@ -38,7 +38,7 @@ func TestEvalGolden_empty_hit_stamp(t *testing.T) {
 	reg2 := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg2, &errReader{err: errors.New("es down")}, ESLogConfig{DatasourceID: "es", DefaultIndex: "vm-manager-*", TraceIDField: "trace_id"})
 	tl2, _ := reg2.Get("es_log_query")
-	out, _ = tl2.Execute(context.Background(), map[string]any{"query": "x"})
+	out, _ = tl2.Execute(context.Background(), map[string]any{"cluster": "es", "query": "x"})
 	m = out.(map[string]any)
 	if m["hit_status"] != HitStatusError {
 		t.Fatalf("G3 %#v", m)

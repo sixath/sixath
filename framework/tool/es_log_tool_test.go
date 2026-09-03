@@ -47,7 +47,7 @@ func TestESLogQuery_ByTraceID(t *testing.T) {
 	if !ok {
 		t.Fatal("es_log_query not registered")
 	}
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(context.Background(), map[string]any{"cluster": "es-logs", "trace_id": "abc"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestESLogQuery_TruncatedPassthrough(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
-	out, _ := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, _ := tl.Execute(context.Background(), map[string]any{"cluster": "es", "trace_id": "abc"})
 	if !out.(map[string]any)["truncated"].(bool) {
 		t.Fatal("expected truncated=true passed through from QueryResult.Truncated")
 	}
@@ -92,7 +92,7 @@ func TestESLogQuery_RequiresParam(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, &fakeReader{}, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
-	out, _ := tl.Execute(context.Background(), map[string]any{})
+	out, _ := tl.Execute(context.Background(), map[string]any{"cluster": "es"})
 	m := out.(map[string]any)
 	if _, has := m["error"]; !has {
 		t.Fatal("expected error when neither trace_id nor query provided")
@@ -114,7 +114,7 @@ func TestESLogQuery_TimeoutTransient(t *testing.T) {
 		DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id",
 	})
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(context.Background(), map[string]any{"cluster": "es", "trace_id": "abc"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -127,8 +127,9 @@ func TestESLogQuery_JSONTermQueryIsQueryClause(t *testing.T) {
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "backend-cgsession-*", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
 	_, err := tl.Execute(context.Background(), map[string]any{
-		"query": `{"term":{"operation":"DiscardUserArchive"}}`,
-		"index": "backend-cgsession-*",
+		"cluster": "es",
+		"query":   `{"term":{"operation":"DiscardUserArchive"}}`,
+		"index":   "backend-cgsession-*",
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -153,9 +154,10 @@ func TestESLogQuery_FromOffsetInDSL(t *testing.T) {
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
 	_, err := tl.Execute(context.Background(), map[string]any{
-		"query": "operation:DiscardUserArchive",
-		"from":  100,
-		"limit": 50,
+		"cluster": "es",
+		"query":   "operation:DiscardUserArchive",
+		"from":    100,
+		"limit":   50,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -197,9 +199,10 @@ func TestESLogQuery_NextFromWhenTruncated(t *testing.T) {
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"query": "DiscardUserArchive",
-		"from":  100,
-		"limit": 2,
+		"cluster": "es",
+		"query":   "DiscardUserArchive",
+		"from":    100,
+		"limit":   2,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -221,7 +224,7 @@ func TestESLogQuery_LuceneFieldQueryUsesQueryString(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
-	_, err := tl.Execute(context.Background(), map[string]any{"query": "operation:DiscardUserArchive"})
+	_, err := tl.Execute(context.Background(), map[string]any{"cluster": "es", "query": "operation:DiscardUserArchive"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -289,8 +292,9 @@ func TestESLogQuery_ExtractsFlowIdsAndSummaryKeys(t *testing.T) {
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "backend-cgsession-*", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"query": `operation:"/cgarchive.ArchiveService/DiscardUserArchive"`,
-		"limit": 50,
+		"cluster": "es",
+		"query":   `operation:"/cgarchive.ArchiveService/DiscardUserArchive"`,
+		"limit":   50,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -332,7 +336,7 @@ func TestESLogQuery_EmptyHitsOK(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(context.Background(), map[string]any{"cluster": "es", "trace_id": "abc"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -358,7 +362,7 @@ func TestESLogQuery_SpillsOverFiftyRows(t *testing.T) {
 	root := t.TempDir()
 	ctx := context.WithValue(context.Background(), ContextKeyWorkspaceRoot, root)
 	ctx = context.WithValue(ctx, ContextKeySessionID, "sess-es")
-	out, err := tl.Execute(ctx, map[string]any{"query": "operation:DiscardUserArchive", "limit": 51})
+	out, err := tl.Execute(ctx, map[string]any{"cluster": "es", "query": "operation:DiscardUserArchive", "limit": 51})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +388,7 @@ func TestESLogQuery_SmallPageUnchangedType(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", TraceIDField: "trace_id"})
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{"query": "x"})
+	out, err := tl.Execute(context.Background(), map[string]any{"cluster": "es", "query": "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +438,8 @@ func TestESLogQuery_EmptyHitRewritesTermToKeywordSubfield(t *testing.T) {
 	})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"query": `{"term":{"operation":"/cgarchive.ArchiveService/DiscardUserArchive"}}`,
+		"cluster": "es",
+		"query":   `{"term":{"operation":"/cgarchive.ArchiveService/DiscardUserArchive"}}`,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -473,7 +478,8 @@ func TestESLogQuery_EmptyHitTermOnTextOnlyUsesMatchPhrase(t *testing.T) {
 	})
 	tl, _ := reg.Get("es_log_query")
 	_, err := tl.Execute(context.Background(), map[string]any{
-		"query": `{"term":{"operation":"DiscardUserArchive"}}`,
+		"cluster": "es",
+		"query":   `{"term":{"operation":"DiscardUserArchive"}}`,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -502,8 +508,9 @@ func TestESLogQuery_EmptyHitUnknownTermsField(t *testing.T) {
 	})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"query": `{"terms":{"flowId":["4103_a","4103_b"]}}`,
-		"limit": 5,
+		"cluster": "es",
+		"query":   `{"terms":{"flowId":["4103_a","4103_b"]}}`,
+		"limit":   5,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -538,8 +545,9 @@ func TestESLogQuery_EmptyHitUnknownFieldNotInvented(t *testing.T) {
 	})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"query": "flow_id: 4103_j0qjifnv99pq",
-		"limit": 5,
+		"cluster": "es",
+		"query":   "flow_id: 4103_j0qjifnv99pq",
+		"limit":   5,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -576,7 +584,8 @@ func TestESLogQuery_EmptyHitCorrectTermKeepsSingleQuery(t *testing.T) {
 	})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"query": `{"term":{"status":"ok"}}`,
+		"cluster": "es",
+		"query":   `{"term":{"status":"ok"}}`,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -591,5 +600,77 @@ func TestESLogQuery_EmptyHitCorrectTermKeepsSingleQuery(t *testing.T) {
 	hints, _ := m["field_hints"].([]ESFieldHint)
 	if len(hints) != 1 || hints[0].Type != "keyword" {
 		t.Fatalf("want mapping hint on true 0-hit, got %#v", m["field_hints"])
+	}
+}
+
+func TestESLogQuery_RequiresCluster(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{Columns: []string{"m"}, Rows: [][]any{{"x"}}}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{DatasourceID: "zj-elk", DefaultIndex: "app-*", TraceIDField: "trace_id"})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{"query": "a:b"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["ok"] != false {
+		t.Fatal("missing cluster must fail")
+	}
+	msg, _ := m["error"].(string)
+	if !strings.Contains(msg, "zj-elk") || !strings.Contains(msg, "cluster") {
+		t.Fatalf("error should list cluster names, got %q", msg)
+	}
+}
+
+func TestESLogQuery_RoutesByCluster(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{Columns: []string{"m"}, Rows: [][]any{{"x"}}}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	err := RegisterESLogTool(reg, fr, ESLogConfig{Clusters: []ESLogCluster{
+		{ID: "zj-elk", DefaultIndex: "app-*", Purpose: "应用日志"},
+		{ID: "zj-elk_flow", DefaultIndex: "1_game_flow_all-*", Purpose: "流水"},
+	}})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	tl, _ := reg.Get("es_log_query")
+	_, err = tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk_flow", "query": "a:b"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if fr.gotDatasource != "zj-elk_flow" || fr.gotIndex != "1_game_flow_all-*" {
+		t.Fatalf("got ds=%q index=%q", fr.gotDatasource, fr.gotIndex)
+	}
+}
+
+func TestESLogQuery_UnknownCluster(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{Clusters: []ESLogCluster{
+		{ID: "zj-elk", DefaultIndex: "app-*", Purpose: "应用"},
+	}})
+	tl, _ := reg.Get("es_log_query")
+	out, _ := tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk_flow", "query": "a:b"})
+	m := out.(map[string]any)
+	if m["ok"] != false {
+		t.Fatal("unknown cluster must fail")
+	}
+	if fr.gotDatasource != "" {
+		t.Fatal("must not query any cluster")
+	}
+}
+
+func TestESLogQuery_MissingDefaultIndexRequiresIndexParam(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{Clusters: []ESLogCluster{
+		{ID: "zj-elk", DefaultIndex: "", Purpose: "应用"},
+	}})
+	tl, _ := reg.Get("es_log_query")
+	out, _ := tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk", "query": "a:b"})
+	if m := out.(map[string]any); m["ok"] != false {
+		t.Fatal("empty default_index without index param must fail")
+	}
+	if fr.gotDatasource != "" {
+		t.Fatal("must not Query with empty index")
 	}
 }
