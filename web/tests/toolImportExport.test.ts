@@ -41,4 +41,15 @@ describe('toolExportFormat', () => {
       /type/,
     )
   })
+
+  it('keeps elasticsearch purpose and default_index from camelCase', () => {
+    const parsed = parseToolsImportJson(JSON.stringify({
+      name: 'zj-elk',
+      type: 'datasource',
+      description: '',
+      config: { datasource: { type: 'elasticsearch', dsn: 'http://es:9200', defaultIndex: 'app-*', purpose: '应用日志' } },
+    }))
+    assert.equal(parsed[0].config.datasource?.default_index, 'app-*')
+    assert.equal(parsed[0].config.datasource?.purpose, '应用日志')
+  })
 })

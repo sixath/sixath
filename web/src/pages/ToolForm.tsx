@@ -125,11 +125,18 @@ export default function ToolForm() {
       submitConfig = { ...config, mcp: { endpoint: config.mcp_endpoint || config.mcp?.endpoint, id: config.mcp_server_id || config.mcp?.id, backend: config.mcp_backend || config.mcp?.backend } }
     } else if (type === 'datasource') {
       const ds = config.datasource ?? {}
+      const dsType = ds.type || 'mysql'
+      if (dsType === 'elasticsearch' || dsType === 'es') {
+        if (!(ds.default_index || '').trim() || !(ds.purpose || '').trim()) {
+          setError('请填写默认索引和用途')
+          return
+        }
+      }
       submitConfig = {
         ...config,
         datasource: {
           ...ds,
-          type: ds.type || 'mysql', // 与下拉框默认展示一致，确保 type 始终传递
+          type: dsType, // 与下拉框默认展示一致，确保 type 始终传递
         },
       }
     } else if (type === 'rca') {
@@ -333,6 +340,34 @@ export default function ToolForm() {
                 {' '}只读
               </label>
             </div>
+            {(config.datasource?.type === 'elasticsearch' || config.datasource?.type === 'es') && (
+              <>
+                <div className="form-group">
+                  <label>默认索引 *</label>
+                  <input
+                    value={config.datasource?.default_index || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), default_index: e.target.value } }))}
+                    placeholder="app-*"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>trace 字段</label>
+                  <input
+                    value={config.datasource?.trace_id_field || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), trace_id_field: e.target.value } }))}
+                    placeholder="trace_id"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>用途 *</label>
+                  <input
+                    value={config.datasource?.purpose || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), purpose: e.target.value } }))}
+                    placeholder="如 应用日志"
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
         {type === 'rca' && (
@@ -346,7 +381,9 @@ export default function ToolForm() {
                 <option value="rca_code">代码检索 (grep/glob/read)</option>
                 <option value="rca_symbol">符号导航 (definition/references)</option>
                 <option value="jaeger_trace">Jaeger 链路</option>
-                <option value="es_log_query">ELK 日志</option>
+                {isEdit && config.rca?.func_path === 'es_log_query' ? (
+                  <option value="es_log_query">ELK 日志</option>
+                ) : null}
               </select>
             </div>
 

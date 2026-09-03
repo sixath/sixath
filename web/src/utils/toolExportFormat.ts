@@ -49,8 +49,27 @@ export function normalizeExportConfig(raw?: unknown): ToolConfig {
     mcp_backend: (cfg.mcp_backend as string | undefined) ?? (cfg.mcpBackend as string | undefined),
     timeout_sec: (cfg.timeout_sec as number | undefined) ?? (cfg.timeoutSec as number | undefined),
     mcp: cfg.mcp as ToolConfig['mcp'],
-    datasource: cfg.datasource as ToolConfig['datasource'],
+    datasource: normalizeDatasourceConfig(cfg.datasource),
     rca,
+  }
+}
+
+function normalizeDatasourceConfig(raw: unknown): ToolConfig['datasource'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  return {
+    id: r.id as string | undefined,
+    type: r.type as string | undefined,
+    dsn: r.dsn as string | undefined,
+    host: r.host as string | undefined,
+    port: r.port as number | undefined,
+    user: r.user as string | undefined,
+    password: r.password as string | undefined,
+    dbname: (r.dbname as string | undefined) ?? (r.dbName as string | undefined),
+    read_only: (r.read_only as boolean | undefined) ?? (r.readOnly as boolean | undefined),
+    default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
+    trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
+    purpose: r.purpose as string | undefined,
   }
 }
 

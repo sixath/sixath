@@ -8,6 +8,17 @@ const TOOL_CATALOG_PAGE_SIZE = 100
 const BIND_TOOL_PAGE_SIZE = 20
 const MCP_CATALOG_PAGE_SIZE = 100
 
+function boundToolIndex(t: Tool): string {
+  const ds = t.config?.datasource
+  if (ds?.type === 'elasticsearch' || ds?.type === 'es') return ds.default_index || ''
+  return t.config?.rca?.default_index || ''
+}
+function boundToolPurpose(t: Tool): string {
+  const ds = t.config?.datasource
+  if (ds?.purpose) return ds.purpose
+  return t.description || ''
+}
+
 export default function AgentDetail() {
   const { id } = useParams()
   const [agent, setAgent] = useState<Agent | null>(null)
@@ -471,6 +482,8 @@ export default function AgentDetail() {
                   <tr>
                     <th>名称</th>
                     <th>类型</th>
+                    <th>默认索引</th>
+                    <th>用途</th>
                     <th>操作</th>
                   </tr>
                 </thead>
@@ -479,6 +492,8 @@ export default function AgentDetail() {
                     <tr key={t.id}>
                       <td>{t.name}</td>
                       <td><span className={`badge badge-${t.type}`}>{t.type}</span></td>
+                      <td>{boundToolIndex(t)}</td>
+                      <td>{boundToolPurpose(t)}</td>
                       <td>
                         <button className="btn btn-danger btn-sm" onClick={() => handleUnbindTool(t.id)}>解绑</button>
                       </td>
