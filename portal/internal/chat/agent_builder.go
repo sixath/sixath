@@ -105,7 +105,7 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 			datasourceConfigs = append(datasourceConfigs, dsCfg)
 			dsBindings = append(dsBindings, bindingFromConfig(t.Name, dsCfg, nil))
 		case biz.ToolTypeRCA:
-			registerRCATool(reg, cfg, tools)
+			registerRCATool(reg, cfg)
 		}
 	}
 
@@ -130,6 +130,8 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 		dsBindings = registered
 		dsPrompt = prompt
 	}
+
+	registerESLogFromAgentTools(reg, tools)
 
 	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
 }
