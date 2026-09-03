@@ -31,20 +31,22 @@ func (cfg ESLogConfig) resolvedClusters() []ESLogCluster {
 	if len(cfg.Clusters) > 0 {
 		out := append([]ESLogCluster(nil), cfg.Clusters...)
 		for i := range out {
+			out[i].ID = strings.TrimSpace(out[i].ID)
 			if out[i].TraceIDField == "" {
 				out[i].TraceIDField = "trace_id"
 			}
 		}
 		return out
 	}
-	if strings.TrimSpace(cfg.DatasourceID) == "" {
+	id := strings.TrimSpace(cfg.DatasourceID)
+	if id == "" {
 		return nil
 	}
 	tf := cfg.TraceIDField
 	if tf == "" {
 		tf = "trace_id"
 	}
-	return []ESLogCluster{{ID: cfg.DatasourceID, DefaultIndex: cfg.DefaultIndex, TraceIDField: tf}}
+	return []ESLogCluster{{ID: id, DefaultIndex: cfg.DefaultIndex, TraceIDField: tf}}
 }
 
 func lookupCluster(clusters []ESLogCluster, id string) (ESLogCluster, bool) {
@@ -87,11 +89,16 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 	if len(clusters) == 0 {
 		return errors.New("es log tool: no clusters configured")
 	}
+	for _, c := range clusters {
+		if c.ID == "" {
+			return errors.New("es log tool: cluster id is empty")
+		}
+	}
 	clusterIDs := make([]string, len(clusters))
 	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string (field:value, AND/OR) or a JSON ES query clause / search body. Page large totals with from (use next_from from the previous result). Per-call limit max 500. On 0 hits, looks up field mapping: unknown fields are reported (do not invent names); term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file)."
 	for i, c := range clusters {
 		clusterIDs[i] = c.ID
-		desc += fmt.Sprintf("\n%s — %s; default index %s", c.ID, c.Purpose, c.DefaultIndex)
+		desc += fmt.Sprintf("\n`%s` — %s; default index `%s`", c.ID, c.Purpose, c.DefaultIndex)
 	}
 	return reg.Register(Tool{
 		Name:        "es_log_query",

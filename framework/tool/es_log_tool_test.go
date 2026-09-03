@@ -342,6 +342,9 @@ func TestESLogQuery_EmptyHitsOK(t *testing.T) {
 	}
 	m := out.(map[string]any)
 	assertRCAEvidenceOK(t, m, "es_log_query")
+	if m["cluster"] != "es" {
+		t.Fatalf("empty-hit cluster=%v want es", m["cluster"])
+	}
 	refs := m["evidence_refs"].([]EvidenceRef)
 	if refs[0].Summary != "no hits" {
 		t.Fatalf("want empty-result summary, got %#v", refs[0])
@@ -413,12 +416,14 @@ func TestESLogQueryDescriptionMentionsRunResultScript(t *testing.T) {
 }
 
 type seqReader struct {
-	calls   []string
-	results []*executor.QueryResult
+	calls       []string
+	datasources []string
+	results     []*executor.QueryResult
 }
 
-func (s *seqReader) Query(_ context.Context, _ string, dsl string, _ executor.QueryOptions) (*executor.QueryResult, error) {
+func (s *seqReader) Query(_ context.Context, datasourceID string, dsl string, _ executor.QueryOptions) (*executor.QueryResult, error) {
 	s.calls = append(s.calls, dsl)
+	s.datasources = append(s.datasources, datasourceID)
 	i := len(s.calls) - 1
 	if i >= len(s.results) {
 		return &executor.QueryResult{}, nil
@@ -616,6 +621,9 @@ func TestESLogQuery_RequiresCluster(t *testing.T) {
 	if m["ok"] != false {
 		t.Fatal("missing cluster must fail")
 	}
+	if _, has := m["cluster"]; !has {
+		t.Fatal("error payload must include cluster")
+	}
 	msg, _ := m["error"].(string)
 	if !strings.Contains(msg, "zj-elk") || !strings.Contains(msg, "cluster") {
 		t.Fatalf("error should list cluster names, got %q", msg)
@@ -633,12 +641,19 @@ func TestESLogQuery_RoutesByCluster(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	tl, _ := reg.Get("es_log_query")
-	_, err = tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk_flow", "query": "a:b"})
+	if !strings.Contains(tl.Description, "`zj-elk_flow`") || !strings.Contains(tl.Description, "`1_game_flow_all-*`") {
+		t.Fatalf("description should backtick cluster id and default index, got %s", tl.Description)
+	}
+	out, err := tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk_flow", "query": "a:b"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if fr.gotDatasource != "zj-elk_flow" || fr.gotIndex != "1_game_flow_all-*" {
 		t.Fatalf("got ds=%q index=%q", fr.gotDatasource, fr.gotIndex)
+	}
+	m := out.(map[string]any)
+	if m["cluster"] != "zj-elk_flow" {
+		t.Fatalf("success cluster=%v want zj-elk_flow", m["cluster"])
 	}
 }
 
@@ -654,6 +669,9 @@ func TestESLogQuery_UnknownCluster(t *testing.T) {
 	if m["ok"] != false {
 		t.Fatal("unknown cluster must fail")
 	}
+	if m["cluster"] != "zj-elk_flow" {
+		t.Fatalf("error cluster=%v want requested zj-elk_flow", m["cluster"])
+	}
 	if fr.gotDatasource != "" {
 		t.Fatal("must not query any cluster")
 	}
@@ -667,10 +685,60 @@ func TestESLogQuery_MissingDefaultIndexRequiresIndexParam(t *testing.T) {
 	}})
 	tl, _ := reg.Get("es_log_query")
 	out, _ := tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk", "query": "a:b"})
-	if m := out.(map[string]any); m["ok"] != false {
+	m := out.(map[string]any)
+	if m["ok"] != false {
 		t.Fatal("empty default_index without index param must fail")
+	}
+	if m["cluster"] != "zj-elk" {
+		t.Fatalf("error cluster=%v want zj-elk", m["cluster"])
 	}
 	if fr.gotDatasource != "" {
 		t.Fatal("must not Query with empty index")
+	}
+}
+
+func TestESLogQuery_EmptyHitRewriteUsesSameCluster(t *testing.T) {
+	sr := &seqReader{results: []*executor.QueryResult{
+		{Columns: []string{"message"}, Rows: nil},
+		{Columns: []string{"message"}, Rows: [][]any{{"discarded"}}},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, sr, ESLogConfig{
+		Clusters: []ESLogCluster{
+			{ID: "zj-elk", DefaultIndex: "app-*", Purpose: "应用日志"},
+			{ID: "zj-elk_flow", DefaultIndex: "1_game_flow_all-*", Purpose: "流水"},
+		},
+		FieldMapper: mapFieldMapper{"operation": {Type: "text", KeywordSubfield: true}},
+	})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"cluster": "zj-elk_flow",
+		"query":   `{"term":{"operation":"/cgarchive.ArchiveService/DiscardUserArchive"}}`,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(sr.datasources) != 2 {
+		t.Fatalf("want 2 Query calls, datasources=%v calls=%v", sr.datasources, sr.calls)
+	}
+	if sr.datasources[0] != "zj-elk_flow" || sr.datasources[1] != "zj-elk_flow" {
+		t.Fatalf("rewrite retry must stay on selected cluster, got %v", sr.datasources)
+	}
+	m := out.(map[string]any)
+	if m["cluster"] != "zj-elk_flow" {
+		t.Fatalf("rewrite cluster=%v want zj-elk_flow", m["cluster"])
+	}
+	if m["query_rewritten"] != true {
+		t.Fatalf("want query_rewritten, got %#v", m)
+	}
+}
+
+func TestESLogQuery_RegisterRejectsEmptyClusterID(t *testing.T) {
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	err := RegisterESLogTool(reg, &fakeReader{}, ESLogConfig{Clusters: []ESLogCluster{
+		{ID: "  ", DefaultIndex: "app-*"},
+	}})
+	if err == nil {
+		t.Fatal("empty cluster id must fail register")
 	}
 }
