@@ -48,7 +48,7 @@ func TestFormatDatasourcePrompt(t *testing.T) {
 func TestFormatDatasourcePrompt_SkipsESAndAddsRoutingHint(t *testing.T) {
 	p := FormatDatasourcePrompt([]DatasourceBinding{
 		{ID: "cgarchive", Type: "mysql", DBName: "d_cgarchive", Available: true},
-		{ID: "zj-es", Type: "elasticsearch", SkipDataTools: true, Available: false},
+		{ID: "zj-es", Type: "elasticsearch", SkipDataTools: true, Available: false, Purpose: "应用日志", DefaultIndex: "app-*"},
 	}, "cgarchive")
 	if strings.Contains(p, "**zj-es**") {
 		t.Fatalf("ES id must not appear in data list: %s", p)
@@ -59,17 +59,35 @@ func TestFormatDatasourcePrompt_SkipsESAndAddsRoutingHint(t *testing.T) {
 	if !strings.Contains(p, "es_log_query") || !strings.Contains(p, "http_request") {
 		t.Fatalf("missing ES routing hint: %s", p)
 	}
+	if !strings.Contains(p, "cluster=") {
+		t.Fatalf("missing cluster= routing: %s", p)
+	}
+	if !strings.Contains(p, "es_log_query(cluster=zj-es)") {
+		t.Fatalf("missing ES cluster listing: %s", p)
+	}
+	if !strings.Contains(p, "应用日志") || !strings.Contains(p, "app-*") {
+		t.Fatalf("missing purpose/default_index: %s", p)
+	}
 }
 
 func TestFormatDatasourcePrompt_ESOnly(t *testing.T) {
 	p := FormatDatasourcePrompt([]DatasourceBinding{
-		{ID: "zj-es", Type: "elasticsearch", SkipDataTools: true},
+		{ID: "zj-es", Type: "elasticsearch", SkipDataTools: true, Purpose: "应用日志", DefaultIndex: "app-*"},
 	}, "")
 	if strings.Contains(p, "## 已绑定数据源") {
 		t.Fatalf("should not list data section for ES-only: %s", p)
 	}
 	if !strings.Contains(p, "es_log_query") {
 		t.Fatalf("want routing hint, got %s", p)
+	}
+	if !strings.Contains(p, "cluster=") {
+		t.Fatalf("missing cluster=: %s", p)
+	}
+	if !strings.Contains(p, "es_log_query(cluster=zj-es)") {
+		t.Fatalf("missing cluster listing: %s", p)
+	}
+	if !strings.Contains(p, "应用日志") || !strings.Contains(p, "app-*") {
+		t.Fatalf("missing purpose/default_index: %s", p)
 	}
 }
 

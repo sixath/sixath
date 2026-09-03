@@ -103,7 +103,11 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 			}
 			dsCfg = canonicalDatasourceConfig(t.Name, dsCfg)
 			datasourceConfigs = append(datasourceConfigs, dsCfg)
-			dsBindings = append(dsBindings, bindingFromConfig(t.Name, dsCfg, nil))
+			b := bindingFromConfig(t.Name, dsCfg, nil)
+			// purpose / default_index live on the tool config map, not datasource.Config.
+			b.DefaultIndex = mapStringField(dsMap, "default_index", "defaultIndex")
+			b.Purpose = mapStringField(dsMap, "purpose")
+			dsBindings = append(dsBindings, b)
 		case biz.ToolTypeRCA:
 			registerRCATool(reg, cfg)
 		}
@@ -244,7 +248,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 		if isElasticsearchType(cfg.Type) {
 			b.SkipDataTools = true
 			b.Available = false
-			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query 或 http_request"
+			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query(cluster=…) 或 http_request"
 			outBindings = append(outBindings, b)
 			continue
 		}

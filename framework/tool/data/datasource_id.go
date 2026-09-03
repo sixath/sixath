@@ -54,7 +54,7 @@ func RejectElasticsearchDatasource(reg *datasource.Registry, datasourceID, toolN
 		if toolName == "" {
 			toolName = "data tool"
 		}
-		return fmt.Errorf("%s 不支持 Elasticsearch；请使用 es_log_query 或 http_request", toolName)
+		return fmt.Errorf("%s 不支持 Elasticsearch；请使用 es_log_query(cluster=…) 或 http_request", toolName)
 	}
 	return nil
 }

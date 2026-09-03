@@ -17,9 +17,12 @@ type DatasourceBinding struct {
 	Err       string
 	// SkipDataTools 为 true 时不进入 list_tables / describe_table / execute_read（如 elasticsearch）。
 	SkipDataTools bool
+	// Purpose / DefaultIndex 来自工具 config map（非 datasource.Config），仅 ES 提示使用。
+	Purpose      string
+	DefaultIndex string
 }
 
-const esDataToolsRoutingHint = "Elasticsearch / 日志检索请使用已绑定的 es_log_query 或 http_request，禁止对 ES 使用 list_tables、describe_table、execute_read。"
+const esDataToolsRoutingHint = "Elasticsearch / 日志检索请使用已绑定的 es_log_query(cluster=<目录名>) 或 http_request，禁止对 ES 使用 list_tables、describe_table、execute_read。"
 
 // isElasticsearchType reports whether a datasource type is Elasticsearch.
 func isElasticsearchType(typ string) bool {
@@ -32,16 +35,16 @@ func isElasticsearchType(typ string) bool {
 }
 
 // FormatDatasourcePrompt 生成注入 system prompt 的多数据源说明。
-// SkipDataTools 绑定不列入 data 三件套清单，仅触发 ES 路由提示。
+// SkipDataTools / ES 绑定不列入 data 三件套清单，单独列出 cluster= 路由。
 func FormatDatasourcePrompt(bindings []DatasourceBinding, defaultID string) string {
 	if len(bindings) == 0 {
 		return ""
 	}
 	var data []DatasourceBinding
-	hasESSkip := false
+	var esClusters []DatasourceBinding
 	for _, ds := range bindings {
 		if ds.SkipDataTools || isElasticsearchType(ds.Type) {
-			hasESSkip = true
+			esClusters = append(esClusters, ds)
 			continue
 		}
 		data = append(data, ds)
@@ -84,14 +87,45 @@ func FormatDatasourcePrompt(bindings []DatasourceBinding, defaultID string) stri
 			b.WriteString("若表不在已绑定库中，说明库名/类型不匹配，应提示用户在 Agent 绑定正确的数据源工具，而不是让用户手填连接信息。\n")
 		}
 	}
-	if hasESSkip {
+	if len(esClusters) > 0 {
 		if b.Len() > 0 {
 			b.WriteString("\n")
 		}
 		b.WriteString(esDataToolsRoutingHint)
 		b.WriteString("\n")
+		for _, ds := range esClusters {
+			b.WriteString("- ")
+			b.WriteString(formatESClusterPromptLine(ds))
+			b.WriteString("\n")
+		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func formatESClusterPromptLine(ds DatasourceBinding) string {
+	cluster := strings.TrimSpace(ds.ToolName)
+	if cluster == "" {
+		cluster = strings.TrimSpace(ds.ID)
+	}
+	line := fmt.Sprintf("es_log_query(cluster=%s)", cluster)
+	purpose := strings.TrimSpace(ds.Purpose)
+	index := strings.TrimSpace(ds.DefaultIndex)
+	if purpose == "" && index == "" {
+		return line
+	}
+	line += " —"
+	if purpose != "" {
+		line += " " + purpose
+	}
+	if index != "" {
+		if purpose != "" {
+			line += "；"
+		} else {
+			line += " "
+		}
+		line += "默认索引 " + index
+	}
+	return line
 }
 
 // AppendDatasourcePrompt 将多数据源说明追加到 system prompt。

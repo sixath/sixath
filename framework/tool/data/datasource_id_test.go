@@ -51,6 +51,9 @@ func TestRejectElasticsearchDatasource(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "不支持 Elasticsearch") {
 		t.Fatalf("err=%v", err)
 	}
+	if !strings.Contains(err.Error(), "cluster=") {
+		t.Fatalf("reject message should mention cluster=: %v", err)
+	}
 	datasource.RegisterNoop(reg)
 	if _, err := reg.Register(datasource.Config{ID: "n1", Type: "noop"}); err != nil {
 		t.Fatal(err)
