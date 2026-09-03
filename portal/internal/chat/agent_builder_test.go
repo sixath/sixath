@@ -112,6 +112,9 @@ func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
 	if len(res.DsBindings) != 1 || !res.DsBindings[0].SkipDataTools {
 		t.Fatalf("bindings=%+v", res.DsBindings)
 	}
+	if _, ok := reg.Get("es_log_query"); !ok {
+		t.Fatal("ES-only agent must register es_log_query")
+	}
 }
 
 func TestBuildRegistry_MySQLPlusES_RegistersDataTrioForMySQLOnly(t *testing.T) {

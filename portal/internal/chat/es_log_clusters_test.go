@@ -284,6 +284,56 @@ func TestCollectESLog_FlatDatasourceConfig(t *testing.T) {
 	}
 }
 
+func TestCollectESLog_TypeEsAliasRegisters(t *testing.T) {
+	nested := esDatasourceMeta(t, "zj-elk", map[string]any{
+		"type": "es", "dsn": "http://zj:9200", "default_index": "app-*",
+	})
+	flat, err := structpb.NewStruct(map[string]any{
+		"id": "flat-es", "type": "es", "dsn": "http://flat:9200", "default_index": "flat-*",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []*biz.ToolMeta{
+		nested,
+		{Name: "flat-es", Type: biz.ToolTypeDatasource, Config: flat},
+	}
+	clusters, esReg := collectESLogClusters(tools)
+	for _, name := range []string{"zj-elk", "flat-es"} {
+		if _, ok := clusterByID(clusters, name); !ok {
+			t.Fatalf("type=es must produce cluster %s, got %v", name, clusters)
+		}
+		if _, err := esReg.Get(name); err != nil {
+			t.Fatalf("esReg.Get(%s): %v", name, err)
+		}
+	}
+	fr := &fakeESReader{}
+	executeESLog(t, clusters, fr, "zj-elk")
+	if fr.gotDatasource != "zj-elk" {
+		t.Fatalf("Query datasourceID=%q want zj-elk", fr.gotDatasource)
+	}
+}
+
+func TestCollectESLog_DatasourceIndexNotOverwrittenByRCA(t *testing.T) {
+	tools := []*biz.ToolMeta{
+		esDatasourceMeta(t, "zj-elk", map[string]any{"dsn": "http://ds:9200", "default_index": "ds-*"}),
+		rcaESLogMeta(t, "zj-elk", "inline rca", map[string]any{
+			"endpoint": "http://inline:9200", "default_index": "rca-inline-*",
+		}),
+		rcaESLogMeta(t, "rca-ref", "ref rca", map[string]any{
+			"datasource_id": "zj-elk", "default_index": "rca-ref-*",
+		}),
+	}
+	clusters, _ := collectESLogClusters(tools)
+	c, ok := clusterByID(clusters, "zj-elk")
+	if !ok {
+		t.Fatal("missing zj-elk")
+	}
+	if c.DefaultIndex != "ds-*" {
+		t.Fatalf("default_index=%q want ds-* (datasource must win)", c.DefaultIndex)
+	}
+}
+
 func TestCollectESLog_BothEndpointAndDatasourceIDSkipped(t *testing.T) {
 	tools := []*biz.ToolMeta{
 		rcaESLogMeta(t, "bad", "", map[string]any{

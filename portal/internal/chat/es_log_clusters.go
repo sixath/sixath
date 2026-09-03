@@ -39,6 +39,7 @@ func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, 
 		if !isElasticsearchType(dsCfg.Type) {
 			continue
 		}
+		dsCfg.Type = datasource.TypeElasticsearch
 		if _, err := esReg.Register(dsCfg); err != nil {
 			slog.Warn("es_log: register elasticsearch datasource failed", "id", dsCfg.ID, "err", err)
 			continue
