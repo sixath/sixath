@@ -177,8 +177,12 @@ func filterToolsForSurface(tools []*biz.ToolMeta, active map[string]struct{}) []
 			}
 		default:
 			fam := FamilyCore
-			if t.Type == biz.ToolTypeDatasource && ToolFamilySplitEnabled() {
-				fam = FamilyData
+			if t.Type == biz.ToolTypeDatasource {
+				if isElasticsearchType(datasourceTypeFromMeta(t)) {
+					fam = FamilyRCA
+				} else if ToolFamilySplitEnabled() {
+					fam = FamilyData
+				}
 			}
 			if FamilyActive(active, fam) {
 				out = append(out, t)

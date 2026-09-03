@@ -149,6 +149,10 @@ func BoundFamiliesFrom(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, webE
 				set[LegacyMCPFamilyID(t.Name)] = struct{}{}
 			}
 		case biz.ToolTypeDatasource:
+			if isElasticsearchType(datasourceTypeFromMeta(t)) {
+				set[FamilyRCA] = struct{}{}
+				continue
+			}
 			if ToolFamilySplitEnabled() {
 				set[FamilyData] = struct{}{}
 			}
@@ -197,6 +201,13 @@ func rcaFuncPath(t *biz.ToolMeta) string {
 	}
 	fp, _ := rcaMap["func_path"].(string)
 	return strings.TrimSpace(fp)
+}
+
+func datasourceTypeFromMeta(t *biz.ToolMeta) string {
+	if t == nil || t.Config == nil {
+		return ""
+	}
+	return mapStringField(datasourceMapFromTool(t), "type")
 }
 
 func familySet(ids []string) map[string]struct{} {

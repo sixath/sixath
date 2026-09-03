@@ -117,6 +117,32 @@ func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
 	}
 }
 
+func TestBuildRegistry_ElasticsearchOnly_RCASurfaceHasESLogQuery(t *testing.T) {
+	cfg, err := structpb.NewStruct(map[string]interface{}{
+		"datasource": map[string]interface{}{
+			"id":   "zj-es",
+			"type": "elasticsearch",
+			"dsn":  "http://127.0.0.1:9200",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewStruct: %v", err)
+	}
+	reg := tool.NewRegistry()
+	_, err = BuildRegistry([]*biz.ToolMeta{{
+		ID:     "es-1",
+		Name:   "zj-es",
+		Type:   biz.ToolTypeDatasource,
+		Config: cfg,
+	}}, nil, reg, RegistryBuildOptions{ActiveFamilies: familySet([]string{FamilyRCA, FamilyCore})})
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	if _, ok := reg.Get("es_log_query"); !ok {
+		t.Fatal("RCA surface with only ES datasource must still register es_log_query")
+	}
+}
+
 func TestBuildRegistry_MySQLPlusES_RegistersDataTrioForMySQLOnly(t *testing.T) {
 	mysqlCfg, err := structpb.NewStruct(map[string]interface{}{
 		"datasource": map[string]interface{}{
@@ -254,6 +280,50 @@ func TestFilterToolsForSurface_DatasourceNeedsDataFamily(t *testing.T) {
 	withData := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode, FamilyData}))
 	if len(withData) != 2 {
 		t.Fatalf("data+code want 2, got %+v", namesOf(withData))
+	}
+}
+
+func TestFilterToolsForSurface_KeepsESOnRCA(t *testing.T) {
+	es, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "elasticsearch", "dsn": "http://es:9200"},
+	})
+	mysql, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "mysql", "dsn": "u:p@tcp(h:3306)/db"},
+	})
+	tools := []*biz.ToolMeta{
+		{Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es},
+		{Name: "pro_mysql", Type: biz.ToolTypeDatasource, Config: mysql},
+	}
+	out := filterToolsForSurface(tools, familySet([]string{FamilyRCA, FamilyCore}))
+	got := namesOf(out)
+	join := strings.Join(got, ",")
+	if !strings.Contains(join, "zj-elk") {
+		t.Fatalf("RCA surface must keep elasticsearch datasource, got %v", got)
+	}
+	if strings.Contains(join, "pro_mysql") {
+		t.Fatalf("RCA surface must not keep mysql, got %v", got)
+	}
+}
+
+func TestFilterToolsForSurface_DropsESOnDataOnly(t *testing.T) {
+	es, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "elasticsearch", "dsn": "http://es:9200"},
+	})
+	mysql, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "mysql", "dsn": "u:p@tcp(h:3306)/db"},
+	})
+	tools := []*biz.ToolMeta{
+		{Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es},
+		{Name: "pro_mysql", Type: biz.ToolTypeDatasource, Config: mysql},
+	}
+	out := filterToolsForSurface(tools, familySet([]string{FamilyData, FamilyCore}))
+	got := namesOf(out)
+	join := strings.Join(got, ",")
+	if strings.Contains(join, "zj-elk") {
+		t.Fatalf("Data-only surface must not keep elasticsearch, got %v", got)
+	}
+	if !strings.Contains(join, "pro_mysql") {
+		t.Fatalf("Data-only surface must keep mysql, got %v", got)
 	}
 }
 

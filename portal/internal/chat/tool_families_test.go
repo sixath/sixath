@@ -158,6 +158,61 @@ func TestBoundFamiliesFrom_DatasourceIsData(t *testing.T) {
 	}
 }
 
+func TestBoundFamiliesFrom_ESDatasourceIsRCANotData(t *testing.T) {
+	es, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "elasticsearch", "dsn": "http://es:9200"},
+	})
+	got := BoundFamiliesFrom([]*biz.ToolMeta{{
+		Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es,
+	}}, nil, false, false)
+	hasRCA, hasData := false, false
+	for _, f := range got {
+		if f == FamilyRCA {
+			hasRCA = true
+		}
+		if f == FamilyData {
+			hasData = true
+		}
+	}
+	if !hasRCA {
+		t.Fatal("elasticsearch datasource must bind FamilyRCA")
+	}
+	if hasData {
+		t.Fatal("elasticsearch must not bind FamilyData")
+	}
+}
+
+func TestBoundFamiliesFrom_ESAliasTypeIsRCA(t *testing.T) {
+	es, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "es", "dsn": "http://es:9200"},
+	})
+	got := familySet(BoundFamiliesFrom([]*biz.ToolMeta{{
+		Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es,
+	}}, nil, false, false))
+	if _, ok := got[FamilyRCA]; !ok {
+		t.Fatal("type es must bind FamilyRCA")
+	}
+	if _, ok := got[FamilyData]; ok {
+		t.Fatal("type es must not bind FamilyData")
+	}
+}
+
+func TestBoundFamiliesFrom_ESIsRCAEvenWhenSplitOff(t *testing.T) {
+	t.Setenv(toolFamilySplitEnv, "0")
+	es, _ := structpb.NewStruct(map[string]any{
+		"datasource": map[string]any{"type": "elasticsearch", "dsn": "http://es:9200"},
+	})
+	got := familySet(BoundFamiliesFrom([]*biz.ToolMeta{{
+		Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es,
+	}}, nil, false, false))
+	if _, ok := got[FamilyRCA]; !ok {
+		t.Fatal("elasticsearch must bind FamilyRCA even when ToolFamilySplitEnabled is false")
+	}
+	if _, ok := got[FamilyData]; ok {
+		t.Fatal("elasticsearch must not bind FamilyData")
+	}
+}
+
 func TestInferPrimaryFamilies(t *testing.T) {
 	got := familySet(InferPrimaryFamilies([]string{FamilyCore, FamilyCode, FamilyData}))
 	if _, ok := got[FamilyCode]; !ok {
