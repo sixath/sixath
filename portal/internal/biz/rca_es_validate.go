@@ -40,16 +40,33 @@ func ValidateRCAESLogConfig(endpoint, datasourceID string) error {
 }
 
 // ValidateCreateRCAESLog rejects creating a new RCA es_log_query tool.
-// Existing tools may still be updated via ValidateRCAESLogConfig.
+// Existing tools may still be updated via ValidateUpdateRCAESLog.
 func ValidateCreateRCAESLog(tt ToolType, config *structpb.Struct) error {
 	if tt != ToolTypeRCA {
 		return nil
 	}
 	fp, _, _ := rcaESLogFieldsFromConfig(config)
-	if fp == "es_log_query" {
+	if isRCAESLogQuery(fp) {
 		return ErrRCAESLogUseDatasource
 	}
 	return nil
+}
+
+// ValidateUpdateRCAESLog allows connection edits on an existing RCA es_log_query
+// tool and rejects minting a new one by changing func_path.
+func ValidateUpdateRCAESLog(existingConfig *structpb.Struct, newType ToolType, newConfig *structpb.Struct) error {
+	if newType != ToolTypeRCA {
+		return nil
+	}
+	newFP, ep, ds := rcaESLogFieldsFromConfig(newConfig)
+	if !isRCAESLogQuery(newFP) {
+		return nil
+	}
+	oldFP, _, _ := rcaESLogFieldsFromConfig(existingConfig)
+	if !isRCAESLogQuery(oldFP) {
+		return ErrRCAESLogUseDatasource
+	}
+	return ValidateRCAESLogConfig(ep, ds)
 }
 
 // ValidateElasticsearchDatasource requires default_index and purpose for ES datasources.
@@ -68,15 +85,8 @@ func ValidateElasticsearchDatasource(tt ToolType, config *structpb.Struct) error
 	return nil
 }
 
-func validateRCAESLogConfigIfNeeded(tt ToolType, config *structpb.Struct) error {
-	if tt != ToolTypeRCA {
-		return nil
-	}
-	fp, ep, ds := rcaESLogFieldsFromConfig(config)
-	if fp != "es_log_query" {
-		return nil
-	}
-	return ValidateRCAESLogConfig(ep, ds)
+func isRCAESLogQuery(funcPath string) bool {
+	return strings.TrimSpace(funcPath) == "es_log_query"
 }
 
 func rcaESLogFieldsFromConfig(config *structpb.Struct) (funcPath, endpoint, dsID string) {

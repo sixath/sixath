@@ -213,20 +213,18 @@ func (uc *ToolUsecase) Update(ctx context.Context, id string, toolType, name, de
 		return nil, err
 	}
 	if config != nil {
-		effective := ToolType("")
+		existing, gerr := uc.repo.GetByID(ctx, id)
+		if gerr != nil && errors.Is(gerr, pkgErrors.ErrNotFound) {
+			return nil, ErrToolNotFound
+		}
+		if gerr != nil {
+			return nil, gerr
+		}
+		effective := existing.Type
 		if toolType != nil && strings.TrimSpace(*toolType) != "" {
 			effective = ToolType(*toolType)
-		} else {
-			existing, gerr := uc.repo.GetByID(ctx, id)
-			if gerr != nil && errors.Is(gerr, pkgErrors.ErrNotFound) {
-				return nil, ErrToolNotFound
-			}
-			if gerr != nil {
-				return nil, gerr
-			}
-			effective = existing.Type
 		}
-		if err := validateRCAESLogConfigIfNeeded(effective, config); err != nil {
+		if err := ValidateUpdateRCAESLog(existing.Config, effective, config); err != nil {
 			return nil, err
 		}
 		if err := ValidateElasticsearchDatasource(effective, config); err != nil {
