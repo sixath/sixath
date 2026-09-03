@@ -1,30 +1,31 @@
 # RCA `es_log_query`（ELK 日志）
 
-## 推荐配置（内联 ES）
+## 推荐配置（elasticsearch 数据源）
 
-在工具类型 **RCA**、子工具 **ELK 日志 / `es_log_query`** 上直接填写：
+新建工具类型 **数据源 / datasource**，子类型 **elasticsearch**，填写：
 
 | 字段 | 说明 |
 |------|------|
-| **ES 地址** `endpoint` | 如 `http://10.x.x.x:29200` |
-| 用户 / 密码 | 可选 Basic 认证 |
-| 默认索引 / `trace_id` 字段 | 与原先相同 |
+| 工具目录名 | 即 `es_log_query` 的 `cluster`（如 `zj-elk`） |
+| 连接 | DSN / Host+Port + 可选认证 |
+| **默认索引** `default_index` | 未传 `index` 时使用 |
+| **用途** `purpose` | 给模型选集群，如「应用日志」 |
+| `trace_id` 字段 | 可选，默认 `trace_id` |
 
-绑定到 Agent 后即可调用 `es_log_query`，**不必**再创建 elasticsearch datasource 工具。
+把该数据源绑定到 Agent。**不要新建 RCA「ELK 日志 / `es_log_query`」工具**；绑 ≥1 套 ES 数据源后运行时会自动注册 `es_log_query`。
 
-## 兼容：引用 datasource
+查询必须带 `cluster`（等于数据源工具名）：
 
-也可只填 **datasource 工具名**（`datasource_id`），且该 datasource 工具必须绑定到同一 Agent。
+```
+es_log_query(cluster="<elasticsearch tool name>", trace_id=...)
+```
 
-## 互斥（保存时强制）
+只绑一套也必须传 `cluster`。漏传会永久错误并列出可用集群，不会默认打第一套。同一 Agent 可绑多套；同一任务可再调一次不同的 `cluster`。
 
-`endpoint` 与 `datasource_id` **二选一**：
+## 过渡：已有 RCA 内联 / datasource_id
 
-- 两者都填 → Create/Update 拒绝  
-- 两者都空 → Create/Update 拒绝  
-
-不要把 ES URL 填进 `datasource_id`（那是工具名，不是地址）。
+现网已保存的 RCA ELK（内联 endpoint 或 `datasource_id`）仍会合并进集群表，直到迁到 elasticsearch 数据源。查询同样必须带 `cluster`。不要再新建 RCA ELK。
 
 ## 设计规格
 
-见 [docs/superpowers/specs/2026-08-15-rca-es-log-inline-design.md](../../docs/superpowers/specs/2026-08-15-rca-es-log-inline-design.md)。
+见 [docs/superpowers/specs/2026-09-02-multi-es-cluster-route-design.md](../../docs/superpowers/specs/2026-09-02-multi-es-cluster-route-design.md)。
