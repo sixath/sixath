@@ -108,3 +108,67 @@ chat:
 		t.Fatalf("env 0 should force false, got %v", cfg.TurnToolSurfaceEnabled)
 	}
 }
+
+func TestLoadChatFromConfigPath_investigationGatesDefaultOff(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  http:\n    addr: \":8000\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SATH_INVESTIGATION_GATES", "")
+	cfg, err := LoadChatFromConfigPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InvestigationGatesNormalized() != "off" {
+		t.Fatalf("got %q, want off", cfg.InvestigationGatesNormalized())
+	}
+}
+
+func TestLoadChatFromConfigPath_investigationGatesGarbageOff(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("chat:\n  investigation_gates: garbage\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SATH_INVESTIGATION_GATES", "")
+	cfg, err := LoadChatFromConfigPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InvestigationGatesNormalized() != "off" {
+		t.Fatalf("got %q", cfg.InvestigationGatesNormalized())
+	}
+}
+
+func TestLoadChatFromConfigPath_investigationGatesOn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("chat:\n  investigation_gates: on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SATH_INVESTIGATION_GATES", "")
+	cfg, err := LoadChatFromConfigPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InvestigationGatesNormalized() != "on" {
+		t.Fatalf("got %q", cfg.InvestigationGatesNormalized())
+	}
+}
+
+func TestLoadChatFromConfigPath_investigationGatesEnvOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("chat:\n  investigation_gates: on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SATH_INVESTIGATION_GATES", "off")
+	cfg, err := LoadChatFromConfigPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InvestigationGatesNormalized() != "off" {
+		t.Fatal("env must override yaml")
+	}
+}
