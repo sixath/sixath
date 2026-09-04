@@ -65,10 +65,28 @@ var (
 	_ agent.IdlePostModelPolicy = TurnIntentGate{}
 )
 
-// NewTurnIntentGate returns the default gate, or nil when disabled via env.
-func NewTurnIntentGate() agent.PostModelPolicy {
+var turnIntentGateOverride *bool
+
+func SetTurnIntentGateEnabled(enabled bool) {
+	v := enabled
+	turnIntentGateOverride = &v
+}
+
+func resetTurnIntentGateOverride() { turnIntentGateOverride = nil }
+
+func TurnIntentGateEnabled() bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(turnIntentGateEnv)))
-	if v == "0" || v == "false" || v == "off" || v == "no" {
+	if v != "" {
+		return !(v == "0" || v == "false" || v == "off" || v == "no")
+	}
+	if turnIntentGateOverride != nil {
+		return *turnIntentGateOverride
+	}
+	return true
+}
+
+func NewTurnIntentGate() agent.PostModelPolicy {
+	if !TurnIntentGateEnabled() {
 		return nil
 	}
 	return TurnIntentGate{}
