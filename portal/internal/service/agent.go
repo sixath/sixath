@@ -372,7 +372,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
 	lock := chat.BuildTurnTaskLock(content, nil)
-	effectivePrompt = chat.AppendTaskLock(effectivePrompt, lock)
+	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
 	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, append(chat.ReActOptionsFromAgent(*agentMeta),
 		chat.CodeClaimGateTurnOption(reg, nil, m),
 	)...)
@@ -397,7 +397,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	if agentMeta.Workspace != "" {
 		md["workspace_root"] = agentMeta.Workspace
 	}
-	md = chat.MergeTaskLockMetadata(md, lock)
+	md = chat.MaybeMergeTaskLockMetadata(md, lock)
 	agentReq := &agent.Request{Messages: messages, Metadata: md}
 	resp, err := a.Run(runCtx, agentReq)
 	if err != nil {

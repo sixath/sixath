@@ -471,7 +471,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	}
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
 	lock := buildTurnTaskLockFromHistory(content, history)
-	effectivePrompt = chat.AppendTaskLock(effectivePrompt, lock)
+	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
 	messages := make([]model.Message, 0, len(history)+2)
 	if effectivePrompt != "" {
 		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
@@ -504,7 +504,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	// 调用 Agent（附带记忆预取所需 metadata：session/agent/workspace/user_id/identity）
 	resp, err := a.Run(runCtx, &agent.Request{
 		Messages: messages,
-		Metadata: chat.MergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
+		Metadata: chat.MaybeMergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
 	})
 	if err != nil {
 		isH, vis, persist, raw := chat.DecomposeGuardrailRunError(err)
@@ -845,7 +845,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
 	lock := buildTurnTaskLockFromHistory(userContent, history)
-	effectivePrompt = chat.AppendTaskLock(effectivePrompt, lock)
+	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
 	messages := make([]model.Message, 0, len(history)+3)
 	if effectivePrompt != "" {
 		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
@@ -898,7 +898,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 
 		req := &agent.Request{
 			Messages: messages,
-			Metadata: chat.MergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
+			Metadata: chat.MaybeMergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
 		}
 
 		enabled := chat.MEAEnabledForAgent(session.AgentID, agentMeta.RuntimeTools.MEAEnabled)

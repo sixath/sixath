@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 
 	"backend/internal/conf"
@@ -63,5 +64,28 @@ func TestApplyInvestigationGates_OnEnablesAll(t *testing.T) {
 	ApplyInvestigationGates(&conf.ChatConfig{InvestigationGates: "on"})
 	if !ToolSurfaceEnabled() || NewTurnIntentGate() == nil || !TaskLockEnabled() {
 		t.Fatal("master on")
+	}
+}
+
+func TestMaybeApplyTaskLock_SkipWhenDisabled(t *testing.T) {
+	resetInvestigationOverrides(t)
+	SetTaskLockEnabled(false)
+	lock := TurnTaskLock{Q: "查流水"}
+	got := MaybeApplyTaskLock("base", lock)
+	if strings.Contains(got, "【本轮任务锁】") {
+		t.Fatalf("got %s", got)
+	}
+	md := MaybeMergeTaskLockMetadata(nil, lock)
+	if _, ok := md[MetadataKeyTaskLock]; ok {
+		t.Fatal("metadata")
+	}
+}
+
+func TestMaybeApplyTaskLock_AppliesWhenEnabled(t *testing.T) {
+	resetInvestigationOverrides(t)
+	SetTaskLockEnabled(true)
+	got := MaybeApplyTaskLock("base", TurnTaskLock{Q: "查流水"})
+	if !strings.Contains(got, "【本轮任务锁】") {
+		t.Fatal(got)
 	}
 }

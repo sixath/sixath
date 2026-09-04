@@ -56,3 +56,17 @@ func ApplyInvestigationGates(cfg *conf.ChatConfig) {
 		SetTaskLockEnabled(on)
 	}
 }
+
+func MaybeApplyTaskLock(prompt string, lock TurnTaskLock) string {
+	if !TaskLockEnabled() {
+		return prompt
+	}
+	return AppendTaskLock(prompt, lock)
+}
+
+func MaybeMergeTaskLockMetadata(md map[string]any, lock TurnTaskLock) map[string]any {
+	if !TaskLockEnabled() {
+		return md
+	}
+	return MergeTaskLockMetadata(md, lock)
+}

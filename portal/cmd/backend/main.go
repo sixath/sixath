@@ -165,11 +165,12 @@ func main() {
 		panic(err)
 	} else if chatCfg != nil {
 		server.ConfigurePublicInbound(chatCfg.PublicInboundEnabled)
-		if chatCfg.TurnToolSurfaceEnabled != nil {
-			chat.SetTurnToolSurfaceEnabled(*chatCfg.TurnToolSurfaceEnabled)
-			if !*chatCfg.TurnToolSurfaceEnabled {
-				log.NewHelper(logger).Info("turn tool surface disabled (chat.turn_tool_surface_enabled=false or SATH_TURN_TOOL_SURFACE=0); bound RCA/MCP tools are fully registered")
-			}
+		if chatCfg.InvestigationGatesInvalid() {
+			log.NewHelper(logger).Warnf("chat.investigation_gates=%q invalid; treating as off", chatCfg.InvestigationGates)
+		}
+		chat.ApplyInvestigationGates(chatCfg)
+		if !chatCfg.InvestigationGatesOn() {
+			log.NewHelper(logger).Info("investigation gates off (HTTP grounding, turn tool surface, task lock)")
 		}
 	}
 

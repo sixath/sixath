@@ -31,6 +31,7 @@ runtime:
 chat:
   # 对外 Chat 入站默认关闭；生产路径 Gateway → /runtime/v1。
   public_inbound_enabled: false
+  investigation_gates: off   # on 恢复工具面/HTTP 接地/任务锁
 auth:
   bootstrap_user_id: "bootstrap"
   bootstrap_org_id: "default"
