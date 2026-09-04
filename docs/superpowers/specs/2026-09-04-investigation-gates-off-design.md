@@ -115,6 +115,10 @@ chat:
 
 解析顺序：单层 env（若 set）→ 总开关（YAML 或 `SATH_INVESTIGATION_GATES`）→ 总开关缺省 `off`。
 
+已有 YAML `chat.turn_tool_surface_enabled` **不是**单层覆盖。总开关 `off` 时忽略该字段，避免旧配置把 B 层又打开。仅 `SATH_TURN_TOOL_SURFACE` 已设置时覆盖 B。总开关 `on` 时该字段保持现网语义。
+
+任务锁：`AppendTaskLock` 纯函数测试保持原样（直接调函数仍追加文案）。`off` 只在 `chat.go` / `agent.go` 调用点跳过，或包级 `TaskLockEnabled()` 为 false 时 append 成 no-op——实现二选一，须让「现网 on 不改断言」成立。
+
 禁止：非法总开关当 `on`。
 
 ---
