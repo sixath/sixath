@@ -150,6 +150,37 @@ func TestIsDeliveryUtterance(t *testing.T) {
 	}
 }
 
+const (
+	sess19a34fTrace = "d57d7b3d475dc3802e42da8cc8cec40e"
+	sess19a34fQ     = "d57d7b3d475dc3802e42da8cc8cec40e  这个trace释放下。咪咕的"
+	sess19a34fOld   = "f89caee9b5424acb1b6b35b3da4d3592"
+)
+
+func TestBuildTurnTaskLock_ExtractsJaegerTraceIDs(t *testing.T) {
+	hist := []model.Message{
+		{Role: "user", Content: "f89caee9b5424acb1b6b35b3da4d3592 这个呢"},
+		{Role: "assistant", Content: "自建 4 条，vmid 226667"},
+		{Role: "user", Content: sess19a34fQ},
+	}
+	lock := BuildTurnTaskLock(sess19a34fQ, hist)
+	if lock.Q != sess19a34fQ {
+		t.Fatalf("Q=%q", lock.Q)
+	}
+	if len(lock.TraceIDs) != 1 || lock.TraceIDs[0] != sess19a34fTrace {
+		t.Fatalf("TraceIDs=%v want [%s]", lock.TraceIDs, sess19a34fTrace)
+	}
+	block := lock.Format()
+	if !strings.Contains(block, sess19a34fTrace) {
+		t.Fatalf("format missing current trace: %s", block)
+	}
+	if !strings.Contains(block, "必须") || !strings.Contains(block, "工具") {
+		t.Fatalf("format must require querying this trace: %s", block)
+	}
+	if strings.Contains(block, "查询 0 击时用现有证据直接回答") {
+		t.Fatalf("must not tell the model to reuse old tables when Q has a new trace: %s", block)
+	}
+}
+
 func TestBuildTurnTaskLock_NeedContinueInheritsPriorQ(t *testing.T) {
 	orig := "查询最近7天 DiscardUserArchive 并解析 args 的 flowid，再用这些 flowId 查 vmid 和 gid"
 	hist := []model.Message{

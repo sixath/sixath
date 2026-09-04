@@ -151,6 +151,46 @@ func TestIntentResolver_CodePathQuestionKeepsCodeDropsData(t *testing.T) {
 	}
 }
 
+func TestIntentResolver_ClassifierCannotInventMCP(t *testing.T) {
+	servers := []*biz.McpServerMeta{
+		{ID: "k8s-dev", Name: "Kubernetes"},
+		{ID: "gitlab", Name: "GitLab"},
+	}
+	bound := []string{FamilyCore, "mcp:k8s-dev", "mcp:gitlab"}
+	res := IntentResolver{Classifier: stubFamClf{sel: []string{"mcp:k8s-dev", FamilyCore}}}.Resolve(
+		context.Background(),
+		IntentResolveInput{
+			UserText:      `vm里的日志有可能在D:\module\xstream\apps\cgvmagent\current\目录下`,
+			BoundFamilies: bound,
+			Servers:       servers,
+		},
+	)
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set["mcp:k8s-dev"]; ok {
+		t.Fatalf("classifier must not add MCP without lexical hit: %+v", res)
+	}
+}
+
+func TestIntentResolver_PodQueryActivatesK8s(t *testing.T) {
+	servers := []*biz.McpServerMeta{{ID: "k8s-dev", Name: "Kubernetes cluster"}}
+	bound := append(BoundFamiliesFrom(nil, servers, false, false), FamilyCode)
+	res := IntentResolver{}.Resolve(context.Background(), IntentResolveInput{
+		UserText:      "这个 pod 为什么 CrashLoop",
+		BoundFamilies: bound,
+		Servers:       servers,
+	})
+	set := familySet(res.ActiveFamilies)
+	if _, ok := set["mcp:k8s-dev"]; !ok {
+		t.Fatalf("pod should lexically hit k8s MCP: %+v", res)
+	}
+}
+
+type stubFamClf struct{ sel []string }
+
+func (s stubFamClf) Classify(context.Context, string, []string, []string) ([]string, string, error) {
+	return s.sel, "high", nil
+}
+
 func TestIntentResolver_ExplicitMongoActivatesData(t *testing.T) {
 	r := IntentResolver{}
 	bound := []string{FamilyCore, FamilyCode, FamilyData}

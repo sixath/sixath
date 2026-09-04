@@ -78,6 +78,10 @@ type RunTrace struct {
 	TruncatedPageNudges int `json:"truncated_page_nudges,omitempty"`
 	// GoalDriftNudges idle 改题回压次数（最多 1）。
 	GoalDriftNudges int `json:"goal_drift_nudges,omitempty"`
+	// IdentLockNudges idle 本轮 trace ID 未查询回压次数（最多 1）。
+	IdentLockNudges int `json:"ident_lock_nudges,omitempty"`
+	// HTTPUngroundedNudges ungrounded http_request 回压次数（最多 1）。
+	HTTPUngroundedNudges int `json:"http_ungrounded_nudges,omitempty"`
 	// DroppedProposals 本轮被 family/drift/intake 丢掉的工具提议。
 	DroppedProposals []DroppedProposal `json:"dropped_proposals,omitempty"`
 

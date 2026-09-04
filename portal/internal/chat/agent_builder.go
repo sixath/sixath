@@ -333,6 +333,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 			_ = tooldata.RegisterExecuteReadTool(reg, &tooldata.ExecuteReadConfig{
 				Exec:                exec,
 				Registry:            dsReg,
+				Store:               store,
 				DefaultDatasourceID: defaultDSID,
 			}, opts)
 		}

@@ -8,13 +8,15 @@ import (
 	"testing"
 
 	"github.com/sixath/framework/executor"
+	"github.com/sixath/framework/metadata"
 	core "github.com/sixath/framework/tool"
 )
 
 type fakeExecutor struct {
-	calls []execCall
-	ret   *executor.Result
-	err   error
+	calls          []execCall
+	ret            *executor.Result
+	err            error
+	failIfContains string
 }
 
 type execCall struct {
@@ -42,6 +44,9 @@ func (f *fakeExecutor) Query(ctx context.Context, datasourceID, dsl string, opts
 			Params:  opts.Params,
 		},
 	})
+	if f.failIfContains != "" && strings.Contains(dsl, f.failIfContains) {
+		return nil, f.err
+	}
 	if f.ret == nil {
 		return nil, f.err
 	}
@@ -50,7 +55,7 @@ func (f *fakeExecutor) Query(ctx context.Context, datasourceID, dsl string, opts
 		Rows:           f.ret.Rows,
 		Truncated:      f.ret.Truncated,
 		EstimatedTotal: f.ret.EstimatedTotal,
-	}, f.err
+	}, nil
 }
 
 func TestExecuteRead_Basic(t *testing.T) {
@@ -292,5 +297,115 @@ func TestExecuteRead_SpillsOverFiftyRows(t *testing.T) {
 	}
 	if strings.Contains(string(raw), `"Rows"`) {
 		t.Fatal("spill stub must not dump Rows")
+	}
+}
+
+func testHealStore(t *testing.T) *metadata.InMemoryStore {
+	t.Helper()
+	store := metadata.NewInMemoryStore(func(ctx context.Context) (*metadata.Schema, error) {
+		return vmSchema(), nil
+	})
+	if _, err := store.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func TestExecuteRead_healsUnknownSelectColumn(t *testing.T) {
+	f := &fakeExecutor{
+		ret: &executor.Result{
+			Columns: []string{"vmid", "mgr_ipv4_address"},
+			Rows:    [][]any{{int64(9076), "10.1.2.3"}},
+		},
+		err:            schemaErr("Error 1054 (42S22): Unknown column 'ecn_id' in 'field list'"),
+		failIfContains: "ecn_id",
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		Store:               testHealStore(t),
+		DefaultDatasourceID: "ds1",
+	}
+	reg := core.NewRegistry()
+	if err := RegisterExecuteReadTool(reg, cfg); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("execute_read")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"dsl": "SELECT vmid, mgr_ipv4_address, ecn_id FROM t_game_virtual_machine_info WHERE vmid = 9076",
+	})
+	if err != nil {
+		t.Fatalf("expected heal success, got %v", err)
+	}
+	res := out.(*executor.QueryResult)
+	if res.RepairNote == "" || !strings.Contains(res.RepairNote, "ecn_id") {
+		t.Fatalf("repair note: %q", res.RepairNote)
+	}
+	if len(f.calls) < 2 {
+		t.Fatalf("want retry after heal, calls=%d", len(f.calls))
+	}
+	if strings.Contains(f.calls[len(f.calls)-1].DSL, "ecn_id") {
+		t.Fatalf("retried SQL still has ecn_id: %s", f.calls[len(f.calls)-1].DSL)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("rows=%v", res.Rows)
+	}
+}
+
+func TestExecuteRead_healsSchemaUsedAsTable(t *testing.T) {
+	f := &fakeExecutor{
+		ret: &executor.Result{
+			Columns: []string{"vmid", "mgr_ipv4_address"},
+			Rows:    [][]any{{int64(9076), "10.1.2.3"}},
+		},
+		err:            schemaErr("Error 1146 (42S02): Table 'd_1000_game_virtual_machine_info.d_1000_game_virtual_machine_info' doesn't exist"),
+		failIfContains: "FROM d_1000_game_virtual_machine_info WHERE",
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		Store:               testHealStore(t),
+		DefaultDatasourceID: "ds1",
+	}
+	reg := core.NewRegistry()
+	_ = RegisterExecuteReadTool(reg, cfg)
+	tl, _ := reg.Get("execute_read")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"query": "SELECT * FROM d_1000_game_virtual_machine_info WHERE flow_id = '9999_zjvplfx19vdv'",
+	})
+	if err != nil {
+		t.Fatalf("expected heal success, got %v", err)
+	}
+	res := out.(*executor.QueryResult)
+	if !strings.Contains(res.RepairedSQL, "t_game_virtual_machine_info") {
+		t.Fatalf("repaired SQL: %s", res.RepairedSQL)
+	}
+	if strings.Contains(f.calls[len(f.calls)-1].DSL, "_test") {
+		t.Fatalf("picked test table: %s", f.calls[len(f.calls)-1].DSL)
+	}
+}
+
+func TestExecuteRead_unknownTableHint(t *testing.T) {
+	f := &fakeExecutor{
+		err: schemaErr("Error 1146 (42S02): Table 'd_1000_game_virtual_machine_info.t_flow' doesn't exist"),
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		Store:               testHealStore(t),
+		DefaultDatasourceID: "ds1",
+	}
+	reg := core.NewRegistry()
+	_ = RegisterExecuteReadTool(reg, cfg)
+	tl, _ := reg.Get("execute_read")
+	_, err := tl.Execute(context.Background(), map[string]any{
+		"dsl": "SELECT * FROM t_flow WHERE flow_id = 'x'",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "t_game_virtual_machine_info") {
+		t.Fatalf("hint missing candidate tables: %s", msg)
 	}
 }

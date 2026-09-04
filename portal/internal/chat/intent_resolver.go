@@ -89,6 +89,7 @@ func (r IntentResolver) classifyOrNarrow(ctx context.Context, user string, bound
 		selected, conf, err := clf.Classify(ctx, user, boundList, candidates)
 		if err == nil && conf == "high" && len(selected) > 0 {
 			clean := filterBoundOnly(selected, bound)
+			clean = dropUngroundedMCP(clean, familySet(candidates))
 			if len(clean) > 0 {
 				return IntentResolveResult{
 					ActiveFamilies: withCore(clean),
@@ -148,7 +149,7 @@ func scoreFamilies(user string, bound map[string]struct{}, servers []*biz.McpSer
 		if _, ok := bound[fid]; !ok {
 			continue
 		}
-		for _, tip := range []string{s.ID, s.Name} {
+		for _, tip := range mcpLexicalTips(s) {
 			tip = strings.ToLower(strings.TrimSpace(tip))
 			if tip == "" {
 				continue
@@ -194,6 +195,43 @@ func unionCodeWhenRCA(active, bound []string) []string {
 	a[FamilyCode] = struct{}{}
 	out := make([]string, 0, len(a))
 	for id := range a {
+		out = append(out, id)
+	}
+	return out
+}
+
+func mcpLexicalTips(s *biz.McpServerMeta) []string {
+	if s == nil {
+		return nil
+	}
+	tips := []string{s.ID, s.Name}
+	desc := strings.TrimSpace(s.Description)
+	if desc != "" {
+		tips = append(tips, desc)
+		for _, w := range strings.Fields(strings.ToLower(desc)) {
+			w = strings.Trim(w, ".,;:()[]{}/")
+			if len(w) >= 4 {
+				tips = append(tips, w)
+			}
+		}
+	}
+	blob := strings.ToLower(s.ID + " " + s.Name + " " + s.Description)
+	if strings.Contains(blob, "k8s") || strings.Contains(blob, "kubernetes") {
+		tips = append(tips, "kubernetes", "k8s", "kubectl", "pod", "pods", "helm", "namespace", "kube")
+	}
+	return tips
+}
+
+// dropUngroundedMCP removes MCP families the classifier invented without a lexical hit.
+// Builtin families (code/rca/data/...) may still be classifier-selected.
+func dropUngroundedMCP(selected []string, lexicalHits map[string]struct{}) []string {
+	out := make([]string, 0, len(selected))
+	for _, id := range selected {
+		if strings.HasPrefix(id, "mcp:") {
+			if _, ok := lexicalHits[id]; !ok {
+				continue
+			}
+		}
 		out = append(out, id)
 	}
 	return out

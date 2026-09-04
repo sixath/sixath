@@ -268,6 +268,110 @@ func TestTurnIntentGate_SkillViewAfterLoadSkillSameNameContinues(t *testing.T) {
 	}
 }
 
+func TestTurnIntentGate_IdleNoToolWithCurrentTraceRetries(t *testing.T) {
+	gate := TurnIntentGate{}
+	lock := TurnTaskLock{Q: sess19a34fQ, TraceIDs: []string{sess19a34fTrace}, HasPriorAssistant: true}
+	trace := &agent.RunTrace{}
+	res := gate.EvaluateIdle(context.Background(), agent.PostModelPolicyInput{
+		Req: testLockReq(sess19a34fQ, lock),
+		AssistantText: "这个 trace 刚才已经查过了，是自建环境的，4 条记录都没有 1058：\n" +
+			"| 1 | 226667 | 4103_mxl1e9e6u69r |",
+		Trace: trace,
+	})
+	if res.Decision != agent.PostModelRetry || res.Reason != "ident_lock" {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
+	}
+	if !strings.Contains(res.Prompt, sess19a34fTrace) {
+		t.Fatalf("prompt must name current trace, got %q", res.Prompt)
+	}
+	if trace.IdentLockNudges != 1 {
+		t.Fatalf("nudges=%d", trace.IdentLockNudges)
+	}
+	res2 := gate.EvaluateIdle(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(sess19a34fQ, lock),
+		AssistantText: "还是那 4 条",
+		Trace:         trace,
+	})
+	if res2.Decision != agent.PostModelContinue {
+		t.Fatalf("second idle must finish, got %v %q", res2.Decision, res2.Reason)
+	}
+}
+
+func TestTurnIntentGate_WrongTraceHTTPRetries(t *testing.T) {
+	gate := TurnIntentGate{}
+	lock := TurnTaskLock{Q: sess19a34fQ, TraceIDs: []string{sess19a34fTrace}}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(sess19a34fQ, lock),
+		AssistantText: "先拉 trace",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{{
+			ID: "1", Name: "http_request", Arguments: map[string]any{
+				"method": "GET",
+				"url":    "http://cg-pro-jaeger.yuntiancloud.com/api/traces/" + sess19a34fOld,
+			},
+		}}},
+		Trace: &agent.RunTrace{},
+	})
+	if res.Decision != agent.PostModelRetry || res.Reason != "ident_lock" {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
+	}
+	if !strings.Contains(res.Prompt, sess19a34fTrace) {
+		t.Fatalf("prompt=%q", res.Prompt)
+	}
+}
+
+func TestTurnIntentGate_CorrectTraceScriptContinues(t *testing.T) {
+	q := "自建环境 trace_id=bb110c9194abc73fa8471092d989d5f7,释放下这些vm"
+	tid := "bb110c9194abc73fa8471092d989d5f7"
+	gate := TurnIntentGate{}
+	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(q, TurnTaskLock{Q: q, TraceIDs: []string{tid}}),
+		AssistantText: "按手册执行",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{{
+			ID: "1", Name: "execute_skill_script", Arguments: map[string]any{
+				"name": "batchReleaseInstance",
+				"path": "scripts/replay.py",
+				"args": []any{tid, "self", "--dry-run"},
+			},
+		}}},
+		Trace: &agent.RunTrace{},
+	})
+	if res.Decision != agent.PostModelContinue {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
+	}
+}
+
+func TestTurnIntentGate_IdleAfterCorrectTraceScriptContinues(t *testing.T) {
+	gate := TurnIntentGate{}
+	lock := TurnTaskLock{Q: sess19a34fQ, TraceIDs: []string{sess19a34fTrace}}
+	trace := &agent.RunTrace{ToolCalls: []agent.ToolCallRecord{{
+		ToolName:  "execute_skill_script",
+		Allowed:   true,
+		Arguments: map[string]any{"args": []any{sess19a34fTrace, "miguu"}},
+	}}}
+	res := gate.EvaluateIdle(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(sess19a34fQ, lock),
+		AssistantText: "咪咕 trace 提取到 vmid=191 flowId=2000_c7h4qssthrx6",
+		Trace:         trace,
+	})
+	if res.Decision != agent.PostModelContinue {
+		t.Fatalf("got %v %q", res.Decision, res.Reason)
+	}
+}
+
+func TestTurnIntentGate_FollowupWithoutHexDoesNotIdentLock(t *testing.T) {
+	gate := TurnIntentGate{}
+	q := "咪咕的阿。咪咕没有吗"
+	lock := TurnTaskLock{Q: q, HasPriorAssistant: true}
+	res := gate.EvaluateIdle(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(q, lock),
+		AssistantText: "自建也没有 1058",
+		Trace:         &agent.RunTrace{},
+	})
+	if res.Decision != agent.PostModelContinue {
+		t.Fatalf("no hex in Q must not ident-lock, got %v %q", res.Decision, res.Reason)
+	}
+}
+
 func TestTurnIntentGate_ExecuteScriptAfterLoadSkillSameNameContinues(t *testing.T) {
 	q := "自建环境 trace_id=bb110c9194abc73fa8471092d989d5f7,释放下这些vm"
 	gate := TurnIntentGate{}
@@ -284,6 +388,7 @@ func TestTurnIntentGate_ExecuteScriptAfterLoadSkillSameNameContinues(t *testing.
 			ID: "1", Name: "execute_skill_script", Arguments: map[string]any{
 				"name": "batchReleaseInstance",
 				"path": "scripts/replay.py",
+				"args": []any{"bb110c9194abc73fa8471092d989d5f7", "self"},
 			},
 		}}},
 		Trace: trace,

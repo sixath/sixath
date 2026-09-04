@@ -23,6 +23,8 @@ type TurnTaskLock struct {
 	Delivery          string
 	KnownValues       []string
 	HasPriorAssistant bool
+	// TraceIDs are 32-char hex IDs in this turn's Q (Jaeger traces). Empty for ordinary follow-ups.
+	TraceIDs []string
 }
 
 var (
@@ -30,7 +32,8 @@ var (
 	backtickRe = regexp.MustCompile("`([^`\n]{4,})`")
 	dquoteRe   = regexp.MustCompile(`"([^"\n]{4,})"`)
 	squoteRe   = regexp.MustCompile(`'([^'\n]{4,})'`)
-	identRe    = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9_-]{5,}`)
+	identRe         = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9_-]{5,}`)
+	jaegerTraceIDRe = regexp.MustCompile(`(?i)\b[a-f0-9]{32}\b`)
 )
 
 // BuildTurnTaskLock extracts G (Q), optional delivery D, opaque KnownValues, and follow-up.
@@ -50,6 +53,7 @@ func BuildTurnTaskLock(userText string, history []model.Message) TurnTaskLock {
 			}
 		}
 	}
+	lock.TraceIDs = mergeTraceIDs(extractTraceIDs(lock.Q), extractTraceIDs(d))
 	return lock
 }
 
@@ -111,8 +115,57 @@ func (l TurnTaskLock) Format() string {
 		b.WriteString(strings.Join(l.KnownValues, "；"))
 	}
 	b.WriteString("\n")
+	if len(l.TraceIDs) > 0 {
+		b.WriteString("本轮 trace（必须写入本轮工具参数，禁止用历史表格代替查询）：")
+		b.WriteString(strings.Join(l.TraceIDs, "；"))
+		b.WriteString("\n")
+		b.WriteString("规则：本轮用户给出了 trace ID。必须先用该 ID 调用工具查询或释放，拿到本轮工具结果后再答。禁止把历史里其它 trace 的表格当成这一条的结果。")
+		return b.String()
+	}
 	b.WriteString("规则：Skill 与工具只是手段。查询 0 击时用现有证据直接回答上述用户问题，包括明确「未查到」。不要把本轮问题换成另一套排查的 intake。")
 	return b.String()
+}
+
+func extractTraceIDs(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	raw := jaegerTraceIDRe.FindAllString(text, -1)
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, id := range raw {
+		id = strings.ToLower(id)
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func mergeTraceIDs(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, ids := range [][]string{a, b} {
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func qLooksLikeIntake(q string) bool {

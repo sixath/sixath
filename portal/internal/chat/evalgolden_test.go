@@ -41,6 +41,39 @@ func TestEvalGolden_8555(t *testing.T) {
 
 const meaESGoal = "用 elasticsearch 查一下错误日志"
 
+func TestEvalGolden_19a34f_identLock(t *testing.T) {
+	lock := BuildTurnTaskLock(sess19a34fQ, []model.Message{
+		{Role: "user", Content: sess19a34fOld + " 这个呢"},
+		{Role: "assistant", Content: "自建 4 条 vmid 226667"},
+		{Role: "user", Content: sess19a34fQ},
+	})
+	if len(lock.TraceIDs) != 1 || lock.TraceIDs[0] != sess19a34fTrace {
+		t.Fatalf("TraceIDs=%v", lock.TraceIDs)
+	}
+	gate := TurnIntentGate{}
+	idle := gate.EvaluateIdle(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(sess19a34fQ, lock),
+		AssistantText: "自建 4 条都没有 1058",
+		Trace:         &agent.RunTrace{},
+	})
+	if idle.Decision != agent.PostModelRetry || idle.Reason != "ident_lock" {
+		t.Fatalf("idle %v %q", idle.Decision, idle.Reason)
+	}
+	wrong := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
+		Req:           testLockReq(sess19a34fQ, lock),
+		AssistantText: "拉 jaeger",
+		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{{
+			ID: "1", Name: "http_request", Arguments: map[string]any{
+				"method": "GET", "url": "http://cg-pro-jaeger.yuntiancloud.com/api/traces/" + sess19a34fOld,
+			},
+		}}},
+		Trace: &agent.RunTrace{},
+	})
+	if wrong.Decision != agent.PostModelRetry || wrong.Reason != "ident_lock" {
+		t.Fatalf("wrong http %v %q", wrong.Decision, wrong.Reason)
+	}
+}
+
 func TestEvalGolden_mea_no_fence(t *testing.T) {
 	got := AutoChecks(meaESGoal)
 	if len(got) != 2 || got[0].Type != "trace_hit_status" || got[1].Type != "empty_hit_speak" {

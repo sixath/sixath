@@ -108,9 +108,43 @@ func (g TurnIntentGate) Evaluate(_ context.Context, in agent.PostModelPolicyInpu
 	lock := TaskLockFromRequest(in.Req)
 	q := overlapQuery(in.Req, lock)
 	orig := calls
-	calls, familyDropped := filterCallsByFamily(calls, g.ActiveFamilies, g.ToolFamily)
+	calls, offeredDropped := filterUnofferedTools(calls, g.ToolFamily)
 	recordDroppedBetween(in.Trace, orig, calls)
+	beforeFamily := calls
+	calls, familyDropped := filterCallsByFamily(calls, g.ActiveFamilies, g.ToolFamily)
+	familyDropped += offeredDropped
+	recordDroppedBetween(in.Trace, beforeFamily, calls)
+	beforeHTTP := calls
+	calls, httpDropped := filterUngroundedHTTP(calls, collectHTTPAnchors(in.Req, in.Trace))
+	recordDroppedBetween(in.Trace, beforeHTTP, calls)
+	ids := lockTraceIDs(lock, q)
+	beforeIdent := calls
+	calls, identDropped := filterMismatchedTraceCalls(calls, ids)
+	recordDroppedBetween(in.Trace, beforeIdent, calls)
 	if len(calls) == 0 {
+		if identDropped > 0 {
+			return agent.PostModelPolicyResult{
+				Decision: agent.PostModelRetry,
+				Reason:   "ident_lock",
+				Prompt:   identLockRetryPrompt(ids),
+			}
+		}
+		if httpDropped > 0 {
+			if in.Trace != nil && in.Trace.HTTPUngroundedNudges > 0 {
+				return agent.PostModelPolicyResult{
+					Decision: agent.PostModelFinish,
+					Reason:   "http_ungrounded",
+				}
+			}
+			if in.Trace != nil {
+				in.Trace.HTTPUngroundedNudges++
+			}
+			return agent.PostModelPolicyResult{
+				Decision: agent.PostModelRetry,
+				Reason:   "http_ungrounded",
+				Prompt:   httpUngroundedRetryPrompt,
+			}
+		}
 		return agent.PostModelPolicyResult{
 			Decision: agent.PostModelRetry,
 			Reason:   "family_dropped_all",
@@ -144,11 +178,11 @@ func (g TurnIntentGate) Evaluate(_ context.Context, in agent.PostModelPolicyInpu
 	}
 	userToks := tokenizeForOverlap(q)
 	if len(userToks) == 0 {
-		if familyDropped > 0 || intakeDropped > 0 {
+		if familyDropped > 0 || intakeDropped > 0 || httpDropped > 0 || identDropped > 0 {
 			return agent.PostModelPolicyResult{
 				Decision:  agent.PostModelFilter,
 				ToolCalls: calls,
-				Reason:    "family_partial",
+				Reason:    partialDropReason(familyDropped, intakeDropped, httpDropped),
 			}
 		}
 		return agent.PostModelPolicyResult{Decision: agent.PostModelContinue}
@@ -170,15 +204,11 @@ func (g TurnIntentGate) Evaluate(_ context.Context, in agent.PostModelPolicyInpu
 		}
 	}
 	if driftDropped == 0 {
-		if familyDropped > 0 || intakeDropped > 0 {
-			reason := "family_partial"
-			if familyDropped == 0 {
-				reason = "intake_partial"
-			}
+		if familyDropped > 0 || intakeDropped > 0 || httpDropped > 0 || identDropped > 0 {
 			return agent.PostModelPolicyResult{
 				Decision:  agent.PostModelFilter,
 				ToolCalls: calls,
-				Reason:    reason,
+				Reason:    partialDropReason(familyDropped, intakeDropped, httpDropped),
 			}
 		}
 		return agent.PostModelPolicyResult{Decision: agent.PostModelContinue}
@@ -199,6 +229,16 @@ func (g TurnIntentGate) Evaluate(_ context.Context, in agent.PostModelPolicyInpu
 // EvaluateIdle implements agent.IdlePostModelPolicy.
 func (g TurnIntentGate) EvaluateIdle(_ context.Context, in agent.PostModelPolicyInput) agent.PostModelPolicyResult {
 	lock := TaskLockFromRequest(in.Req)
+	q := overlapQuery(in.Req, lock)
+	ids := lockTraceIDs(lock, q)
+	if len(ids) > 0 && !turnUsedTraceIDs(in.Trace, ids) && in.Trace != nil && in.Trace.IdentLockNudges == 0 {
+		in.Trace.IdentLockNudges++
+		return agent.PostModelPolicyResult{
+			Decision: agent.PostModelRetry,
+			Reason:   "ident_lock",
+			Prompt:   identLockRetryPrompt(ids),
+		}
+	}
 	if looksLikeGoalDrift(lock, in.AssistantText, in.Trace) && in.Trace != nil && in.Trace.GoalDriftNudges == 0 {
 		in.Trace.GoalDriftNudges++
 		return agent.PostModelPolicyResult{
@@ -234,6 +274,19 @@ func callFamily(name string, toolFamily map[string]string) string {
 		}
 	}
 	return FamilyForBuiltinToolName(name)
+}
+
+func partialDropReason(familyDropped, intakeDropped, httpDropped int) string {
+	if familyDropped > 0 {
+		return "family_partial"
+	}
+	if httpDropped > 0 {
+		return "http_ungrounded_partial"
+	}
+	if intakeDropped > 0 {
+		return "intake_partial"
+	}
+	return "family_partial"
 }
 
 func familyRetryPrompt(active map[string]struct{}) string {
@@ -627,6 +680,92 @@ func discoveryLoopRetryPrompt(lock *TurnTaskLock) string {
 	}
 	b.WriteString("已经有查询结果。不要再 list_tools / tool_search / list_tables / describe_table。用已有工具结果直接回答用户问题；0 击就写未查到。")
 	return b.String()
+}
+
+func identLockRetryPrompt(ids []string) string {
+	return "本轮用户要查的 trace 是 " + strings.Join(ids, "；") +
+		"。刚才没有用这个 ID 调用工具，或用了历史里其它 trace。请立刻用本轮这个 ID 调用 execute_skill_script 或 http_request 查询/释放，不要用上一张表作答。"
+}
+
+func lockTraceIDs(lock *TurnTaskLock, q string) []string {
+	var ids []string
+	if lock != nil {
+		ids = lock.TraceIDs
+	}
+	return mergeTraceIDs(ids, extractTraceIDs(q))
+}
+
+func isIdentRequiringTool(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "http_request", "execute_skill_script", "jaeger_trace", "web_fetch", "web_extract":
+		return true
+	default:
+		return false
+	}
+}
+
+func callArgsBlob(args map[string]any) string {
+	if args == nil {
+		return ""
+	}
+	b, err := json.Marshal(args)
+	if err != nil {
+		return stringifyArg(args)
+	}
+	return string(b)
+}
+
+func callMentionsTrace(c model.ToolCall, ids []string) bool {
+	return blobMentionsTrace(callArgsBlob(c.Arguments), ids)
+}
+
+func blobMentionsTrace(blob string, ids []string) bool {
+	if blob == "" || len(ids) == 0 {
+		return false
+	}
+	lower := strings.ToLower(blob)
+	for _, id := range ids {
+		if id != "" && strings.Contains(lower, strings.ToLower(id)) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterMismatchedTraceCalls(calls []model.ToolCall, ids []string) ([]model.ToolCall, int) {
+	if len(ids) == 0 || len(calls) == 0 {
+		return calls, 0
+	}
+	kept := make([]model.ToolCall, 0, len(calls))
+	dropped := 0
+	for _, c := range calls {
+		if isIdentRequiringTool(c.Name) {
+			if callMentionsTrace(c, ids) {
+				kept = append(kept, c)
+			} else {
+				dropped++
+			}
+			continue
+		}
+		if len(extractTraceIDs(callArgsBlob(c.Arguments))) > 0 && !callMentionsTrace(c, ids) {
+			dropped++
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return kept, dropped
+}
+
+func turnUsedTraceIDs(trace *agent.RunTrace, ids []string) bool {
+	if trace == nil || len(ids) == 0 {
+		return false
+	}
+	for _, rec := range trace.ToolCalls {
+		if blobMentionsTrace(callArgsBlob(rec.Arguments), ids) {
+			return true
+		}
+	}
+	return false
 }
 
 func goalDriftRetryPrompt(lock *TurnTaskLock) string {

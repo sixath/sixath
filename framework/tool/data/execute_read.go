@@ -10,6 +10,7 @@ import (
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
+	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/obs"
 	"github.com/sixath/framework/tool"
 )
@@ -19,6 +20,7 @@ type ExecuteReadConfig struct {
 	Reader              executor.Reader
 	Exec                executor.Executor    // Deprecated: use Reader; 若 Reader 为空且 Exec 非空则经 executorAsReader 适配
 	Registry            *datasource.Registry // 可选：用于将误传的 datasource_id "default" 解析为实际默认 id
+	Store               *metadata.InMemoryStore
 	DefaultDatasourceID string
 	// DefaultTimeoutSec 默认超时时间（秒），0 表示无限制。
 	DefaultTimeoutSec int
@@ -160,13 +162,10 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 				qo.NamedParams = m
 			}
 		}
-		res, err := reader.Query(ctx, datasourceID, dsl, qo)
+		res, err := queryWithSchemaHeal(ctx, cfg, reader, datasourceID, dsl, qo)
 		if err != nil {
 			status = "error"
-			if executor.IsSchemaRelated(err) {
-				return nil, fmt.Errorf("execute_read: %w; 请先对该表/索引调用 describe_table 获取正确结构后再重试 execute_read。", err)
-			}
-			return nil, fmt.Errorf("execute_read: %w", err)
+			return nil, err
 		}
 		rid, _ := ctx.Value(tool.ContextKeyRequestID).(string)
 		invokedPayload := map[string]any{
@@ -197,12 +196,64 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 		if res.Columns != nil {
 			payload["columns"] = res.Columns
 		}
+		if res.RepairNote != "" {
+			payload["repair_note"] = res.RepairNote
+			payload["repaired_sql"] = res.RepairedSQL
+		}
 		if stub, _ := tool.MaybeSpill(ctx, "execute_read", rows, payload, nil); stub != nil {
 			stub.Truncated = res.Truncated
 			return stub, nil
 		}
 		return res, nil
 	}
+}
+
+func queryWithSchemaHeal(ctx context.Context, cfg *ExecuteReadConfig, reader executor.Reader, datasourceID, dsl string, qo executor.QueryOptions) (*executor.QueryResult, error) {
+	res, err := reader.Query(ctx, datasourceID, dsl, qo)
+	if err == nil {
+		return res, nil
+	}
+	if !executor.IsSchemaRelated(err) {
+		return nil, fmt.Errorf("execute_read: %w", err)
+	}
+	cur := dsl
+	var notes []string
+	schema := schemaForHeal(ctx, cfg, datasourceID)
+	for attempt := 0; attempt < maxSQLHealAttempts; attempt++ {
+		next, note, ok := HealReadSQL(cur, err, schema)
+		if !ok {
+			break
+		}
+		notes = append(notes, note)
+		cur = next
+		res, err = reader.Query(ctx, datasourceID, cur, qo)
+		if err == nil {
+			if res != nil {
+				res.RepairedSQL = cur
+				res.RepairNote = strings.Join(notes, "; ")
+			}
+			return res, nil
+		}
+		if !executor.IsSchemaRelated(err) {
+			return nil, fmt.Errorf("execute_read: %w", err)
+		}
+		if schema == nil {
+			schema = schemaForHeal(ctx, cfg, datasourceID)
+		}
+	}
+	hint := SchemaHealHint(cur, err, schema)
+	return nil, fmt.Errorf("execute_read: %w; %s", err, hint)
+}
+
+func schemaForHeal(ctx context.Context, cfg *ExecuteReadConfig, datasourceID string) *metadata.Schema {
+	if cfg == nil || cfg.Store == nil {
+		return nil
+	}
+	schema, err := metadata.EnsureSchemaForDatasource(ctx, cfg.Registry, cfg.Store, datasourceID)
+	if err != nil {
+		return nil
+	}
+	return schema
 }
 
 func queryResultRows(res *executor.QueryResult) []map[string]any {

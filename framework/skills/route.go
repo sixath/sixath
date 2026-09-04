@@ -134,7 +134,38 @@ func tokenize(s string) map[string]struct{} {
 		lastClass = c
 	}
 	flush()
+	expandCJKNGrams(out)
 	return out
+}
+
+// expandCJKNGrams adds 2-grams and 3-grams for CJK tokens so Chinese queries
+// can match skill description/tags (a whole sentence is otherwise one token).
+func expandCJKNGrams(out map[string]struct{}) {
+	var extra []string
+	for tok := range out {
+		rs := []rune(tok)
+		if len(rs) < 2 {
+			continue
+		}
+		allCJK := true
+		for _, r := range rs {
+			if tokenClass(r) != 2 {
+				allCJK = false
+				break
+			}
+		}
+		if !allCJK {
+			continue
+		}
+		for n := 2; n <= 3 && n <= len(rs); n++ {
+			for i := 0; i+n <= len(rs); i++ {
+				extra = append(extra, string(rs[i:i+n]))
+			}
+		}
+	}
+	for _, g := range extra {
+		out[g] = struct{}{}
+	}
 }
 
 func tokenClass(r rune) int {

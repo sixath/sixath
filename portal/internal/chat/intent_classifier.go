@@ -41,6 +41,7 @@ Rules:
 - prefer candidates when relevant: %s
 - include multiple families only for explicit multi-intent
 - confidence=high only when sure
+- MCP families (ids starting with mcp:) only when the user message clearly refers to that system by name or domain. Do not map generic words like vm, instance, server, 日志, log onto kubernetes/k8s/gitlab/jira.
 
 User message:
 %s`, strings.Join(bound, ", "), strings.Join(candidates, ", "), user)

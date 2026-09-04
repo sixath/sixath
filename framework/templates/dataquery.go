@@ -453,6 +453,7 @@ func registerDataQueryTools(reg *tool.Registry, cfg DataQueryConfig, desc *TypeD
 				Reader:              cfg.Reader,
 				Exec:                cfg.Exec,
 				Registry:            cfg.DatasourceRegistry,
+				Store:               cfg.MetadataStore,
 				DefaultDatasourceID: cfg.DefaultDatasourceID,
 				DefaultTimeoutSec:   cfg.DefaultReadTimeoutSec,
 				DefaultMaxRows:      cfg.DefaultReadMaxRows,
