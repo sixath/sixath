@@ -65,6 +65,7 @@ type ChatAgent struct {
 type ChatConfig struct {
 	MaxHistory int
 	EventBus   *events.Bus // 可选；非空时在生命周期关键点发布事件。
+	Workspace  string      // 可写根；非空时 PromptBuilder 读 MEMORY.md / USER.md
 }
 
 // Option 为 ChatAgent 提供可选配置。
@@ -82,6 +83,13 @@ func WithMaxHistory(n int) Option {
 func WithEventBus(bus *events.Bus) Option {
 	return func(c *ChatConfig) {
 		c.EventBus = bus
+	}
+}
+
+// WithChatWorkspace 设置可写 workspace 根；空白字符串视为未配置。
+func WithChatWorkspace(workspace string) Option {
+	return func(c *ChatConfig) {
+		c.Workspace = strings.TrimSpace(workspace)
 	}
 }
 
@@ -151,6 +159,7 @@ func (a *ChatAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 		messages = append(messages, h.Message)
 	}
 	messages = append(messages, req.Messages...)
+	messages = a.withWorkspacePrompt(messages)
 
 	emit(events.ModelInvoked, map[string]any{"message_count": len(messages)})
 	gen, err := a.model.Chat(ctx, messages)
@@ -206,6 +215,7 @@ func (a *ChatAgent) RunStream(ctx context.Context, req *Request) (<-chan string,
 		messages = append(messages, h.Message)
 	}
 	messages = append(messages, req.Messages...)
+	messages = a.withWorkspacePrompt(messages)
 
 	emit(events.ModelInvoked, map[string]any{"message_count": len(messages)})
 

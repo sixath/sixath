@@ -25,7 +25,7 @@ func NewChatAgentHandlerFromConfig(cfg config.Config, middlewareByName map[strin
 			mws = append(mws, mw)
 		}
 	}
-	return NewChatAgentHandler(m, mem, mws...), nil
+	return NewChatAgentHandlerWithWorkspace(m, mem, cfg.Workspace, mws...), nil
 }
 
 // DefaultMiddlewareMap 返回内置中间件名称到实现的映射，供 FromConfig 使用。

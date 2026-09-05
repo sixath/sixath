@@ -104,6 +104,7 @@ var (
 	WithAgentContext             = harness.WithAgentContext
 	WithEventBus                 = harness.WithEventBus
 	WithMaxHistory               = harness.WithMaxHistory
+	WithChatWorkspace            = harness.WithChatWorkspace
 	WithReActContextCompression  = harness.WithReActContextCompression
 	WithReActEventBus            = harness.WithReActEventBus
 	WithReActGuardrailEvaluator  = harness.WithReActGuardrailEvaluator

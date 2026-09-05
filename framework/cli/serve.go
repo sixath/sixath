@@ -71,7 +71,7 @@ func NewServeCommand() *cobra.Command {
 					middleware.LoggingMiddleware,
 					middleware.MetricsMiddleware,
 				}
-				handler = templates.NewChatAgentHandler(m, mem, mws...)
+				handler = templates.NewChatAgentHandlerWithWorkspace(m, mem, cfg.Workspace, mws...)
 			}
 			if debug {
 				handler = middleware.DebugMiddleware(true)(handler)

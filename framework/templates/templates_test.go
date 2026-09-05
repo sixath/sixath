@@ -2,6 +2,8 @@ package templates
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,28 @@ func TestNewChatAgentHandler(t *testing.T) {
 	}
 	if resp == nil || resp.Text != "hello" {
 		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestNewChatAgentHandlerWithWorkspace_InjectsMemoryMD(t *testing.T) {
+	dir := t.TempDir()
+	const token = "s9-handler-mem-token"
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(token), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &stubModel{reply: "hello"}
+	h := NewChatAgentHandlerWithWorkspace(m, memory.NewBufferMemory(5), dir)
+	if _, err := h(context.Background(), &agent.Request{
+		Messages: []model.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(m.lastMessages) == 0 || m.lastMessages[0].Role != "system" {
+		t.Fatalf("expected system first, got %#v", m.lastMessages)
+	}
+	sys := m.lastMessages[0].Content
+	if !strings.Contains(sys, "## MEMORY.md") || !strings.Contains(sys, token) {
+		t.Fatalf("missing MEMORY.md: %q", sys)
 	}
 }
 

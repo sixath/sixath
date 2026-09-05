@@ -29,21 +29,21 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestChatAgent_Run_InjectsWorkspaceMemoryMD`
-- [ ] `TestChatAgent_Run_BlankWorkspaceSkipsMemoryMD`
-- [ ] `TestNewChatAgentHandlerWithWorkspace_InjectsMemoryMD`
-- [ ] 跑测试确认失败
+- [x] `TestChatAgent_Run_InjectsWorkspaceMemoryMD`
+- [x] `TestChatAgent_Run_BlankWorkspaceSkipsMemoryMD`
+- [x] `TestNewChatAgentHandlerWithWorkspace_InjectsMemoryMD`
+- [x] 跑测试确认失败
 
 ---
 
 ### Task 2: 接线
 
-- [ ] `WithChatWorkspace`；Run/RunStream 注入 PromptBuilder
-- [ ] FromConfig / `NewChatAgentHandlerWithWorkspace` / serve 回退
-- [ ] alias 转发
-- [ ] `cd framework && go test ./harness ./templates ./agent ./config -count=1`
+- [x] `WithChatWorkspace`；Run/RunStream 注入 PromptBuilder
+- [x] FromConfig / `NewChatAgentHandlerWithWorkspace` / serve 回退
+- [x] alias 转发
+- [x] `cd framework && go test ./harness ./templates ./agent ./config -count=1`
 
-- [ ] **Commit** `fix(harness): wire workspace into ChatAgent prompt`
+- [x] **Commit** `fix(harness): wire workspace into ChatAgent prompt`
 
 ---
 

@@ -100,6 +100,18 @@ func readWorkspaceMarkdown(workspace, name string) string {
 	return string(b)
 }
 
+func (a *ChatAgent) withWorkspacePrompt(messages []model.Message) []model.Message {
+	if a == nil {
+		return messages
+	}
+	in := fwctx.Input{
+		MemoryMD: readWorkspaceMarkdown(a.config.Workspace, "MEMORY.md"),
+		UserMD:   readWorkspaceMarkdown(a.config.Workspace, "USER.md"),
+	}
+	encoded := fwctx.Encode(fwctx.Build(in).Stable, "")
+	return replaceOrInsertFirstSystem(messages, encoded)
+}
+
 func ephemeralFor(trace *RunTrace) string {
 	if trace == nil || trace.ContextOps == nil {
 		return ""

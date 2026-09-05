@@ -3,6 +3,9 @@ package harness
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sixath/framework/memory"
@@ -124,5 +127,47 @@ func TestChatAgent_Run_ModelError(t *testing.T) {
 	}
 	if resp != nil {
 		t.Fatalf("expected nil response on error, got %#v", resp)
+	}
+}
+
+func TestChatAgent_Run_InjectsWorkspaceMemoryMD(t *testing.T) {
+	dir := t.TempDir()
+	const token = "s9-chat-mem-token"
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(token), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &fakeModel{replyText: "ok"}
+	a := NewChatAgent(m, memory.NewBufferMemory(5), WithChatWorkspace(dir))
+	if _, err := a.Run(context.Background(), &Request{
+		Messages: []model.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(m.lastMessages) == 0 || m.lastMessages[0].Role != "system" {
+		t.Fatalf("expected system first, got %#v", m.lastMessages)
+	}
+	sys := m.lastMessages[0].Content
+	if !strings.Contains(sys, "## MEMORY.md") || !strings.Contains(sys, token) {
+		t.Fatalf("missing MEMORY.md: %q", sys)
+	}
+}
+
+func TestChatAgent_Run_BlankWorkspaceSkipsMemoryMD(t *testing.T) {
+	dir := t.TempDir()
+	const token = "s9-chat-blank-should-not-appear"
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(token), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &fakeModel{replyText: "ok"}
+	a := NewChatAgent(m, memory.NewBufferMemory(5), WithChatWorkspace("   "))
+	if _, err := a.Run(context.Background(), &Request{
+		Messages: []model.Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	for _, msg := range m.lastMessages {
+		if strings.Contains(msg.Content, token) {
+			t.Fatalf("blank workspace must not load MEMORY.md, got %#v", m.lastMessages)
+		}
 	}
 }
