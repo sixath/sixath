@@ -12,17 +12,17 @@ skills:
   route_min_score: 5
   route_max_body_runes: 12000
 growth:
-  llm_review_enabled: true
+  llm_review_enabled: false          # P4/S19：默认不走 LLM 复盘
   worker_enabled: false
   worker_poll_interval: 45s
   idle_sweep_interval: 600s
   idle_check_interval: 600s
   combined_review_enabled: false
   session_end_memory_review_enabled: false
-  session_end_skill_review_enabled: true
+  session_end_skill_review_enabled: false  # C2s opt-in
   max_retry: 5
   curator_enabled: false
-  learnings_review_enabled: true
+  learnings_review_enabled: false
   learnings_max_runes: 6000
   review_patch_file: "growth_review_patch.example.json"
 runtime:

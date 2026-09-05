@@ -12,17 +12,17 @@ skills:
   route_min_score: 5
   route_max_body_runes: 12000
 growth:
-  llm_review_enabled: true
+  llm_review_enabled: false          # P4/S19：默认不走 LLM 复盘；打开 worker 时再显式打开
   worker_enabled: false
   worker_poll_interval: 10s      # 本地验收缩短轮询；生产可改回 45s
   idle_sweep_interval: 10m
   idle_check_interval: 10m
   combined_review_enabled: false
   session_end_memory_review_enabled: false
-  session_end_skill_review_enabled: true   # C2s: 每轮 assistant 落库后若有未达阈值的工具/回合活动则触发技能复盘
+  session_end_skill_review_enabled: false  # C2s opt-in；Chat 默认不接会话结束钩子
   max_retry: 5
   curator_enabled: false
-  learnings_review_enabled: true   # 复盘 prompt 注入 .learnings（workspace 及上级目录）
+  learnings_review_enabled: false  # 复盘 prompt 注入 .learnings；仅 worker 真跑时才有意义
   learnings_max_runes: 6000
   # 无 llm.model 时回退假补丁；配置 LLM 或 SATH_GROWTH_LLM_MODEL 后优先真 LLM
   review_patch_file: "growth_review_patch.example.json"

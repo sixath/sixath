@@ -27,18 +27,18 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestShippedConfig_growthReviewFlagsOff` 读 `../../configs/config.yaml` 与 `config.docker.yaml`
-- [ ] 断言 `llm_review_enabled` / `session_end_skill_review_enabled` / `learnings_review_enabled` 为 false
-- [ ] 同时锁定已关的 `worker_enabled` / `curator_enabled` / `session_end_memory_review_enabled` / `combined_review_enabled`
-- [ ] 先跑应失败
+- [x] `TestShippedConfig_growthReviewFlagsOff` 读 `../../configs/config.yaml` 与 `config.docker.yaml`
+- [x] 断言 `llm_review_enabled` / `session_end_skill_review_enabled` / `learnings_review_enabled` 为 false
+- [x] 同时锁定已关的 `worker_enabled` / `curator_enabled` / `session_end_memory_review_enabled` / `combined_review_enabled`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 改 yaml
 
-- [ ] 两份文件三项改为 false，更新注释说明 opt-in
-- [ ] `cd portal && go test ./internal/conf -count=1`
-- [ ] **Commit** `fix(portal): default shipped growth review flags off`
+- [x] 两份文件三项改为 false，更新注释说明 opt-in
+- [x] `cd portal && go test ./internal/conf -count=1`
+- [x] **Commit** `fix(portal): default shipped growth review flags off`
 
 ---
 
