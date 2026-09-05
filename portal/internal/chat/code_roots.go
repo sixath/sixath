@@ -153,6 +153,44 @@ func ListCodeDirs(root, rel string) ([]CodeDirEntry, error) {
 	return out, nil
 }
 
+// ResolveWorkspaceCodeRoot returns the absolute path of workspace/code when it
+// exists as a directory or as a symlink to a directory. Empty if missing.
+func ResolveWorkspaceCodeRoot(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return ""
+	}
+	p := filepath.Join(workspace, WorkspaceCodeLink)
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return ""
+	}
+	target := p
+	if fi.Mode()&os.ModeSymlink != 0 {
+		eval, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			return ""
+		}
+		st, err := os.Stat(eval)
+		if err != nil || !st.IsDir() {
+			return ""
+		}
+		target = eval
+	} else if !fi.IsDir() {
+		return ""
+	}
+	return filepath.Clean(target)
+}
+
+// MergeRCARoots prefers workspace/code when present; otherwise keeps configured roots
+// (waiver for agents that have not mounted code).
+func MergeRCARoots(workspace string, configured []string) []string {
+	if code := ResolveWorkspaceCodeRoot(workspace); code != "" {
+		return []string{code}
+	}
+	return configured
+}
+
 // WorkspaceUnderCodeRoots reports whether workspace is under any code root.
 func WorkspaceUnderCodeRoots(workspace string, roots []string) bool {
 	workspace = strings.TrimSpace(workspace)

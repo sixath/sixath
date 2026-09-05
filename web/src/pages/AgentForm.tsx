@@ -18,13 +18,20 @@ import {
 
 const emptyRuntimeTools = (): RuntimeToolsConfig => ({})
 
-type WorkspaceMode = 'subdir' | 'full'
-
 function joinRootPath(root: string, path: string): string {
   const r = root.replace(/[/\\]+$/, '')
   const p = path.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '')
   if (!p) return r
   return `${r}/${p}`
+}
+
+function workspaceUnderCodeRoots(ws: string, roots: string[]): boolean {
+  const n = ws.replace(/[/\\]+$/, '').toLowerCase()
+  if (!n) return false
+  return roots.some((r) => {
+    const root = r.replace(/[/\\]+$/, '').toLowerCase()
+    return n === root || n.startsWith(`${root}/`) || n.startsWith(`${root}\\`)
+  })
 }
 
 export default function AgentForm() {
@@ -36,7 +43,6 @@ export default function AgentForm() {
   const [description, setDescription] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [workspace, setWorkspace] = useState('')
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('subdir')
   const [selectedTarget, setSelectedTarget] = useState('')
   const [existingLinkTarget, setExistingLinkTarget] = useState('')
   const [codeRoots, setCodeRoots] = useState<string[]>([])
@@ -139,28 +145,16 @@ export default function AgentForm() {
 
   const selectCurrentDir = () => {
     if (!browseRoot) return
-    const abs = joinRootPath(browseRoot, browsePath)
-    setSelectedTarget(abs)
-    if (workspaceMode === 'full') {
-      setWorkspace(abs)
-    }
+    setSelectedTarget(joinRootPath(browseRoot, browsePath))
   }
+
+  const retiredWholeRepo = isEdit && workspaceUnderCodeRoots(workspace, codeRoots)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     if (!name.trim()) {
       setError('请输入 Agent 名称')
-      return
-    }
-    if (workspaceMode === 'subdir') {
-      // Create: must pick a code dir to mount. Edit: keep existing workspace/code if not re-selected.
-      if (!isEdit && !selectedTarget.trim()) {
-        setError('请先浏览并选择要挂载的代码目录')
-        return
-      }
-    } else if (!workspace.trim()) {
-      setError('请输入工作空间路径（或浏览选择整仓目录）')
       return
     }
     if (!modelConfig.provider || !modelConfig.model) {
@@ -173,8 +167,7 @@ export default function AgentForm() {
         name: name.trim(),
         description: description.trim() || undefined,
         system_prompt: systemPrompt.trim() || undefined,
-        // subdir: empty string lets server default to {data_root}/agents/{id}
-        workspace: workspaceMode === 'subdir' ? (workspace.trim() || '') : workspace.trim(),
+        workspace: workspace.trim(),
         model_config: modelConfig,
         debug_run: debugRun,
         runtime_tools: serializeRuntimeTools(runtimeTools),
@@ -185,7 +178,7 @@ export default function AgentForm() {
         if (clearBindingsOnSave) {
           await memoryHubApi.clearBindings(id)
         }
-        if (workspaceMode === 'subdir' && selectedTarget.trim()) {
+        if (selectedTarget.trim()) {
           const next = selectedTarget.trim()
           const prev = existingLinkTarget.trim()
           const same =
@@ -202,7 +195,7 @@ export default function AgentForm() {
         }
       } else {
         const created = await agentApi.create(data)
-        if (workspaceMode === 'subdir' && selectedTarget.trim()) {
+        if (selectedTarget.trim()) {
           try {
             await agentApi.workspaceLink(created.id, selectedTarget.trim())
           } catch (linkErr) {
@@ -245,37 +238,16 @@ export default function AgentForm() {
             </div>
 
             <div className="form-group">
-              <label>Workspace 模式</label>
-              <div className="checkbox-list">
-                <label className="checkbox-field">
-                  <input
-                    type="radio"
-                    name="workspace-mode"
-                    checked={workspaceMode === 'subdir'}
-                    onChange={() => setWorkspaceMode('subdir')}
-                  />
-                  <span>挂到 workspace/code（推荐）</span>
-                </label>
-                <label className="checkbox-field">
-                  <input
-                    type="radio"
-                    name="workspace-mode"
-                    checked={workspaceMode === 'full'}
-                    onChange={() => setWorkspaceMode('full')}
-                  />
-                  <span>整仓作 Workspace</span>
-                </label>
-              </div>
-              {workspaceMode === 'full' ? (
-                <small style={{ color: 'var(--warning, #b45309)', display: 'block', marginTop: 8 }}>
-                  代码根默认只读，技能上传不可用
+              <label>Workspace</label>
+              <small style={{ display: 'block', marginBottom: 8 }}>
+                可写目录由平台默认为 data_root/agents/{'{id}'}；代码根可选，保存后挂到 workspace/code。
+                {isEdit ? ' 编辑时可不重选，将保留已有挂载。' : ' 新建可不选代码目录。'}
+              </small>
+              {retiredWholeRepo ? (
+                <small style={{ color: 'var(--warning, #b45309)', display: 'block', marginBottom: 8 }}>
+                  整仓作 Workspace 已退役。此 Agent 仍可使用当前路径；新建请留空工作空间并可选挂载 code。
                 </small>
-              ) : (
-                <small style={{ display: 'block', marginTop: 8 }}>
-                  可写 workspace 由服务端默认；所选代码目录将 symlink 到 workspace/code。
-                  {isEdit ? ' 编辑时可不重选，将保留已有挂载。' : ''}
-                </small>
-              )}
+              ) : null}
             </div>
 
             <div className="form-group">
@@ -377,24 +349,13 @@ export default function AgentForm() {
             </div>
 
             <div className="form-group">
-              <label>
-                工作空间路径
-                {workspaceMode === 'full' ? ' *' : '（高级 / 可留空）'}
-              </label>
+              <label>工作空间路径（高级 / 可留空）</label>
               <input
                 value={workspace}
                 onChange={(e) => setWorkspace(e.target.value)}
-                placeholder={
-                  workspaceMode === 'subdir'
-                    ? '留空则服务端默认 data_root/agents/{id}'
-                    : '/mnt/codes/my-repo'
-                }
+                placeholder="留空则服务端默认 data_root/agents/{id}"
               />
-              {workspaceMode === 'subdir' ? (
-                <small>子目录模式可留空；技能包仍解压到可写 workspace/skills/</small>
-              ) : (
-                <small>整仓模式请使用代码根下绝对路径；技能上传不可用</small>
-              )}
+              <small>技能包解压到可写 workspace/skills/；不要把代码根填成 workspace。</small>
             </div>
           </section>
 

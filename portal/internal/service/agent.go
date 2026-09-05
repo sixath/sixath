@@ -136,7 +136,11 @@ func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgent
 	if err := chat.ValidateAgentHub(rt); err != nil {
 		return nil, errors.BadRequest("INVALID_HUB", err.Error())
 	}
-	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), req.GetWorkspace(), modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds())
+	workspace := strings.TrimSpace(req.GetWorkspace())
+	if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
+		return nil, biz.ErrWorkspaceWholeRepoRetired
+	}
+	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), workspace, modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds())
 	if err != nil {
 		s.log.Errorf("CreateAgent failed: name=%s workspace=%s err=%v", req.GetName(), req.GetWorkspace(), err)
 		return nil, err
@@ -289,6 +293,9 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat get agent failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
+	if err := biz.RequireWorkspaceRoot(agentMeta.Workspace); err != nil {
+		return nil, err
+	}
 
 	tools, err := s.toolUC.ListByAgent(ctx, agentID)
 	if err != nil {
@@ -312,7 +319,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 	reg := tool.NewRegistry()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg)
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("Chat build tool registry failed: agent_id=%s err=%v", agentID, err)
 		return nil, err

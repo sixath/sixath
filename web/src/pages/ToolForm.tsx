@@ -395,6 +395,7 @@ export default function ToolForm() {
                   onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), roots: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } }))}
                   placeholder={'/abs/path/service-a\n/abs/path/service-b'}
                 />
+                <small>Agent 已挂载 workspace/code 时，运行时以该目录为根；此处仅在无挂载时作为后备。</small>
               </div>
             )}
 

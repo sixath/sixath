@@ -45,6 +45,64 @@ func TestListDirs_OnlyDirectories(t *testing.T) {
 	}
 }
 
+func TestResolveWorkspaceCodeRoot_Dir(t *testing.T) {
+	ws := t.TempDir()
+	code := filepath.Join(ws, WorkspaceCodeLink)
+	if err := os.Mkdir(code, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := ResolveWorkspaceCodeRoot(ws)
+	if got != filepath.Clean(code) {
+		t.Fatalf("got %q want %q", got, filepath.Clean(code))
+	}
+}
+
+func TestResolveWorkspaceCodeRoot_Missing(t *testing.T) {
+	if got := ResolveWorkspaceCodeRoot(t.TempDir()); got != "" {
+		t.Fatalf("got %q", got)
+	}
+	if got := ResolveWorkspaceCodeRoot(""); got != "" {
+		t.Fatalf("empty workspace got %q", got)
+	}
+}
+
+func TestResolveWorkspaceCodeRoot_Symlink(t *testing.T) {
+	ws := t.TempDir()
+	target := t.TempDir()
+	link := filepath.Join(ws, WorkspaceCodeLink)
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("symlink not permitted:", err)
+	}
+	got := ResolveWorkspaceCodeRoot(ws)
+	want, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Clean(want) {
+		t.Fatalf("got %q want %q", got, filepath.Clean(want))
+	}
+}
+
+func TestMergeRCARoots_PrefersCodeMount(t *testing.T) {
+	ws := t.TempDir()
+	code := filepath.Join(ws, WorkspaceCodeLink)
+	if err := os.Mkdir(code, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := MergeRCARoots(ws, []string{"/repos/a", "/repos/b"})
+	if len(got) != 1 || got[0] != filepath.Clean(code) {
+		t.Fatalf("got %#v want [%q]", got, filepath.Clean(code))
+	}
+}
+
+func TestMergeRCARoots_WaiverWithoutMount(t *testing.T) {
+	cfg := []string{"/repos/a"}
+	got := MergeRCARoots(t.TempDir(), cfg)
+	if len(got) != 1 || got[0] != "/repos/a" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
 func TestWorkspaceUnderAnyRoot(t *testing.T) {
 	root := t.TempDir()
 	ws := filepath.Join(root, "repo")

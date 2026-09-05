@@ -10,7 +10,7 @@ import (
 // registerRCATool 按 cfg["func_path"] 构造并注册 RCA 工具。
 // es_log_query 由 registerESLogFromAgentTools 一次性注册，此处不再处理。
 // 缺配置/依赖缺失时跳过并记 warn,绝不 panic 或阻断整体构建。
-func registerRCATool(reg *tool.Registry, cfg map[string]interface{}) {
+func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace string) {
 	if reg == nil {
 		return
 	}
@@ -22,14 +22,14 @@ func registerRCATool(reg *tool.Registry, cfg map[string]interface{}) {
 	funcPath, _ := rcaMap["func_path"].(string)
 	switch funcPath {
 	case "rca_code":
-		roots := stringSliceFromAny(rcaMap["roots"])
+		roots := MergeRCARoots(workspace, stringSliceFromAny(rcaMap["roots"]))
 		if len(roots) == 0 {
 			slog.Warn("rca: rca_code has no roots, skip")
 			return
 		}
 		_ = tool.RegisterRCACodeTools(reg, roots)
 	case "rca_symbol":
-		roots := stringSliceFromAny(rcaMap["roots"])
+		roots := MergeRCARoots(workspace, stringSliceFromAny(rcaMap["roots"]))
 		if len(roots) == 0 {
 			slog.Warn("rca: rca_symbol has no roots, skip")
 			return

@@ -63,6 +63,8 @@ type RegistryBuildResult struct {
 type RegistryBuildOptions struct {
 	// ActiveFamilies nil => no filtering (legacy full bind).
 	ActiveFamilies map[string]struct{}
+	// Workspace is the agent writable root; rca_* uses workspace/code when present.
+	Workspace string
 }
 
 // BuildRegistry 根据 Agent 绑定的工具与 MCP Server 列表构建 tool.Registry。
@@ -109,7 +111,7 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 			b.Purpose = mapStringField(dsMap, "purpose")
 			dsBindings = append(dsBindings, b)
 		case biz.ToolTypeRCA:
-			registerRCATool(reg, cfg)
+			registerRCATool(reg, cfg, o.Workspace)
 		}
 	}
 

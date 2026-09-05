@@ -326,6 +326,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage get agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
+	if err := biz.RequireWorkspaceRoot(agentMeta.Workspace); err != nil {
+		return nil, err
+	}
 
 	// 保存 user 消息
 	userMsg, err := s.chatUC.CreateMessage(ctx, sessionID, "user", content)
@@ -373,7 +376,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active})
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active, Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
@@ -588,6 +591,9 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream get agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
 	}
+	if err := biz.RequireWorkspaceRoot(agentMeta.Workspace); err != nil {
+		return nil, "", err
+	}
 
 	if cr != nil && cr.Kind == "skill_manage" && cr.Token != "" {
 		return s.streamSkillManageConfirm(ctx, sessionID, agentMeta.Workspace, *cr)
@@ -690,7 +696,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			}
 		}
 	}()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active})
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active, Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err

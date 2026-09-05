@@ -3,7 +3,9 @@ package biz
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 
 	pkgErrors "backend/internal/pkg/errors"
 
@@ -13,9 +15,19 @@ import (
 )
 
 var (
-	ErrAgentNotFound      = kratosErrors.NotFound("AGENT_NOT_FOUND", "agent not found")
-	ErrAgentDuplicateName = kratosErrors.Conflict("AGENT_DUPLICATE_NAME", "agent name already exists")
+	ErrAgentNotFound             = kratosErrors.NotFound("AGENT_NOT_FOUND", "agent not found")
+	ErrAgentDuplicateName        = kratosErrors.Conflict("AGENT_DUPLICATE_NAME", "agent name already exists")
+	ErrWorkspaceRequired         = kratosErrors.BadRequest("WORKSPACE_REQUIRED", "workspace root is required")
+	ErrWorkspaceWholeRepoRetired = kratosErrors.BadRequest("WORKSPACE_WHOLE_REPO_RETIRED", "whole-repo workspace is retired; leave workspace empty for the default writable root and mount code via workspace/code")
 )
+
+// RequireWorkspaceRoot rejects an empty workspace string before a Run.
+func RequireWorkspaceRoot(workspace string) error {
+	if strings.TrimSpace(workspace) == "" {
+		return ErrWorkspaceRequired
+	}
+	return nil
+}
 
 // AgentUsecase is the agent use case
 type AgentUsecase struct {
@@ -41,8 +53,11 @@ func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPro
 		return nil, err
 	}
 	id := uuid.NewString()
-	if workspace == "" {
+	if strings.TrimSpace(workspace) == "" {
 		workspace = filepath.Join(uc.dataRoot, "agents", id)
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		return nil, err
 	}
 	agent, err := uc.repo.Create(ctx, id, name, description, systemPrompt, workspace, modelConfig, debugRun, wecomChannelID, runtimeTools, toolIDs)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
