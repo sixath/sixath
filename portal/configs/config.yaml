@@ -8,9 +8,6 @@ server:
     timeout: 30s
 skills:
   allow_script_execution: true
-  auto_route_enabled: false  # P3 已拆 SKILL 全文预注入；此键现网无调用者
-  route_min_score: 5
-  route_max_body_runes: 12000
 growth:
   # /route 分类器读 llm；未配则 fail-open。也可用 SATH_GROWTH_LLM_*。
   # llm:

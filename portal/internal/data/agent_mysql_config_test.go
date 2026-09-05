@@ -13,7 +13,7 @@ func TestModelConfigToBiz_maxOutputTokens(t *testing.T) {
 	}
 }
 
-func TestModelConfigToBiz_codeModel(t *testing.T) {
+func TestModelConfigToBiz_codeModelIgnored(t *testing.T) {
 	biz := modelConfigToBiz(map[string]interface{}{
 		"provider":      "openai",
 		"model":         "gpt-4",
@@ -22,11 +22,10 @@ func TestModelConfigToBiz_codeModel(t *testing.T) {
 		"code_api_key":  "sk-c",
 		"code_base_url": "http://code",
 	})
-	if biz.CodeModel != "gpt-code" || biz.CodeAPIKey != "sk-c" || biz.CodeBaseURL != "http://code" {
-		t.Fatalf("code fields: %#v", biz)
-	}
 	m := bizModelConfigToMap(biz)
-	if m["code_model"] != "gpt-code" || m["code_api_key"] != "sk-c" {
-		t.Fatalf("map=%v", m)
+	for _, key := range []string{"code_provider", "code_model", "code_api_key", "code_base_url"} {
+		if _, ok := m[key]; ok {
+			t.Fatalf("dead code_* key %s must not round-trip, map=%v", key, m)
+		}
 	}
 }

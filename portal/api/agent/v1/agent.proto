@@ -105,11 +105,7 @@ message ModelConfig {
   string base_url = 4;
   // max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（32768）。
   int32 max_output_tokens = 5;
-  // 源码分析模型（code 族）。全空则跟随全局设置。
-  string code_provider = 6;
-  string code_model = 7;
-  string code_api_key = 8;
-  string code_base_url = 9;
+  reserved 6 to 9;
 }
 
 // Hermes P0 运行时工具开关（与全局 env OR 合并）
@@ -124,13 +120,7 @@ message RuntimeToolsConfig {
   bool browser_enabled = 8;
   // unset = on（默认开启混合召回）；presence 全链路保留
   optional bool hybrid_recall = 9;
-  // Memory Hub provider overrides（空/unset = 用进程 defaults；非空 = Catalog name）
-  optional string hub_governance = 10;
-  optional string hub_knowledge = 11;
-  // §3.5.1 读路径运输错误时是否回落到 defaults 治理面
-  optional bool hub_fallback_to_default_on_read_error = 12;
-  // MEA（Manage-Execute-Audit）最小子集；与 SATH_MEA / SATH_MEA_PILOT_AGENTS OR 合并
-  bool mea_enabled = 13;
+  reserved 10 to 13;
 }
 
 message CreateAgentRequest {

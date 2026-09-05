@@ -27,21 +27,21 @@
 
 ### Task 1: 失败锁定测试
 
-- [ ] `TestAgentProto_omitsDeadKeys`
-- [ ] `TestConfProto_omitsDeadGrowthAndSkillRouteKeys`
-- [ ] 先跑必须红
+- [x] `TestAgentProto_omitsDeadKeys`
+- [x] `TestConfProto_omitsDeadGrowthAndSkillRouteKeys`
+- [x] 先跑必须红
 
 ---
 
 ### Task 2: 改 proto 并修好调用方
 
-- [ ] 删字段 + reserved；`make config` / `make api`
-- [ ] 去掉 biz/data/service 死映射；Update 只保留 `hybrid_recall` presence
-- [ ] 发货 yaml 去掉 skills 预注入死键
-- [ ] **Commit** `fix(proto): drop leftover mea/hub/code-model and growth worker fields`
+- [x] 删字段 + reserved；`make config` / `make api`
+- [x] 去掉 biz/data/service 死映射；Update 只保留 `hybrid_recall` presence
+- [x] 发货 yaml 去掉 skills 预注入死键
+- [x] **Commit** `fix(proto): drop leftover mea/hub/code-model and growth worker fields`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] 不要 merge/push，除非用户明确要求。

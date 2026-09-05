@@ -40,10 +40,6 @@ func modelConfigToBiz(m model.ModelConfig) biz.ModelConfig {
 		APIKey:          getStr(m, "api_key"),
 		BaseURL:         getStr(m, "base_url"),
 		MaxOutputTokens: getInt(m, "max_output_tokens"),
-		CodeProvider:    getStr(m, "code_provider"),
-		CodeModel:       getStr(m, "code_model"),
-		CodeAPIKey:      getStr(m, "code_api_key"),
-		CodeBaseURL:     getStr(m, "code_base_url"),
 	}
 }
 
@@ -63,18 +59,6 @@ func bizModelConfigToMap(c biz.ModelConfig) model.ModelConfig {
 	}
 	if c.MaxOutputTokens > 0 {
 		m["max_output_tokens"] = c.MaxOutputTokens
-	}
-	if c.CodeProvider != "" {
-		m["code_provider"] = c.CodeProvider
-	}
-	if c.CodeModel != "" {
-		m["code_model"] = c.CodeModel
-	}
-	if c.CodeAPIKey != "" {
-		m["code_api_key"] = c.CodeAPIKey
-	}
-	if c.CodeBaseURL != "" {
-		m["code_base_url"] = c.CodeBaseURL
 	}
 	return m
 }
@@ -112,23 +96,10 @@ func bizRuntimeToolsToModel(c biz.RuntimeToolsConfig) model.RuntimeToolsConfig {
 		TerminalLocalEnabled:      c.TerminalLocalEnabled,
 		CronjobToolEnabled:        c.CronjobToolEnabled,
 		BrowserEnabled:            c.BrowserEnabled,
-		MEAEnabled:                c.MEAEnabled,
 	}
 	if c.HybridRecall != nil {
 		v := *c.HybridRecall
 		out.HybridRecall = &v
-	}
-	if c.HubGovernance != nil {
-		v := *c.HubGovernance
-		out.HubGovernance = &v
-	}
-	if c.HubKnowledge != nil {
-		v := *c.HubKnowledge
-		out.HubKnowledge = &v
-	}
-	if c.HubFallbackToDefaultOnReadError != nil {
-		v := *c.HubFallbackToDefaultOnReadError
-		out.HubFallbackToDefaultOnReadError = &v
 	}
 	return out
 }
@@ -143,23 +114,10 @@ func modelRuntimeToolsToBiz(c model.RuntimeToolsConfig) biz.RuntimeToolsConfig {
 		TerminalLocalEnabled:      c.TerminalLocalEnabled,
 		CronjobToolEnabled:        c.CronjobToolEnabled,
 		BrowserEnabled:            c.BrowserEnabled,
-		MEAEnabled:                c.MEAEnabled,
 	}
 	if c.HybridRecall != nil {
 		v := *c.HybridRecall
 		out.HybridRecall = &v
-	}
-	if c.HubGovernance != nil {
-		v := *c.HubGovernance
-		out.HubGovernance = &v
-	}
-	if c.HubKnowledge != nil {
-		v := *c.HubKnowledge
-		out.HubKnowledge = &v
-	}
-	if c.HubFallbackToDefaultOnReadError != nil {
-		v := *c.HubFallbackToDefaultOnReadError
-		out.HubFallbackToDefaultOnReadError = &v
 	}
 	return out
 }

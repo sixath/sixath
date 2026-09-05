@@ -31,58 +31,13 @@ message Auth {
   string public_base_url = 12;
 }
 
-// Growth 配置成长系统后台行为（默认关闭 LLM 复盘，见 phase2 计划 L1）。
+// Growth 只保留 /route 分类器用的 llm（auxiliary 优先）。
 message Growth {
-  // llm_review_enabled 为 true 时走 noop LLM 骨架（后续接 transcript + patch）；默认 false 仅用 StubRunner。
-  bool llm_review_enabled = 1;
-  // review_patch_file 为 JSON 补丁文件路径（内容格式同 growth.ParsePatchBatchJSON）；非空且 llm_review_enabled 时走假 LLM 写盘（二期 2.2）。
-  // 相对路径相对于 -conf 目录（若 -conf 指向单文件 yaml，则相对于该文件所在目录）。
-  string review_patch_file = 2;
-  // worker_enabled 为 false 时完全禁用 GrowthWorker 后台轮询（默认 false；P4 起 Growth 不进默认路径）。
-  bool worker_enabled = 3;
-  // combined_review_enabled 为 true 时，双 pending 同 tick 走单次 LLM（spec 二期 L2）；默认 false。
-  bool combined_review_enabled = 4;
-  // llm 描述真实 LLM 复盘客户端；为空且 review_patch_file 为空时退化为 NoopLLMRunner（spec 二期 L1）。
+  reserved 1 to 4, 6 to 23;
   GrowthLLM llm = 5;
-  // max_retry 失败超过该值后自动清除 pending（A5）；<=0 时使用内置默认 5。
-  int32 max_retry = 6;
-  // worker_poll_interval pending 队列轮询间隔；未设置时默认 45s，可用 SATH_GROWTH_WORKER_POLL 覆盖。
-  google.protobuf.Duration worker_poll_interval = 7;
-  // idle_sweep_interval 无 pending 会话的空闲扫描 ticker；未设置时默认 10m，可用 SATH_GROWTH_IDLE_SWEEP 覆盖。
-  google.protobuf.Duration idle_sweep_interval = 8;
-  // idle_check_interval 距上次 last_idle_check_at 多久才纳入空闲扫描；未设置时默认 10m（与 Task12 一致）。
-  google.protobuf.Duration idle_check_interval = 9;
-  // session_end_memory_review_enabled 为 true 时，assistant 落库后若无 pending 但有未达阈值的计数，置 pending_memory 并唤醒 worker（C2）；默认 false。
-  bool session_end_memory_review_enabled = 10;
-  // session_end_skill_review_enabled 为 true 时，assistant 落库后若本轮有工具/回合活动且未 pending_skill，置 pending_skill 并唤醒 worker（C2s）；默认 false。
-  bool session_end_skill_review_enabled = 17;
-  // curator_enabled 为 true 时启动 R2b workspace Curator worker（默认 false；不反写 cron）。
-  bool curator_enabled = 11;
-  // curator_interval 同一 workspace 两次 Curator 最小间隔；默认 168h。
-  google.protobuf.Duration curator_interval = 12;
-  // curator_min_skills 索引技能数低于该值则跳过；默认 2。
-  int32 curator_min_skills = 13;
-  // curator_poll_interval worker 扫描 workspace 列表间隔；默认 1h。
-  google.protobuf.Duration curator_poll_interval = 14;
-  // curator_llm_enabled 为 true 且 growth.llm 已配置时使用 LLM Curator（否则 curator_patch_file）。
-  bool curator_llm_enabled = 15;
-  // curator_patch_file 假 Curator JSON patch 文件（相对 -conf 目录）。
-  string curator_patch_file = 16;
-  // learnings_review_enabled 为 true 时，技能复盘 prompt 注入 workspace/.learnings（及上级目录）摘要。
-  bool learnings_review_enabled = 18;
-  // learnings_max_runes 注入 learnings 的最大 rune 数；<=0 默认 6000。
-  int32 learnings_max_runes = 19;
-  // agent_review_enabled 为 true 且 llm 已配置时，会话级技能复盘走 fork ReActAgent 路径（spec §4.5）；默认 false。
-  bool agent_review_enabled = 20;
-  // agent_review_full_tools 为 true 时复盘 agent 使用全量工具集；默认 false（仅 skillops 安全集）。
-  bool agent_review_full_tools = 21;
-  // agent_review_max_steps 复盘 agent 步数硬上界；<=0 时默认 12。
-  int32 agent_review_max_steps = 22;
-  // agent_review_timeout 单次复盘超时（触发降级）；未设置时默认 120s。
-  google.protobuf.Duration agent_review_timeout = 23;
 }
 
-// GrowthLLM 是 growth runner 的真实 LLM 客户端配置（与 model.NewModelFromConfig 对齐）。
+// GrowthLLM 是 /route 分类器的模型配置（与 model.NewModelFromConfig 对齐）。
 message GrowthLLM {
   string provider = 1;   // openai / dashscope / ollama
   string model = 2;
@@ -90,25 +45,14 @@ message GrowthLLM {
   string base_url = 4;
   // max_transcript_runes 限制 prompt 中 transcript 截断长度；<=0 不截断。
   int32 max_transcript_runes = 5;
-  // skill_system_prompt 覆盖默认技能复盘 system prompt；为空时使用 growth.DefaultSkillReviewSystemPrompt。
-  string skill_system_prompt = 6;
-  // combined_system_prompt 覆盖合并复盘默认 prompt；为空使用 growth.DefaultCombinedReviewSystemPrompt。
-  string combined_system_prompt = 7;
-  // auxiliary 可选 - 当存在时，growth runner 使用此模型而非 provider/model/api_key/base_url；
-  // 用途：用更便宜/独立的 auxiliary 模型跑复盘，避免与主对话竞争配额（spec phase2 L3）。
+  reserved 6, 7, 9;
+  // auxiliary 可选：分类器优先用更便宜的独立模型。
   GrowthLLM auxiliary = 8;
-  // curator_system_prompt 覆盖 Curator 默认 prompt；为空使用 growth.DefaultCuratorSystemPrompt。
-  string curator_system_prompt = 9;
 }
 
 message Skills {
   bool allow_script_execution = 1;  // 是否允许 execute_skill_script，默认 true
-  // auto_route_enabled 为 true 时，按用户消息关键词匹配 Top-1 Skill 并预注入 SKILL.md 正文。
-  bool auto_route_enabled = 2;
-  // route_min_score 路由最低分；<=0 使用内置默认 5。
-  int32 route_min_score = 3;
-  // route_max_body_runes 预注入 SKILL 正文最大 rune 数；<=0 使用默认 12000。
-  int32 route_max_body_runes = 4;
+  reserved 2 to 4;
 }
 
 message Server {

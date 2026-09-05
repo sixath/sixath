@@ -39,10 +39,6 @@ func protoToBizModelConfig(mc *agentv1.ModelConfig) biz.ModelConfig {
 		APIKey:          mc.GetApiKey(),
 		BaseURL:         mc.GetBaseUrl(),
 		MaxOutputTokens: int(mc.GetMaxOutputTokens()),
-		CodeProvider:    mc.GetCodeProvider(),
-		CodeModel:       mc.GetCodeModel(),
-		CodeAPIKey:      mc.GetCodeApiKey(),
-		CodeBaseURL:     mc.GetCodeBaseUrl(),
 	}
 }
 
@@ -109,10 +105,6 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 			ApiKey:          m.ModelConfig.APIKey,
 			BaseUrl:         m.ModelConfig.BaseURL,
 			MaxOutputTokens: int32(m.ModelConfig.MaxOutputTokens),
-			CodeProvider:    m.ModelConfig.CodeProvider,
-			CodeModel:       m.ModelConfig.CodeModel,
-			CodeApiKey:      m.ModelConfig.CodeAPIKey,
-			CodeBaseUrl:     m.ModelConfig.CodeBaseURL,
 		},
 		Workspace:      m.Workspace,
 		ToolIds:        m.ToolIDs,
@@ -196,31 +188,15 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 	}
 	if req.RuntimeTools != nil {
 		rt := biz.RuntimeToolsFromProto(req.RuntimeTools)
-		// Old clients may omit optional presence fields; preserve stored values.
-		needPreserve := req.RuntimeTools.HybridRecall == nil ||
-			req.RuntimeTools.HubGovernance == nil ||
-			req.RuntimeTools.HubKnowledge == nil ||
-			req.RuntimeTools.HubFallbackToDefaultOnReadError == nil
-		if needPreserve {
+		// Old clients may omit optional presence fields; preserve stored hybrid_recall.
+		if req.RuntimeTools.HybridRecall == nil {
 			existing, err := s.uc.GetForEdit(ctx, req.GetId())
 			if err != nil {
 				return nil, err
 			}
-			if req.RuntimeTools.HybridRecall == nil && existing.RuntimeTools.HybridRecall != nil {
+			if existing.RuntimeTools.HybridRecall != nil {
 				v := *existing.RuntimeTools.HybridRecall
 				rt.HybridRecall = &v
-			}
-			if req.RuntimeTools.HubGovernance == nil && existing.RuntimeTools.HubGovernance != nil {
-				v := *existing.RuntimeTools.HubGovernance
-				rt.HubGovernance = &v
-			}
-			if req.RuntimeTools.HubKnowledge == nil && existing.RuntimeTools.HubKnowledge != nil {
-				v := *existing.RuntimeTools.HubKnowledge
-				rt.HubKnowledge = &v
-			}
-			if req.RuntimeTools.HubFallbackToDefaultOnReadError == nil && existing.RuntimeTools.HubFallbackToDefaultOnReadError != nil {
-				v := *existing.RuntimeTools.HubFallbackToDefaultOnReadError
-				rt.HubFallbackToDefaultOnReadError = &v
 			}
 		}
 		updates["runtime_tools"] = rt
