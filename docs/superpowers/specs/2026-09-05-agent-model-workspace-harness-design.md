@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S38）
+## 12. P4 之后（S1–S39）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -374,5 +374,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S36 | [remaining-dead-shell-off](./2026-09-05-remaining-dead-shell-off-design.md) | 拆 HyperTool config、Web `code_*`、发货 Growth worker yaml、Portal code 模型 settings。不 regen proto、不改 Channel、不改 MaybeSpill |
 | S37 | [proto-dead-keys-off](./2026-09-05-proto-dead-keys-off-design.md) | regen proto：去掉 `code_*` / `hub_*` / `mea_enabled` 与 Growth worker 死字段。保留 `growth.llm`。不改 Channel、不改 MaybeSpill |
 | S38 | [portal-setting-off](./2026-09-05-portal-setting-off-design.md) | 关掉 S36 leftover：停 `PortalSetting` AutoMigrate、删模型。不 DROP 表、不改 Channel、不改 MaybeSpill |
+| S39 | [credential-solicitation-off](./2026-09-05-credential-solicitation-off-design.md) | 关掉 S24 leftover：删无调用者的纯文本凭据回拉。保留 `ask_user` 的 `MatchAskUserIntent`。不改 MaybeSpill |
 
-**顺序**：S1 → … → S37 → S38。
+**顺序**：S1 → … → S38 → S39。
