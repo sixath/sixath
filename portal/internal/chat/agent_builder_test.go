@@ -131,29 +131,22 @@ func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
 	}
 }
 
-func TestBuildRegistry_ElasticsearchOnly_RCASurfaceHasESLogQuery(t *testing.T) {
-	cfg, err := structpb.NewStruct(map[string]interface{}{
-		"datasource": map[string]interface{}{
-			"id":   "zj-es",
-			"type": "elasticsearch",
-			"dsn":  "http://127.0.0.1:9200",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewStruct: %v", err)
-	}
+func TestBuildRegistry_RegistersAllBoundRCATools(t *testing.T) {
+	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
+		"roots": []any{t.TempDir()},
+	})}
+	esTool := &biz.ToolMeta{Name: "mg-rca-es", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "es_log_query", map[string]any{
+		"endpoint": "http://es",
+	})}
 	reg := tool.NewRegistry()
-	_, err = BuildRegistry([]*biz.ToolMeta{{
-		ID:     "es-1",
-		Name:   "zj-es",
-		Type:   biz.ToolTypeDatasource,
-		Config: cfg,
-	}}, nil, reg, RegistryBuildOptions{ActiveFamilies: familySet([]string{FamilyRCA, FamilyCore})})
-	if err != nil {
+	if _, err := BuildRegistry([]*biz.ToolMeta{codeTool, esTool}, nil, reg, RegistryBuildOptions{Workspace: t.TempDir()}); err != nil {
 		t.Fatalf("BuildRegistry: %v", err)
 	}
+	if _, ok := reg.Get("rca_grep"); !ok {
+		t.Fatal("code RCA tools must register without a family surface")
+	}
 	if _, ok := reg.Get("es_log_query"); !ok {
-		t.Fatal("RCA surface with only ES datasource must still register es_log_query")
+		t.Fatal("es RCA tools must register without a family surface")
 	}
 }
 
@@ -255,98 +248,3 @@ func TestBuildRegistry_RegisterSSHExecBuiltin(t *testing.T) {
 	}
 }
 
-func TestFilterToolsForSurface_CodeVsRCA(t *testing.T) {
-	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
-		"roots": []any{"D:\\workspace\\migu"},
-	})}
-	esTool := &biz.ToolMeta{Name: "mg-rca-es", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "es_log_query", map[string]any{
-		"endpoint": "http://es",
-	})}
-	tools := []*biz.ToolMeta{codeTool, esTool}
-
-	codeOnly := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode}))
-	if len(codeOnly) != 1 || codeOnly[0].Name != "migu-rca" {
-		t.Fatalf("code surface want only rca_code tool, got %+v", namesOf(codeOnly))
-	}
-
-	rcaOnly := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyRCA}))
-	if len(rcaOnly) != 1 || rcaOnly[0].Name != "mg-rca-es" {
-		t.Fatalf("rca surface want only es tool, got %+v", namesOf(rcaOnly))
-	}
-
-	both := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode, FamilyRCA}))
-	if len(both) != 2 {
-		t.Fatalf("both families want 2 tools, got %+v", namesOf(both))
-	}
-}
-
-func TestFilterToolsForSurface_DatasourceNeedsDataFamily(t *testing.T) {
-	t.Setenv(toolFamilySplitEnv, "1")
-	ds := &biz.ToolMeta{Name: "migu_mongodb", Type: biz.ToolTypeDatasource}
-	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
-		"roots": []any{"D:\\workspace\\migu"},
-	})}
-	tools := []*biz.ToolMeta{ds, codeTool}
-	codeOnly := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode}))
-	if len(codeOnly) != 1 || codeOnly[0].Name != "migu-rca" {
-		t.Fatalf("code surface must drop datasource, got %+v", namesOf(codeOnly))
-	}
-	withData := filterToolsForSurface(tools, familySet([]string{FamilyCore, FamilyCode, FamilyData}))
-	if len(withData) != 2 {
-		t.Fatalf("data+code want 2, got %+v", namesOf(withData))
-	}
-}
-
-func TestFilterToolsForSurface_KeepsESOnRCA(t *testing.T) {
-	es, _ := structpb.NewStruct(map[string]any{
-		"datasource": map[string]any{"type": "elasticsearch", "dsn": "http://es:9200"},
-	})
-	mysql, _ := structpb.NewStruct(map[string]any{
-		"datasource": map[string]any{"type": "mysql", "dsn": "u:p@tcp(h:3306)/db"},
-	})
-	tools := []*biz.ToolMeta{
-		{Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es},
-		{Name: "pro_mysql", Type: biz.ToolTypeDatasource, Config: mysql},
-	}
-	out := filterToolsForSurface(tools, familySet([]string{FamilyRCA, FamilyCore}))
-	got := namesOf(out)
-	join := strings.Join(got, ",")
-	if !strings.Contains(join, "zj-elk") {
-		t.Fatalf("RCA surface must keep elasticsearch datasource, got %v", got)
-	}
-	if strings.Contains(join, "pro_mysql") {
-		t.Fatalf("RCA surface must not keep mysql, got %v", got)
-	}
-}
-
-func TestFilterToolsForSurface_DropsESOnDataOnly(t *testing.T) {
-	es, _ := structpb.NewStruct(map[string]any{
-		"datasource": map[string]any{"type": "elasticsearch", "dsn": "http://es:9200"},
-	})
-	mysql, _ := structpb.NewStruct(map[string]any{
-		"datasource": map[string]any{"type": "mysql", "dsn": "u:p@tcp(h:3306)/db"},
-	})
-	tools := []*biz.ToolMeta{
-		{Name: "zj-elk", Type: biz.ToolTypeDatasource, Config: es},
-		{Name: "pro_mysql", Type: biz.ToolTypeDatasource, Config: mysql},
-	}
-	out := filterToolsForSurface(tools, familySet([]string{FamilyData, FamilyCore}))
-	got := namesOf(out)
-	join := strings.Join(got, ",")
-	if strings.Contains(join, "zj-elk") {
-		t.Fatalf("Data-only surface must not keep elasticsearch, got %v", got)
-	}
-	if !strings.Contains(join, "pro_mysql") {
-		t.Fatalf("Data-only surface must keep mysql, got %v", got)
-	}
-}
-
-func namesOf(tools []*biz.ToolMeta) []string {
-	out := make([]string, 0, len(tools))
-	for _, t := range tools {
-		if t != nil {
-			out = append(out, t.Name)
-		}
-	}
-	return out
-}

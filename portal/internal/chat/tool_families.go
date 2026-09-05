@@ -18,34 +18,8 @@ const (
 	FamilyData         = "data"
 	FamilySkills       = "skills"
 	FamilyMemory       = "memory"
-	turnToolSurfaceEnv = "SATH_TURN_TOOL_SURFACE"
 	toolFamilySplitEnv = "SATH_TOOL_FAMILY_SPLIT"
 )
-
-// turnToolSurfaceOverride is set from chat.turn_tool_surface_enabled in config.yaml.
-// nil → follow env / default on. Env SATH_TURN_TOOL_SURFACE always wins when set.
-var turnToolSurfaceOverride *bool
-
-// SetTurnToolSurfaceEnabled applies the YAML switch (nil pointer = leave default).
-func SetTurnToolSurfaceEnabled(enabled bool) {
-	v := enabled
-	turnToolSurfaceOverride = &v
-}
-
-func resetTurnToolSurfaceOverride() {
-	turnToolSurfaceOverride = nil
-}
-
-func ToolSurfaceEnabled() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv(turnToolSurfaceEnv)))
-	if v != "" {
-		return !(v == "0" || v == "false" || v == "off" || v == "no")
-	}
-	if turnToolSurfaceOverride != nil {
-		return *turnToolSurfaceOverride
-	}
-	return true
-}
 
 // ToolFamilySplitEnabled 为 true 时 data/skills/memory 独立成族（默认开）。
 // SATH_TOOL_FAMILY_SPLIT=0 回退 8-09：这些工具仍算 core。

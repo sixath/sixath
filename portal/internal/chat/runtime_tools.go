@@ -29,8 +29,6 @@ type AgentRuntimeToolsOptions struct {
 	VisionAnalyzer tool.VisionAnalyzer
 	// RuntimeTools drives Memory Hub Resolve for knowledge_* registration (P1).
 	RuntimeTools biz.RuntimeToolsConfig
-	// ActiveFamilies nil => no surface filter (legacy full runtime bind).
-	ActiveFamilies map[string]struct{}
 }
 
 // RegisterAgentRuntimeTools registers Hermes P0 runtime tools according to flags (spec §14).
@@ -43,15 +41,12 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 		SetSkillManageConfirmCreateDelete(flags.SkillManageConfirmCreateDelete)
 	}
 
-	registerSkills := !ToolFamilySplitEnabled() || FamilyActive(opts.ActiveFamilies, FamilySkills)
-	if registerSkills {
-		if err := RegisterCoreSkillTools(reg, opts.SkillsIdx, opts.McpServers, opts.AllowScript); err != nil {
+	if err := RegisterCoreSkillTools(reg, opts.SkillsIdx, opts.McpServers, opts.AllowScript); err != nil {
+		return err
+	}
+	if flags.SkillRuntimeManageEnabled {
+		if err := RegisterSkillRuntimeTools(reg, opts.SkillsIdx, opts.McpServers); err != nil {
 			return err
-		}
-		if flags.SkillRuntimeManageEnabled {
-			if err := RegisterSkillRuntimeTools(reg, opts.SkillsIdx, opts.McpServers); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -59,13 +54,10 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 	if store == nil {
 		store = BuildMemoryStore(nil, opts.MemoryCfg, opts.SessionProvider, DefaultMemoryStoreOptions())
 	}
-	registerMemory := !ToolFamilySplitEnabled() || FamilyActive(opts.ActiveFamilies, FamilyMemory)
-	if registerMemory {
-		if err := toolmem.RegisterMemoryStoreTools(reg, store, toolmem.StoreToolsOptions{
-			AgentWriteEnabled: flags.MemoryWriteEnabled,
-		}); err != nil {
-			return err
-		}
+	if err := toolmem.RegisterMemoryStoreTools(reg, store, toolmem.StoreToolsOptions{
+		AgentWriteEnabled: flags.MemoryWriteEnabled,
+	}); err != nil {
+		return err
 	}
 
 	if flags.TodoEnabled {
@@ -78,7 +70,7 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 			return err
 		}
 	}
-	if flags.WebToolsEnabled && FamilyActive(opts.ActiveFamilies, FamilyWeb) {
+	if flags.WebToolsEnabled {
 		if err := registerWebTools(reg, true); err != nil {
 			return err
 		}
@@ -98,10 +90,8 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 			return err
 		}
 	}
-	if FamilyActive(opts.ActiveFamilies, FamilyKnowledge) {
-		if err := RegisterKnowledgeHubTools(reg, opts.RuntimeTools); err != nil {
-			return err
-		}
+	if err := RegisterKnowledgeHubTools(reg, opts.RuntimeTools); err != nil {
+		return err
 	}
 	return nil
 }

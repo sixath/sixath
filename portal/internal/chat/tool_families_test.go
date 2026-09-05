@@ -9,42 +9,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func TestToolSurfaceEnabled_DefaultOn(t *testing.T) {
-	t.Setenv("SATH_TURN_TOOL_SURFACE", "")
-	resetTurnToolSurfaceOverride()
-	t.Cleanup(resetTurnToolSurfaceOverride)
-	if !ToolSurfaceEnabled() {
-		t.Fatal("default should be enabled")
-	}
-}
-
-func TestToolSurfaceEnabled_Off(t *testing.T) {
-	t.Setenv("SATH_TURN_TOOL_SURFACE", "0")
-	if ToolSurfaceEnabled() {
-		t.Fatal("0 should disable")
-	}
-}
-
-func TestToolSurfaceEnabled_YAMLOffWhenEnvUnset(t *testing.T) {
-	t.Setenv("SATH_TURN_TOOL_SURFACE", "")
-	resetTurnToolSurfaceOverride()
-	t.Cleanup(resetTurnToolSurfaceOverride)
-	SetTurnToolSurfaceEnabled(false)
-	if ToolSurfaceEnabled() {
-		t.Fatal("yaml false should disable when env unset")
-	}
-}
-
-func TestToolSurfaceEnabled_EnvOverridesYAML(t *testing.T) {
-	resetTurnToolSurfaceOverride()
-	t.Cleanup(resetTurnToolSurfaceOverride)
-	SetTurnToolSurfaceEnabled(false)
-	t.Setenv("SATH_TURN_TOOL_SURFACE", "1")
-	if !ToolSurfaceEnabled() {
-		t.Fatal("env 1 should win over yaml false")
-	}
-}
-
 func TestFamilyForBuiltinToolName_CodeVsRCA(t *testing.T) {
 	if FamilyForBuiltinToolName("rca_grep") != FamilyCode {
 		t.Fatal("rca_grep → code")

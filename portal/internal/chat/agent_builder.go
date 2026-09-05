@@ -59,10 +59,8 @@ type RegistryBuildResult struct {
 	DsBindings       []DatasourceBinding
 }
 
-// RegistryBuildOptions optional surface filter for BuildRegistry.
+// RegistryBuildOptions optional inputs for BuildRegistry.
 type RegistryBuildOptions struct {
-	// ActiveFamilies nil => no filtering (legacy full bind).
-	ActiveFamilies map[string]struct{}
 	// Workspace is the agent writable root; rca_* uses workspace/code when present.
 	Workspace string
 }
@@ -74,8 +72,6 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	tools = filterToolsForSurface(tools, o.ActiveFamilies)
-	servers = filterServersForSurface(servers, o.ActiveFamilies)
 
 	reg.SetEventBus(events.DefaultBus())
 
@@ -140,62 +136,6 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	registerESLogFromAgentTools(reg, tools)
 
 	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
-}
-
-func filterServersForSurface(servers []*biz.McpServerMeta, active map[string]struct{}) []*biz.McpServerMeta {
-	if active == nil {
-		return servers
-	}
-	var out []*biz.McpServerMeta
-	for _, s := range servers {
-		if s == nil {
-			continue
-		}
-		if FamilyActive(active, MCPFamilyID(s.ID)) {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func filterToolsForSurface(tools []*biz.ToolMeta, active map[string]struct{}) []*biz.ToolMeta {
-	if active == nil {
-		return tools
-	}
-	var out []*biz.ToolMeta
-	for _, t := range tools {
-		if t == nil {
-			continue
-		}
-		switch t.Type {
-		case biz.ToolTypeRCA:
-			if FamilyActive(active, familyForRCATool(t)) {
-				out = append(out, t)
-			}
-		case biz.ToolTypeMCP:
-			mc := tool.McpConfigFromMap(toolConfigToMap(t.Config))
-			fid := LegacyMCPFamilyID(t.Name)
-			if mc != nil && mc.Id != "" {
-				fid = MCPFamilyID(mc.Id)
-			}
-			if FamilyActive(active, fid) {
-				out = append(out, t)
-			}
-		default:
-			fam := FamilyCore
-			if t.Type == biz.ToolTypeDatasource {
-				if isElasticsearchType(datasourceTypeFromMeta(t)) {
-					fam = FamilyRCA
-				} else if ToolFamilySplitEnabled() {
-					fam = FamilyData
-				}
-			}
-			if FamilyActive(active, fam) {
-				out = append(out, t)
-			}
-		}
-	}
-	return out
 }
 
 func mcpEntryFromConfig(mc *tool.McpConfig) toolskill.McpServerEntry {
