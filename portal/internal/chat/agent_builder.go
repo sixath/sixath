@@ -12,6 +12,7 @@ import (
 
 	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
+	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
@@ -379,17 +380,20 @@ func ExecuteSkillScript(ctx context.Context, workspace string, extraSkillDirs []
 	return fmt.Sprint(result), nil
 }
 
-// BuildEffectiveSystemPrompt 根据 Agent 的 systemPrompt 与 skills 构建最终注入的系统提示。
-// 当 skillsIdx 非空时，若用户未配置 systemPrompt，则使用完整的技能说明；若已配置，则在其后追加技能摘要。
+// BuildEffectiveSystemPrompt 返回装配进 Harness 的 Agent 文案。
+// Skills 索引由 Harness PromptBuilder 负责，这里不再拼接。
 func BuildEffectiveSystemPrompt(userPrompt string, skillsIdx *skills.Index) string {
-	if skillsIdx == nil {
-		return userPrompt
+	_ = skillsIdx
+	return userPrompt
+}
+
+// HarnessReActOptions 把 workspace 与额外 skills 目录交给 Harness PromptBuilder。
+func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReActOption {
+	opts := []agent.ReActOption{agent.WithReActWorkspace(workspace)}
+	if len(extraSkillDirs) > 0 {
+		opts = append(opts, agent.WithReActSkillsDirs(extraSkillDirs))
 	}
-	skillsPrompt := templates.BuildSkillsAwarePrompt(skillsIdx)
-	if userPrompt == "" {
-		return skillsPrompt
-	}
-	return userPrompt + "\n\n---\n\n" + skillsPrompt
+	return opts
 }
 
 // DefaultMaxOutputTokens Portal 对话默认单次回复 token 上限（框架 CallConfig 默认为 1024）。
@@ -414,7 +418,7 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 	opts := []agent.ReActOption{
 		agent.WithReActMaxSteps(80),
 		agent.WithReActMaxHistory(maxHistory),
-		agent.WithReActMaxContextRunes(model.DefaultMaxContextRunes),
+		agent.WithReActMaxContextRunes(fwctx.DefaultMaxContextRunes),
 		agent.WithReActMaxOutputTokens(DefaultMaxOutputTokens),
 		agent.WithReActEventBus(events.DefaultBus()),
 	}

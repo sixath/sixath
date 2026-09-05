@@ -359,15 +359,12 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 
-	effectivePrompt := chat.BuildEffectiveSystemPrompt(agentMeta.SystemPrompt, skillsIdx)
-	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, chat.ReActOptionsFromAgent(*agentMeta)...)
+	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
+	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	a := chat.BuildReActAgent(m, reg, agentText, 20, opts...)
 
-	messages := make([]model.Message, 0, 3)
-	if effectivePrompt != "" {
-		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
-	}
+	messages := make([]model.Message, 0, 1)
 	messages = append(messages, model.Message{Role: "user", Content: content})
 
 	runCtx := context.WithValue(ctx, tool.ContextKeyWorkspaceRoot, agentMeta.Workspace)

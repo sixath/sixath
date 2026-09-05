@@ -423,9 +423,11 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	})
 	// 构建 ReActAgent（含成长工具成功钩子，见 growth_chat.go）
 	maxHistory := 20
-	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
-		append(chat.ReActOptionsFromAgent(*agentMeta),
-			s.growthReActOptions(agentMeta.Workspace)...)...)
+	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
+	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	opts = append(opts, s.growthReActOptions(agentMeta.Workspace)...)
+	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
 
 	// 加载历史消息（已包含刚保存的 user 消息）
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
@@ -434,14 +436,8 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	// 转换为 agent.Request.Messages
-	effectivePrompt := chat.BuildEffectiveSystemPrompt(agentMeta.SystemPrompt, skillsIdx)
-	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	messages := make([]model.Message, 0, len(history)+2)
-	if effectivePrompt != "" {
-		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
-	}
+	// 转换为 agent.Request.Messages（system 由 Harness PromptBuilder 写入）
+	messages := make([]model.Message, 0, len(history)+1)
 	for _, h := range history {
 		if h.Role == "system" {
 			continue
@@ -699,13 +695,14 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		Catalog:      catalog,
 	})
 	maxHistory := 20
+	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
+	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	opts = append(opts, s.growthReActOptions(agentMeta.Workspace)...)
+	opts = append(opts, agent.WithReActEventBus(turnBus))
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。
-	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
-		append(chat.ReActOptionsFromAgent(*agentMeta),
-			append(s.growthReActOptions(agentMeta.Workspace),
-				agent.WithReActEventBus(turnBus),
-			)...)...)
+	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
 
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
 	if err != nil {
@@ -757,13 +754,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		}
 	}
 
-	effectivePrompt := chat.BuildEffectiveSystemPrompt(agentMeta.SystemPrompt, skillsIdx)
-	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
 	messages := make([]model.Message, 0, len(history)+3)
-	if effectivePrompt != "" {
-		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
-	}
 	for _, h := range history {
 		if h.Role == "system" {
 			continue
