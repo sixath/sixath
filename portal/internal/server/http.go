@@ -89,9 +89,6 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.POST("/api/v1/orgs/{id}/members", AddOrgMemberHandler(aclAPI))
 	r.POST("/api/v1/resources/{id}/grants", CreateResourceGrantHandler(aclAPI))
 	r.POST("/api/v1/users/{id}/tokens", IssueUserTokenHandler(aclAPI))
-	// E2: growth 指标 JSON 端点（spec phase2 §E2）。便于人工排查；正式生产可接 Prometheus collector。
-	r.GET("/api/v1/growth/metrics", GrowthMetricsHandler())
-	// Trajectory utilization: message-level SearchAnchored for UI (hand-written; not in chat.proto).
 	r.GET("/api/v1/agents/{agent_id}/transcript/search", TranscriptSearchHandler(chat))
 	// Code roots browse + agent workspace/code symlink (hand-written).
 	r.GET("/api/v1/code-roots", CodeRootsListHandler(codeRoots))

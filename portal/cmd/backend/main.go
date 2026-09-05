@@ -141,7 +141,7 @@ func main() {
 	bc.Auth = conf.EnrichAuthFromEnv(bc.Auth)
 	conf.EnrichDataFromEnv(bc.Data)
 	conf.EnrichGrowthFromEnv(bc.Growth)
-	chat.EnrichFailureCaptureFromEnv()
+	chat.EnrichSkillManageConfirmFromEnv()
 
 	chat.InitSessionSearchFromEnv()
 

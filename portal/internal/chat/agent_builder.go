@@ -391,9 +391,6 @@ func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReAc
 			hooks = append(hooks, loaded...)
 		}
 	}
-	if FailureCaptureEnabled {
-		hooks = append(hooks, agent.NewFailureCaptureHook(agent.FailureCaptureConfig{}))
-	}
 	if len(hooks) > 0 {
 		opts = append(opts, agent.WithReActToolHooks(hooks...))
 	}
