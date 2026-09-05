@@ -27,16 +27,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestAgentAliasPackageRemoved`：`../agent` 目录必须不存在
-- [ ] 先跑应失败
+- [x] `TestAgentAliasPackageRemoved`：`../agent` 目录必须不存在
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 删包
 
-- [ ] `git rm -r framework/agent`
-- [ ] `cd framework && go test ./harness ./workspace ./context ./model ./templates -count=1`
-- [ ] **Commit** `fix(framework): drop one-season agent alias package`
+- [x] `git rm -r framework/agent`
+- [x] `cd framework && go test ./harness ./workspace ./context ./model ./templates -count=1`
+- [x] **Commit** `fix(framework): drop one-season agent alias package`
 
 ---
 
