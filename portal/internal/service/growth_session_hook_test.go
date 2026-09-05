@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"testing"
-	"time"
 
 	chatv1 "backend/api/chat/v1"
 	"backend/internal/biz"
@@ -36,39 +35,5 @@ func TestDeleteSession_DefaultChatService_noGrowthSessionEndHooks(t *testing.T) 
 	}
 	if repo.state.PendingSkillReview {
 		t.Fatal("default ChatService must not register growth session-end hooks")
-	}
-}
-
-func TestNotifyGrowthAssistantTurn_doesNotCallTrySessionEnd(t *testing.T) {
-	repo := &fakeGrowthRepoForService{state: &biz.ChatGrowthState{
-		SessionID:              "g2-asst",
-		TurnsSinceMemoryReview: 1,
-		ToolItersSinceReview:   1,
-	}}
-	uc := biz.NewGrowthUsecase(repo)
-	uc.SetSessionEndMemoryReviewEnabled(true)
-	uc.SetSessionEndSkillReviewEnabled(true)
-
-	s := &ChatService{
-		growthUC: uc,
-		log:      log.NewHelper(log.DefaultLogger),
-	}
-	s.notifyGrowthAssistantTurn("g2-asst")
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if repo.state != nil && repo.state.TurnsSinceMemoryReview == 2 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if repo.state == nil || repo.state.TurnsSinceMemoryReview != 2 {
-		t.Fatalf("expected OnAssistantTurn to bump turns to 2, got %#v", repo.state)
-	}
-	if repo.state.PendingMemoryReview {
-		t.Fatal("assistant path must not call TrySessionEndMemoryReview")
-	}
-	if repo.state.PendingSkillReview {
-		t.Fatal("assistant path must not call TrySessionEndSkillReview")
 	}
 }

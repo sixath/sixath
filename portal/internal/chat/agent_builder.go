@@ -387,11 +387,23 @@ func BuildEffectiveSystemPrompt(userPrompt string, skillsIdx *skills.Index) stri
 	return userPrompt
 }
 
-// HarnessReActOptions 把 workspace 与额外 skills 目录交给 Harness PromptBuilder。
+// HarnessReActOptions 把 workspace、额外 skills 目录与 workspace hooks 交给 Harness。
 func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReActOption {
 	opts := []agent.ReActOption{agent.WithReActWorkspace(workspace)}
 	if len(extraSkillDirs) > 0 {
 		opts = append(opts, agent.WithReActSkillsDirs(extraSkillDirs))
+	}
+	var hooks []agent.ToolHook
+	if ws := strings.TrimSpace(workspace); ws != "" {
+		if loaded, err := agent.LoadWorkspaceHarnessHooks(ws); err == nil {
+			hooks = append(hooks, loaded...)
+		}
+	}
+	if FailureCaptureEnabled {
+		hooks = append(hooks, agent.NewFailureCaptureHook(agent.FailureCaptureConfig{}))
+	}
+	if len(hooks) > 0 {
+		opts = append(opts, agent.WithReActToolHooks(hooks...))
 	}
 	return opts
 }

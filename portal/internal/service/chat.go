@@ -431,12 +431,11 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		Wiring:       catalogInput,
 		Catalog:      catalog,
 	})
-	// 构建 ReActAgent（含成长工具成功钩子，见 growth_chat.go）
+	// 构建 ReActAgent
 	maxHistory := 20
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
-	opts = append(opts, s.growthReActOptions(agentMeta.Workspace)...)
 	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
 
 	// 加载历史消息（已包含刚保存的 user 消息）
@@ -708,7 +707,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
-	opts = append(opts, s.growthReActOptions(agentMeta.Workspace)...)
 	opts = append(opts, agent.WithReActEventBus(turnBus))
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。

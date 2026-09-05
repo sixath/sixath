@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"backend/internal/biz"
@@ -23,6 +25,35 @@ func TestReActOptionsFromAgent_maxOutputTokens(t *testing.T) {
 func TestReActOptionsFromAgent_zeroOmits(t *testing.T) {
 	if opts := ReActOptionsFromAgent(biz.AgentMeta{}); len(opts) != 0 {
 		t.Fatalf("expected no opts")
+	}
+}
+
+func TestHarnessReActOptions_LoadsWorkspaceHooks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`
+version: 1
+rules:
+  - id: block-demo
+    tools: [demo]
+    action: block
+    reason: "no demo"
+`)
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := HarnessReActOptions(root, nil)
+	var cfg agent.ReActConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if cfg.Workspace != root {
+		t.Fatalf("workspace=%q", cfg.Workspace)
+	}
+	if len(cfg.ToolHooks) != 1 {
+		t.Fatalf("ToolHooks=%d want 1", len(cfg.ToolHooks))
 	}
 }
 

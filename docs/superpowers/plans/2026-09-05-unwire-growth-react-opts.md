@@ -28,19 +28,19 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestHarnessReActOptions_LoadsWorkspaceHooks`
-- [ ] `TestChatGo_DoesNotCallGrowthReActOptions`
-- [ ] 先跑应失败
+- [x] `TestHarnessReActOptions_LoadsWorkspaceHooks`
+- [x] `TestChatGo_DoesNotCallGrowthReActOptions`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 接线与删除
 
-- [ ] hooks 并进 `HarnessReActOptions`；chat.go 去掉 `growthReActOptions`
-- [ ] 删 `growth_chat.go` 与无调用者测试
-- [ ] `cd portal && go test ./internal/chat ./internal/service -count=1`
+- [x] hooks 并进 `HarnessReActOptions`；chat.go 去掉 `growthReActOptions`
+- [x] 删 `growth_chat.go` 与无调用者测试
+- [x] `cd portal && go test ./internal/chat ./internal/service -count=1`
 
-- [ ] **Commit** `fix(portal): move harness hooks out of growth ReAct options`
+- [x] **Commit** `fix(portal): move harness hooks out of growth ReAct options`
 
 ---
 
