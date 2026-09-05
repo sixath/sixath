@@ -360,5 +360,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S22 | [skill-autoroute-off](./2026-09-05-skill-autoroute-off-design.md) | 关掉 S19 leftover：发货 yaml `skills.auto_route_enabled` false。不改 Channel 路由、不 regen proto |
 | S23 | [unwire-append-learning](./2026-09-05-unwire-append-learning-design.md) | 关掉 Growth leftover：默认 Chat 不再注册 `append_learning`。不删工具实现 |
 | S24 | [remaining-default-path-off](./2026-09-05-remaining-default-path-off-design.md) | 一次性拆掉剩余默认路径 leftover：凭据回拉、任务锁文案、extract/graph notify、prefetch、toolFamily 索引。不删器官包、不合 assembler |
+| S25 | [shelf-family-code-model-off](./2026-09-05-shelf-family-code-model-off-design.md) | 删零调用货架函数；拆 FamilyCode 切模与设置页/表单。不删器官包、不 regen proto |
 
-**顺序**：S1 → … → S23 → S24。
+**顺序**：S1 → … → S24 → S25。
