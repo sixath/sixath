@@ -30,11 +30,7 @@ func TestBuildPrefetchMemoryOrchestrator_OmitsProceduralBindings(t *testing.T) {
 	if o == nil || len(o.Backends) != 1 {
 		t.Fatalf("orchestrator backends=%v", o)
 	}
-	b, ok := o.Backends[0].(*memory.StorePrefetchBackend)
-	if !ok {
+	if _, ok := o.Backends[0].(*memory.StorePrefetchBackend); !ok {
 		t.Fatalf("backend type %T", o.Backends[0])
-	}
-	if len(b.ProceduralBindings) != 0 || b.LoadPersistedProcedural {
-		t.Fatalf("default prefetch must not inject procedural: binds=%d loadPersisted=%v", len(b.ProceduralBindings), b.LoadPersistedProcedural)
 	}
 }

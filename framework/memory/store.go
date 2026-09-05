@@ -19,21 +19,14 @@ var (
 	ErrScopeNotEnabled    = errors.New("memory: scope not enabled")
 	ErrNotSupported       = errors.New("memory: not supported")
 	ErrEmptyQueryRejected = errors.New("memory: empty query rejected")
-	// ErrProceduralRememberBlocked rejects bare metadata.kind=procedural (use CommitProceduralRepair).
+	// ErrProceduralRememberBlocked rejects bare metadata.kind=procedural.
 	ErrProceduralRememberBlocked = errors.New("memory: procedural remember blocked (episode boundary)")
-	// ErrProceduralCommitRejected is returned when commit gates fail.
-	ErrProceduralCommitRejected = errors.New("memory: procedural commit rejected")
 )
 
 // Unit kind values (memory_units.kind / metadata.kind).
 const (
-	KindFact        = "fact"
-	KindProcedural  = "procedural"
-	MetaSourceProceduralRepair = "procedural_repair"
-	MetaProceduralStatus       = "procedural_status"
-	MetaProceduralEntryID      = "procedural_entry_id"
-	MetaFailureCode            = "failure_code"
-	MetaSupportCount           = "support_count"
+	KindFact       = "fact"
+	KindProcedural = "procedural"
 )
 
 // KindFactOnly is the default Recall/List filter: exclude procedural.

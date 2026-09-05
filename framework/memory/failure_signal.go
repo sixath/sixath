@@ -60,8 +60,15 @@ func identityFromCtx(ctx context.Context) (agentID, agentName, sessionID, family
 	agentName = strings.TrimSpace(agentName)
 	sessionID = strings.TrimSpace(sessionID)
 	// TaskFamily: prefer agent name/label when present, else agent_id (§6.5).
-	family = ResolveTaskFamily(agentID, agentName)
+	family = resolveTaskFamily(agentID, agentName)
 	return agentID, agentName, sessionID, family
+}
+
+func resolveTaskFamily(agentID, agentName string) string {
+	if s := strings.TrimSpace(agentName); s != "" {
+		return s
+	}
+	return strings.TrimSpace(agentID)
 }
 
 func payloadString(p map[string]any, key string) string {

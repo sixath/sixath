@@ -175,33 +175,6 @@ func TestStorePrefetchBackend_Prefetch_MergesSessionAndAgent(t *testing.T) {
 	}
 }
 
-func TestStorePrefetchBackend_Prefetch_ProceduralBindings(t *testing.T) {
-	store := &fakePrefetchStore{}
-	b := &StorePrefetchBackend{
-		Store: store,
-		ProceduralBindings: []ProceduralBinding{{
-			TriggerQuery: "转人工",
-			ActionKind:   BindingActionSkill,
-			SkillID:      "escalation",
-			Mode:         BindingModeSuggest,
-		}},
-	}
-	parts, err := b.Prefetch(context.Background(), PrefetchQuery{
-		SessionID:   "s1",
-		AgentID:     "zone-4100-agent",
-		UserMessage: "请转人工",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(parts) != 1 || parts[0].Label != "procedural" {
-		t.Fatalf("parts=%+v", parts)
-	}
-	if !strings.Contains(parts[0].Content, "escalation") {
-		t.Fatalf("content=%s", parts[0].Content)
-	}
-}
-
 func TestStorePrefetchBackend_Prefetch_DefaultLimit(t *testing.T) {
 	store := &fakePrefetchStore{}
 	b := &StorePrefetchBackend{Store: store}

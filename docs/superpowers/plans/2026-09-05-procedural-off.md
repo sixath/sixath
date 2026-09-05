@@ -28,24 +28,24 @@
 
 ### Task 1: 失败锁定测试
 
-- [ ] `TestProceduralCommitGoRemoved` 等
-- [ ] `TestConfigGo_omitsMemoryProceduralRepair`
-- [ ] 先跑必须红
+- [x] `TestProceduralCommitGoRemoved` 等
+- [x] `TestConfigGo_omitsMemoryProceduralRepair`
+- [x] 先跑必须红
 
 ---
 
 ### Task 2: 删 five-gate 并修好调用方
 
-- [ ] 删 procedural_* 文件与 e2e
-- [ ] prefetch 去掉注入字段与匹配循环
-- [ ] config 去掉 `MemoryProceduralRepair`
-- [ ] 保留 `KindProcedural` / Remember 拒写 / FailureSignal
-- [ ] **Commit** `fix(memory): drop unused procedural five-gate after portal unwired`
+- [x] 删 procedural_* 文件与 e2e
+- [x] prefetch 去掉注入字段与匹配循环
+- [x] config 去掉 `MemoryProceduralRepair`
+- [x] 保留 `KindProcedural` / Remember 拒写 / FailureSignal
+- [x] **Commit** `fix(memory): drop unused procedural five-gate after portal unwired`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] `cd framework && go test ./memory ./config ./harness -count=1`
-- [ ] `cd portal && go test ./internal/chat ./internal/data -count=1`（skip SQLITE_BUSY）
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] `cd framework && go test ./memory ./config ./harness -count=1`
+- [x] `cd portal && go test ./internal/chat ./internal/data -count=1`（skip SQLITE_BUSY）
+- [x] 不要 merge/push，除非用户明确要求。

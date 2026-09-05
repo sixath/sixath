@@ -35,26 +35,3 @@ func KindMatchesFilter(unitKind, filter string) bool {
 		return unitKind != KindProcedural
 	}
 }
-
-// IsPilotAgent reports whether agentID or agentName is in the pilot list.
-// Empty pilot list → no agent is pilot (safe default for auto_commit).
-func IsPilotAgent(pilotAgents []string, agentID, agentName string) bool {
-	if len(pilotAgents) == 0 {
-		return false
-	}
-	agentID = strings.TrimSpace(agentID)
-	agentName = strings.TrimSpace(agentName)
-	for _, p := range pilotAgents {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if agentID != "" && p == agentID {
-			return true
-		}
-		if agentName != "" && p == agentName {
-			return true
-		}
-	}
-	return false
-}
