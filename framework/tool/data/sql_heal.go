@@ -15,8 +15,6 @@ var (
 	reFromTable     = regexp.MustCompile(`(?i)\bFROM\s+((?:` + "`" + `?[A-Za-z0-9_]+` + "`" + `?\.)?` + "`" + `?[A-Za-z0-9_*\-]+` + "`" + `?)`)
 )
 
-const maxSQLHealAttempts = 5
-
 // HealReadSQL proposes one rewritten SELECT after a schema-related execute_read error.
 // It never changes WHERE predicates. ok=false means no safe rewrite.
 func HealReadSQL(sql string, err error, schema *metadata.Schema) (string, string, bool) {

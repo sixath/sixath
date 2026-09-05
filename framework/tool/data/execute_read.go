@@ -192,54 +192,6 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 	}
 }
 
-func queryWithSchemaHeal(ctx context.Context, cfg *ExecuteReadConfig, reader executor.Reader, datasourceID, dsl string, qo executor.QueryOptions) (*executor.QueryResult, error) {
-	res, err := reader.Query(ctx, datasourceID, dsl, qo)
-	if err == nil {
-		return res, nil
-	}
-	if !executor.IsSchemaRelated(err) {
-		return nil, fmt.Errorf("execute_read: %w", err)
-	}
-	cur := dsl
-	var notes []string
-	schema := schemaForHeal(ctx, cfg, datasourceID)
-	for attempt := 0; attempt < maxSQLHealAttempts; attempt++ {
-		next, note, ok := HealReadSQL(cur, err, schema)
-		if !ok {
-			break
-		}
-		notes = append(notes, note)
-		cur = next
-		res, err = reader.Query(ctx, datasourceID, cur, qo)
-		if err == nil {
-			if res != nil {
-				res.RepairedSQL = cur
-				res.RepairNote = strings.Join(notes, "; ")
-			}
-			return res, nil
-		}
-		if !executor.IsSchemaRelated(err) {
-			return nil, fmt.Errorf("execute_read: %w", err)
-		}
-		if schema == nil {
-			schema = schemaForHeal(ctx, cfg, datasourceID)
-		}
-	}
-	hint := SchemaHealHint(cur, err, schema)
-	return nil, fmt.Errorf("execute_read: %w; %s", err, hint)
-}
-
-func schemaForHeal(ctx context.Context, cfg *ExecuteReadConfig, datasourceID string) *metadata.Schema {
-	if cfg == nil || cfg.Store == nil {
-		return nil
-	}
-	schema, err := metadata.EnsureSchemaForDatasource(ctx, cfg.Registry, cfg.Store, datasourceID)
-	if err != nil {
-		return nil
-	}
-	return schema
-}
-
 func queryResultRows(res *executor.QueryResult) []map[string]any {
 	if res == nil {
 		return nil
