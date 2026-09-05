@@ -1,10 +1,11 @@
-package model
+package context
 
 import (
-	"context"
+	stdctx "context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/sixath/framework/model"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 // L2Runtime 维护 L2 摘要的 auxiliary 调用与失败冷却（设计 §5.2、§5.6）；由 ReAct 通过 WithL2Runtime 注入 CallConfig。
 type L2Runtime struct {
-	aux          Model
+	aux          model.Model
 	softTokens   int
 	maxFailures  int
 	cooldownSec  int
@@ -25,7 +26,7 @@ type L2Runtime struct {
 }
 
 // NewL2Runtime 创建运行时；aux 为 nil 时 MaybeSummarize 不生效。
-func NewL2Runtime(aux Model, softTokens, maxFailures, cooldownSec int, alpha float64, prePruneToolRunes int) *L2Runtime {
+func NewL2Runtime(aux model.Model, softTokens, maxFailures, cooldownSec int, alpha float64, prePruneToolRunes int) *L2Runtime {
 	if softTokens <= 0 {
 		softTokens = 32000
 	}
@@ -48,7 +49,7 @@ func NewL2Runtime(aux Model, softTokens, maxFailures, cooldownSec int, alpha flo
 	}
 }
 
-func lastRealUserIndex(msgs []Message) int {
+func lastRealUserIndex(msgs []model.Message) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if strings.EqualFold(msgs[i].Role, "user") && !compressionNoticeUserMessage(msgs[i]) {
 			return i
@@ -57,7 +58,7 @@ func lastRealUserIndex(msgs []Message) int {
 	return -1
 }
 
-func transcriptForL2(msgs []Message) string {
+func transcriptForL2(msgs []model.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
@@ -71,7 +72,7 @@ func transcriptForL2(msgs []Message) string {
 }
 
 // MaybeSummarize 在 L0/strip 之后调用：若保守 token 仍高于 softTokens，则将「首段 system 之后、末条真实 user 之前」整段替换为 L2 system 摘要。
-func (r *L2Runtime) MaybeSummarize(ctx context.Context, msgs []Message, trace ContextTraceFunc) []Message {
+func (r *L2Runtime) MaybeSummarize(ctx stdctx.Context, msgs []model.Message, trace ContextTraceFunc) []model.Message {
 	if r == nil || r.aux == nil || len(msgs) == 0 {
 		return msgs
 	}
@@ -101,9 +102,9 @@ func (r *L2Runtime) MaybeSummarize(ctx context.Context, msgs []Message, trace Co
 	if strings.TrimSpace(trans) == "" {
 		return msgs
 	}
-	sys := Message{Role: "system", Content: "你是上下文压缩助手。下面给出一段对话摘录，请用中文写一段不超过 800 字的摘要，保留关键结论与实体名；不要编造未出现的信息。"}
-	user := Message{Role: "user", Content: "【待压缩摘录】\n" + trans}
-	gen, err := r.aux.Chat(ctx, []Message{sys, user}, WithMaxTokens(512), WithTemperature(0.2))
+	sys := model.Message{Role: "system", Content: "你是上下文压缩助手。下面给出一段对话摘录，请用中文写一段不超过 800 字的摘要，保留关键结论与实体名；不要编造未出现的信息。"}
+	user := model.Message{Role: "user", Content: "【待压缩摘录】\n" + trans}
+	gen, err := r.aux.Chat(ctx, []model.Message{sys, user}, model.WithMaxTokens(512), model.WithTemperature(0.2))
 	if err != nil || gen == nil || strings.TrimSpace(gen.Text) == "" {
 		r.recordFailure(trace)
 		return msgs
@@ -111,14 +112,14 @@ func (r *L2Runtime) MaybeSummarize(ctx context.Context, msgs []Message, trace Co
 	summary := strings.TrimSpace(gen.Text)
 	sumHash := sha256.Sum256([]byte(summary))
 	hash := hex.EncodeToString(sumHash[:])
-	sumMsg := Message{
+	sumMsg := model.Message{
 		Role:    "system",
 		Content: "[记忆中段摘要 / L2]\n" + summary,
 		Metadata: map[string]any{
-			MetadataKeySixathOrigin: OriginL2Handoff,
+			model.MetadataKeySixathOrigin: model.OriginL2Handoff,
 		},
 	}
-	out := make([]Message, 0, len(msgs)-len(middle)+1)
+	out := make([]model.Message, 0, len(msgs)-len(middle)+1)
 	out = append(out, msgs[:head]...)
 	out = append(out, sumMsg)
 	out = append(out, msgs[u:]...)

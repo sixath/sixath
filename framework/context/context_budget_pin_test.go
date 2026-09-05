@@ -1,7 +1,8 @@
-package model
+package context
 
 import (
 	"encoding/json"
+	"github.com/sixath/framework/model"
 	"strings"
 	"testing"
 )
@@ -49,7 +50,7 @@ func TestPruneToolMessageBodies_PreservesControlFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msgs := []Message{{Role: "tool", Content: string(raw)}}
+	msgs := []model.Message{{Role: "tool", Content: string(raw)}}
 	out := pruneToolMessageBodies(msgs, 500)
 	got := out[0].Content
 	if !strings.Contains(got, `"control_flow"`) {
@@ -68,23 +69,23 @@ func TestPruneToolMessageBodies_PreservesControlFlow(t *testing.T) {
 }
 
 func TestPruneToolMessageBodies_NonJSONStillTruncates(t *testing.T) {
-	msgs := []Message{{Role: "tool", Content: strings.Repeat("z", 400)}}
+	msgs := []model.Message{{Role: "tool", Content: strings.Repeat("z", 400)}}
 	out := pruneToolMessageBodies(msgs, 50)
 	if !strings.Contains(out[0].Content, "truncated for L2 pre-prune") {
 		t.Fatalf("plain tool body should still truncate, got %q", out[0].Content)
 	}
 }
 
-func TestPrepareChatContext_L2PrePrunePinsControlFlow(t *testing.T) {
+func TestPrepare_L2PrePrunePinsControlFlow(t *testing.T) {
 	huge := strings.Repeat("x", 5000)
 	body := `{"tool":"rca_read","result":{"content":"` + huge + `","control_flow":[{"function":"F","paths":[{"id":"p1","when":["errcode == 0"],"calls":["InsertUnionUserAreaInfo"]}]}]}}`
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "s"},
 		{Role: "user", Content: "why 1105"},
 		{Role: "tool", Content: body},
 	}
-	cfg := &CallConfig{L2: NewL2Runtime(nil, 32000, 3, 600, 0, 400)}
-	out := PrepareChatContext(msgs, cfg)
+	cfg := &PipelineConfig{L2: NewL2Runtime(nil, 32000, 3, 600, 0, 400)}
+	out := Prepare(msgs, cfg)
 	var tool string
 	for _, m := range out {
 		if strings.EqualFold(m.Role, "tool") {

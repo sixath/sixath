@@ -1,24 +1,25 @@
-package model
+package context
 
 import (
+	"github.com/sixath/framework/model"
 	"strings"
 	"testing"
 )
 
-func tc(name string, args map[string]any) ToolCall {
-	return ToolCall{Name: name, Arguments: args, ID: "call-" + name}
+func tc(name string, args map[string]any) model.ToolCall {
+	return model.ToolCall{Name: name, Arguments: args, ID: "call-" + name}
 }
 
-func assistantToolRound(calls ...ToolCall) Message {
-	return Message{
+func assistantToolRound(calls ...model.ToolCall) model.Message {
+	return model.Message{
 		Role:     "assistant",
 		Content:  " ",
 		Metadata: map[string]any{"tool_calls": calls},
 	}
 }
 
-func toolResult(name, callID, content string) Message {
-	return Message{
+func toolResult(name, callID, content string) model.Message {
+	return model.Message{
 		Role:    "tool",
 		Content: content,
 		Metadata: map[string]any{
@@ -29,7 +30,7 @@ func toolResult(name, callID, content string) Message {
 }
 
 func TestSnipCompactMessages_RemovesSupersededReadFileChain(t *testing.T) {
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "read foo twice"},
 		assistantToolRound(tc("read_file", map[string]any{"path": "src/foo.go"})),
@@ -51,7 +52,7 @@ func TestSnipCompactMessages_RemovesSupersededReadFileChain(t *testing.T) {
 }
 
 func TestSnipCompactMessages_KeepsMixedChainWithWriteFile(t *testing.T) {
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		assistantToolRound(
 			tc("read_file", map[string]any{"path": "a.go"}),
@@ -72,7 +73,7 @@ func TestSnipCompactMessages_KeepsMixedChainWithWriteFile(t *testing.T) {
 }
 
 func TestSnipCompactMessages_WebSearchQueryDedup(t *testing.T) {
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "s"},
 		assistantToolRound(tc("web_search", map[string]any{"query": "Go 1.22 release"})),
 		toolResult("web_search", "c1", `{}`),
@@ -86,8 +87,8 @@ func TestSnipCompactMessages_WebSearchQueryDedup(t *testing.T) {
 }
 
 func TestSnipCompactMessages_SkipsProtectedRuntimeMessages(t *testing.T) {
-	msgs := []Message{
-		{Role: "system", Content: "sys", Metadata: map[string]any{MetadataKeySixathOrigin: OriginL2Handoff}},
+	msgs := []model.Message{
+		{Role: "system", Content: "sys", Metadata: map[string]any{model.MetadataKeySixathOrigin: model.OriginL2Handoff}},
 		assistantToolRound(tc("todo", map[string]any{})),
 		toolResult("todo", "c1", `{}`),
 	}
@@ -97,22 +98,22 @@ func TestSnipCompactMessages_SkipsProtectedRuntimeMessages(t *testing.T) {
 	}
 }
 
-func TestPrepareChatContext_EmitsSnipCompact(t *testing.T) {
+func TestPrepare_EmitsSnipCompact(t *testing.T) {
 	var kinds []string
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		assistantToolRound(tc("read_file", map[string]any{"path": "x"})),
 		toolResult("read_file", "c1", `{}`),
 		assistantToolRound(tc("read_file", map[string]any{"path": "x"})),
 		toolResult("read_file", "c2", `{}`),
 	}
-	cfg := &CallConfig{
+	cfg := &PipelineConfig{
 		SnipCompactEnabled: true,
-		ContextTrace: func(kind string, detail map[string]any) {
+		Trace: func(kind string, detail map[string]any) {
 			kinds = append(kinds, kind)
 		},
 	}
-	out := PrepareChatContext(msgs, cfg)
+	out := Prepare(msgs, cfg)
 	if len(out) >= len(msgs) {
 		t.Fatalf("expected snip to remove messages")
 	}
@@ -128,15 +129,15 @@ func TestPrepareChatContext_EmitsSnipCompact(t *testing.T) {
 	}
 }
 
-func TestPrepareChatContext_SnipDisabled(t *testing.T) {
-	msgs := []Message{
+func TestPrepare_SnipDisabled(t *testing.T) {
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		assistantToolRound(tc("read_file", map[string]any{"path": "x"})),
 		toolResult("read_file", "c1", `{}`),
 		assistantToolRound(tc("read_file", map[string]any{"path": "x"})),
 		toolResult("read_file", "c2", `{}`),
 	}
-	out := PrepareChatContext(msgs, &CallConfig{SnipCompactEnabled: false})
+	out := Prepare(msgs, &PipelineConfig{SnipCompactEnabled: false})
 	if len(out) != len(msgs) {
 		t.Fatalf("snip disabled should keep all messages, got %d", len(out))
 	}

@@ -54,7 +54,7 @@ func ApplyL1SanitizeToMessages(msgs []Message) ([]Message, int) {
 			}
 			m.Parts = parts
 		}
-		if strings.EqualFold(m.Role, "assistant") && hasToolCallsMeta(m) && strings.TrimSpace(m.Content) == "" {
+		if strings.EqualFold(m.Role, "assistant") && assistantHasToolCalls(m) && strings.TrimSpace(m.Content) == "" {
 			m.Content = " "
 		}
 		if strings.EqualFold(m.Role, "tool") && strings.TrimSpace(m.Content) == "" {
@@ -63,6 +63,24 @@ func ApplyL1SanitizeToMessages(msgs []Message) ([]Message, int) {
 		out[i] = m
 	}
 	return out, changed
+}
+
+func assistantHasToolCalls(m Message) bool {
+	if m.Metadata == nil {
+		return false
+	}
+	tc, ok := m.Metadata["tool_calls"]
+	if !ok || tc == nil {
+		return false
+	}
+	switch v := tc.(type) {
+	case []ToolCall:
+		return len(v) > 0
+	case []any:
+		return len(v) > 0
+	default:
+		return true
+	}
 }
 
 // TruncateMessageRunes 将 content 截断到至多 maxRunes 个 Unicode 码点（suffix 不计入预算）；maxRunes<=0 时不修改。

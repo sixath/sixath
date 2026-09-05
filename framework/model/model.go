@@ -104,18 +104,6 @@ type CallConfig struct {
 	Temperature float32
 	MaxTokens   int
 	ModelName   string
-	// MaxContextRunes 若 >0，则在调用前按 Unicode 码点近似压缩 messages（见 CompressMessagesByRunesBudget）。
-	MaxContextRunes int
-	// MaxContextTokensSoft 若 >0，则以保守 token 粗估触发 L0 压缩（与 MaxContextRunes 独立开关，可并存）。
-	MaxContextTokensSoft int
-	// TokenEstimateAlpha 为 token 粗估系数（<=0 使用 DefaultTokenEstimateAlpha）。
-	TokenEstimateAlpha float64
-	// ContextTrace 若非空，在 PrepareChatContext（压缩、strip 孤儿 tool）时回调，供可观测聚合（即 TraceSink）。
-	ContextTrace ContextTraceFunc
-	// L2 可选摘要运行时；非空且启用时在 PrepareChatContextCtx 末尾尝试 MaybeSummarize（设计 §5）。
-	L2 *L2Runtime
-	// SnipCompactEnabled 为 true 时在 L2 预剪枝前移除 superseded 的 tool 链（Claude Code snipCompact）。
-	SnipCompactEnabled bool
 }
 
 // ApplyOptions 根据可选参数构建最终配置。
@@ -149,60 +137,5 @@ func WithModelName(name string) Option {
 		if name != "" {
 			c.ModelName = name
 		}
-	}
-}
-
-// WithMaxContextRunes 设置上下文字符预算；超过时裁剪较早「用户轮」与左侧工具链（见 context_budget.go）。0 表示关闭。
-func WithMaxContextRunes(n int) Option {
-	return func(c *CallConfig) {
-		if n > 0 {
-			c.MaxContextRunes = n
-		}
-	}
-}
-
-// WithMaxContextTokensSoft 设置上下文 token 软阈值（保守粗估）；>0 时触发 L0 近似压缩。
-func WithMaxContextTokensSoft(n int) Option {
-	return func(c *CallConfig) {
-		if n > 0 {
-			c.MaxContextTokensSoft = n
-		}
-	}
-}
-
-// WithTokenEstimateAlpha 设置 token 粗估系数；<=0 时保持默认。
-func WithTokenEstimateAlpha(alpha float64) Option {
-	return func(c *CallConfig) {
-		if alpha > 0 {
-			c.TokenEstimateAlpha = alpha
-		}
-	}
-}
-
-// WithContextTrace 注册上下文变换回调（压缩、strip 等），与 WithMaxContextRunes 等一并传入 Chat / ChatWithTools。
-func WithContextTrace(fn ContextTraceFunc) Option {
-	return func(c *CallConfig) {
-		c.ContextTrace = fn
-	}
-}
-
-// WithTraceSink 注册可观测 TraceSink（与 WithContextTrace 等价，便于按规格 O2 检索 API）。
-func WithTraceSink(sink TraceSink) Option {
-	return func(c *CallConfig) {
-		c.ContextTrace = sink
-	}
-}
-
-// WithL2Runtime 注入 L2 摘要运行时（与 WithContextTrace 配合）；nil 清除。
-func WithL2Runtime(r *L2Runtime) Option {
-	return func(c *CallConfig) {
-		c.L2 = r
-	}
-}
-
-// WithSnipCompactEnabled 启用 snipCompact：L2 前按工具引用关系移除 superseded 的 tool 链。
-func WithSnipCompactEnabled(enabled bool) Option {
-	return func(c *CallConfig) {
-		c.SnipCompactEnabled = enabled
 	}
 }

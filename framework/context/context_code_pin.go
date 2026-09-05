@@ -1,7 +1,8 @@
-package model
+package context
 
 import (
 	"encoding/json"
+	"github.com/sixath/framework/model"
 	"strings"
 	"unicode/utf8"
 )
@@ -16,7 +17,7 @@ const (
 // ensureCodePinMessages copies the last N rca_read content windows and CFG
 // summaries into a leading system message so L0/L2 can drop tool bodies
 // without losing the source window.
-func ensureCodePinMessages(msgs []Message) []Message {
+func ensureCodePinMessages(msgs []model.Message) []model.Message {
 	reads := extractCodePinReads(msgs)
 	if len(reads) == 0 {
 		return dropCodePinMessages(msgs)
@@ -25,16 +26,16 @@ func ensureCodePinMessages(msgs []Message) []Message {
 	if err != nil {
 		return msgs
 	}
-	pin := Message{
+	pin := model.Message{
 		Role:    "system",
 		Content: content,
 		Metadata: map[string]any{
-			MetadataKeySixathOrigin: OriginCodePin,
+			model.MetadataKeySixathOrigin: model.OriginCodePin,
 		},
 	}
 	out := dropCodePinMessages(msgs)
 	head := leadingSystemCount(out)
-	with := make([]Message, 0, len(out)+1)
+	with := make([]model.Message, 0, len(out)+1)
 	with = append(with, out[:head]...)
 	with = append(with, pin)
 	with = append(with, out[head:]...)
@@ -83,7 +84,7 @@ func assembleCodePinContent(reads []map[string]any) (string, error) {
 	}
 
 	if utf8.RuneCountInString(content) > codePinMaxRunes {
-		content = TruncateMessageRunes(content, codePinMaxRunes, "")
+		content = model.TruncateMessageRunes(content, codePinMaxRunes, "")
 	}
 	return content, nil
 }
@@ -101,7 +102,7 @@ func pinContentWouldBeWiped(pinContent string, reads []map[string]any) bool {
 	if prefix == "" {
 		return false
 	}
-	trunc := TruncateMessageRunes(pinContent, codePinMaxRunes, "")
+	trunc := model.TruncateMessageRunes(pinContent, codePinMaxRunes, "")
 	return !strings.Contains(trunc, prefix)
 }
 
@@ -151,7 +152,7 @@ func shortenControlFlowWhen(pin map[string]any) {
 				}
 				if len(w) == 1 {
 					if s, ok := w[0].(string); ok && utf8.RuneCountInString(s) > 80 {
-						pm["when"] = []any{TruncateMessageRunes(s, 80, "")}
+						pm["when"] = []any{model.TruncateMessageRunes(s, 80, "")}
 					}
 				}
 			}
@@ -159,8 +160,8 @@ func shortenControlFlowWhen(pin map[string]any) {
 	}
 }
 
-func dropCodePinMessages(msgs []Message) []Message {
-	out := make([]Message, 0, len(msgs))
+func dropCodePinMessages(msgs []model.Message) []model.Message {
+	out := make([]model.Message, 0, len(msgs))
 	for _, m := range msgs {
 		if isCodePinMessage(m) {
 			continue
@@ -170,16 +171,16 @@ func dropCodePinMessages(msgs []Message) []Message {
 	return out
 }
 
-func isCodePinMessage(m Message) bool {
+func isCodePinMessage(m model.Message) bool {
 	if m.Metadata != nil {
-		if v, ok := m.Metadata[MetadataKeySixathOrigin].(string); ok && v == OriginCodePin {
+		if v, ok := m.Metadata[model.MetadataKeySixathOrigin].(string); ok && v == model.OriginCodePin {
 			return true
 		}
 	}
 	return strings.HasPrefix(strings.TrimSpace(m.Content), codePinPrefix)
 }
 
-func extractCodePinReads(msgs []Message) []map[string]any {
+func extractCodePinReads(msgs []model.Message) []map[string]any {
 	var reads []map[string]any
 	for _, m := range msgs {
 		if !strings.EqualFold(m.Role, "tool") {
@@ -230,7 +231,7 @@ func pinFromToolContent(content string) map[string]any {
 		pin["repo"] = repo
 	}
 	if src != "" {
-		pin["content"] = TruncateMessageRunes(src, codePinContentMaxRunes, "")
+		pin["content"] = model.TruncateMessageRunes(src, codePinContentMaxRunes, "")
 	}
 	if summary := summarizeControlFlow(cf); summary != nil {
 		pin["control_flow"] = summary

@@ -1,16 +1,17 @@
-package model
+package context
 
 import (
+	"github.com/sixath/framework/model"
 	"strings"
 	"testing"
 )
 
 func TestCompressionNoticeUserMessage_MetadataWithoutChineseKeyword(t *testing.T) {
-	m := Message{
+	m := model.Message{
 		Role:    "user",
 		Content: "short",
 		Metadata: map[string]any{
-			MetadataKeySixathOrigin: OriginCompressionNotice,
+			model.MetadataKeySixathOrigin: model.OriginCompressionNotice,
 		},
 	}
 	if !compressionNoticeUserMessage(m) {
@@ -19,13 +20,13 @@ func TestCompressionNoticeUserMessage_MetadataWithoutChineseKeyword(t *testing.T
 }
 
 func TestStripLeadingOrphanTools_SkipsToolAfterCompressionNoticeByMetadata(t *testing.T) {
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "s"},
 		{
 			Role:    "user",
 			Content: "x",
 			Metadata: map[string]any{
-				MetadataKeySixathOrigin: OriginCompressionNotice,
+				model.MetadataKeySixathOrigin: model.OriginCompressionNotice,
 			},
 		},
 		{Role: "tool", Content: `{}`, Metadata: map[string]any{"tool_call_id": "1"}},

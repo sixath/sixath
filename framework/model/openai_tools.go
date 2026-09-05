@@ -76,7 +76,7 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 		modelName = callCfg.ModelName
 	}
 
-	msgs := PrepareChatContextCtx(ctx, messages, callCfg)
+	msgs := messages
 
 	deferActive, _ := ctx.Value(tool.ContextKeyToolSearchActive).(bool)
 	tools := reg.ListForAPIWithDefer(ctx, nil, deferActive)

@@ -1,6 +1,7 @@
-package model
+package context
 
 import (
+	"github.com/sixath/framework/model"
 	"unicode/utf8"
 )
 
@@ -10,7 +11,7 @@ const DefaultTokenEstimateAlpha = 1.35
 
 // EstimateTokensConservative 对 messages 做保守 token 粗估：sum(rune_count(plain)*alpha)。
 // plain 口径与 CompressMessagesByRunesBudget 一致（见 plainTextForBudget）。
-func EstimateTokensConservative(msgs []Message, alpha float64) int {
+func EstimateTokensConservative(msgs []model.Message, alpha float64) int {
 	if alpha <= 0 {
 		alpha = DefaultTokenEstimateAlpha
 	}

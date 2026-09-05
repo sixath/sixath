@@ -91,8 +91,7 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []Message, opts ...Opt
 		return nil, errors.New("messages is empty")
 	}
 	callCfg := ApplyOptions(opts...)
-	msgs := PrepareChatContextCtx(ctx, messages, callCfg)
-	req := c.buildChatRequest(msgs, callCfg)
+	req := c.buildChatRequest(messages, callCfg)
 	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, err
@@ -167,8 +166,7 @@ func (c *OpenAIClient) ChatStream(ctx context.Context, messages []Message, opts 
 		return nil, errors.New("messages is empty")
 	}
 	callCfg := ApplyOptions(opts...)
-	msgs := PrepareChatContextCtx(ctx, messages, callCfg)
-	req := c.buildChatRequest(msgs, callCfg)
+	req := c.buildChatRequest(messages, callCfg)
 
 	stream, err := c.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {

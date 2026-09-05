@@ -1,14 +1,15 @@
-package model
+package context
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/sixath/framework/model"
 	"strings"
 )
 
 // SnipCompactMessages 在 L2 摘要前移除已被后续同键 tool 链 supersede 的僵尸消息（Claude Code snipCompact 语义）。
 // 以 assistant(tool_calls)+tool 为原子单元；含不可 snip 工具或无法提取 dedup 键的链保留不动。
-func SnipCompactMessages(msgs []Message) (out []Message, removed int) {
+func SnipCompactMessages(msgs []model.Message) (out []model.Message, removed int) {
 	if len(msgs) == 0 {
 		return msgs, 0
 	}
@@ -61,7 +62,7 @@ func SnipCompactMessages(msgs []Message) (out []Message, removed int) {
 	if len(removeIdx) == 0 {
 		return msgs, 0
 	}
-	out = make([]Message, 0, len(msgs)-len(removeIdx))
+	out = make([]model.Message, 0, len(msgs)-len(removeIdx))
 	for i, m := range msgs {
 		if _, drop := removeIdx[i]; drop {
 			continue
@@ -76,7 +77,7 @@ type snipToolChain struct {
 	end   int // exclusive
 }
 
-func enumerateSnipToolChains(msgs []Message, head int) []snipToolChain {
+func enumerateSnipToolChains(msgs []model.Message, head int) []snipToolChain {
 	var chains []snipToolChain
 	for i := head; i < len(msgs); {
 		if isProtectedRuntimeMessage(msgs[i]) {
@@ -96,13 +97,13 @@ func enumerateSnipToolChains(msgs []Message, head int) []snipToolChain {
 	return chains
 }
 
-func isProtectedRuntimeMessage(m Message) bool {
+func isProtectedRuntimeMessage(m model.Message) bool {
 	if m.Metadata == nil {
 		return false
 	}
-	origin, _ := m.Metadata[MetadataKeySixathOrigin].(string)
+	origin, _ := m.Metadata[model.MetadataKeySixathOrigin].(string)
 	switch origin {
-	case OriginL2Handoff, OriginMemoryFence, OriginCompressionNotice, OriginCompactBoundary, OriginGuardrailHalt, OriginCodeWorkset, OriginCodePin:
+	case model.OriginL2Handoff, model.OriginMemoryFence, model.OriginCompressionNotice, model.OriginCompactBoundary, model.OriginGuardrailHalt, model.OriginCodeWorkset, model.OriginCodePin:
 		return true
 	default:
 		return false
@@ -114,7 +115,7 @@ type snipCall struct {
 	args map[string]any
 }
 
-func toolCallsInChain(msgs []Message, start, end int) []snipCall {
+func toolCallsInChain(msgs []model.Message, start, end int) []snipCall {
 	if start < 0 || start >= len(msgs) || end > len(msgs) || start >= end {
 		return nil
 	}
@@ -140,7 +141,7 @@ func toolCallsInChain(msgs []Message, start, end int) []snipCall {
 	return out
 }
 
-func toolCallsFromMessage(m Message) []ToolCall {
+func toolCallsFromMessage(m model.Message) []model.ToolCall {
 	if m.Metadata == nil {
 		return nil
 	}
@@ -149,14 +150,14 @@ func toolCallsFromMessage(m Message) []ToolCall {
 		return nil
 	}
 	switch v := raw.(type) {
-	case []ToolCall:
+	case []model.ToolCall:
 		return v
 	default:
 		return nil
 	}
 }
 
-func toolNameFromToolMessage(m Message) string {
+func toolNameFromToolMessage(m model.Message) string {
 	if m.Metadata != nil {
 		if n, _ := m.Metadata["tool_name"].(string); strings.TrimSpace(n) != "" {
 			return n

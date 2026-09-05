@@ -1,7 +1,8 @@
-package model
+package context
 
 import (
 	"fmt"
+	"github.com/sixath/framework/model"
 	"strings"
 	"unicode/utf8"
 )
@@ -11,13 +12,13 @@ import (
 const DefaultMaxContextRunes = 200_000
 
 // plainTextForBudget 估算单条消息占用的「文本量」（与 DashScope 侧 plain 文本规则一致）。
-func plainTextForBudget(m Message) string {
+func plainTextForBudget(m model.Message) string {
 	if len(strings.TrimSpace(m.Content)) > 0 {
 		return m.Content
 	}
 	var b strings.Builder
 	for _, p := range m.Parts {
-		if p.Type != ContentTypeText {
+		if p.Type != model.ContentTypeText {
 			continue
 		}
 		t := strings.TrimSpace(p.Text)
@@ -32,7 +33,7 @@ func plainTextForBudget(m Message) string {
 	return b.String()
 }
 
-func totalMessageRunes(msgs []Message) int {
+func totalMessageRunes(msgs []model.Message) int {
 	n := 0
 	for i := range msgs {
 		n += utf8.RuneCountInString(plainTextForBudget(msgs[i]))
@@ -40,7 +41,7 @@ func totalMessageRunes(msgs []Message) int {
 	return n
 }
 
-func leadingSystemCount(msgs []Message) int {
+func leadingSystemCount(msgs []model.Message) int {
 	i := 0
 	for i < len(msgs) && strings.EqualFold(msgs[i].Role, "system") {
 		i++
@@ -48,7 +49,7 @@ func leadingSystemCount(msgs []Message) int {
 	return i
 }
 
-func hasToolCallsMeta(m Message) bool {
+func hasToolCallsMeta(m model.Message) bool {
 	if m.Metadata == nil {
 		return false
 	}
@@ -57,7 +58,7 @@ func hasToolCallsMeta(m Message) bool {
 		return false
 	}
 	switch v := tc.(type) {
-	case []ToolCall:
+	case []model.ToolCall:
 		return len(v) > 0
 	case []any:
 		return len(v) > 0
@@ -67,7 +68,7 @@ func hasToolCallsMeta(m Message) bool {
 }
 
 // toolChainEnd 返回从 msgs[i] 开始的「assistant(tool_calls) + 连续 tool」子链之后的首个下标；若 i 不是带 tool_calls 的 assistant，返回 i。
-func toolChainEnd(msgs []Message, i int) int {
+func toolChainEnd(msgs []model.Message, i int) int {
 	if i >= len(msgs) || !strings.EqualFold(msgs[i].Role, "assistant") || !hasToolCallsMeta(msgs[i]) {
 		return i
 	}
@@ -79,7 +80,7 @@ func toolChainEnd(msgs []Message, i int) int {
 }
 
 // userBlocks 将 msgs[head:] 按「user 分段」切成若干块，每块为下标切片（保序）。
-func userBlocks(msgs []Message, head int) [][]int {
+func userBlocks(msgs []model.Message, head int) [][]int {
 	var blocks [][]int
 	n := len(msgs)
 	j := head
@@ -112,8 +113,8 @@ func userBlocks(msgs []Message, head int) [][]int {
 	return blocks
 }
 
-func assembleFromBlocks(msgs []Message, head int, blocks [][]int, fromBlock int) []Message {
-	out := make([]Message, 0, len(msgs))
+func assembleFromBlocks(msgs []model.Message, head int, blocks [][]int, fromBlock int) []model.Message {
+	out := make([]model.Message, 0, len(msgs))
 	out = append(out, msgs[:head]...)
 	for b := fromBlock; b < len(blocks); b++ {
 		for _, idx := range blocks[b] {
@@ -123,8 +124,8 @@ func assembleFromBlocks(msgs []Message, head int, blocks [][]int, fromBlock int)
 	return out
 }
 
-func dropLeadingToolRoundsWhileOverBudget(msgs []Message, maxRunes int) []Message {
-	out := append([]Message(nil), msgs...)
+func dropLeadingToolRoundsWhileOverBudget(msgs []model.Message, maxRunes int) []model.Message {
+	out := append([]model.Message(nil), msgs...)
 	head := leadingSystemCount(out)
 	if len(out) <= head+1 {
 		return out
@@ -144,7 +145,7 @@ func dropLeadingToolRoundsWhileOverBudget(msgs []Message, maxRunes int) []Messag
 	return out
 }
 
-func compressMessagesByRunesBudgetInner(msgs []Message, maxRunes int) []Message {
+func compressMessagesByRunesBudgetInner(msgs []model.Message, maxRunes int) []model.Message {
 	head := leadingSystemCount(msgs)
 	blocks := userBlocks(msgs, head)
 	if len(blocks) == 0 {
@@ -161,7 +162,7 @@ func compressMessagesByRunesBudgetInner(msgs []Message, maxRunes int) []Message 
 // CompressMessagesByRunesBudget 在总字符量（Unicode 码点近似）超过 maxRunes 时压缩消息列表：
 // 1) 保留全部前缀 system；2) 按 user 分段丢弃最旧的若干「用户轮」；3) 若仍超限，在同一轮内从左侧丢弃完整的 assistant(tool)+tool 链。
 // maxRunes<=0 时不修改。若确实删去了消息，会插入一条简短 user 说明（中文）。
-func CompressMessagesByRunesBudget(msgs []Message, maxRunes int) []Message {
+func CompressMessagesByRunesBudget(msgs []model.Message, maxRunes int) []model.Message {
 	if maxRunes <= 0 || len(msgs) == 0 {
 		return msgs
 	}
@@ -182,10 +183,10 @@ func CompressMessagesByRunesBudget(msgs []Message, maxRunes int) []Message {
 	return stripLeadingOrphanToolsAfterSystem(insertCompressionNotice(out, h, dropped))
 }
 
-func compressionNoticeUserMessage(m Message) bool {
+func compressionNoticeUserMessage(m model.Message) bool {
 	if m.Metadata != nil {
-		if v, ok := m.Metadata[MetadataKeySixathOrigin]; ok {
-			if s, ok := v.(string); ok && s == OriginCompressionNotice {
+		if v, ok := m.Metadata[model.MetadataKeySixathOrigin]; ok {
+			if s, ok := v.(string); ok && s == model.OriginCompressionNotice {
 				return true
 			}
 		}
@@ -193,16 +194,16 @@ func compressionNoticeUserMessage(m Message) bool {
 	return strings.Contains(m.Content, "上下文已压缩")
 }
 
-func insertCompressionNotice(msgs []Message, head int, droppedCount int) []Message {
+func insertCompressionNotice(msgs []model.Message, head int, droppedCount int) []model.Message {
 	text := fmt.Sprintf("[上下文已压缩：已省略较早的 %d 条消息；以下为保留的最近对话。]", droppedCount)
-	note := Message{
+	note := model.Message{
 		Role:    "user",
 		Content: text,
 		Metadata: map[string]any{
-			MetadataKeySixathOrigin: OriginCompressionNotice,
+			model.MetadataKeySixathOrigin: model.OriginCompressionNotice,
 		},
 	}
-	out := make([]Message, 0, len(msgs)+1)
+	out := make([]model.Message, 0, len(msgs)+1)
 	out = append(out, msgs[:head]...)
 	out = append(out, note)
 	out = append(out, msgs[head:]...)
@@ -211,7 +212,7 @@ func insertCompressionNotice(msgs []Message, head int, droppedCount int) []Messa
 
 // stripLeadingOrphanToolsAfterSystem 去掉「全部前缀 system」之后、在合法 user/assistant 之前出现的孤立 tool，
 // 以及「压缩说明 user」后紧跟的 tool（否则 OpenAI 兼容网关常返回 invalid request）。
-func stripLeadingOrphanToolsAfterSystem(msgs []Message) []Message {
+func stripLeadingOrphanToolsAfterSystem(msgs []model.Message) []model.Message {
 	h := leadingSystemCount(msgs)
 	if h >= len(msgs) {
 		return msgs
@@ -234,7 +235,7 @@ func stripLeadingOrphanToolsAfterSystem(msgs []Message) []Message {
 	if i == h {
 		return msgs
 	}
-	out := make([]Message, 0, len(msgs)-(i-h))
+	out := make([]model.Message, 0, len(msgs)-(i-h))
 	out = append(out, msgs[:h]...)
 	out = append(out, msgs[i:]...)
 	return out
@@ -243,11 +244,11 @@ func stripLeadingOrphanToolsAfterSystem(msgs []Message) []Message {
 const l2ToolPrePruneSuffix = "\n...[tool output truncated for L2 pre-prune]"
 
 // pruneToolMessageBodies 仅截断 tool 角色 content 的码点长度（设计 §5.3 第 2 步）；不拆 assistant(tool_calls)+tool 原子单元。
-func pruneToolMessageBodies(msgs []Message, maxRunesEach int) []Message {
+func pruneToolMessageBodies(msgs []model.Message, maxRunesEach int) []model.Message {
 	if maxRunesEach <= 0 || len(msgs) == 0 {
 		return msgs
 	}
-	out := make([]Message, len(msgs))
+	out := make([]model.Message, len(msgs))
 	copy(out, msgs)
 	for i := range out {
 		if !strings.EqualFold(out[i].Role, "tool") {

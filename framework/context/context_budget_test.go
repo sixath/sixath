@@ -1,6 +1,7 @@
-package model
+package context
 
 import (
+	"github.com/sixath/framework/model"
 	"strings"
 	"testing"
 )
@@ -8,7 +9,7 @@ import (
 func TestCompressMessagesByRunesBudget_DropsOlderUserBlock(t *testing.T) {
 	u1 := strings.Repeat("x", 80)
 	u2 := strings.Repeat("y", 70)
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: u1},
 		{Role: "assistant", Content: "a1"},
@@ -31,7 +32,7 @@ func TestCompressMessagesByRunesBudget_DropsOlderUserBlock(t *testing.T) {
 }
 
 func TestCompressMessagesByRunesBudget_NoOpUnderBudget(t *testing.T) {
-	msgs := []Message{{Role: "user", Content: "hi"}}
+	msgs := []model.Message{{Role: "user", Content: "hi"}}
 	out := CompressMessagesByRunesBudget(msgs, 10_000)
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Fatalf("unexpected: %#v", out)
@@ -39,21 +40,21 @@ func TestCompressMessagesByRunesBudget_NoOpUnderBudget(t *testing.T) {
 }
 
 func TestStripLeadingOrphanToolsAfterSystem(t *testing.T) {
-	sys := Message{Role: "system", Content: "s"}
-	tool := Message{Role: "tool", Content: `{"tool":"x"}`, Metadata: map[string]any{"tool_call_id": "c1"}}
-	u := Message{Role: "user", Content: "hi"}
-	out := stripLeadingOrphanToolsAfterSystem([]Message{sys, tool, u})
+	sys := model.Message{Role: "system", Content: "s"}
+	tool := model.Message{Role: "tool", Content: `{"tool":"x"}`, Metadata: map[string]any{"tool_call_id": "c1"}}
+	u := model.Message{Role: "user", Content: "hi"}
+	out := stripLeadingOrphanToolsAfterSystem([]model.Message{sys, tool, u})
 	if len(out) != 2 || out[1].Content != "hi" {
 		t.Fatalf("expected system+user, got %#v", out)
 	}
 }
 
 func TestStripLeadingOrphanToolsAfterCompressionNote(t *testing.T) {
-	sys := Message{Role: "system", Content: "s"}
-	note := Message{Role: "user", Content: "[上下文已压缩：已省略较早的 1 条消息；以下为保留的最近对话。]"}
-	tool := Message{Role: "tool", Content: `{}`, Metadata: map[string]any{"tool_call_id": "c1"}}
-	u := Message{Role: "user", Content: "real"}
-	out := stripLeadingOrphanToolsAfterSystem([]Message{sys, note, tool, u})
+	sys := model.Message{Role: "system", Content: "s"}
+	note := model.Message{Role: "user", Content: "[上下文已压缩：已省略较早的 1 条消息；以下为保留的最近对话。]"}
+	tool := model.Message{Role: "tool", Content: `{}`, Metadata: map[string]any{"tool_call_id": "c1"}}
+	u := model.Message{Role: "user", Content: "real"}
+	out := stripLeadingOrphanToolsAfterSystem([]model.Message{sys, note, tool, u})
 	// 压缩说明后紧跟孤立 tool 时一并去掉说明与 tool，保留后续合法 user。
 	if len(out) != 2 || out[1].Content != "real" {
 		t.Fatalf("expected system+real user, got len=%d %#v", len(out), out)
@@ -61,7 +62,7 @@ func TestStripLeadingOrphanToolsAfterCompressionNote(t *testing.T) {
 }
 
 func TestCompressMessagesByRunesBudget_Disabled(t *testing.T) {
-	msgs := []Message{{Role: "user", Content: strings.Repeat("z", 100)}}
+	msgs := []model.Message{{Role: "user", Content: strings.Repeat("z", 100)}}
 	out := CompressMessagesByRunesBudget(msgs, 0)
 	if len(out) != 1 {
 		t.Fatalf("expected unchanged")
@@ -69,10 +70,10 @@ func TestCompressMessagesByRunesBudget_Disabled(t *testing.T) {
 }
 
 func TestCompressMessagesByRunesBudget_DropsLeadingToolRound(t *testing.T) {
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "s"},
 		{Role: "user", Content: "q"},
-		{Role: "assistant", Content: " ", Metadata: map[string]any{"tool_calls": []ToolCall{{
+		{Role: "assistant", Content: " ", Metadata: map[string]any{"tool_calls": []model.ToolCall{{
 			ID: "c1", Name: "t", Arguments: map[string]any{},
 		}}}},
 		{Role: "tool", Content: strings.Repeat("o", 200), Metadata: map[string]any{"tool_call_id": "c1"}},

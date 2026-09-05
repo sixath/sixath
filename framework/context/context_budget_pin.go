@@ -1,7 +1,8 @@
-package model
+package context
 
 import (
 	"encoding/json"
+	"github.com/sixath/framework/model"
 	"unicode/utf8"
 )
 
@@ -24,10 +25,10 @@ func pruneToolBodyPreservingPinnedJSON(content string, maxRunes int) string {
 	}
 	var raw any
 	if err := json.Unmarshal([]byte(content), &raw); err != nil {
-		return TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
+		return model.TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
 	}
 	if !jsonHasPinnedKey(raw, l2PinnedJSONKeys) {
-		return TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
+		return model.TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
 	}
 	pinBudget := utf8.RuneCountInString(content) - jsonPinnedRunes(raw) - 64
 	if pinBudget < 64 {
@@ -41,7 +42,7 @@ func pruneToolBodyPreservingPinnedJSON(content string, maxRunes int) string {
 		shrinkJSONStrings(raw, stringBudget, l2PinnedJSONKeys, l2TruncatableJSONKeys)
 		b, err := json.Marshal(raw)
 		if err != nil {
-			return TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
+			return model.TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
 		}
 		if utf8.RuneCount(b) <= maxRunes || stringBudget <= 32 {
 			return string(b)
@@ -53,7 +54,7 @@ func pruneToolBodyPreservingPinnedJSON(content string, maxRunes int) string {
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
+		return model.TruncateMessageRunes(content, maxRunes, l2ToolPrePruneSuffix)
 	}
 	// Never mid-cut JSON that still carries control_flow.
 	return string(b)
@@ -110,7 +111,7 @@ func shrinkJSONStrings(v any, maxStringRunes int, preserve, truncKeys map[string
 			}
 			if s, ok := val.(string); ok {
 				if _, trunc := truncKeys[k]; trunc && utf8.RuneCountInString(s) > maxStringRunes {
-					x[k] = TruncateMessageRunes(s, maxStringRunes, l2ToolPrePruneSuffix)
+					x[k] = model.TruncateMessageRunes(s, maxStringRunes, l2ToolPrePruneSuffix)
 				}
 				continue
 			}

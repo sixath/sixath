@@ -1,6 +1,10 @@
-package model
+package context
 
-import "context"
+import (
+	stdctx "context"
+
+	"github.com/sixath/framework/model"
+)
 
 // ContextTraceFunc 在上下文变换（L0/L1/L2、strip 孤儿 tool 等）发生时回调，供 agent 聚合到 RunTrace。
 // kind 取值示例："l1_sanitize"、"snip_compact"、"l2_pre_prune_tool"、"l0_compress"、"strip_orphan_tools"、"l2_summarize"、"l2_cooldown_skip"、"l2_cooldown_enter"。
@@ -10,22 +14,32 @@ type ContextTraceFunc func(kind string, detail map[string]any)
 // 实现应放在 agent 等上层包；model 不依赖 agent，避免循环引用。
 type TraceSink = ContextTraceFunc
 
-// PrepareChatContext 在进入网关请求前对 messages 执行与 OpenAIClient 一致的变换（无 ctx 时使用 Background）。
-func PrepareChatContext(messages []Message, callCfg *CallConfig) []Message {
-	return PrepareChatContextCtx(context.Background(), messages, callCfg)
+// PipelineConfig 控制 L0/L1/L2 压缩管道；与 model.CallConfig 分离。
+type PipelineConfig struct {
+	MaxContextRunes      int
+	MaxContextTokensSoft int
+	TokenEstimateAlpha   float64
+	Trace                ContextTraceFunc
+	L2                   *L2Runtime
+	SnipCompactEnabled   bool
 }
 
-// PrepareChatContextCtx 与设计 §5.3 顺序对齐：L1 → L2 预剪枝（可选）→ code pin → L0 → strip → L2 摘要（可选）。
-func PrepareChatContextCtx(ctx context.Context, messages []Message, callCfg *CallConfig) []Message {
+// Prepare 在进入网关请求前对 messages 执行与 OpenAIClient 一致的变换（无 ctx 时使用 Background）。
+func Prepare(messages []model.Message, callCfg *PipelineConfig) []model.Message {
+	return PrepareCtx(stdctx.Background(), messages, callCfg)
+}
+
+// PrepareCtx 与设计 §5.3 顺序对齐：L1 → L2 预剪枝（可选）→ code pin → L0 → strip → L2 摘要（可选）。
+func PrepareCtx(ctx stdctx.Context, messages []model.Message, callCfg *PipelineConfig) []model.Message {
 	out := messages
 	var tracef ContextTraceFunc
 	if callCfg != nil {
-		tracef = callCfg.ContextTrace
+		tracef = callCfg.Trace
 	}
 	if len(out) == 0 {
 		return out
 	}
-	out, nL1 := ApplyL1SanitizeToMessages(out)
+	out, nL1 := model.ApplyL1SanitizeToMessages(out)
 	if tracef != nil && nL1 > 0 {
 		tracef("l1_sanitize", map[string]any{"messages_touched": nL1})
 	}

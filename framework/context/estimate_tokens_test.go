@@ -1,9 +1,12 @@
-package model
+package context
 
-import "testing"
+import (
+	"github.com/sixath/framework/model"
+	"testing"
+)
 
 func TestEstimateTokensConservative_alpha(t *testing.T) {
-	msgs := []Message{{Role: "user", Content: "你好"}}
+	msgs := []model.Message{{Role: "user", Content: "你好"}}
 	n1 := EstimateTokensConservative(msgs, 1.0)
 	if n1 != 2 {
 		t.Fatalf("alpha=1 want 2 runes, got %d", n1)

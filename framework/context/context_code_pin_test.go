@@ -1,8 +1,9 @@
-package model
+package context
 
 import (
-	"context"
+	stdctx "context"
 	"encoding/json"
+	"github.com/sixath/framework/model"
 	"strings"
 	"testing"
 )
@@ -23,7 +24,7 @@ func TestEnsureCodePinMessages_extractsControlFlow(t *testing.T) {
 			},
 		},
 	})
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "q"},
 		{Role: "tool", Content: string(body)},
@@ -46,7 +47,7 @@ func TestEnsureCodePinMessages_pinsContentWithoutCFG(t *testing.T) {
 			"content": "func GetGameInfo() error { return redis.Nil }",
 		},
 	})
-	out := ensureCodePinMessages([]Message{
+	out := ensureCodePinMessages([]model.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "tool", Content: string(body)},
 	})
@@ -63,10 +64,10 @@ func TestEnsureCodePinMessages_dropsCallGraphBeforeContent(t *testing.T) {
 	content := strings.Repeat("SRC", 3000)
 	cg := map[string]any{"nodes": []any{map[string]any{"id": strings.Repeat("N", 5000)}}}
 	body, _ := json.Marshal(map[string]any{
-		"tool": "rca_read",
+		"tool":   "rca_read",
 		"result": map[string]any{"file": "ReleaseVm.go", "content": content, "call_graph": cg},
 	})
-	out := ensureCodePinMessages([]Message{
+	out := ensureCodePinMessages([]model.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "tool", Content: string(body)},
 	})
@@ -82,7 +83,7 @@ func TestEnsureCodePinMessages_dropsCallGraphBeforeContent(t *testing.T) {
 	}
 }
 
-func TestPrepareChatContextCtx_L2KeepsCodePin(t *testing.T) {
+func TestPrepareCtx_L2KeepsCodePin(t *testing.T) {
 	cf := []any{
 		map[string]any{
 			"function": "Handle",
@@ -101,10 +102,10 @@ func TestPrepareChatContextCtx_L2KeepsCodePin(t *testing.T) {
 			"end_line":     80,
 		},
 	})
-	msgs := []Message{
+	msgs := []model.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: strings.Repeat("测", 3000)},
-		{Role: "assistant", Content: "ack", Metadata: map[string]any{"tool_calls": []ToolCall{{ID: "1", Name: "rca_read"}}}},
+		{Role: "assistant", Content: "ack", Metadata: map[string]any{"tool_calls": []model.ToolCall{{ID: "1", Name: "rca_read"}}}},
 		{Role: "tool", Content: string(body), Metadata: map[string]any{"tool_call_id": "1"}},
 		{Role: "user", Content: "final question"},
 	}
@@ -115,7 +116,7 @@ func TestPrepareChatContextCtx_L2KeepsCodePin(t *testing.T) {
 		}
 	}
 	r := NewL2Runtime(stubAuxModel{}, 200, 3, 600, 2.0, 400)
-	out := PrepareChatContextCtx(context.Background(), msgs, &CallConfig{L2: r, ContextTrace: sink})
+	out := PrepareCtx(stdctx.Background(), msgs, &PipelineConfig{L2: r, Trace: sink})
 	if !sawL2 {
 		t.Fatal("expected l2_summarize")
 	}
