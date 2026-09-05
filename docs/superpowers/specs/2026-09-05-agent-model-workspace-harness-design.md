@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S24）
+## 12. P4 之后（S1–S28）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -363,5 +363,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S25 | [shelf-family-code-model-off](./2026-09-05-shelf-family-code-model-off-design.md) | 删零调用货架函数；拆 FamilyCode 切模与设置页/表单。不删器官包、不 regen proto |
 | S26 | [hypertool-off](./2026-09-05-hypertool-off-design.md) | 删无调用者的 `hypertool.go`。不删 growth/mea/hub、不改 config 死键 |
 | S27 | [mea-off](./2026-09-05-mea-off-design.md) | 删无调用者的 `framework/mea` 包。不删 growth/hub |
+| S28 | [prefetch-hub-off](./2026-09-05-prefetch-hub-off-design.md) | `framework/memory` 包根不再 import hub。不删 hub 包、不拆 Portal `hub_*.go` |
 
-**顺序**：S1 → … → S26 → S27。
+**顺序**：S1 → … → S27 → S28。
