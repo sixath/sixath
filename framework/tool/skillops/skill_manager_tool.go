@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 	fwws "github.com/sixath/framework/workspace"
@@ -18,7 +17,7 @@ import (
 // SkillManageConfig configures skill_manage runtime writes.
 type SkillManageConfig struct {
 	Index                      *skills.Index
-	Lease                      *growth.RuntimeWriteLease
+	Lease                      *RuntimeWriteLease
 	PendingStore               SkillManagePendingStore
 	TokenGen                   tool.TokenGenerator
 	RequireCreateDeleteConfirm bool
@@ -36,7 +35,7 @@ func RegisterSkillManageTool(reg *tool.Registry, cfg *SkillManageConfig) error {
 	if reg == nil {
 		return errors.New("skill_manage: registry is nil")
 	}
-	lease := growth.DefaultRuntimeWriteLease
+	lease := DefaultRuntimeWriteLease
 	requireConfirm := true
 	requirePatchConfirm := false
 	ttl := 300
@@ -104,7 +103,7 @@ func RegisterSkillManageTool(reg *tool.Registry, cfg *SkillManageConfig) error {
 	})
 }
 
-func buildSkillManageExecute(cfg *SkillManageConfig, lease *growth.RuntimeWriteLease, requireConfirm, requirePatchConfirm bool, ttl int) tool.ExecuteFunc {
+func buildSkillManageExecute(cfg *SkillManageConfig, lease *RuntimeWriteLease, requireConfirm, requirePatchConfirm bool, ttl int) tool.ExecuteFunc {
 	return func(ctx context.Context, params map[string]any) (any, error) {
 		ws, _ := ctx.Value(tool.ContextKeyWorkspaceRoot).(string)
 		if strings.TrimSpace(ws) == "" {
@@ -160,7 +159,7 @@ func proposeSkillManage(ctx context.Context, cfg *SkillManageConfig, workspace, 
 		return errMap, nil
 	}
 
-	pinned, err := growth.IsSkillPinned(workspace, name)
+	pinned, err := IsSkillPinned(workspace, name)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
@@ -208,7 +207,7 @@ func proposeSkillManage(ctx context.Context, cfg *SkillManageConfig, workspace, 
 	}, nil
 }
 
-func confirmSkillManage(ctx context.Context, cfg *SkillManageConfig, lease *growth.RuntimeWriteLease, workspace, token string, ttl int) (any, error) {
+func confirmSkillManage(ctx context.Context, cfg *SkillManageConfig, lease *RuntimeWriteLease, workspace, token string, ttl int) (any, error) {
 	if cfg == nil || cfg.PendingStore == nil {
 		return map[string]any{"error": "skill_manage: confirm store not configured"}, nil
 	}
@@ -274,7 +273,7 @@ func skillManageConfirmError(code string) map[string]any {
 	return map[string]any{"error": msg, "error_code": code}
 }
 
-func applySkillManage(ctx context.Context, lease *growth.RuntimeWriteLease, workspace, action, name string, params map[string]any) (any, error) {
+func applySkillManage(ctx context.Context, lease *RuntimeWriteLease, workspace, action, name string, params map[string]any) (any, error) {
 	content, _ := params["content"].(string)
 	if action == "create" && strings.TrimSpace(content) == "" {
 		return map[string]any{"error": "content is required for create"}, nil
@@ -295,7 +294,7 @@ func applySkillManage(ctx context.Context, lease *growth.RuntimeWriteLease, work
 	}
 
 	if isSkillManageWriteAction(action) {
-		pinned, err := growth.IsSkillPinned(workspace, name)
+		pinned, err := IsSkillPinned(workspace, name)
 		if err != nil {
 			return map[string]any{"error": err.Error()}, nil
 		}
@@ -336,14 +335,14 @@ func applySkillManage(ctx context.Context, lease *growth.RuntimeWriteLease, work
 			return map[string]any{"error": err.Error()}, nil
 		}
 	} else if len(batch) > 0 {
-		if err := growth.ApplyPatchBatch(workspace, batch); err != nil {
+		if err := ApplyPatchBatch(workspace, batch); err != nil {
 			return map[string]any{"error": err.Error()}, nil
 		}
 	} else if action != "delete" {
 		return map[string]any{"error": "no changes applied"}, nil
 	}
 
-	growth.DefaultSkillsIndexTracker.Bump(workspace)
+	DefaultSkillsIndexTracker.Bump(workspace)
 	path := skillSkillMDRel(name)
 	if action == "delete" {
 		path = filepath.ToSlash(filepath.Join("skills", name))
@@ -394,7 +393,7 @@ func skillManageMarkdownForValidate(workspace, action, name string, params map[s
 
 // skillManageMarkdownFromBatch extracts SKILL.md bytes from an already-built patch batch
 // (create Content / patch|edit New / write_file Content|New when basename is SKILL.md).
-func skillManageMarkdownFromBatch(action string, batch []growth.Patch) (content string, need bool, err error) {
+func skillManageMarkdownFromBatch(action string, batch []Patch) (content string, need bool, err error) {
 	switch action {
 	case "create":
 		if len(batch) == 0 {
@@ -414,7 +413,7 @@ func skillManageMarkdownFromBatch(action string, batch []growth.Patch) (content 
 		if !strings.EqualFold(filepath.Base(p.Path), "SKILL.md") {
 			return "", false, nil
 		}
-		if p.Op == growth.OpCreate {
+		if p.Op == OpCreate {
 			return p.Content, true, nil
 		}
 		return p.New, true, nil
@@ -448,7 +447,7 @@ func validateSkillManageContent(workspace, action, name string, params map[strin
 }
 
 // validateSkillManageBatch validates SKILL.md from the same batch that ApplyPatchBatch will write.
-func validateSkillManageBatch(action, name string, batch []growth.Patch) ([]skills.SkillWarning, map[string]any) {
+func validateSkillManageBatch(action, name string, batch []Patch) ([]skills.SkillWarning, map[string]any) {
 	content, need, err := skillManageMarkdownFromBatch(action, batch)
 	if err != nil {
 		return nil, map[string]any{"error": err.Error()}
@@ -463,13 +462,13 @@ func skillManageScanParams(action string, params map[string]any) error {
 	switch action {
 	case "create", "edit":
 		content, _ := params["content"].(string)
-		return growth.ScanUserContent(content)
+		return ScanUserContent(content)
 	case "patch":
 		newS, _ := params["new_string"].(string)
-		return growth.ScanUserContent(newS)
+		return ScanUserContent(newS)
 	case "write_file":
 		fc, _ := params["file_content"].(string)
-		return growth.ScanUserContent(fc)
+		return ScanUserContent(fc)
 	default:
 		return nil
 	}
@@ -506,16 +505,16 @@ func skillFileRel(name, filePath string) (string, error) {
 	return filepath.ToSlash(filepath.Join("skills", name, filePath)), nil
 }
 
-func skillManageToPatches(workspace string, action, name string, params map[string]any) ([]growth.Patch, error) {
+func skillManageToPatches(workspace string, action, name string, params map[string]any) ([]Patch, error) {
 	switch action {
 	case "create":
 		content, _ := params["content"].(string)
 		if strings.TrimSpace(content) == "" {
 			return nil, fmt.Errorf("content is required for create")
 		}
-		return []growth.Patch{{
+		return []Patch{{
 			Path:    skillSkillMDRel(name),
-			Op:      growth.OpCreate,
+			Op:      OpCreate,
 			Content: content,
 		}}, nil
 	case "edit":
@@ -535,9 +534,9 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 		if err != nil {
 			return nil, err
 		}
-		return []growth.Patch{{
+		return []Patch{{
 			Path: path,
-			Op:   growth.OpPatch,
+			Op:   OpPatch,
 			Old:  string(prev),
 			New:  content,
 		}}, nil
@@ -571,9 +570,9 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 		} else {
 			out = strings.Replace(s, oldS, newS, 1)
 		}
-		return []growth.Patch{{
+		return []Patch{{
 			Path: path,
-			Op:   growth.OpPatch,
+			Op:   OpPatch,
 			Old:  s,
 			New:  out,
 		}}, nil
@@ -589,9 +588,9 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 			return nil, err
 		}
 		if _, err := os.Stat(full); os.IsNotExist(err) {
-			return []growth.Patch{{
+			return []Patch{{
 				Path:    rel,
-				Op:      growth.OpCreate,
+				Op:      OpCreate,
 				Content: fileContent,
 			}}, nil
 		}
@@ -599,9 +598,9 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 		if err != nil {
 			return nil, err
 		}
-		return []growth.Patch{{
+		return []Patch{{
 			Path: rel,
-			Op:   growth.OpPatch,
+			Op:   OpPatch,
 			Old:  string(prev),
 			New:  fileContent,
 		}}, nil
@@ -611,9 +610,9 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 		if err != nil {
 			return nil, err
 		}
-		return []growth.Patch{{
+		return []Patch{{
 			Path: rel,
-			Op:   growth.OpDelete,
+			Op:   OpDelete,
 		}}, nil
 	case "delete":
 		return nil, nil

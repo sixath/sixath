@@ -1,19 +1,14 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"backend/internal/biz"
 	"backend/internal/chat"
 	"backend/internal/conf"
 	"backend/internal/cron"
 	"backend/internal/runtime"
 	"backend/internal/server"
-	"backend/internal/service"
 
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
@@ -24,7 +19,6 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/http"
 
 	fwconfig "github.com/sixath/framework/config"
-	"github.com/sixath/framework/turntrace"
 
 	_ "go.uber.org/automaxprocs"
 )
@@ -45,70 +39,15 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "../configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, cronSrv *cron.Server, chatSvc *service.ChatService, gw *service.GrowthWorker, cw *service.CuratorWorker, workerEnabled workerEnabledInput) *kratos.App {
-	workerCtx, stopWorker := context.WithCancel(context.Background())
-	opts := []kratos.Option{
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, cronSrv *cron.Server) *kratos.App {
+	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),
 		kratos.Version(Version),
 		kratos.Metadata(map[string]string{}),
 		kratos.Logger(logger),
 		kratos.Server(gs, hs, cronSrv),
-		kratos.AfterStop(func(context.Context) error {
-			stopWorker()
-			return nil
-		}),
-	}
-	// GrowthWorker is constructed only when growth.worker_enabled (poll Loop).
-	if gw != nil && bool(workerEnabled) {
-		opts = append(opts, kratos.BeforeStart(func(context.Context) error {
-			go gw.Loop(workerCtx)
-			return nil
-		}))
-	}
-	if cw != nil {
-		opts = append(opts, kratos.BeforeStart(func(context.Context) error {
-			go cw.Loop(workerCtx)
-			return nil
-		}))
-	}
-	return kratos.New(opts...)
-}
-
-// Distinct Wire input types avoid ambiguous primitive bindings in wireApp.
-type llmReviewEnabledInput bool
-type growthReviewPatchFileInput string
-type curatorPatchFileInput string
-type workerEnabledInput bool
-
-func provideGrowthWorker(
-	logger log.Logger,
-	chatUC *biz.ChatUsecase,
-	agentUC *biz.AgentUsecase,
-	growthUC *biz.GrowthUsecase,
-	cronRefUC *biz.CronRefRewriteUsecase,
-	auth *conf.Auth,
-	llmReviewEnabled llmReviewEnabledInput,
-	reviewPatchFile growthReviewPatchFileInput,
-	growthCfg *conf.Growth,
-	workerEnabled workerEnabledInput,
-	turnTraces turntrace.Store,
-) *service.GrowthWorker {
-	if !bool(workerEnabled) {
-		return nil
-	}
-	return service.NewGrowthWorker(logger, chatUC, agentUC, growthUC, cronRefUC, bool(llmReviewEnabled), string(reviewPatchFile), growthCfg, auth, turnTraces)
-}
-
-func provideCuratorWorker(
-	logger log.Logger,
-	curatorUC *biz.CuratorUsecase,
-	cronRefUC *biz.CronRefRewriteUsecase,
-	growthCfg *conf.Growth,
-	llmReviewEnabled llmReviewEnabledInput,
-	curatorPatchFile curatorPatchFileInput,
-) *service.CuratorWorker {
-	return service.NewCuratorWorker(logger, curatorUC, cronRefUC, growthCfg, bool(llmReviewEnabled), string(curatorPatchFile))
+	)
 }
 
 func main() {
@@ -181,53 +120,6 @@ func main() {
 		chat.SetAllowScriptExecution(v == "1" || v == "true" || v == "yes")
 	}
 
-	// growth.llm_review_enabled：YAML 优先；未配置 growth 节时可由 SATH_GROWTH_LLM_REVIEW_ENABLED 开启（二期里程碑 2.1）。
-	llmReviewEnabled := false
-	if bc.Growth != nil {
-		llmReviewEnabled = bc.Growth.GetLlmReviewEnabled()
-	} else if v := os.Getenv("SATH_GROWTH_LLM_REVIEW_ENABLED"); v != "" {
-		llmReviewEnabled = v == "1" || v == "true" || v == "yes"
-	}
-
-	// growth.worker_enabled：YAML 优先；未配置时默认 false（P4：Growth 不进默认路径）。
-	workerEnabled := false
-	if bc.Growth != nil {
-		workerEnabled = bc.Growth.GetWorkerEnabled()
-	} else if v := os.Getenv("SATH_GROWTH_WORKER_ENABLED"); v != "" {
-		workerEnabled = v == "1" || v == "true" || v == "yes"
-	}
-
-	// growth.review_patch_file：YAML 优先；否则 SATH_GROWTH_REVIEW_PATCH_FILE；相对路径相对 -conf 目录（或单文件 yaml 的父目录）。
-	growthReviewPatchFile := ""
-	if bc.Growth != nil {
-		growthReviewPatchFile = strings.TrimSpace(bc.Growth.GetReviewPatchFile())
-	}
-	if growthReviewPatchFile == "" {
-		growthReviewPatchFile = strings.TrimSpace(os.Getenv("SATH_GROWTH_REVIEW_PATCH_FILE"))
-	}
-	if growthReviewPatchFile != "" && !filepath.IsAbs(growthReviewPatchFile) {
-		base := flagconf
-		if st, err := os.Stat(flagconf); err == nil && !st.IsDir() {
-			base = filepath.Dir(flagconf)
-		}
-		growthReviewPatchFile = filepath.Clean(filepath.Join(base, growthReviewPatchFile))
-	}
-
-	curatorPatchFile := ""
-	if bc.Growth != nil {
-		curatorPatchFile = strings.TrimSpace(bc.Growth.GetCuratorPatchFile())
-	}
-	if curatorPatchFile == "" {
-		curatorPatchFile = strings.TrimSpace(os.Getenv("SATH_GROWTH_CURATOR_PATCH_FILE"))
-	}
-	if curatorPatchFile != "" && !filepath.IsAbs(curatorPatchFile) {
-		base := flagconf
-		if st, err := os.Stat(flagconf); err == nil && !st.IsDir() {
-			base = filepath.Dir(flagconf)
-		}
-		curatorPatchFile = filepath.Clean(filepath.Join(base, curatorPatchFile))
-	}
-
 	if bc.Data != nil {
 		chat.SetMemoryVectorDataRoot(bc.Data.GetDataRoot())
 	}
@@ -246,10 +138,6 @@ func main() {
 		bc.Server,
 		bc.Data,
 		bc.Auth,
-		llmReviewEnabledInput(llmReviewEnabled),
-		growthReviewPatchFileInput(growthReviewPatchFile),
-		curatorPatchFileInput(curatorPatchFile),
-		workerEnabledInput(workerEnabled),
 		bc.Growth,
 		logger,
 	)

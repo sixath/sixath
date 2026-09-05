@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/skills"
 	core "github.com/sixath/framework/tool"
 )
@@ -29,7 +28,7 @@ func (f *fakeTokenGen) NewToken() (string, error) {
 	return f.next, nil
 }
 
-func skillManageTestConfig(lease *growth.RuntimeWriteLease, requireConfirm bool) *SkillManageConfig {
+func skillManageTestConfig(lease *RuntimeWriteLease, requireConfirm bool) *SkillManageConfig {
 	store := NewInMemorySkillManagePendingStore()
 	return &SkillManageConfig{
 		Lease:                      lease,
@@ -62,7 +61,7 @@ func TestSkillManage_CreateAndBump_DirectWrite(t *testing.T) {
 	root := t.TempDir()
 	cfg := skillManageTestConfig(nil, false)
 	tl := registerSkillManageForTest(t, cfg)
-	before := growth.DefaultSkillsIndexTracker.Generation(root)
+	before := DefaultSkillsIndexTracker.Generation(root)
 
 	content := "---\nname: new-skill\ndescription: test\n---\n# Hello"
 	res, err := tl.Execute(skillManageTestCtx(root), map[string]any{
@@ -85,7 +84,7 @@ func TestSkillManage_CreateAndBump_DirectWrite(t *testing.T) {
 	if string(b) != content {
 		t.Fatalf("SKILL.md content mismatch: %q", string(b))
 	}
-	after := growth.DefaultSkillsIndexTracker.Generation(root)
+	after := DefaultSkillsIndexTracker.Generation(root)
 	if after != before+1 {
 		t.Fatalf("expected generation bump %d -> %d, got %d", before, before+1, after)
 	}
@@ -190,7 +189,7 @@ func TestSkillManage_CreateConfirmReuseTokenFails(t *testing.T) {
 
 func TestSkillManage_ConfirmFailedKeepsToken(t *testing.T) {
 	root := t.TempDir()
-	lease := growth.NewRuntimeWriteLease()
+	lease := NewRuntimeWriteLease()
 	ok, _ := lease.TryAcquire(root, "blocker", time.Minute)
 	if !ok {
 		t.Fatal("failed to acquire blocker lease")
@@ -276,7 +275,7 @@ func TestSkillManage_PinnedRejectsPatch(t *testing.T) {
 
 func TestSkillManage_WorkspaceBusy(t *testing.T) {
 	root := t.TempDir()
-	lease := growth.NewRuntimeWriteLease()
+	lease := NewRuntimeWriteLease()
 	ok, _ := lease.TryAcquire(root, "growth-worker", time.Minute)
 	if !ok {
 		t.Fatal("expected lease acquire for growth-worker")

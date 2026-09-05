@@ -453,44 +453,8 @@ func (r *agentRepo) UnbindTools(ctx context.Context, agentID string, toolIDs []s
 	return res.Error
 }
 
-func (r *agentRepo) ListDistinctWorkspaces(ctx context.Context, limit int) ([]biz.CuratorWorkspace, error) {
-	if limit <= 0 {
-		limit = 200
-	}
-	type row struct {
-		Workspace string
-		AgentID   string
-	}
-	var rows []row
-	err := r.db.WithContext(ctx).Model(&model.Agent{}).
-		Select("workspace, MIN(id) AS agent_id").
-		Where("workspace <> ''").
-		Group("workspace").
-		Limit(limit).
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	out := make([]biz.CuratorWorkspace, len(rows))
-	for i, rw := range rows {
-		out[i] = biz.CuratorWorkspace{WorkspaceKey: rw.Workspace, AgentID: rw.AgentID}
-	}
-	return out, nil
-}
-
 func (r *agentRepo) CountByWecomChannelID(ctx context.Context, channelID string) (int, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Agent{}).Where("wecom_channel_id = ?", channelID).Count(&count).Error
 	return int(count), err
-}
-
-func (r *agentRepo) ListAgentIDsByWorkspace(ctx context.Context, workspace string) ([]string, error) {
-	if workspace == "" {
-		return nil, nil
-	}
-	var ids []string
-	err := r.db.WithContext(ctx).Model(&model.Agent{}).
-		Where("workspace = ?", workspace).
-		Pluck("id", &ids).Error
-	return ids, err
 }

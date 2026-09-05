@@ -49,8 +49,4 @@ type AgentRepo interface {
 	Delete(ctx context.Context, id string) error
 	BindTools(ctx context.Context, agentID string, toolIDs []string) error
 	UnbindTools(ctx context.Context, agentID string, toolIDs []string) error
-	// ListDistinctWorkspaces 返回去重后的 workspace 及一个代表 agent_id（R2b Curator）。
-	ListDistinctWorkspaces(ctx context.Context, limit int) ([]CuratorWorkspace, error)
-	// ListAgentIDsByWorkspace 返回 workspace 下全部 agent id（R2c cron 反写）。
-	ListAgentIDsByWorkspace(ctx context.Context, workspace string) ([]string, error)
 }

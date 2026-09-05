@@ -66,12 +66,6 @@ func (r *hybridAgentRepo) BindTools(context.Context, string, []string) error {
 func (r *hybridAgentRepo) UnbindTools(context.Context, string, []string) error {
 	return nil
 }
-func (r *hybridAgentRepo) ListDistinctWorkspaces(context.Context, int) ([]biz.CuratorWorkspace, error) {
-	return nil, nil
-}
-func (r *hybridAgentRepo) ListAgentIDsByWorkspace(context.Context, string) ([]string, error) {
-	return nil, nil
-}
 
 type hybridResourceRepo struct {
 	res *biz.Resource

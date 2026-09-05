@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sixath/framework/events"
-	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
@@ -452,7 +451,7 @@ func registerSkillViewTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 				if err != nil {
 					return nil, err
 				}
-				if err := growth.ScanUserContent(body); err != nil {
+				if err := ScanUserContent(body); err != nil {
 					return map[string]any{"error": err.Error(), "name": name, "file_path": filePath}, nil
 				}
 				return map[string]any{
@@ -474,7 +473,7 @@ func registerSkillViewTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 				once.unclaim(name)
 				return nil, err
 			}
-			if err := growth.ScanUserContent(body); err != nil {
+			if err := ScanUserContent(body); err != nil {
 				return map[string]any{"error": err.Error(), "name": name}, nil
 			}
 			registerSkillMcpFromMeta(reg, idx, name, mcpServers)

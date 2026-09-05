@@ -105,12 +105,6 @@ func (f *fakeAgentACLRepo) Delete(_ context.Context, id string) error {
 }
 func (f *fakeAgentACLRepo) BindTools(context.Context, string, []string) error   { return nil }
 func (f *fakeAgentACLRepo) UnbindTools(context.Context, string, []string) error { return nil }
-func (f *fakeAgentACLRepo) ListDistinctWorkspaces(context.Context, int) ([]CuratorWorkspace, error) {
-	return nil, nil
-}
-func (f *fakeAgentACLRepo) ListAgentIDsByWorkspace(context.Context, string) ([]string, error) {
-	return nil, nil
-}
 
 type fakeAgentResourceRepo struct {
 	fakeResourceReader

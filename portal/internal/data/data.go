@@ -26,7 +26,7 @@ const (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewGrowthRepo, NewCuratorRepo)
+var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo)
 
 // Data .
 type Data struct {
@@ -82,8 +82,6 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 	if err := db.AutoMigrate(
 		&model.Tool{}, &model.Agent{}, &model.AgentTool{}, &model.ChatSession{}, &model.ChatMessage{},
 		&model.Channel{}, &model.ChannelRuntimeStatus{}, &model.ChannelPeerSession{}, &model.CronTask{}, &model.CronRun{},
-		&model.ChatGrowthState{}, &model.GrowthWorkspaceLease{},
-		&model.GrowthCuratorState{},
 		&model.User{}, &model.Org{}, &model.OrgMember{}, &model.UserToken{},
 		&model.OrgInvite{}, &model.EmailVerifyToken{},
 		&model.Resource{}, &model.ResourceGrant{},

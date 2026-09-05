@@ -25,7 +25,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, mainLlmReviewEnabledInput llmReviewEnabledInput, mainGrowthReviewPatchFileInput growthReviewPatchFileInput, mainCuratorPatchFileInput curatorPatchFileInput, mainWorkerEnabledInput workerEnabledInput, growth *conf.Growth, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, growth *conf.Growth, logger log.Logger) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData, auth, logger)
 	if err != nil {
 		return nil, nil, err
@@ -49,8 +49,6 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, main
 	chatSessionRepo := data.NewChatSessionRepo(dataData, logger)
 	chatMessageRepo := data.NewChatMessageRepo(dataData, logger)
 	chatUsecase := biz.NewChatUsecase(chatSessionRepo, chatMessageRepo, agentRepo, resourceRepo, accessChecker)
-	growthRepo := data.NewGrowthRepo(dataData, logger)
-	growthUsecase := biz.ProvideGrowthUsecase(growthRepo, growth)
 	sessionUnitsBackend := data.NewSessionUnitsBackendFromData(dataData)
 	store := data.NewTurnTraceStoreFromData(dataData)
 	chatService := service.ProvideChatServiceWithTurnTrace(chatUsecase, agentUsecase, toolUsecase, mcpServerUsecase, skillResourceUsecase, channelUsecase, sessionUnitsBackend, store, v, dataData, logger)
@@ -74,12 +72,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, main
 	duration := cron.ProvideSchedulerInterval()
 	scheduler := cron.NewScheduler(cronUsecase, executor, duration, logger)
 	cronServer := cron.NewServer(scheduler)
-	cronRefRewriteUsecase := biz.ProvideCronRefRewriteUsecase(cronTaskRepo, agentRepo)
-	growthWorker := provideGrowthWorker(logger, chatUsecase, agentUsecase, growthUsecase, cronRefRewriteUsecase, auth, mainLlmReviewEnabledInput, mainGrowthReviewPatchFileInput, growth, mainWorkerEnabledInput, store)
-	curatorRepo := data.NewCuratorRepo(dataData, logger)
-	curatorUsecase := biz.ProvideCuratorUsecase(curatorRepo, agentRepo, growthUsecase)
-	curatorWorker := provideCuratorWorker(logger, curatorUsecase, cronRefRewriteUsecase, growth, mainLlmReviewEnabledInput, mainCuratorPatchFileInput)
-	app := newApp(logger, grpcServer, httpServer, cronServer, chatService, growthWorker, curatorWorker, mainWorkerEnabledInput)
+	app := newApp(logger, grpcServer, httpServer, cronServer)
 	return app, func() {
 		cleanup()
 	}, nil
