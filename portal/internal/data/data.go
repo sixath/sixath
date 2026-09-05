@@ -89,7 +89,6 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 		&model.TurnTraceRow{},
 		&model.AgentAssetBinding{},
 		&model.McpServer{}, &model.AgentMcpServer{},
-		&model.PortalSetting{},
 	); err != nil {
 		return nil, nil, err
 	}

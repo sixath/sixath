@@ -28,47 +28,22 @@
 
 ### Task 1: 失败锁定测试
 
-- [ ] 扩展 `TestPortalSettingsGoRemoved` 的同文件：
-  - `TestPortalSettingModelRemoved`：`model/portal_setting.go` 不存在
-  - `TestDataGo_omitsPortalSettingAutoMigrate`：`data.go` 源码不含 `PortalSetting`
-- [ ] 先跑必须红
-
-```go
-func TestPortalSettingModelRemoved(t *testing.T) {
-	if _, err := os.Stat("model/portal_setting.go"); err == nil {
-		t.Fatal("model/portal_setting.go must not exist")
-	} else if !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-}
-
-func TestDataGo_omitsPortalSettingAutoMigrate(t *testing.T) {
-	b, err := os.ReadFile("data.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(b), "PortalSetting") {
-		t.Fatal("data.go must not AutoMigrate PortalSetting")
-	}
-}
-```
-
-Run: `cd portal; $env:GOMAXPROCS='1'; go test ./internal/data -count=1 -run "TestPortalSettingModelRemoved|TestDataGo_omitsPortalSettingAutoMigrate"`
-
-Expected: FAIL（文件仍在、`data.go` 仍含 `PortalSetting`）
+- [x] `TestPortalSettingModelRemoved`
+- [x] `TestDataGo_omitsPortalSettingAutoMigrate`
+- [x] 先跑必须红
 
 ---
 
 ### Task 2: 停 AutoMigrate 并删模型
 
-- [ ] `data.go` AutoMigrate 列表去掉 `&model.PortalSetting{},`
-- [ ] 删除 `portal/internal/data/model/portal_setting.go`
-- [ ] 再跑 Task 1 测试必须绿
-- [ ] **Commit** `fix(data): stop AutoMigrate of unused portal_settings model`
+- [x] `data.go` AutoMigrate 列表去掉 `&model.PortalSetting{},`
+- [x] 删除 `portal/internal/data/model/portal_setting.go`
+- [x] 再跑 Task 1 测试必须绿
+- [x] **Commit** `fix(data): stop AutoMigrate of unused portal_settings model`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] `cd portal && go test ./internal/data ./internal/conf ./internal/service -count=1`（skip 预存 SQLITE_BUSY / biz 权限用例）
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] `cd portal && go test ./internal/data ./internal/conf ./internal/service -count=1`（skip 预存 SQLITE_BUSY / biz 权限用例）
+- [x] 不要 merge/push，除非用户明确要求。
