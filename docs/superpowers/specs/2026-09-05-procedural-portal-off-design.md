@@ -50,7 +50,7 @@ framework/memory.CommitProceduralRepair → 仍可被测试/以后的器官直�
 
 ## 4. 非目标
 
-- 不拆 GrowthWorker / FinalizeTurnForBackgroundReview
+- 不拆 GrowthWorker / FinalizeTurnForBackgroundReview（**S16：Chat C3 钩子已拆，worker poll 仍 opt-in**）
 - 不删 `framework/memory` procedural 类型与 five-gate
 - 不删 `config.MemoryProceduralRepair` 字段（避免旧配置反序列化失败）
 - 不合 assembler
