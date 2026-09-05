@@ -28,6 +28,9 @@ type Config struct {
 
 	// ToolGuardrails 可选；与根配置 tool_guardrails 同形。
 	ToolGuardrails *config.ToolGuardrails
+
+	// Workspace 可选可写根；非空时交给 ReAct（MEMORY.md / USER.md / 文件器官）。
+	Workspace string
 }
 
 // BuildMCPSystemPrompt 构造 MCP Agent 的系统级提示。
@@ -74,6 +77,7 @@ func NewMCPAgentHandler(m model.Model, mem memory.Memory, cfg Config, mws ...mid
 		agent.WithReActMaxSteps(cfg.MaxReActSteps),
 		agent.WithReActMaxHistory(cfg.MaxHistory),
 	}
+	reactOpts = appendWorkspaceOpt(reactOpts, cfg.Workspace)
 	if bus := events.DefaultBus(); bus != nil {
 		reactOpts = append(reactOpts, agent.WithReActEventBus(bus))
 	}

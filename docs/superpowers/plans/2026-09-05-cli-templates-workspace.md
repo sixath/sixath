@@ -29,20 +29,20 @@
 
 ### Task 1: 失败测试（MEMORY.md 信号）
 
-- [ ] `TestNewDataQueryHandler_InjectsWorkspaceMemoryMD`：TempDir + `MEMORY.md`，`DataQueryConfig.Workspace` 指向该根，断言 `fakeToolModel.lastMessages` 含 `## MEMORY.md` 与正文。
-- [ ] `TestNewMCPAgentHandler_InjectsWorkspaceMemoryMD`：同上；空白 Workspace 的对照不出现该正文。
-- [ ] 跑测试确认失败（尚未接线）。
+- [x] `TestNewDataQueryHandler_InjectsWorkspaceMemoryMD`：TempDir + `MEMORY.md`，`DataQueryConfig.Workspace` 指向该根，断言 `fakeToolModel.lastMessages` 含 `## MEMORY.md` 与正文。
+- [x] `TestNewMCPAgentHandler_InjectsWorkspaceMemoryMD`：同上；空白 Workspace 的对照不出现该正文。
+- [x] 跑测试确认失败（尚未接线）。
 
 ---
 
 ### Task 2: 接线
 
-- [ ] `appendWorkspaceOpt`；dataquery / MCP / skills 共用。
-- [ ] `DataQueryConfig.Workspace`；`NewDataQueryHandlerFromConfig` 拷 `cfg.Workspace`。
-- [ ] `templates.Config.Workspace`。
-- [ ] `cd framework && go test ./templates ./config -count=1`
+- [x] `appendWorkspaceOpt`；dataquery / MCP / skills 共用。
+- [x] `DataQueryConfig.Workspace`；`NewDataQueryHandlerFromConfig` 拷 `cfg.Workspace`。
+- [x] `templates.Config.Workspace`。
+- [x] `cd framework && go test ./templates ./config -count=1`
 
-- [ ] **Commit** `fix(templates): wire workspace into dataquery and mcp ReAct`
+- [x] **Commit** `fix(templates): wire workspace into dataquery and mcp ReAct`
 
 ---
 

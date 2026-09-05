@@ -98,9 +98,7 @@ func NewSkillsAwareChatHandlerFromConfig(cfg config.Config, skillsIdx *skills.In
 		})
 
 		reactOpts := []agent.ReActOption{agent.WithReActMaxSteps(20)}
-		if ws := strings.TrimSpace(cfg.Workspace); ws != "" {
-			reactOpts = append(reactOpts, agent.WithReActWorkspace(ws))
-		}
+		reactOpts = appendWorkspaceOpt(reactOpts, cfg.Workspace)
 		if bus := events.DefaultBus(); bus != nil {
 			reactOpts = append(reactOpts, agent.WithReActEventBus(bus))
 		}

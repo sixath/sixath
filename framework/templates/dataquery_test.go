@@ -2,6 +2,8 @@ package templates
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -169,6 +171,56 @@ func TestNewDataQueryHandler_InjectsSystemPromptAndTools(t *testing.T) {
 	}
 }
 
+func TestNewDataQueryHandler_InjectsWorkspaceMemoryMD(t *testing.T) {
+	dir := t.TempDir()
+	const token = "s8-dataquery-mem-token"
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(token), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &fakeToolModel{}
+	h := NewDataQueryHandler(m, memory.NewBufferMemory(5), DataQueryConfig{
+		DatasourceRegistry:  datasource.NewRegistry(),
+		MetadataStore:       metadata.NewInMemoryStore(nil),
+		Exec:                executor.NewMySQLExecutor(datasource.NewRegistry()),
+		DefaultDatasourceID: "ds-1",
+		Workspace:           dir,
+	})
+	if _, err := h(context.Background(), &agent.Request{
+		Messages: []model.Message{{Role: "user", Content: "列出所有表"}},
+	}); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	sys := firstSystemContent(m.lastMessages)
+	if !strings.Contains(sys, "## MEMORY.md") || !strings.Contains(sys, token) {
+		t.Fatalf("expected workspace MEMORY.md in system prompt, got:\n%s", sys)
+	}
+}
+
+func TestNewDataQueryHandler_BlankWorkspaceSkipsMemoryMD(t *testing.T) {
+	dir := t.TempDir()
+	const token = "s8-dataquery-blank-should-not-appear"
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(token), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &fakeToolModel{}
+	h := NewDataQueryHandler(m, memory.NewBufferMemory(5), DataQueryConfig{
+		DatasourceRegistry:  datasource.NewRegistry(),
+		MetadataStore:       metadata.NewInMemoryStore(nil),
+		Exec:                executor.NewMySQLExecutor(datasource.NewRegistry()),
+		DefaultDatasourceID: "ds-1",
+		Workspace:           "   ",
+	})
+	if _, err := h(context.Background(), &agent.Request{
+		Messages: []model.Message{{Role: "user", Content: "列出所有表"}},
+	}); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	sys := firstSystemContent(m.lastMessages)
+	if strings.Contains(sys, token) {
+		t.Fatalf("blank workspace must not load MEMORY.md, got:\n%s", sys)
+	}
+}
+
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
 }
@@ -180,4 +232,13 @@ func containsAll(s string, subs []string) bool {
 		}
 	}
 	return true
+}
+
+func firstSystemContent(msgs []model.Message) string {
+	for _, m := range msgs {
+		if m.Role == "system" {
+			return m.Content
+		}
+	}
+	return ""
 }
