@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 )
 

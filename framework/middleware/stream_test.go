@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 func TestStreamChain_Order(t *testing.T) {

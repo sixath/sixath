@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/sessionsearch"
 )
 

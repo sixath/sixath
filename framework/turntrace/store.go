@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 type Store interface {

@@ -11,7 +11,7 @@ import (
 	"backend/internal/data/model"
 
 	"github.com/google/uuid"
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/turntrace"
 	"gorm.io/gorm"
 )

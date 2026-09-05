@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 // Auditor verifies execution against a contract without mutating the environment.

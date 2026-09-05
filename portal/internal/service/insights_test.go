@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 func TestAggregateInsights_TopToolsAndErrorRate(t *testing.T) {

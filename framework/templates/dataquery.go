@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/auth"
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/events"
+	agent "github.com/sixath/framework/harness"
 
 	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/memory"

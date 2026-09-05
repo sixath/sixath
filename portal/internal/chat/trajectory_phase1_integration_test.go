@@ -10,7 +10,7 @@ import (
 	"backend/internal/data"
 	"backend/internal/data/model"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/sessionsearch"

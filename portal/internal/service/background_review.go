@@ -12,7 +12,7 @@ import (
 	"backend/internal/chat"
 	"backend/internal/growthwake"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/skills"

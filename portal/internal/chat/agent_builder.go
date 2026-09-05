@@ -10,7 +10,7 @@ import (
 
 	"backend/internal/biz"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/config"
 	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/datasource"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 // AgentContextMiddleware 为每次请求注入 agent.AgentContext 并同步 Request 高频字段。

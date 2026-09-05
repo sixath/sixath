@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 func TestMetricsMiddleware_TokenObserved(t *testing.T) {

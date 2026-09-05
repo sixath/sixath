@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 // CacheKeyBuilder 自定义缓存 key 计算。

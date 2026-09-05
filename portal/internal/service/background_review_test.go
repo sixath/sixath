@@ -9,7 +9,7 @@ import (
 	"backend/internal/biz"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/model"
 )

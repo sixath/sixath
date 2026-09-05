@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/executor"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/model"

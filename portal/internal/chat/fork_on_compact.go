@@ -8,7 +8,7 @@ import (
 
 	"backend/internal/biz"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 // CompactForkSessionEnabled is the stand-in for compact.fork_session_on_l2 (default false).

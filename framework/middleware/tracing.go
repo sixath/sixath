@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -13,7 +13,7 @@ import (
 // TracingMiddleware 在每次 Agent 调用时创建一个新的 Span，便于调用链追踪。
 // 需要在应用启动时先调用 obs.InitTracer 配置全局 TracerProvider。
 func TracingMiddleware(next Handler) Handler {
-	tracer := otel.Tracer("github.com/sixath/framework/agent")
+	tracer := otel.Tracer("github.com/sixath/framework/harness")
 	return func(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 		agentName := "default"
 		if req != nil {

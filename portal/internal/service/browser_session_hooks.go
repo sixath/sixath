@@ -5,7 +5,7 @@ import (
 
 	"backend/internal/chat"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 // registerBrowserSessionHooks closes the process-level browser SessionStore entry

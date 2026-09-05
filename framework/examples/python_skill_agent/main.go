@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/middleware"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/skills"

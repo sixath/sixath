@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	runtimeDebug "runtime/debug"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 func debugHandler(logger *slog.Logger, enabled bool, next Handler) Handler {
