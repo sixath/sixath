@@ -161,13 +161,13 @@ func ResolveWorkspaceCodeRoot(workspace string) string {
 	return fwws.ResolveCodeMount(workspace)
 }
 
-// MergeRCARoots prefers workspace/code when present; otherwise keeps configured roots
-// (waiver for agents that have not mounted code).
-func MergeRCARoots(workspace string, configured []string) []string {
+// MergeRCARoots returns workspace/code when mounted. Configured tool roots are ignored
+// (no dual-root waiver).
+func MergeRCARoots(workspace string, _ []string) []string {
 	if code := ResolveWorkspaceCodeRoot(workspace); code != "" {
 		return []string{code}
 	}
-	return configured
+	return nil
 }
 
 // WorkspaceUnderCodeRoots reports whether workspace is under any code root.

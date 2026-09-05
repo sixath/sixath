@@ -132,6 +132,10 @@ func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
 }
 
 func TestBuildRegistry_RegistersAllBoundRCATools(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, WorkspaceCodeLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
 		"roots": []any{t.TempDir()},
 	})}
@@ -139,7 +143,7 @@ func TestBuildRegistry_RegistersAllBoundRCATools(t *testing.T) {
 		"endpoint": "http://es",
 	})}
 	reg := tool.NewRegistry()
-	if _, err := BuildRegistry([]*biz.ToolMeta{codeTool, esTool}, nil, reg, RegistryBuildOptions{Workspace: t.TempDir()}); err != nil {
+	if _, err := BuildRegistry([]*biz.ToolMeta{codeTool, esTool}, nil, reg, RegistryBuildOptions{Workspace: ws}); err != nil {
 		t.Fatalf("BuildRegistry: %v", err)
 	}
 	if _, ok := reg.Get("rca_grep"); !ok {

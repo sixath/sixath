@@ -389,13 +389,9 @@ export default function ToolForm() {
 
             {(['rca_code', 'rca_symbol'] as const).includes((config.rca?.func_path || 'rca_code') as 'rca_code' | 'rca_symbol') && (
               <div className="form-group">
-                <label>仓库根路径(每行一个绝对路径)</label>
-                <textarea
-                  value={(config.rca?.roots || []).join('\n')}
-                  onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), roots: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } }))}
-                  placeholder={'/abs/path/service-a\n/abs/path/service-b'}
-                />
-                <small>Agent 已挂载 workspace/code 时，运行时以该目录为根；此处仅在无挂载时作为后备。</small>
+                <p className="form-panel__desc">
+                  代码检索 / 符号导航只使用该 Agent 的 workspace/code。未挂载则不会注册 rca_grep 等工具，请在 Agent 表单里挂载代码根。
+                </p>
               </div>
             )}
 

@@ -15,14 +15,32 @@ func rcaHas(reg *tool.Registry, name string) bool {
 	return ok
 }
 
+func withCodeMount(t *testing.T) string {
+	t.Helper()
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, WorkspaceCodeLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return ws
+}
+
 func TestRegisterRCATool_Code(t *testing.T) {
 	reg := tool.NewRegistry()
 	cfg := map[string]any{"rca": map[string]any{"func_path": "rca_code", "roots": []any{"/repos/a", "/repos/b"}}}
-	registerRCATool(reg, cfg, "")
+	registerRCATool(reg, cfg, withCodeMount(t))
 	for _, n := range []string{"rca_grep", "rca_glob", "rca_read"} {
 		if !rcaHas(reg, n) {
 			t.Fatalf("expected %s registered", n)
 		}
+	}
+}
+
+func TestRegisterRCATool_CodeConfiguredRootsWithoutMountSkips(t *testing.T) {
+	reg := tool.NewRegistry()
+	cfg := map[string]any{"rca": map[string]any{"func_path": "rca_code", "roots": []any{"/repos/a", "/repos/b"}}}
+	registerRCATool(reg, cfg, t.TempDir())
+	if rcaHas(reg, "rca_grep") {
+		t.Fatal("configured roots must not register rca_code without workspace/code")
 	}
 }
 
@@ -43,7 +61,7 @@ func TestRegisterRCATool_Symbol(t *testing.T) {
 		"ready_timeout_sec":   10,
 		"request_timeout_sec": float64(15),
 	}}
-	registerRCATool(reg, cfg, "")
+	registerRCATool(reg, cfg, withCodeMount(t))
 	if !rcaHas(reg, "rca_symbol") {
 		t.Fatal("rca_symbol should be registered")
 	}

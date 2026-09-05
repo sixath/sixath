@@ -95,11 +95,10 @@ func TestMergeRCARoots_PrefersCodeMount(t *testing.T) {
 	}
 }
 
-func TestMergeRCARoots_WaiverWithoutMount(t *testing.T) {
-	cfg := []string{"/repos/a"}
-	got := MergeRCARoots(t.TempDir(), cfg)
-	if len(got) != 1 || got[0] != "/repos/a" {
-		t.Fatalf("got %#v", got)
+func TestMergeRCARoots_NoMountIgnoresConfigured(t *testing.T) {
+	got := MergeRCARoots(t.TempDir(), []string{"/repos/a"})
+	if len(got) != 0 {
+		t.Fatalf("got %#v want empty", got)
 	}
 }
 
