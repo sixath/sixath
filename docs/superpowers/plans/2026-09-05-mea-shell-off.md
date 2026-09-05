@@ -27,20 +27,20 @@
 
 ### Task 1: 失败锁定测试
 
-- [ ] e2e：`runtime-tool-mea_enabled` 必须不可见
-- [ ] `TestChatGo_DoesNotStreamMEA`
-- [ ] 先跑 e2e 应失败（勾选仍在）
+- [x] e2e：`runtime-tool-mea_enabled` 必须不可见
+- [x] `TestChatGo_DoesNotStreamMEA`
+- [x] 先跑 e2e 应失败（勾选仍在）
 
 ---
 
 ### Task 2: 拆 Web 字段
 
-- [ ] 从 `RuntimeToolsConfig` / `RuntimeToolFlagKey` / `RUNTIME_TOOL_FIELDS` / `normalizeRuntimeTools` 去掉 `mea_enabled`
-- [ ] 跑 e2e 与 portal 锁定测试
-- [ ] **Commit** `fix(web): drop mea_enabled agent toggle after MEA package removed`
+- [x] 从 `RuntimeToolsConfig` / `RuntimeToolFlagKey` / `RUNTIME_TOOL_FIELDS` / `normalizeRuntimeTools` 去掉 `mea_enabled`
+- [x] 跑 e2e 与 portal 锁定测试
+- [x] **Commit** `fix(web): drop mea_enabled agent toggle after MEA package removed`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] 不要 merge/push，除非用户明确要求。

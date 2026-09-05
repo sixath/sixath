@@ -423,8 +423,6 @@ export interface RuntimeToolsConfig {
   terminal_local_enabled?: boolean
   cronjob_tool_enabled?: boolean
   browser_enabled?: boolean
-  /** MEA Manage-Execute-Audit; OR-merged with SATH_MEA / SATH_MEA_PILOT_AGENTS */
-  mea_enabled?: boolean
 }
 
 type RuntimeToolFlagKey =
@@ -436,7 +434,6 @@ type RuntimeToolFlagKey =
   | 'terminal_local_enabled'
   | 'cronjob_tool_enabled'
   | 'browser_enabled'
-  | 'mea_enabled'
 
 export const RUNTIME_TOOL_FIELDS: { key: RuntimeToolFlagKey; label: string; hint?: string }[] = [
   { key: 'memory_write_enabled', label: '记忆写入 (memory)' },
@@ -447,11 +444,6 @@ export const RUNTIME_TOOL_FIELDS: { key: RuntimeToolFlagKey; label: string; hint
   { key: 'terminal_local_enabled', label: '本地终端 (terminal)', hint: '有安全风险，仅在可信环境启用' },
   { key: 'cronjob_tool_enabled', label: '定时任务 (cronjob)' },
   { key: 'browser_enabled', label: '浏览器 (navigate/snapshot/click/…)', hint: '需本机 Chrome 或设置 BROWSER_CDP_URL；下载默认 deny' },
-  {
-    key: 'mea_enabled',
-    label: 'MEA 长程验收 (Manage-Execute-Audit)',
-    hint: '需消息含 mea-checks；与 SATH_MEA / pilot OR 合并；Workspace 不能为空',
-  },
 ]
 
 export const CODING_ASSISTANT_RUNTIME_TOOLS: RuntimeToolsConfig = {
@@ -576,7 +568,6 @@ function normalizeRuntimeTools(raw?: RuntimeToolsConfig | Record<string, unknown
     terminal_local_enabled: (cfg.terminal_local_enabled as boolean | undefined) ?? (cfg.terminalLocalEnabled as boolean | undefined),
     cronjob_tool_enabled: (cfg.cronjob_tool_enabled as boolean | undefined) ?? (cfg.cronjobToolEnabled as boolean | undefined),
     browser_enabled: (cfg.browser_enabled as boolean | undefined) ?? (cfg.browserEnabled as boolean | undefined),
-    mea_enabled: (cfg.mea_enabled as boolean | undefined) ?? (cfg.meaEnabled as boolean | undefined),
   }
 }
 
