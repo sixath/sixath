@@ -27,16 +27,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestChatGo_DoesNotRegisterLearningTools` / `TestAgentGo_DoesNotRegisterLearningTools`
-- [ ] 先跑应失败
+- [x] `TestChatGo_DoesNotRegisterLearningTools` / `TestAgentGo_DoesNotRegisterLearningTools`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 拆装配
 
-- [ ] 去掉三处调用
-- [ ] `cd portal && go test ./internal/service ./internal/chat -count=1`
-- [ ] **Commit** `fix(portal): unwire append_learning from default chat`
+- [x] 去掉三处调用
+- [x] `cd portal && go test ./internal/service ./internal/chat -count=1`
+- [x] **Commit** `fix(portal): unwire append_learning from default chat`
 
 ---
 

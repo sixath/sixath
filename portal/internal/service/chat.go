@@ -393,10 +393,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
-	if err := chat.RegisterLearningTools(reg); err != nil {
-		s.log.Errorf("SendMessage register append_learning failed: session_id=%s err=%v", sessionID, err)
-		return nil, err
-	}
 	if err := chat.RegisterAskUserTools(reg); err != nil {
 		s.log.Errorf("SendMessage register ask_user failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
@@ -663,10 +659,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
 	}); err != nil {
 		s.log.Errorf("SendMessageStream register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
-		return nil, "", err
-	}
-	if err := chat.RegisterLearningTools(reg); err != nil {
-		s.log.Errorf("SendMessageStream register append_learning failed: session_id=%s err=%v", sessionID, err)
 		return nil, "", err
 	}
 	if err := chat.RegisterAskUserTools(reg); err != nil {

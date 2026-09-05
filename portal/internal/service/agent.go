@@ -343,10 +343,6 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat register runtime tools failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
-	if err := chat.RegisterLearningTools(reg); err != nil {
-		s.log.Errorf("Chat register append_learning failed: agent_id=%s err=%v", agentID, err)
-		return nil, err
-	}
 	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
