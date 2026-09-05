@@ -1,8 +1,8 @@
 # Agent = Model + Workspace + Harness 重启规格
 
 **日期**: 2026-09-05  
-**状态**: 已确认（2026-09-05）  
-**范围**: 架构契约与 keep/cut。本文件**不改代码**。后续减肉按第 11 节切分实施。  
+**状态**: 已确认（2026-09-05）；**2026-09-05 修订** S1–S3（Hub 管理面退出外壳；Context 迁出 `model`；引入 PromptBuilder 与 `harness`/`workspace` 搬家）  
+**范围**: 架构契约与 keep/cut。本文件**不改代码**。P1–P4 减肉见第 11 节；其后增强见第 12 节。  
 **一句话**: 旧公式把 Harness 定义成「模型之外的一切」，骨架吞掉血肉、器官和免疫；新公式把三者并列，平台外壳保留，焊进循环的领域闸与 Portal 第二套 Harness 全部移出核心。
 
 **取代（权威冲突时以本文为准）**:
@@ -21,7 +21,7 @@
 
 - [code-root-workspace-mount](./2026-08-13-code-root-workspace-mount-design.md) 的 **默认可写根 + 可选 `code/` 挂载**（**整仓当 workspace 变体退役**）
 - [design-agent-runtime-hermes-inspired](../../../framework/docs/design-agent-runtime-hermes-inspired.md) 的 **单一编排核心、canonical 消息、Toolset、取消/预算**（G-O1/G-O2/G-O4/G-O6/G-O7）
-- 上下文压缩 L0/L1/L2 管道（`framework/model`）
+- 上下文压缩 L0/L1/L2 管道（目标包 `framework/context`；P1–P4 期间仍在 `framework/model`，由 [S2](./2026-09-05-context-promptbuilder-design.md) 迁出）
 - Skills 渐进披露（`load_skill` / `skill_view`，Skill 名是参数不是工具名）
 
 ---
@@ -90,8 +90,8 @@ Web / Gateway / Portal          平台外壳（装配与分发，不是 Agent）
 
 1. 装配器解析 Agent：model、workspace 根、已绑定器官、hooks。
 2. Harness 从 workspace 加载 `harness/hooks.yaml` 与 skills 索引。
-3. Harness 组装 Context（NormalizeHistory → L0/L1/L2 管道）。P1–P4 不引入新的 Stable/Ephemeral PromptBuilder。
-4. 调用 Model；按 tool_calls 调度器官；**Hook.Before → PermissionPolicy → Execute → Hook.After**（与现网 `executeOneToolCall` 一致；Before 可改 args，block 发生在鉴权之前）。
+3. Harness 组装 Context：PromptBuilder（Stable + Ephemeral）→ Encode 为一条 system → L0/L1/L2 管道（只压 messages）。P1–P4 未引入 Builder；[S2](./2026-09-05-context-promptbuilder-design.md) 引入。
+4. 调用 Model（傻 Provider：编码 + 发请求）；按 tool_calls 调度器官；**Hook.Before → PermissionPolicy → Execute → Hook.After**（与现网 `executeOneToolCall` 一致；Before 可改 args，block 发生在鉴权之前）。
 5. 器官读写 workspace；结果写回 canonical 消息；循环直到停步或预算耗尽。
 
 ---
@@ -103,14 +103,15 @@ Web / Gateway / Portal          平台外壳（装配与分发，不是 Agent）
 ```text
 framework/harness     循环、Hook、预算、生命周期     禁止领域闸、禁止拼业务 prompt
 framework/workspace   根路径、守卫、约定目录、挂载     禁止执行模型
-framework/model       Provider + Context 管道
+framework/context     PromptBuilder + L0/L1/L2       禁止跑模型、禁止领域闸
+framework/model       Provider（编码 + 发请求）       禁止压缩管道、禁止 import harness/context
 framework/tool        器官注册与 MCP
 framework/skills      Skill 索引与加载
 framework/memory      仅 Context 材料（buffer + 可选检索）
 portal/internal/chat  装配器 + 会话 IO               禁止策略闸、禁止第二循环
 ```
 
-**依赖方向**：`portal` → `harness` → `model` / `workspace` / `tool`；`model` **不得** import `harness` / `agent`（现有 TraceSink 回调约定保留）。
+**依赖方向**：`portal` → `harness` → `context` / `workspace` / `tool`；`context` → `model`（Message）；`model` **不得** import `harness` / `context` / `agent`（现有 TraceSink 回调约定保留）。P1–P4 代码锚点仍是 `framework/agent` 与 `framework/model` 管道；包名由 [S3](./2026-09-05-harness-workspace-rename-design.md) 落地。
 
 当前代码锚点（搬家前）：
 
@@ -118,7 +119,7 @@ portal/internal/chat  装配器 + 会话 IO               禁止策略闸、禁�
 |----------|----------|
 | harness | `framework/agent/react_agent.go`、`tool_hook.go`、`harness_hooks.go`、`chat_session_hook.go` |
 | workspace | `framework/tool/pathguard.go`、`file_tools.go`；Portal `code_roots.go`、Agent `workspace` 列 |
-| context | `framework/model/context_pipeline.go` 及 L0/L1/L2 文件 |
+| context | P1–P4：`framework/model/context_pipeline.go` 及 L0/L1/L2；S2 后：`framework/context` |
 | 装配器 | `portal/internal/chat/agent_builder.go` |
 
 ---
@@ -170,7 +171,7 @@ Turn Tool Surface 的根因是「一个身体装了所有器官，再每轮截�
 - `framework/model`：L1 sanitize → snip → L2 pre-prune → L0 budget → orphan strip → L2 summarize
 - `framework/skills`：Index / loader；`load_skill` / `skill_view` / `read_skill_file` / `execute_skill_script`
 - 记忆：**本会话 buffer + 可选检索注入 Context**。向量/图/Neo4j/语义冲突不当作默认操作系统。
-- Prompt：减肉阶段只保留 **一条装配路径**（Agent `systemPrompt` + Harness Context 管道）。**不**在 P1–P4 新建 Stable/Ephemeral PromptBuilder 子系统；那是以后的增强，不是减肉范围。
+- Prompt：P1–P4 只保留 **一条装配路径**（Agent `systemPrompt` + 管道）。Stable/Ephemeral PromptBuilder 由 [S2](./2026-09-05-context-promptbuilder-design.md) 引入，禁止把已裁的 catalog/web/datasource/任务锁叠层焊回。
 
 ### 5.4 器官（可插拔，默认不绑全）
 
@@ -199,9 +200,9 @@ Model tool_calls
 
 | 层 | KEEP | 不进入 Harness |
 |----|------|----------------|
-| Web | 对话、Agent（含 workspace picker）、sessions、tools/MCP、登录/设置、Confirm cards | Insights 随 Growth 降级 |
+| Web | 对话、Agent（含 workspace picker）、sessions、tools/MCP、登录/设置、Confirm cards | Insights 随 Growth 降级；Hub Loadout/Binding 随 [S1](./2026-09-05-dead-code-hub-off-design.md) 退出外壳 |
 | Gateway | Web SSE/session 代理、Runtime 桥、Webhook、企微长连接（分发层） | 不跑 ReAct |
-| Portal | 会话持久化、Auth/ACL/Org、Agent CRUD、workspace 绑定、Runtime API、Tools/MCP/Skills 管理、Channel 投递、SSE/rewind/turn-trace、Confirm 协议 | 调查闸、技能预注入、MEA 旁路、Hub/Growth 主循环 |
+| Portal | 会话持久化、Auth/ACL/Org、Agent CRUD、workspace 绑定、Runtime API、Tools/MCP/Skills 管理、Channel 投递、SSE/rewind/turn-trace、Confirm 协议 | 调查闸、技能预注入、MEA 旁路、Hub/Growth 主循环；Hub HTTP 管理面随 S1 拆除 |
 
 `agent_builder` **退化后**保留为唯一接线：`model + registry(from bindings) + workspace → ReAct`。
 
@@ -328,3 +329,15 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 **顺序**：P1 必须先于 P3（P3 仍依赖 `PostModelPolicy` 接口直到它自己拆闸）。P2 可与 P1 并行。P4 最后。
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
+
+## 12. P4 之后（S1–S3）
+
+P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
+
+| 序号 | 规格 | 可验收交付 |
+|------|------|------------|
+| S1 | [dead-code-hub-off](./2026-09-05-dead-code-hub-off-design.md) | 删 ActiveFamilies / turn-surface 开关 / `queryWithSchemaHeal`；Hub HTTP+Web UI 拆除；procedural 退出默认预取。不删 `framework/memory/hub`、`growth`、`mea` |
+| S2 | [context-promptbuilder](./2026-09-05-context-promptbuilder-design.md) | 新建 `framework/context`；L0/L1/L2 迁出 `model`；PromptBuilder Stable/Ephemeral + `prompt_stable_hash`；Provider 内部不再压缩 |
+| S3 | [harness-workspace-rename](./2026-09-05-harness-workspace-rename-design.md) | `agent` → `harness`（可留一季别名）；抽出 `workspace`（pathguard + `code/` 挂载纯函数）。不改循环语义 |
+
+**顺序**：S1 → S2 → S3。
