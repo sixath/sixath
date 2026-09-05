@@ -57,10 +57,10 @@ func TestNudgeConfigFromEnv_defaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestBackgroundReviewEnabledFromEnv_defaultTrue(t *testing.T) {
+func TestBackgroundReviewEnabledFromEnv_defaultFalse(t *testing.T) {
 	t.Setenv("SATH_BACKGROUND_REVIEW", "")
-	if !backgroundReviewEnabledFromEnv() {
-		t.Fatal("unset SATH_BACKGROUND_REVIEW must default true (C3 stand-in)")
+	if backgroundReviewEnabledFromEnv() {
+		t.Fatal("unset SATH_BACKGROUND_REVIEW must default false (P4: growth off default path)")
 	}
 }
 
@@ -74,12 +74,12 @@ func TestBackgroundReviewEnabledFromEnv_false(t *testing.T) {
 func TestProvideGrowthUsecase_backgroundReviewFromEnv(t *testing.T) {
 	t.Setenv("SATH_BACKGROUND_REVIEW", "")
 	uc := ProvideGrowthUsecase(&fakeGrowthRepo{state: &ChatGrowthState{SessionID: "br1"}}, nil)
-	if !uc.BackgroundReviewEnabled() {
-		t.Fatal("ProvideGrowthUsecase must enable C3 when SATH_BACKGROUND_REVIEW unset")
+	if uc.BackgroundReviewEnabled() {
+		t.Fatal("ProvideGrowthUsecase must disable C3 when SATH_BACKGROUND_REVIEW unset")
 	}
-	t.Setenv("SATH_BACKGROUND_REVIEW", "0")
+	t.Setenv("SATH_BACKGROUND_REVIEW", "1")
 	uc2 := ProvideGrowthUsecase(&fakeGrowthRepo{state: &ChatGrowthState{SessionID: "br2"}}, nil)
-	if uc2.BackgroundReviewEnabled() {
-		t.Fatal("ProvideGrowthUsecase must honor SATH_BACKGROUND_REVIEW=0")
+	if !uc2.BackgroundReviewEnabled() {
+		t.Fatal("ProvideGrowthUsecase must honor SATH_BACKGROUND_REVIEW=1")
 	}
 }

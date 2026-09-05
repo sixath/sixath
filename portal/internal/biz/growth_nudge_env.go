@@ -40,16 +40,16 @@ func nudgeConfigFromEnv() growth.NudgeConfig {
 // backgroundReviewEnabledFromEnv reads C3 flag (stand-in for growth.background_review.enabled
 // until conf.proto gains a nested message — avoids Windows protobuf regen).
 //
-//	SATH_BACKGROUND_REVIEW — unset → true; "0"/"false"/"no"/"off" → false; else true
+//	SATH_BACKGROUND_REVIEW — unset → false; "0"/"false"/"no"/"off" → false; "1"/"true"/"yes"/"on" → true
 func backgroundReviewEnabledFromEnv() bool {
 	v := strings.TrimSpace(os.Getenv("SATH_BACKGROUND_REVIEW"))
 	if v == "" {
-		return true
+		return false
 	}
 	switch strings.ToLower(v) {
-	case "0", "false", "no", "off":
-		return false
-	default:
+	case "1", "true", "yes", "on":
 		return true
+	default:
+		return false
 	}
 }

@@ -30,18 +30,18 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestBackgroundReviewEnabledFromEnv_defaultFalse`
-- [ ] `TestBackgroundReviewGo_NoAfterTurnHook`
-- [ ] `TestProvideGrowthWorkerSource_NilWhenDisabled`
-- [ ] 先跑应失败
+- [x] `TestBackgroundReviewEnabledFromEnv_defaultFalse`
+- [x] `TestBackgroundReviewGo_NoAfterTurnHook`
+- [x] `TestProvideGrowthWorkerSource_NilWhenDisabled`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 拆接线
 
-- [ ] env 默认 false；`!workerEnabled` 不构造 worker；删 ChatService C3 钩子
-- [ ] `cd portal && go test ./internal/biz ./internal/service -count=1`
-- [ ] **Commit** `fix(portal): keep background review off the default chat path`
+- [x] env 默认 false；`!workerEnabled` 不构造 worker；删 ChatService C3 钩子
+- [x] `cd portal && go test ./internal/biz ./internal/service -count=1`
+- [x] **Commit** `fix(portal): keep background review off the default chat path`
 
 ---
 

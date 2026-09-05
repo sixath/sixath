@@ -40,11 +40,7 @@ type ChatService struct {
 	memoryStore    memory.MemoryStore
 	turnTraceStore turntrace.Store
 	codeRoots      []string
-	// bgReviewer is the C3 in-process fork (GrowthWorker); optional until newApp wires it.
-	bgReviewer BackgroundReviewer
-	// bgReviewSpawnHook overrides spawnBackgroundReviewOnce in tests (sync spy).
-	bgReviewSpawnHook func(BackgroundReviewParams)
-	log               *log.Helper
+	log            *log.Helper
 }
 
 // NewChatService creates a ChatService

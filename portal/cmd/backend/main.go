@@ -59,7 +59,7 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, cronSrv *cron.S
 			return nil
 		}),
 	}
-	// GrowthWorker is always constructed (C3 SpawnBackgroundReview); poll Loop only when enabled.
+	// GrowthWorker is constructed only when growth.worker_enabled (poll Loop).
 	if gw != nil && bool(workerEnabled) {
 		opts = append(opts, kratos.BeforeStart(func(context.Context) error {
 			go gw.Loop(workerCtx)
@@ -91,9 +91,12 @@ func provideGrowthWorker(
 	llmReviewEnabled llmReviewEnabledInput,
 	reviewPatchFile growthReviewPatchFileInput,
 	growthCfg *conf.Growth,
-	_ workerEnabledInput, // Loop gated in newApp; always construct for C3 SpawnBackgroundReview
+	workerEnabled workerEnabledInput,
 	turnTraces turntrace.Store,
 ) *service.GrowthWorker {
+	if !bool(workerEnabled) {
+		return nil
+	}
 	return service.NewGrowthWorker(logger, chatUC, agentUC, growthUC, cronRefUC, bool(llmReviewEnabled), string(reviewPatchFile), growthCfg, auth, turnTraces)
 }
 
