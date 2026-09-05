@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S8）
+## 12. P4 之后（S1–S9）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -344,5 +344,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S6 | [whole-repo-update-reject](./2026-09-05-whole-repo-update-reject-design.md) | 关掉 S5「Update 不拦」waiver：Update 写入整仓路径与 Create 同一错误码；空字符串落到 `{data_root}/agents/{id}`。不自动 `LinkCode`、不改未保存的行 |
 | S7 | [cli-rca-code-mount](./2026-09-05-cli-rca-code-mount-design.md) | 关掉 S4 CLI waiver：`templates.registerRCATools` 的 `rca_grep` 只走 `workspace/code`；`config.Workspace` 交给 ReAct。`rca.repos.roots` 运行时忽略。jaeger/ES 不改 |
 | S8 | [cli-templates-workspace](./2026-09-05-cli-templates-workspace-design.md) | 关掉 S7 dataquery/MCP waiver：非空 workspace 交给 dataquery 与 MCP 的 ReAct。ChatAgent / 空 workspace 拒跑 / RCA 不改 |
+| S9 | [chat-agent-workspace](./2026-09-05-chat-agent-workspace-design.md) | 关掉 S8 ChatAgent waiver：非空 workspace 时 ChatAgent 用 PromptBuilder 读 MEMORY.md/USER.md。不改成 ReAct、不删一季别名 |
 
-**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8。
+**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9。
