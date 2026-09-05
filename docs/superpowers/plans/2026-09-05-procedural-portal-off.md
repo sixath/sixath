@@ -31,18 +31,18 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestProceduralBindingGoRemoved`
-- [ ] `TestPortalAgentExtraGo_DoesNotCallSetProceduralRepairConfig`
-- [ ] 先跑应失败
+- [x] `TestProceduralBindingGoRemoved`
+- [x] `TestPortalAgentExtraGo_DoesNotCallSetProceduralRepairConfig`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 拆接线
 
-- [ ] sink 无 catalog；extra 忽略 `MemoryProceduralRepair`
-- [ ] 删 Portal procedural 装配与只测该路径的测试
-- [ ] `cd portal && go test ./internal/chat ./internal/service -count=1`
-- [ ] **Commit** `fix(portal): unwire procedural catalog from agent extra`
+- [x] sink 无 catalog；extra 忽略 `MemoryProceduralRepair`
+- [x] 删 Portal procedural 装配与只测该路径的测试
+- [x] `cd portal && go test ./internal/chat ./internal/service -count=1`
+- [x] **Commit** `fix(portal): unwire procedural catalog from agent extra`
 
 ---
 

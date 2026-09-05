@@ -67,11 +67,6 @@ func SetPortalAgentExtra(extra *config.PortalAgentExtra) {
 	} else {
 		SetMemoryGraphConfig(nil)
 	}
-	if extra.MemoryProceduralRepair != nil {
-		SetProceduralRepairConfig(extra.MemoryProceduralRepair)
-	} else {
-		SetProceduralRepairConfig(nil)
-	}
 	RebuildPrefetchMemoryOrchestrator()
 	if extra.Portal != nil && extra.Portal.GuardrailHalt != nil {
 		g := extra.Portal.GuardrailHalt
