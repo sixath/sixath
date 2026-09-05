@@ -27,16 +27,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestShippedConfig_skillAutoRouteOff`
-- [ ] 先跑应失败
+- [x] `TestShippedConfig_skillAutoRouteOff`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 改 yaml
 
-- [ ] 两份文件 `auto_route_enabled: false`，注释写明 P3 已拆预注入
-- [ ] `cd portal && go test ./internal/conf -count=1`
-- [ ] **Commit** `fix(portal): default shipped skill auto_route off`
+- [x] 两份文件 `auto_route_enabled: false`，注释写明 P3 已拆预注入
+- [x] `cd portal && go test ./internal/conf -count=1`
+- [x] **Commit** `fix(portal): default shipped skill auto_route off`
 
 ---
 

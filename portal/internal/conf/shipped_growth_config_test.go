@@ -61,3 +61,31 @@ func TestShippedConfig_growthReviewFlagsOff(t *testing.T) {
 		}
 	}
 }
+
+type shippedSkillsYAML struct {
+	Skills struct {
+		AutoRouteEnabled bool `yaml:"auto_route_enabled"`
+	} `yaml:"skills"`
+}
+
+func TestShippedConfig_skillAutoRouteOff(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	dir := filepath.Join(filepath.Dir(thisFile), "..", "..", "configs")
+	for _, name := range []string{"config.yaml", "config.docker.yaml"} {
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var raw shippedSkillsYAML
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("unmarshal %s: %v", name, err)
+		}
+		if raw.Skills.AutoRouteEnabled {
+			t.Errorf("%s skills.auto_route_enabled=true, want false (P3 removed SKILL pre-inject)", name)
+		}
+	}
+}
