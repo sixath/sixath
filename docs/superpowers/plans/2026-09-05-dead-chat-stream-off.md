@@ -27,16 +27,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestChatStreamGoRemoved`：`chat_stream.go` 必须不存在
-- [ ] 先跑应失败
+- [x] `TestChatStreamGoRemoved`：`chat_stream.go` 必须不存在
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 删文件
 
-- [ ] `git rm framework/templates/chat_stream.go`
-- [ ] `cd framework && go test ./templates ./harness -count=1`
-- [ ] **Commit** `fix(templates): remove unused ChatStream handler wrappers`
+- [x] `git rm framework/templates/chat_stream.go`
+- [x] `cd framework && go test ./templates ./harness -count=1`
+- [x] **Commit** `fix(templates): remove unused ChatStream handler wrappers`
 
 ---
 
