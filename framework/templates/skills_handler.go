@@ -3,7 +3,6 @@ package templates
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/events"
@@ -21,24 +20,9 @@ func BuildSkillsSummary(all []skills.SkillMeta, maxCount int) string {
 	return skills.BuildSkillsSummary(all, maxCount)
 }
 
-// BuildSkillsAwarePrompt 转发 skills.BuildSkillsAwarePrompt（无 HyperTool 段）。
+// BuildSkillsAwarePrompt 转发 skills.BuildSkillsAwarePrompt。
 func BuildSkillsAwarePrompt(skillsIdx *skills.Index) string {
 	return skills.BuildSkillsAwarePrompt(skillsIdx)
-}
-
-// buildSkillsAwareSystemPrompt 在 skills 索引文案上可选插入 HyperTool 说明。
-func buildSkillsAwareSystemPrompt(skillsIdx *skills.Index, hyperToolEnabled bool) string {
-	base := skills.BuildSkillsAwarePrompt(skillsIdx)
-	if !hyperToolEnabled {
-		return base
-	}
-	extra := "\n" + tool.HyperToolPromptSnippet() + "\n"
-	const needle = "排障结束后"
-	i := strings.LastIndex(base, needle)
-	if i < 0 {
-		return base + extra
-	}
-	return base[:i] + extra + base[i:]
 }
 
 // NewSkillsAwareChatHandlerFromConfig 构建一个支持 Skills 的 ReAct 对话 Handler。
@@ -89,13 +73,6 @@ func NewSkillsAwareChatHandlerFromConfig(cfg config.Config, skillsIdx *skills.In
 			}
 			_ = toolskill.RegisterExecuteSkillScriptTool(reg, skillsIdx, cfg.Skills.AllowScriptExecution, scriptOpts)
 		}
-		_ = tool.RegisterHyperTool(reg, &tool.HyperToolOptions{
-			Enabled:          cfg.HyperTool.Enabled,
-			TimeoutSeconds:   cfg.HyperTool.TimeoutSeconds,
-			MaxInternalCalls: cfg.HyperTool.MaxInternalCalls,
-			PythonCommand:    cfg.HyperTool.PythonCommand,
-			BlockedTools:     cfg.HyperTool.BlockedTools,
-		})
 
 		reactOpts := []agent.ReActOption{agent.WithReActMaxSteps(20)}
 		reactOpts = appendWorkspaceOpt(reactOpts, cfg.Workspace)
@@ -108,7 +85,7 @@ func NewSkillsAwareChatHandlerFromConfig(cfg config.Config, skillsIdx *skills.In
 		}
 		react := agent.NewReActAgent(m, mem, reg, reactOpts...)
 
-		sys := buildSkillsAwareSystemPrompt(skillsIdx, cfg.HyperTool.Enabled)
+		sys := BuildSkillsAwarePrompt(skillsIdx)
 		llmReq := *req
 		llmReq.Messages = append([]model.Message{
 			{Role: "system", Content: sys},

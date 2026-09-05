@@ -27,16 +27,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestSkillsHandlerGo_doesNotWireHyperTool`：读 `skills_handler.go`，不得含 `RegisterHyperTool` / `HyperToolPromptSnippet`
-- [ ] 先跑应失败
+- [x] `TestSkillsHandlerGo_doesNotWireHyperTool`：读 `skills_handler.go`，不得含 `RegisterHyperTool` / `HyperToolPromptSnippet`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 拆装配
 
-- [ ] 去掉 `RegisterHyperTool`；system prompt 走 `BuildSkillsAwarePrompt`；删除 `buildSkillsAwareSystemPrompt`
-- [ ] `cd framework && go test ./templates ./tool -count=1`
-- [ ] **Commit** `fix(templates): unwire hypertool from default skills handler`
+- [x] 去掉 `RegisterHyperTool`；system prompt 走 `BuildSkillsAwarePrompt`；删除 `buildSkillsAwareSystemPrompt`
+- [x] `cd framework && go test ./templates ./tool -count=1`
+- [x] **Commit** `fix(templates): unwire hypertool from default skills handler`
 
 ---
 
