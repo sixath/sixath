@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S16）
+## 12. P4 之后（S1–S17）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -352,5 +352,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S14 | [dead-chat-stream-off](./2026-09-05-dead-chat-stream-off-design.md) | 关掉 S12 leftover：删无调用者的 `NewChatStreamHandler` / `NewChatAgentHandlerWithContext`。不拆 GrowthWorker、不删 procedural |
 | S15 | [procedural-portal-off](./2026-09-05-procedural-portal-off-design.md) | 关掉 S1 leftover：Portal 不再装 procedural catalog / auto-commit；sink 只留 Logging+Ring。不删 `framework/memory` procedural、不拆 GrowthWorker |
 | S16 | [background-review-off](./2026-09-05-background-review-off-design.md) | 关掉 P4 leftover：C3 默认 off；ChatService 不再 after-turn FinalizeTurn/spawn；GrowthWorker 只在 `worker_enabled` 时构造。不删 `framework/growth` |
+| S17 | [chat-growthuc-off](./2026-09-05-chat-growthuc-off-design.md) | 关掉 S16 leftover：ChatService 不再注入 `growthUC`。worker/curator 仍用 ProvideGrowthUsecase。不改 CuratorWorker |
 
-**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12 → S13 → S14 → S15 → S16。
+**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12 → S13 → S14 → S15 → S16 → S17。

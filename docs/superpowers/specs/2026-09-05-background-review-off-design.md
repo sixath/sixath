@@ -59,7 +59,7 @@ growth.worker_enabled == true:
 
 - 不删 `framework/growth`
 - 不改 CuratorWorker
-- 不把 `growthUC` 移出 `NewChatService` 签名
+- 不把 `growthUC` 移出 `NewChatService` 签名（**S17 已拆**）
 - 不改 `DefaultNudgeConfig`（framework 包默认）
 - 不合 assembler
 
