@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S19）
+## 12. P4 之后（S1–S20）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -355,5 +355,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S17 | [chat-growthuc-off](./2026-09-05-chat-growthuc-off-design.md) | 关掉 S16 leftover：ChatService 不再注入 `growthUC`。worker/curator 仍用 ProvideGrowthUsecase。不改 CuratorWorker |
 | S18 | [nudge-default-off](./2026-09-05-nudge-default-off-design.md) | 关掉 S17 leftover：`DefaultNudgeConfig.Enabled` 默认 false。不删 OnToolSuccess API |
 | S19 | [growth-yaml-defaults-off](./2026-09-05-growth-yaml-defaults-off-design.md) | 关掉 S18 leftover：发货 yaml 不再打开 `llm_review` / C2s / learnings。不改 proto、不拆 worker |
+| S20 | [unwire-hypertool](./2026-09-05-unwire-hypertool-design.md) | 关掉 P4 leftover：CLI skills handler 不再 `RegisterHyperTool`。不删 hypertool 包 |
 
-**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12 → S13 → S14 → S15 → S16 → S17 → S18 → S19。
+**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12 → S13 → S14 → S15 → S16 → S17 → S18 → S19 → S20。
