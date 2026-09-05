@@ -209,3 +209,14 @@ func preferFailedThenTrim(recs []ToolCallRecord, limit int) []ToolCallRecord {
 	}
 	return out
 }
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "..."
+}
