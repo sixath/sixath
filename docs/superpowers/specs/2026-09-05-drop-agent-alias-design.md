@@ -45,7 +45,7 @@ import "github.com/sixath/framework/harness" → 唯一骨架包
 
 ## 4. 非目标
 
-- 不删 `NewChatStreamHandler` / `NewChatAgentHandlerWithContext`
+- 不删 `NewChatStreamHandler` / `NewChatAgentHandlerWithContext`（**S14 已删**）
 - 不拆 GrowthWorker / FinalizeTurnForBackgroundReview
 - 不删 `portal/internal/chat/procedural_binding.go`
 - 不合 assembler

@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S13）
+## 12. P4 之后（S1–S14）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -349,5 +349,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S11 | [insights-shell-off](./2026-09-05-insights-shell-off-design.md) | 关掉 S1「Insights 隐藏路由留下」waiver：拆 Web 页与 `GET .../insights`。Rewind / turn-trace 不改 |
 | S12 | [unwire-growth-react-opts](./2026-09-05-unwire-growth-react-opts-design.md) | 关掉 P4 leftover：默认 Run 不再经 `growthReActOptions`；hooks.yaml / FailureCapture 并进 `HarnessReActOptions`。不删 Growth 包 |
 | S13 | [drop-agent-alias](./2026-09-05-drop-agent-alias-design.md) | 关掉 S3「留一季别名」waiver：仓内已无 `github.com/sixath/framework/agent` import，删除别名包。不删 ChatStream、不拆 GrowthWorker |
+| S14 | [dead-chat-stream-off](./2026-09-05-dead-chat-stream-off-design.md) | 关掉 S12 leftover：删无调用者的 `NewChatStreamHandler` / `NewChatAgentHandlerWithContext`。不拆 GrowthWorker、不删 procedural |
 
-**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12 → S13。
+**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11 → S12 → S13 → S14。
