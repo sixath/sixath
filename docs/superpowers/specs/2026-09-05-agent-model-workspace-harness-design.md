@@ -90,7 +90,7 @@ Web / Gateway / Portal          平台外壳（装配与分发，不是 Agent）
 
 1. 装配器解析 Agent：model、workspace 根、已绑定器官、hooks。
 2. Harness 从 workspace 加载 `harness/hooks.yaml` 与 skills 索引。
-3. Harness 组装 Context：PromptBuilder（Stable + Ephemeral）→ Encode 为一条 system → L0/L1/L2 管道（只压 messages）。P1–P4 未引入 Builder；[S2](./2026-09-05-context-promptbuilder-design.md) 引入。
+3. Harness 组装 Context：从 workspace 加载 skills 索引并渲染为索引文本；PromptBuilder（Stable + Ephemeral）→ Encode 为一条 system → L0/L1/L2 管道（只压 messages）。P1–P4 未引入 Builder；[S2](./2026-09-05-context-promptbuilder-design.md) 引入。
 4. 调用 Model（傻 Provider：编码 + 发请求）；按 tool_calls 调度器官；**Hook.Before → PermissionPolicy → Execute → Hook.After**（与现网 `executeOneToolCall` 一致；Before 可改 args，block 发生在鉴权之前）。
 5. 器官读写 workspace；结果写回 canonical 消息；循环直到停步或预算耗尽。
 

@@ -72,9 +72,27 @@ ToolNames     []string    // 当时 registry 的 List 名；MCP 热加载后可�
 Ephemeral     string      // 本轮一次性；无则空
 ```
 
-Portal 装配器负责读 workspace 的 MEMORY.md/USER.md、调用 `BuildSkillsAwarePrompt`、把 Agent 文案交给 Harness。Harness 每步从 **当时** registry 取 ToolNames。
+Portal 装配器只传 Agent `systemPrompt`、workspace 根、registry。Harness 从 workspace 扫 skills 索引，用 `templates.BuildSkillsAwarePrompt` 渲染索引文本，读 `MEMORY.md` / `USER.md`（缺则空），从 **当时** registry 取工具名。PromptBuilder 只收字符串，不 import portal / skills。
 
-Trace：Run / invocation 记录 `prompt_stable_hash`（可选字段即可）。
+### Stable 序列化（确定性，用于 hash）
+
+块顺序固定，块间 `\n\n`。空块整段省略（含标题），不留空白占位。
+
+1. Agent 文案（无标题，原文）
+2. `## Skills` + 索引文本（`BuildSkillsAwarePrompt` 的返回；空索引则省略整块）
+3. `## MEMORY.md` + 文件正文（文件不存在或空白则省略）
+4. `## USER.md` + 文件正文（同上）
+5. `## Tools` + 工具名，**排序去重** 后每行一条 `- {name}`（registry 为空则省略）
+
+`prompt_stable_hash` = SHA256(UTF-8 Stable 字节) 的 hex 前 16 字符。
+
+### Ephemeral 生命周期
+
+Ephemeral 按 **每次模型 invocation** 计算，不是「用户轮次只插第一次」。Harness 根据当前 Run 状态生成（预算告警、本 invocation 的护栏 banner）；没有则为空。它不进入 hash。同一用户轮次内后续 step 若告警消失，Ephemeral 变空，Stable 与 hash 仍不变。
+
+### Encode 与 system 条
+
+messages 里若已有 system：只替换 **第一条** `role=system`。若无 system：插入为第 0 条。禁止追加第二条 system。无 Ephemeral 时 Encode 结果等于 Stable，不含 `---`。
 
 ---
 
@@ -90,11 +108,12 @@ Trace：Run / invocation 记录 `prompt_stable_hash`（可选字段即可）。
 
 ## 6. 成功标准
 
-1. `grep PrepareChatContext framework/model/*.go` 无生产调用（测试已迁出）。
+1. `grep PrepareChatContext` 在 `framework/model` **整树**（含子目录）无生产调用；`openai.go` / `openai_tools.go` / `openai_tools_stream.go`（及其它 Provider）内部不再压缩。
 2. 只改 Ephemeral、Stable 字节不变 → `prompt_stable_hash` 不变（单测）。
-3. Encode 顺序固定：Stable 在前；无 Ephemeral 时无 `---` 分隔符。
-4. 默认装配仍能：假 Model + 计算器或无工具跑通 SSE。
-5. 管道行为与迁出前一致：现有 L0/L1/L2 单测换包后绿。
-6. `go test ./framework/context ./framework/model ./framework/agent ./framework/tool -count=1` 绿。
+3. Encode 顺序固定：Stable 在前；无 Ephemeral 时无 `---` 分隔符；只维护第一条 system。
+4. ToolNames 排序去重：同一组名不同传入顺序 → Stable 与 hash 相同。
+5. 默认装配仍能：假 Model + 计算器或无工具跑通 SSE。
+6. 管道行为与迁出前一致：现有 L0/L1/L2 单测换包后绿。
+7. `go test ./framework/context ./framework/model ./framework/agent ./framework/tool -count=1` 绿。
 
 禁止把 `_neo4j_q/` 当夹具。

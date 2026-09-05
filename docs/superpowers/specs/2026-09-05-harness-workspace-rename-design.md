@@ -22,8 +22,8 @@
 |----|------|
 | harness | `github.com/sixath/framework/harness` ← 现 `framework/agent` 中仍存活的循环/Hook/预算/生命周期 |
 | workspace | `github.com/sixath/framework/workspace`：`ResolveWorkspacePath`、约定目录文档、`code/` symlink 纯函数 |
-| 别名 | 留一季 `framework/agent`：`type ReActAgent = harness.ReActAgent` 等转发；**新代码禁止** import `agent` |
-| 旧闸 | 若搬家时磁盘上仍有 P1 CUT 文件，**先删再搬**，禁止带进新包名 |
+| 别名 | 留一季 `framework/agent`：对 Harness 公开类型与 `New*` / `WithReAct*` 做转发；**新代码禁止** import `agent`；`model` 不得 import `agent` |
+| 旧闸 | **先删再搬**仅限已确认零生产调用者的 P1 领域闸文件。`plan_agent.go` / `post_model_policy.go` 不是强制删除项 |
 | Portal | 仍拥有 Agent.workspace 列与 `{data_root}/agents/{id}/` 创建（P2）；HTTP/ACL 留在 portal |
 | 不搬 | L0/L1/L2（已在 context）；MCP/器官实现；Growth / MEA / Hub 包名 |
 
@@ -46,9 +46,9 @@ github.com/sixath/framework/model      // Provider only
 
 迁入（非穷尽，以实施时仍存在的文件为准）：`react_agent.go`、`tool_hook.go`、`harness_hooks.go`、`chat_session_hook.go`、`trace.go`、`stream.go`、`guardrail_evaluator.go`、`failure_capture_hook.go`、`tool_guardrail.go`、request/metadata/context_ops。
 
-**先删再搬**的候选（若仍在磁盘）：`evidence_gate.go`、`inbound_gate.go`、`code_claim_*.go`、`code_quote_gate.go`、`empty_*_gate.go`、`truncated_page_gate.go`、`scenario_path_gate.go`、`surrogate_source_gate.go`、`code_workset.go`、`plan_agent.go`、`post_model_policy.go`。
+**先删再搬**仅限已确认 **零生产调用者** 的 P1 领域闸（例如仍在磁盘上的 `evidence_gate.go`、`inbound_gate.go`、`code_workset.go` 及测试）。`plan_agent.go` / `post_model_policy.go` **不是**强制删除：无调用者才删，否则随包迁走，避免改循环语义。
 
-别名包只做类型与构造函数转发，不复制逻辑。
+别名包只做类型与构造函数转发，不复制逻辑。实施计划必须列出转发的公开符号。`model` 仍不得 import `harness` 或 `agent`。
 
 ---
 
@@ -78,5 +78,6 @@ Portal 创建 Agent 时 `MkdirAll {data_root}/agents/{id}/` 不变。
 2. `go test ./framework/harness ./framework/workspace ./framework/context ./framework/model ./framework/tool ./framework/agent -count=1` 绿（`agent` 仅为别名包测试）。
 3. 空 workspace root 仍拒跑；`hooks.yaml` block 仍生效；新建 Agent 仍有默认可写根。
 4. 循环单测换 import 后断言不变（system prompt 注入、Hook Before block）。
+5. `code/` 挂载：允许根内创建 symlink 成功；目标越出允许根拒绝；空 workspace root 仍非法。Windows 上若无法建 symlink，错误可观测且不写到允许根之外（实施计划写清跳过或用 junction 的测试策略）。
 
 禁止把 `_neo4j_q/` 当夹具。禁止一份 PR 把 S3 与 S1/S2 混在一起。
