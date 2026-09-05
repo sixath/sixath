@@ -22,7 +22,7 @@
 |----|------|
 | harness | `github.com/sixath/framework/harness` ← 现 `framework/agent` 中仍存活的循环/Hook/预算/生命周期 |
 | workspace | `github.com/sixath/framework/workspace`：`ResolveWorkspacePath`、约定目录文档、`code/` symlink 纯函数 |
-| 别名 | 留一季 `framework/agent`：对 Harness 公开类型与 `New*` / `WithReAct*` 做转发；**新代码禁止** import `agent`；`model` 不得 import `agent` |
+| 别名 | 留一季 `framework/agent`：对 Harness 公开类型与 `New*` / `WithReAct*` 做转发；**新代码禁止** import `agent`；`model` 不得 import `agent`。**S13 已删包** |
 | 旧闸 | **先删再搬**仅限已确认零生产调用者的 P1 领域闸文件。`plan_agent.go` / `post_model_policy.go` 不是强制删除项 |
 | Portal | 仍拥有 Agent.workspace 列与 `{data_root}/agents/{id}/` 创建（P2）；HTTP/ACL 留在 portal |
 | 不搬 | L0/L1/L2（已在 context）；MCP/器官实现；Growth / MEA / Hub 包名 |
