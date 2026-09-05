@@ -287,7 +287,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat get agent failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
-	if err := biz.RequireWorkspaceRoot(agentMeta.Workspace); err != nil {
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
 		return nil, err
 	}
 
@@ -475,6 +475,9 @@ func (s *AgentService) ExecuteSkill(ctx context.Context, req *agentv1.ExecuteSki
 	agentMeta, err := s.uc.GetForUse(ctx, agentID)
 	if err != nil {
 		s.log.Errorf("ExecuteSkill get agent failed: agent_id=%s err=%v", agentID, err)
+		return nil, err
+	}
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
 		return nil, err
 	}
 

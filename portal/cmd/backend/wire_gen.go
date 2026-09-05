@@ -53,7 +53,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, main
 	growthUsecase := biz.ProvideGrowthUsecase(growthRepo, growth)
 	sessionUnitsBackend := data.NewSessionUnitsBackendFromData(dataData)
 	store := data.NewTurnTraceStoreFromData(dataData)
-	chatService := service.ProvideChatServiceWithTurnTrace(chatUsecase, agentUsecase, toolUsecase, mcpServerUsecase, skillResourceUsecase, growthUsecase, channelUsecase, sessionUnitsBackend, store, dataData, logger)
+	chatService := service.ProvideChatServiceWithTurnTrace(chatUsecase, agentUsecase, toolUsecase, mcpServerUsecase, skillResourceUsecase, growthUsecase, channelUsecase, sessionUnitsBackend, store, v, dataData, logger)
 	grpcServer := server.NewGRPCServer(confServer, toolService, agentService, chatService, logger)
 	channelRuntimeRepo := data.NewChannelRuntimeRepo(dataData, logger)
 	channelService := service.NewChannelService(channelUsecase, channelRuntimeRepo, agentService, logger)

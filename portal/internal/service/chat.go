@@ -39,6 +39,7 @@ type ChatService struct {
 	sessionHooks   *agent.ChatSessionHookRegistry
 	memoryStore    memory.MemoryStore
 	turnTraceStore turntrace.Store
+	codeRoots      []string
 	// bgReviewer is the C3 in-process fork (GrowthWorker); optional until newApp wires it.
 	bgReviewer BackgroundReviewer
 	// bgReviewSpawnHook overrides spawnBackgroundReviewOnce in tests (sync spy).
@@ -58,9 +59,10 @@ func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUs
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, _ *data.Data, logger log.Logger) *ChatService {
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, _ *data.Data, logger log.Logger) *ChatService {
 	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
+	s.SetCodeRoots(codeRoots)
 	return s
 }
 
@@ -70,6 +72,14 @@ func (s *ChatService) SetTurnTraceStore(st turntrace.Store) {
 		return
 	}
 	s.turnTraceStore = st
+}
+
+// SetCodeRoots sets the configured code-root whitelist used to reject whole-repo workspaces.
+func (s *ChatService) SetCodeRoots(roots []string) {
+	if s == nil {
+		return
+	}
+	s.codeRoots = roots
 }
 
 func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
@@ -321,7 +331,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage get agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
-	if err := biz.RequireWorkspaceRoot(agentMeta.Workspace); err != nil {
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
 		return nil, err
 	}
 
@@ -549,7 +559,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream get agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
 	}
-	if err := biz.RequireWorkspaceRoot(agentMeta.Workspace); err != nil {
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
 		return nil, "", err
 	}
 

@@ -232,7 +232,7 @@ export default function AgentForm() {
               </small>
               {retiredWholeRepo ? (
                 <small style={{ color: 'var(--warning, #b45309)', display: 'block', marginBottom: 8 }}>
-                  整仓作 Workspace 已退役。此 Agent 仍可使用当前路径；新建请留空工作空间并可选挂载 code。
+                  整仓作 Workspace 已退役。当前路径不能再跑对话或执行技能；请改成默认可写根并可选挂载 workspace/code。
                 </small>
               ) : null}
             </div>

@@ -33,13 +33,13 @@
 
 **Files:** `workspace_run.go`、`agent.go`、`agent_create_workspace_test.go`
 
-- [ ] **Step 1:** 新增 `TestChat_RejectsWholeRepoWorkspace`（仿 `TestChat_RejectsEmptyWorkspace`，workspace 在 `codeRoots` 下，reason=`WORKSPACE_WHOLE_REPO_RETIRED`）。`TestExecuteSkill_RejectsWholeRepoWorkspace` 同判据。
+- [x] **Step 1:** 新增 `TestChat_RejectsWholeRepoWorkspace`（仿 `TestChat_RejectsEmptyWorkspace`，workspace 在 `codeRoots` 下，reason=`WORKSPACE_WHOLE_REPO_RETIRED`）。`TestExecuteSkill_RejectsWholeRepoWorkspace` 同判据。
 
-- [ ] **Step 2:** 实现 `requireRunWorkspace`；Chat / ExecuteSkill 改用它。
+- [x] **Step 2:** 实现 `requireRunWorkspace`；Chat / ExecuteSkill 改用它。
 
-- [ ] **Step 3:** `cd portal && go test ./internal/service -run "TestChat_Rejects|TestExecuteSkill_Rejects|TestCreateAgent_Rejects" -count=1`
+- [x] **Step 3:** `cd portal && go test ./internal/service -run "TestChat_Rejects|TestExecuteSkill_Rejects|TestCreateAgent_Rejects" -count=1`
 
-- [ ] **Step 4: Commit** `fix(portal): reject whole-repo workspace on agent run`
+- [x] **Step 4: Commit** `fix(portal): reject whole-repo workspace on agent run`
 
 ---
 
@@ -47,19 +47,19 @@
 
 **Files:** `chat.go`、`wire_gen.go`、`AgentForm.tsx`、SendMessage 测试
 
-- [ ] **Step 1:** `ChatService.codeRoots` + `SetCodeRoots`；`ProvideChatServiceWithTurnTrace` 增加 `codeRoots []string`。SendMessage / Stream 用 `requireRunWorkspace`。
+- [x] **Step 1:** `ChatService.codeRoots` + `SetCodeRoots`；`ProvideChatServiceWithTurnTrace` 增加 `codeRoots []string`。SendMessage / Stream 用 `requireRunWorkspace`。
 
-- [ ] **Step 2:** `TestSendMessage_RejectsWholeRepoWorkspace`：会话绑定整仓 Agent，在写消息前失败。
+- [x] **Step 2:** `TestSendMessage_RejectsWholeRepoWorkspace`：会话绑定整仓 Agent，在写消息前失败。
 
-- [ ] **Step 3:** 更新 `wire_gen.go`（`go generate` 或手改：把已有 `v` 传入 Provide）。AgentForm 退役文案改为不能再跑对话。
+- [x] **Step 3:** 更新 `wire_gen.go`（`go generate` 或手改：把已有 `v` 传入 Provide）。AgentForm 退役文案改为不能再跑对话。
 
-- [ ] **Step 4:** `cd portal && go test ./internal/service -count=1`；`cd portal/cmd/backend && go build -o NUL .`（确认 wire 编译）
+- [x] **Step 4:** `cd portal && go test ./internal/service -count=1`；`cd portal/cmd/backend && go build -o NUL .`（确认 wire 编译）
 
-- [ ] **Step 5: Commit** `fix(portal): reject whole-repo workspace on chat run`
+- [x] **Step 5: Commit** `fix(portal): reject whole-repo workspace on chat run`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] `cd portal && go test ./internal/chat ./internal/service -count=1`（skip 预存 SQLITE_BUSY）
-- [ ] 不要开始下一切片。不要 merge/push，除非用户明确要求。
+- [x] `cd portal && go test ./internal/chat ./internal/service -count=1`（skip 预存 SQLITE_BUSY）
+- [x] 不要开始下一切片。不要 merge/push，除非用户明确要求。
