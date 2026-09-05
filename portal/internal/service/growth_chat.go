@@ -31,9 +31,6 @@ func metadataSessionID(req *agent.Request) string {
 
 func (s *ChatService) growthReActOptions(workspace string) []agent.ReActOption {
 	var opts []agent.ReActOption
-	if s.growthUC != nil {
-		opts = append(opts, agent.WithReActToolSuccessHook(s.growthToolSuccessHook))
-	}
 	var hooks []agent.ToolHook
 	if ws := strings.TrimSpace(workspace); ws != "" {
 		if loaded, err := agent.LoadWorkspaceHarnessHooks(ws); err != nil {

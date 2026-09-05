@@ -38,7 +38,7 @@ message Growth {
   // review_patch_file 为 JSON 补丁文件路径（内容格式同 growth.ParsePatchBatchJSON）；非空且 llm_review_enabled 时走假 LLM 写盘（二期 2.2）。
   // 相对路径相对于 -conf 目录（若 -conf 指向单文件 yaml，则相对于该文件所在目录）。
   string review_patch_file = 2;
-  // worker_enabled 为 false 时完全禁用 GrowthWorker 后台轮询（默认 true）。
+  // worker_enabled 为 false 时完全禁用 GrowthWorker 后台轮询（默认 false；P4 起 Growth 不进默认路径）。
   bool worker_enabled = 3;
   // combined_review_enabled 为 true 时，双 pending 同 tick 走单次 LLM（spec 二期 L2）；默认 false。
   bool combined_review_enabled = 4;

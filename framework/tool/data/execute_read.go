@@ -162,10 +162,10 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 				qo.NamedParams = m
 			}
 		}
-		res, err := queryWithSchemaHeal(ctx, cfg, reader, datasourceID, dsl, qo)
+		res, err := reader.Query(ctx, datasourceID, dsl, qo)
 		if err != nil {
 			status = "error"
-			return nil, err
+			return nil, fmt.Errorf("execute_read: %w", err)
 		}
 		rid, _ := ctx.Value(tool.ContextKeyRequestID).(string)
 		invokedPayload := map[string]any{
@@ -188,22 +188,6 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 		}
 		res.HitStatus = tool.HitStatusFromCount(true, n)
 		res.QueriedIndex = idx
-
-		rows := queryResultRows(res)
-		payload := map[string]any{
-			"hits": rows, "truncated": res.Truncated, "hit_status": res.HitStatus, "queried_index": res.QueriedIndex,
-		}
-		if res.Columns != nil {
-			payload["columns"] = res.Columns
-		}
-		if res.RepairNote != "" {
-			payload["repair_note"] = res.RepairNote
-			payload["repaired_sql"] = res.RepairedSQL
-		}
-		if stub, _ := tool.MaybeSpill(ctx, "execute_read", rows, payload, nil); stub != nil {
-			stub.Truncated = res.Truncated
-			return stub, nil
-		}
 		return res, nil
 	}
 }

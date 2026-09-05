@@ -492,21 +492,6 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 	return agent.NewReActAgent(m, mem, reg, opts...)
 }
 
-// ShouldEnableEvidenceGate reports whether the registry has RCA evidence tools
-// (jaeger_trace or es_log_query) that warrant Soft EvidenceGate on ReAct.
-func ShouldEnableEvidenceGate(reg *tool.Registry) bool {
-	if reg == nil {
-		return false
-	}
-	if _, ok := reg.Get("jaeger_trace"); ok {
-		return true
-	}
-	if _, ok := reg.Get("es_log_query"); ok {
-		return true
-	}
-	return false
-}
-
 // ShouldEnableParallelTools is true when the registry has code-root tools that
 // are safe to run together in one ReAct step (grep/read/symbol).
 func ShouldEnableParallelTools(reg *tool.Registry) bool {
@@ -515,30 +500,6 @@ func ShouldEnableParallelTools(reg *tool.Registry) bool {
 	}
 	for _, name := range []string{"rca_read", "rca_grep", "rca_glob", "rca_symbol"} {
 		if _, ok := reg.Get(name); ok {
-			return true
-		}
-	}
-	return false
-}
-
-// ShouldApplyEvidenceGate is true only when this turn is an RCA investigation.
-// Bound ES/Jaeger tools must not force log evidence on unrelated lookups (e.g. Mongo).
-func ShouldApplyEvidenceGate(active map[string]struct{}, userText string) bool {
-	if active != nil {
-		_, ok := active[FamilyRCA]
-		return ok
-	}
-	return rcaKeywordHit(userText)
-}
-
-func rcaKeywordHit(userText string) bool {
-	lower := strings.ToLower(strings.TrimSpace(userText))
-	if lower == "" {
-		return false
-	}
-	for _, kw := range familyKeywords[FamilyRCA] {
-		kw = strings.ToLower(strings.TrimSpace(kw))
-		if kw != "" && strings.Contains(lower, kw) {
 			return true
 		}
 	}

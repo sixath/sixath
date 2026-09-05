@@ -26,46 +26,6 @@ func TestReActOptionsFromAgent_zeroOmits(t *testing.T) {
 	}
 }
 
-func TestShouldEnableEvidenceGate(t *testing.T) {
-	if ShouldEnableEvidenceGate(nil) {
-		t.Fatal("nil registry must be false")
-	}
-	empty := tool.NewRegistry()
-	if ShouldEnableEvidenceGate(empty) {
-		t.Fatal("empty registry must be false")
-	}
-
-	jaeger := tool.NewRegistry()
-	if err := jaeger.Register(tool.Tool{
-		Name:        "jaeger_trace",
-		Description: "jaeger",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register jaeger: %v", err)
-	}
-	if !ShouldEnableEvidenceGate(jaeger) {
-		t.Fatal("jaeger_trace registry must enable gate")
-	}
-
-	es := tool.NewRegistry()
-	if err := es.Register(tool.Tool{
-		Name:        "es_log_query",
-		Description: "es",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register es: %v", err)
-	}
-	if !ShouldEnableEvidenceGate(es) {
-		t.Fatal("es_log_query registry must enable gate")
-	}
-}
-
 func TestBuildReActAgent_jaegerDoesNotSoftInject(t *testing.T) {
 	reg := tool.NewRegistry()
 	if err := reg.Register(tool.Tool{
@@ -121,22 +81,6 @@ func TestBuildReActAgent_calculatorRunsWithoutRCATools(t *testing.T) {
 	}
 	if resp == nil || resp.Text != "ok" {
 		t.Fatalf("got %#v", resp)
-	}
-}
-
-func TestShouldApplyEvidenceGate(t *testing.T) {
-	mongo := "查询mongodb下uu=193218288的记录"
-	if ShouldApplyEvidenceGate(nil, mongo) {
-		t.Fatal("surface-off Mongo lookup must not apply EvidenceGate")
-	}
-	if !ShouldApplyEvidenceGate(nil, "用 elasticsearch 查一下错误日志") {
-		t.Fatal("surface-off ES/log query should apply EvidenceGate")
-	}
-	if ShouldApplyEvidenceGate(familySet([]string{FamilyCore}), "why down?") {
-		t.Fatal("core-only surface must not apply EvidenceGate")
-	}
-	if !ShouldApplyEvidenceGate(familySet([]string{FamilyCore, FamilyRCA}), mongo) {
-		t.Fatal("RCA-active surface should apply EvidenceGate even if text is a lookup")
 	}
 }
 

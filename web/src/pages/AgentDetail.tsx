@@ -299,7 +299,6 @@ export default function AgentDetail() {
         <div className="actions">
           <Link to="/agents" className="btn btn-secondary btn-sm">返回列表</Link>
           <Link to={`/agents/${id}/chat`} className="btn btn-sm">对话</Link>
-          <Link to={`/agents/${id}/insights`} className="btn btn-secondary btn-sm">Insights</Link>
           <Link to={`/agents/${id}/edit`} className="btn btn-secondary btn-sm">编辑</Link>
         </div>
       </div>

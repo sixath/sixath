@@ -11,7 +11,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 )
 
-func TestDeleteSession_GrowthSessionEndHooks_setsPending(t *testing.T) {
+func TestDeleteSession_DefaultChatService_noGrowthSessionEndHooks(t *testing.T) {
 	repo := &fakeGrowthRepoForService{state: &biz.ChatGrowthState{
 		SessionID:              "g2-sess",
 		TurnsSinceMemoryReview: 1,
@@ -31,11 +31,11 @@ func TestDeleteSession_GrowthSessionEndHooks_setsPending(t *testing.T) {
 	if reply == nil || reply.GetRet() == nil || reply.GetRet().GetCode() != 0 {
 		t.Fatalf("expected ok reply, got %#v", reply)
 	}
-	if !repo.state.PendingMemoryReview {
-		t.Fatal("expected pending_memory_review via ChatSessionHooks after DeleteSession")
+	if repo.state.PendingMemoryReview {
+		t.Fatal("default ChatService must not register growth session-end hooks")
 	}
-	if !repo.state.PendingSkillReview {
-		t.Fatal("expected pending_skill_review via ChatSessionHooks after DeleteSession")
+	if repo.state.PendingSkillReview {
+		t.Fatal("default ChatService must not register growth session-end hooks")
 	}
 }
 

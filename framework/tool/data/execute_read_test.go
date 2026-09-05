@@ -2,7 +2,6 @@ package tooldata
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -246,7 +245,7 @@ func TestExecuteRead_ExecutorErrorWrapped(t *testing.T) {
 	}
 }
 
-func TestExecuteRead_SpillsOverFiftyRows(t *testing.T) {
+func TestExecuteRead_DoesNotSpillOverFiftyRows(t *testing.T) {
 	rows := make([][]any, 51)
 	for i := range rows {
 		rows[i] = []any{int64(i)}
@@ -284,19 +283,15 @@ func TestExecuteRead_SpillsOverFiftyRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	stub, ok := out.(*core.QuerySpillStub)
+	if _, ok := out.(*core.QuerySpillStub); ok {
+		t.Fatal("default execute_read must not spill")
+	}
+	res, ok := out.(*executor.QueryResult)
 	if !ok {
 		t.Fatalf("unexpected result type: %T", out)
 	}
-	if stub.Count != 51 {
-		t.Fatalf("Count=%d", stub.Count)
-	}
-	raw, err := json.Marshal(stub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), `"Rows"`) {
-		t.Fatal("spill stub must not dump Rows")
+	if len(res.Rows) != 51 {
+		t.Fatalf("rows=%d", len(res.Rows))
 	}
 }
 
@@ -311,7 +306,7 @@ func testHealStore(t *testing.T) *metadata.InMemoryStore {
 	return store
 }
 
-func TestExecuteRead_healsUnknownSelectColumn(t *testing.T) {
+func TestExecuteRead_doesNotAutoHealUnknownSelectColumn(t *testing.T) {
 	f := &fakeExecutor{
 		ret: &executor.Result{
 			Columns: []string{"vmid", "mgr_ipv4_address"},
@@ -331,28 +326,18 @@ func TestExecuteRead_healsUnknownSelectColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	tl, _ := reg.Get("execute_read")
-	out, err := tl.Execute(context.Background(), map[string]any{
+	_, err := tl.Execute(context.Background(), map[string]any{
 		"dsl": "SELECT vmid, mgr_ipv4_address, ecn_id FROM t_game_virtual_machine_info WHERE vmid = 9076",
 	})
-	if err != nil {
-		t.Fatalf("expected heal success, got %v", err)
+	if err == nil {
+		t.Fatal("default execute_read must not auto-heal schema errors")
 	}
-	res := out.(*executor.QueryResult)
-	if res.RepairNote == "" || !strings.Contains(res.RepairNote, "ecn_id") {
-		t.Fatalf("repair note: %q", res.RepairNote)
-	}
-	if len(f.calls) < 2 {
-		t.Fatalf("want retry after heal, calls=%d", len(f.calls))
-	}
-	if strings.Contains(f.calls[len(f.calls)-1].DSL, "ecn_id") {
-		t.Fatalf("retried SQL still has ecn_id: %s", f.calls[len(f.calls)-1].DSL)
-	}
-	if len(res.Rows) != 1 {
-		t.Fatalf("rows=%v", res.Rows)
+	if len(f.calls) != 1 {
+		t.Fatalf("want single query, calls=%d", len(f.calls))
 	}
 }
 
-func TestExecuteRead_healsSchemaUsedAsTable(t *testing.T) {
+func TestExecuteRead_doesNotAutoHealSchemaUsedAsTable(t *testing.T) {
 	f := &fakeExecutor{
 		ret: &executor.Result{
 			Columns: []string{"vmid", "mgr_ipv4_address"},
@@ -370,18 +355,14 @@ func TestExecuteRead_healsSchemaUsedAsTable(t *testing.T) {
 	reg := core.NewRegistry()
 	_ = RegisterExecuteReadTool(reg, cfg)
 	tl, _ := reg.Get("execute_read")
-	out, err := tl.Execute(context.Background(), map[string]any{
+	_, err := tl.Execute(context.Background(), map[string]any{
 		"query": "SELECT * FROM d_1000_game_virtual_machine_info WHERE flow_id = '9999_zjvplfx19vdv'",
 	})
-	if err != nil {
-		t.Fatalf("expected heal success, got %v", err)
+	if err == nil {
+		t.Fatal("default execute_read must not auto-heal schema errors")
 	}
-	res := out.(*executor.QueryResult)
-	if !strings.Contains(res.RepairedSQL, "t_game_virtual_machine_info") {
-		t.Fatalf("repaired SQL: %s", res.RepairedSQL)
-	}
-	if strings.Contains(f.calls[len(f.calls)-1].DSL, "_test") {
-		t.Fatalf("picked test table: %s", f.calls[len(f.calls)-1].DSL)
+	if len(f.calls) != 1 {
+		t.Fatalf("want single query, calls=%d", len(f.calls))
 	}
 }
 
@@ -405,7 +386,7 @@ func TestExecuteRead_unknownTableHint(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "t_game_virtual_machine_info") {
-		t.Fatalf("hint missing candidate tables: %s", msg)
+	if !strings.Contains(msg, "doesn't exist") && !strings.Contains(msg, "t_flow") {
+		t.Fatalf("want original schema error, got %s", msg)
 	}
 }

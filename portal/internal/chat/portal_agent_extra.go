@@ -28,7 +28,6 @@ func SetPortalAgentExtra(extra *config.PortalAgentExtra) {
 	if extra == nil {
 		return
 	}
-	InitLocalMemoryHub() // idempotent; Catalog ready even before NewChatService
 	config.NormalizePortalAgentExtra(extra)
 	if extra.ToolGuardrails != nil {
 		SetGlobalToolGuardrails(agent.ToolGuardrailsFromConfig(extra.ToolGuardrails))

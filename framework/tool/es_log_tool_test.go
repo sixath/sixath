@@ -351,7 +351,7 @@ func TestESLogQuery_EmptyHitsOK(t *testing.T) {
 	}
 }
 
-func TestESLogQuery_SpillsOverFiftyRows(t *testing.T) {
+func TestESLogQuery_DoesNotSpillOverFiftyRows(t *testing.T) {
 	rows := make([][]any, 51)
 	cols := []string{"operation", "args"}
 	for i := 0; i < 51; i++ {
@@ -369,18 +369,8 @@ func TestESLogQuery_SpillsOverFiftyRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stub, ok := out.(*QuerySpillStub)
-	if !ok {
-		t.Fatalf("type %T", out)
-	}
-	if stub.Count != 51 {
-		t.Fatalf("count=%d want 51 %#v", stub.Count, stub)
-	}
-	if !stub.HasMore && !stub.Truncated {
-		t.Fatalf("want HasMore or Truncated, %#v", stub)
-	}
-	if refs := CollectEvidenceRefs(stub); len(refs) == 0 || refs[0].Kind != "es_log_query" || refs[0].Summary == "no hits" {
-		t.Fatalf("refs=%#v", refs)
+	if _, ok := out.(*QuerySpillStub); ok {
+		t.Fatal("default es_log_query must not spill")
 	}
 }
 

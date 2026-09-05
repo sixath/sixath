@@ -308,12 +308,6 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				Tool:         toolName,
 				Ctx:          ctx,
 			})
-			refs := deriveESLogRefs(payload) // must still contain hits
-			stub, fallback := MaybeSpill(ctx, toolName, hits, payload, refs)
-			if stub != nil {
-				return stub, nil
-			}
-			payload = fallback
 			return rcaOK(toolName, payload), nil
 		},
 	})

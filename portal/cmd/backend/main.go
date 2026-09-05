@@ -47,9 +47,6 @@ func init() {
 
 func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, cronSrv *cron.Server, chatSvc *service.ChatService, gw *service.GrowthWorker, cw *service.CuratorWorker, workerEnabled workerEnabledInput) *kratos.App {
 	workerCtx, stopWorker := context.WithCancel(context.Background())
-	if chatSvc != nil && gw != nil {
-		chatSvc.SetBackgroundReviewer(gw)
-	}
 	opts := []kratos.Option{
 		kratos.ID(id),
 		kratos.Name(Name),
@@ -189,8 +186,8 @@ func main() {
 		llmReviewEnabled = v == "1" || v == "true" || v == "yes"
 	}
 
-	// growth.worker_enabled：YAML 优先；未配置时默认 true；可通过 SATH_GROWTH_WORKER_ENABLED 关闭。
-	workerEnabled := true
+	// growth.worker_enabled：YAML 优先；未配置时默认 false（P4：Growth 不进默认路径）。
+	workerEnabled := false
 	if bc.Growth != nil {
 		workerEnabled = bc.Growth.GetWorkerEnabled()
 	} else if v := os.Getenv("SATH_GROWTH_WORKER_ENABLED"); v != "" {
@@ -230,7 +227,6 @@ func main() {
 
 	if bc.Data != nil {
 		chat.SetMemoryVectorDataRoot(bc.Data.GetDataRoot())
-		chat.SetMEADataRoot(bc.Data.GetDataRoot())
 	}
 
 	if portalExtra != nil {

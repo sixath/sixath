@@ -16,7 +16,6 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/events"
-	"github.com/sixath/framework/mea"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/sessionsearch"
@@ -111,8 +110,6 @@ func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *
 	chatUC.SetSessionSearchBackend(chat.NewSessionSearchBackend(chatUC))
 	chat.SetPrefetchSessionProvider(transcriptProvider)
 	chat.SetPrefetchMemoryStore(memoryStore)
-	chat.SetHubUnitWriter(chat.NewGatedMemoryUnitWriter(memoryStore, agentUC))
-	chat.InitLocalMemoryHub() // Catalog defaults=local (+ UnitsWrite); does not change Prefetch
 	chat.RebuildPrefetchMemoryOrchestrator()
 	s := &ChatService{
 		chatUC:       chatUC,
@@ -126,7 +123,6 @@ func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *
 		memoryStore:  memoryStore,
 		log:          log.NewHelper(logger),
 	}
-	s.registerGrowthSessionHooks()
 	s.registerBrowserSessionHooks()
 	s.registerProcessSessionHooks()
 	s.registerProcessNotifyWake()
@@ -487,7 +483,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 					s.log.Errorf("SendMessage save guardrail banner failed: session_id=%s err=%v", sessionID, cerr)
 					return nil, cerr
 				}
-				s.notifyGrowthAssistantTurn(sessionID)
 				go chat.NotifyMemorySessionDirty(ctx, sessionID, len(vis), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
 				chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, msg)
 				return &chatv1.MessageReply{
@@ -514,7 +509,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	tr := chat.RunTraceFromMetadata(resp.Metadata)
 	s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
 	s.persistCompactBoundary(runCtx, sessionID, tr)
-	s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, resp.Messages, tr)
 
 	// 保存 assistant 消息
 	msg, err := s.chatUC.CreateMessage(ctx, sessionID, "assistant", resp.Text)
@@ -522,7 +516,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage save assistant message failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	s.notifyGrowthAssistantTurn(sessionID)
 	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(resp.Text), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
 	chat.NotifyMemoryExtractFromTurn(ctx, s.memoryStore, session, content, resp.Text, agentMeta)
 	chat.NotifyMemoryGraphFromTurn(ctx, s.memoryStore, session, content, resp.Text, agentMeta)
@@ -590,18 +583,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	if err != nil {
 		s.log.Errorf("SendMessageStream build model failed: session_id=%s agent_id=%s provider=%s model=%s err=%v", sessionID, session.AgentID, agentMeta.ModelConfig.Provider, agentMeta.ModelConfig.Model, err)
 		return nil, "", err
-	}
-
-	userForIntent := chat.UserMessageContentForTurn(content, ir)
-	var meaChecks []mea.AcceptanceCheck
-	var meaAcceptance []string
-	if clean, checks, ok := chat.ParseMEAChecks(userForIntent); ok {
-		userForIntent = clean
-		meaChecks = checks
-	}
-	if clean, acceptance, ok := chat.ParseMEAAcceptance(userForIntent); ok {
-		userForIntent = clean
-		meaAcceptance = acceptance
 	}
 
 	reg := tool.NewRegistry()
@@ -736,18 +717,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 
 	userContent := chat.UserMessageContentForTurn(content, ir)
-	if clean, checks, ok := chat.ParseMEAChecks(userContent); ok {
-		userContent = clean
-		if len(meaChecks) == 0 {
-			meaChecks = checks
-		}
-	}
-	if clean, acceptance, ok := chat.ParseMEAAcceptance(userContent); ok {
-		userContent = clean
-		if len(meaAcceptance) == 0 {
-			meaAcceptance = acceptance
-		}
-	}
 	var synthetic []model.Message
 	if ir != nil {
 		pending, outcome, applyErr := chat.ApplyInputResponse(ctx, sessionID, *ir, chat.AskUserPendingStore(), chat.AskUserFulfillmentStore())
@@ -849,18 +818,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
 		}
 
-		enabled := chat.MEAEnabledForAgent(session.AgentID, agentMeta.RuntimeTools.MEAEnabled)
-		g := userContent
-		checks := meaChecks
-		if enabled {
-			checks = chat.ResolveAcceptanceChecks(meaChecks, len(meaChecks) > 0, g)
-		}
-		useMEA := chat.ShouldUseMEA(enabled, agentMeta.Workspace, checks, meaAcceptance)
-		if useMEA {
-			s.streamWithRulesMEA(runCtx, sessionID, session.AgentID, agentMeta.Workspace, g, checks, meaAcceptance, agentMeta.RuntimeTools.MEAEnabled, m, a, messages, req.Metadata, streamSessionProvider, ch)
-			return
-		}
-
 		if _, err := s.streamAgentEvents(runCtx, sessionID, session.AgentID, agentMeta.Workspace, a, req, streamSessionProvider, ch); err != nil {
 			return
 		}
@@ -878,7 +835,6 @@ func (s *ChatService) handleStreamRunError(ctx context.Context, sessionID, agent
 			if gmsg, cerr := s.chatUC.CreateMessage(ctx, sessionID, "assistant", vis); cerr != nil {
 				s.log.Errorf("SendMessageStream persist guardrail banner failed: session_id=%s err=%v", sessionID, cerr)
 			} else {
-				s.notifyGrowthAssistantTurn(sessionID)
 				go chat.NotifyMemorySessionDirty(ctx, sessionID, len(vis), 1, s.chatUC, s.agentUC, provider)
 				chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, gmsg)
 			}
@@ -947,7 +903,6 @@ func (s *ChatService) SaveAssistantMessage(ctx context.Context, sessionID, conte
 		s.log.Errorf("SaveAssistantMessage failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	s.notifyGrowthAssistantTurn(sessionID)
 	provider := chat.NewChatTranscriptProvider(s.chatUC)
 	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(content), 1, s.chatUC, s.agentUC, provider)
 	s.notifyMemoryExtractAfterAssistant(ctx, sessionID, content)
