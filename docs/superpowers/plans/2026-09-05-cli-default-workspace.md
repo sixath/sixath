@@ -29,19 +29,19 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestEnsureCLIRoot_EmptyCreatesDotSath`（`t.Chdir` 临时目录）
-- [ ] `TestEnsureCLIRoot_NonEmptyKeepsPath`
-- [ ] 跑测试确认失败
+- [x] `TestEnsureCLIRoot_EmptyCreatesDotSath`（`t.Chdir` 临时目录）
+- [x] `TestEnsureCLIRoot_NonEmptyKeepsPath`
+- [x] 跑测试确认失败
 
 ---
 
 ### Task 2: 接线
 
-- [ ] 实现 `EnsureCLIRoot`；`applyCLIWorkspace` 给 serve/demo
-- [ ] init `main.go` 模板接 `WithChatWorkspace(EnsureCLIRoot(...))`
-- [ ] `cd framework && go test ./workspace ./cli ./config ./templates ./harness -count=1`
+- [x] 实现 `EnsureCLIRoot`；`applyCLIWorkspace` 给 serve/demo
+- [x] init `main.go` 模板接 `WithChatWorkspace(EnsureCLIRoot(...))`
+- [x] `cd framework && go test ./workspace ./cli ./config ./templates ./harness -count=1`
 
-- [ ] **Commit** `fix(cli): default empty workspace to .sath/workspace`
+- [x] **Commit** `fix(cli): default empty workspace to .sath/workspace`
 
 ---
 

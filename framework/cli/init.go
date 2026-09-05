@@ -22,11 +22,17 @@ import (
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/middleware"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/workspace"
 )
 
 func main() {
 	ctx := context.Background()
 	cfg := config.FromEnv()
+	ws, err := workspace.EnsureCLIRoot(cfg.Workspace)
+	if err != nil {
+		fmt.Println("workspace:", err)
+		os.Exit(1)
+	}
 
 	m, err := model.NewOpenAIClient()
 	if err != nil {
@@ -35,7 +41,7 @@ func main() {
 	}
 
 	mem := memory.NewBufferMemory(cfg.MaxHistory)
-	core := agent.NewChatAgent(m, mem, agent.WithMaxHistory(cfg.MaxHistory))
+	core := agent.NewChatAgent(m, mem, agent.WithMaxHistory(cfg.MaxHistory), agent.WithChatWorkspace(ws))
 	handler := middleware.Chain(
 		func(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 			return core.Run(ctx, req)
@@ -75,6 +81,7 @@ max_history: 10
 middlewares:
   - logging
   - metrics
+# workspace 省略时，sath serve 落到 {cwd}/.sath/workspace
 `
 
 // NewInitCommand 返回 sath init 命令。

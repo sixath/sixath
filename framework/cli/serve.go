@@ -43,6 +43,9 @@ func NewServeCommand() *cobra.Command {
 			} else {
 				cfg = config.FromEnv()
 			}
+			if err := applyCLIWorkspace(&cfg); err != nil {
+				return err
+			}
 
 			var handler middleware.Handler
 			var dataHandler middleware.Handler
