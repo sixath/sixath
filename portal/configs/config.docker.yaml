@@ -12,19 +12,12 @@ skills:
   route_min_score: 5
   route_max_body_runes: 12000
 growth:
-  llm_review_enabled: false          # P4/S19：默认不走 LLM 复盘
-  worker_enabled: false
-  worker_poll_interval: 45s
-  idle_sweep_interval: 600s
-  idle_check_interval: 600s
-  combined_review_enabled: false
-  session_end_memory_review_enabled: false
-  session_end_skill_review_enabled: false  # C2s opt-in
-  max_retry: 5
-  curator_enabled: false
-  learnings_review_enabled: false
-  learnings_max_runes: 6000
-  review_patch_file: "growth_review_patch.example.json"
+  # /route 分类器读 llm；未配则 fail-open。也可用 SATH_GROWTH_LLM_*。
+  # llm:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   api_key: "your-key"
+  #   base_url: "https://api.openai.com/v1"
 runtime:
   # Gateway → Portal Runtime service token（可用 SATH_RUNTIME_TOKEN 覆盖）。
   service_token: "dev-runtime-token"

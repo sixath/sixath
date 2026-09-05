@@ -12,21 +12,7 @@ skills:
   route_min_score: 5
   route_max_body_runes: 12000
 growth:
-  llm_review_enabled: false          # P4/S19：默认不走 LLM 复盘；打开 worker 时再显式打开
-  worker_enabled: false
-  worker_poll_interval: 10s      # 本地验收缩短轮询；生产可改回 45s
-  idle_sweep_interval: 10m
-  idle_check_interval: 10m
-  combined_review_enabled: false
-  session_end_memory_review_enabled: false
-  session_end_skill_review_enabled: false  # C2s opt-in；Chat 默认不接会话结束钩子
-  max_retry: 5
-  curator_enabled: false
-  learnings_review_enabled: false  # 复盘 prompt 注入 .learnings；仅 worker 真跑时才有意义
-  learnings_max_runes: 6000
-  # 无 llm.model 时回退假补丁；配置 LLM 或 SATH_GROWTH_LLM_MODEL 后优先真 LLM
-  review_patch_file: "growth_review_patch.example.json"
-  # 真 LLM 复盘（二选一：YAML 或环境变量，见 docs/growth-llm-learnings.md）：
+  # /route 分类器读 llm；未配则 fail-open。也可用 SATH_GROWTH_LLM_*。
   # llm:
   #   provider: openai
   #   model: gpt-4o-mini
@@ -34,7 +20,6 @@ growth:
   #   base_url: "https://api.openai.com/v1"
   #   max_transcript_runes: 24000
 # 环境变量：SATH_GROWTH_LLM_MODEL、SATH_GROWTH_LLM_PROVIDER、SATH_GROWTH_LLM_API_KEY、SATH_GROWTH_LLM_BASE_URL
-#           SATH_LEARNINGS_DIR（额外 .learnings 目录）、SATH_GROWTH_REVIEW_PATCH_FILE
 data:
   data_root: "./data"
   database:

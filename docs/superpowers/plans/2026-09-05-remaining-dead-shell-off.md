@@ -28,22 +28,22 @@
 
 ### Task 1: 失败锁定测试
 
-- [ ] `TestWebClientTs_omitsCodeModelFields`
-- [ ] `TestConfigGo_omitsHyperTool`
-- [ ] `TestShippedConfig_omitsDeadGrowthWorkerKeys`
-- [ ] `TestPortalSettingsGoRemoved`
-- [ ] 先跑必须红
+- [x] `TestWebClientTs_omitsCodeModelFields`
+- [x] `TestConfigGo_omitsHyperTool`
+- [x] `TestShippedConfig_omitsDeadGrowthWorkerKeys`
+- [x] `TestPortalSettingsGoRemoved`
+- [x] 先跑必须红
 
 ---
 
 ### Task 2: 拆死壳
 
-- [ ] 去掉 Web `code_*`；删 `HyperToolConfig`；发货 yaml 只留 `growth.llm` 注释；删 `portal_settings.go`
-- [ ] 跑锁定测试与包测试
-- [ ] **Commit** `fix(shelf): drop leftover hypertool config, code-model shell, and growth worker yaml`
+- [x] 去掉 Web `code_*`；删 `HyperToolConfig`；发货 yaml 只留 `growth.llm` 注释；删 `portal_settings.go`
+- [x] 跑锁定测试与包测试
+- [x] **Commit** `fix(shelf): drop leftover hypertool config, code-model shell, and growth worker yaml`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] 不要 merge/push，除非用户明确要求。

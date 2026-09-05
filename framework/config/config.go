@@ -43,20 +43,6 @@ type SkillsConfig struct {
 	ScriptTimeoutSeconds int `json:"script_timeout_seconds" yaml:"script_timeout_seconds"`
 }
 
-// HyperToolConfig 控制 HyperTool meta-tool（论文 HyperTool 最小原型，见 docs/superpowers/specs/2026-06-12-hypertool-prototype-design.md）。
-type HyperToolConfig struct {
-	// Enabled 为 true 时注册 hypertool 工具；默认 false（动态 Python 执行需显式开启）。
-	Enabled bool `json:"enabled" yaml:"enabled"`
-	// TimeoutSeconds 单个代码块超时（秒）；<=0 时默认 30。
-	TimeoutSeconds int `json:"timeout_seconds" yaml:"timeout_seconds"`
-	// MaxInternalCalls 块内 call_tool 上限；<=0 时默认 20。
-	MaxInternalCalls int `json:"max_internal_calls" yaml:"max_internal_calls"`
-	// PythonCommand Python 解释器；空时默认 python。
-	PythonCommand string `json:"python_command" yaml:"python_command"`
-	// BlockedTools 块内禁止调用的工具名；空时使用内置默认黑名单。
-	BlockedTools []string `json:"blocked_tools" yaml:"blocked_tools"`
-}
-
 // Config 保存框架在 V0.2 阶段的核心配置。
 type Config struct {
 	// 默认模型标识，如 "openai/gpt-4o"。
@@ -87,9 +73,6 @@ type Config struct {
 
 	// ContextCompression 可选；L2 与 token 粗估参数（设计 §5）；auxiliary 模型实例由上层根据 L2AuxiliaryModel 字段装配。
 	ContextCompression ContextCompression `json:"context_compression" yaml:"context_compression"`
-
-	// HyperTool 可选；启用可执行代码块 meta-tool，将确定性工具子流程折叠为单次外层调用。
-	HyperTool HyperToolConfig `json:"hypertool" yaml:"hypertool"`
 
 	// Workspace 可写工作区根。CLI 入口空则落到 {cwd}/.sath/workspace；库调用仍可空。
 	Workspace string `json:"workspace" yaml:"workspace"`
