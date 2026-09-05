@@ -295,7 +295,9 @@ go run ./cmd/memory-mcp --transport=http --addr=:8765
 
 ## Memory Hub（P0–P3b）
 
-进程启动注册 `framework/memory/hub` 的 **local** Governance / Knowledge（`InitLocalMemoryHub` / `ResolveForAgent`）。
+管理面已拆除（无 Hub HTTP / Loadout UI / 默认 `knowledge_*` 注册）；`framework/memory/hub` 包保留。
+
+进程启动不再调用 `InitLocalMemoryHub`。下表为历史阶段对照。
 
 | 阶段 | 有 | 无 |
 |---|---|---|

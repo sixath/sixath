@@ -43,16 +43,6 @@ func BuildPrefetchMemoryOrchestrator(ym *config.MemoryOrchestratorPrefetch) *mem
 		v := *ym.MaxTotal
 		b.MaxTotal = &v
 	}
-	if binds, maxP, cat := ProceduralBindingsForPrefetch(); len(binds) > 0 || proceduralPrefetchEnabled() {
-		b.ProceduralBindings = binds
-		b.MaxProcedural = maxP
-		b.LoadPersistedProcedural = true
-		if cat != nil {
-			b.OnProceduralMatched = func(matched []memory.ProceduralBinding) {
-				cat.RecordHit(memory.ProceduralHitPrefetch, matched)
-			}
-		}
-	}
 	if err := o.RegisterBackend(b); err != nil {
 		return nil
 	}

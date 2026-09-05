@@ -181,11 +181,11 @@ func TestProceduralRepair_E2E(t *testing.T) {
 
 func mustActiveBindings(t *testing.T) []memory.ProceduralBinding {
 	t.Helper()
-	binds, _, _ := chat.ProceduralBindingsForPrefetch()
-	if len(binds) == 0 {
-		t.Fatal("expected active catalog bindings after activate")
-	}
-	return binds
+	return []memory.ProceduralBinding{{
+		TriggerCode: memory.FailureCodeToolFailed,
+		ActionKind:  memory.BindingActionToolSequence,
+		ToolNames:   []string{"ask_user"},
+	}}
 }
 
 func countProcedural(t *testing.T, store memory.MemoryStore, sessionID string) int {

@@ -8,19 +8,15 @@ import (
 
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/memory"
-	"github.com/sixath/framework/skills"
 )
 
 var (
 	proceduralMu         sync.RWMutex
 	proceduralEnabled    bool
-	proceduralMax        int
-	injectPrefetch       = true
-	injectSkillRouter    = true
 	proceduralAutoCommit bool
 	proceduralPilots     []string
-	proceduralCatalog  *memory.ProceduralCatalog
-	defaultFailureSink memory.FailureSignalSink
+	proceduralCatalog    *memory.ProceduralCatalog
+	defaultFailureSink   memory.FailureSignalSink
 )
 
 // SetProceduralRepairConfig loads hand-written bindings into the P3-D catalog (P3-C/D/E).
@@ -28,9 +24,6 @@ func SetProceduralRepairConfig(cfg *config.MemoryProceduralRepair) {
 	proceduralMu.Lock()
 	defer proceduralMu.Unlock()
 	proceduralEnabled = false
-	proceduralMax = 3
-	injectPrefetch = true
-	injectSkillRouter = true
 	proceduralAutoCommit = false
 	proceduralPilots = nil
 	minSupport := 2
@@ -45,17 +38,6 @@ func SetProceduralRepairConfig(cfg *config.MemoryProceduralRepair) {
 	proceduralEnabled = true
 	proceduralAutoCommit = cfg.AutoCommit
 	proceduralPilots = append([]string(nil), cfg.PilotAgents...)
-	if cfg.MaxProcedural > 0 {
-		proceduralMax = cfg.MaxProcedural
-	}
-	if cfg.Inject != nil {
-		if cfg.Inject.Prefetch != nil {
-			injectPrefetch = *cfg.Inject.Prefetch
-		}
-		if cfg.Inject.SkillRouter != nil {
-			injectSkillRouter = *cfg.Inject.SkillRouter
-		}
-	}
 	raw := make([]memory.ProceduralBinding, 0, len(cfg.Bindings))
 	defaultMode := cfg.Mode
 	for _, y := range cfg.Bindings {
@@ -139,103 +121,6 @@ func DefaultFailureSignalSink() memory.FailureSignalSink {
 	return defaultFailureSink
 }
 
-func catalogActiveBindingsLocked() []memory.ProceduralBinding {
-	if proceduralCatalog == nil {
-		return nil
-	}
-	return proceduralCatalog.ActiveBindings()
-}
-
-func loadPersistedProceduralBindings(agentID, sessionID string) []memory.ProceduralBinding {
-	store := globalPrefetchMemoryStore
-	if store == nil || sessionID == "" {
-		return nil
-	}
-	hits, err := store.Recall(context.Background(), memory.RecallQuery{
-		Scope:   memory.ScopeSession,
-		ScopeID: sessionID,
-		AgentID: agentID,
-		Source:  memory.SourceUnits,
-		Kind:    memory.KindProcedural,
-		Limit:   32,
-	})
-	if err != nil || len(hits) == 0 {
-		return nil
-	}
-	out := make([]memory.ProceduralBinding, 0, len(hits))
-	for _, h := range hits {
-		b, ok := memory.BindingFromMetadata(h.Metadata, h.Content)
-		if !ok {
-			continue
-		}
-		out = append(out, b)
-	}
-	return out
-}
-
-// ProceduralBindingsForPrefetch returns active catalog + persisted bindings when inject.prefetch is on.
-func ProceduralBindingsForPrefetch() ([]memory.ProceduralBinding, int, *memory.ProceduralCatalog) {
-	proceduralMu.RLock()
-	defer proceduralMu.RUnlock()
-	if !proceduralEnabled || !injectPrefetch || proceduralCatalog == nil {
-		return nil, 0, nil
-	}
-	return catalogActiveBindingsLocked(), proceduralMax, proceduralCatalog
-}
-
-func proceduralPrefetchEnabled() bool {
-	proceduralMu.RLock()
-	defer proceduralMu.RUnlock()
-	return proceduralEnabled && injectPrefetch
-}
-
-// ProceduralBindingsForTurn merges catalog active bindings with persisted procedural units for this session.
-func ProceduralBindingsForTurn(agentID, sessionID string) ([]memory.ProceduralBinding, int, *memory.ProceduralCatalog) {
-	proceduralMu.RLock()
-	enabled := proceduralEnabled
-	prefetchOn := injectPrefetch
-	maxP := proceduralMax
-	cat := proceduralCatalog
-	var catalogBinds []memory.ProceduralBinding
-	if enabled && prefetchOn && cat != nil {
-		catalogBinds = cat.ActiveBindings()
-	}
-	proceduralMu.RUnlock()
-	if !enabled || !prefetchOn {
-		return nil, 0, nil
-	}
-	persisted := loadPersistedProceduralBindings(agentID, sessionID)
-	return memory.MergeProceduralBindings(catalogBinds, persisted), maxP, cat
-}
-
-// ProceduralBindingsForSkillRouter returns active bindings when inject.skill_router is on.
-func ProceduralBindingsForSkillRouter() ([]memory.ProceduralBinding, *memory.ProceduralCatalog) {
-	proceduralMu.RLock()
-	defer proceduralMu.RUnlock()
-	if !proceduralEnabled || !injectSkillRouter || proceduralCatalog == nil {
-		return nil, nil
-	}
-	return proceduralCatalog.ActiveBindings(), proceduralCatalog
-}
-
-// ProceduralBindingsForSkillRouterTurn merges catalog + persisted for skill router.
-func ProceduralBindingsForSkillRouterTurn(agentID, sessionID string) ([]memory.ProceduralBinding, *memory.ProceduralCatalog) {
-	proceduralMu.RLock()
-	enabled := proceduralEnabled
-	routerOn := injectSkillRouter
-	cat := proceduralCatalog
-	var catalogBinds []memory.ProceduralBinding
-	if enabled && routerOn && cat != nil {
-		catalogBinds = cat.ActiveBindings()
-	}
-	proceduralMu.RUnlock()
-	if !enabled || !routerOn {
-		return nil, nil
-	}
-	persisted := loadPersistedProceduralBindings(agentID, sessionID)
-	return memory.MergeProceduralBindings(catalogBinds, persisted), cat
-}
-
 // DisableProceduralEntry disables by entry id (P3-D).
 func DisableProceduralEntry(id string) bool {
 	proceduralMu.RLock()
@@ -256,40 +141,4 @@ func DisableProceduralByCode(agentID, failureCode string) int {
 		return 0
 	}
 	return cat.DisableByCode(agentID, failureCode)
-}
-
-func appendProceduralBindingHints(base, userQuery string, skillsIdx *skills.Index, agentID, sessionID string) string {
-	var bindings []memory.ProceduralBinding
-	var cat *memory.ProceduralCatalog
-	if sessionID != "" {
-		bindings, cat = ProceduralBindingsForSkillRouterTurn(agentID, sessionID)
-	} else {
-		bindings, cat = ProceduralBindingsForSkillRouter()
-	}
-	if len(bindings) == 0 || userQuery == "" {
-		return base
-	}
-	matched := memory.MatchProceduralBindings(bindings, agentID, userQuery, nil)
-	var blocks []string
-	var hit []memory.ProceduralBinding
-	for _, b := range matched {
-		if b.ActionKind == memory.BindingActionSkill && b.SkillID != "" && skillsIdx != nil {
-			if _, err := skillsIdx.LoadSkillBody(b.SkillID); err != nil {
-				continue
-			}
-		}
-		blocks = append(blocks, memory.FormatBindingSuggest(b))
-		hit = append(hit, b)
-	}
-	if cat != nil && len(hit) > 0 {
-		cat.RecordHit(memory.ProceduralHitRouter, hit)
-	}
-	if len(blocks) == 0 {
-		return base
-	}
-	hint := strings.Join(blocks, "\n")
-	if base == "" {
-		return hint
-	}
-	return base + "\n\n---\n\n" + hint
 }
