@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S32）
+## 12. P4 之后（S1–S33）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -368,5 +368,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S30 | [memory-hub-off](./2026-09-05-memory-hub-off-design.md) | 删无调用者的 `framework/memory/hub` 包。不删 growth、不 regen proto |
 | S31 | [growth-shell-leftover-off](./2026-09-05-growth-shell-leftover-off-design.md) | 拆默认 Growth metrics 与 FailureCapture 装配。不删 `framework/growth`、不改 skillops |
 | S32 | [failure-capture-off](./2026-09-05-failure-capture-off-design.md) | 删无调用者的 `FailureCaptureHook`。保留 `WithRequestMetadata`。不删 growth |
+| S33 | [append-learning-off](./2026-09-05-append-learning-off-design.md) | 删无调用者的 `append_learning` 工具与 prompt 教唆。不改 skill_manage、不删 growth |
 
-**顺序**：S1 → … → S31 → S32。
+**顺序**：S1 → … → S32 → S33。
