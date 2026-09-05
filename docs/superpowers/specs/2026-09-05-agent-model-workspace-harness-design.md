@@ -322,7 +322,7 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 | 序号 | 计划（建议文件名） | 可验收交付 |
 |------|-------------------|------------|
 | P1 | `docs/superpowers/plans/2026-09-05-slim-harness-strip.md` | 删除 §6.1 短语闸**类型、文件、循环接线**与 `ReActConfig` 的 `EvidenceGate`/`CodeClaimGate`；拆除 `code_workset` 默认注入；**同时拆除所有编译引用**（含 portal 的 `WithReActEvidenceGate` / `CodeClaimGateTurnOption`）并改掉引用已删类型的测试。`ShouldApplyEvidenceGate`（portal 启发式）**P1 不删**（`mea_autochecks` 用到 P4）。**不**删调查闸 / turn-surface / task lock（P3）。`PostModelPolicy` 接口与 `plan_agent.go` 留到后续切片。`go test ./framework/agent/...` 绿；`cd portal && go test ./internal/chat/... ./internal/service/...` 绿。 |
-| P2 | workspace 一等公民 | **仅拦新建**：创建 Agent 必有默认可写根；空 root 字符串拒跑；UI/API **不再提供整仓当 workspace**。已有整仓/空 root 行本切片不强制迁移（读取时：空 root 拒跑；整仓仍能打开但文档标明退役）。验收必须包含：`rca_*` 路径经 `workspace/code`（或明确仍走独立 roots 的 waiver 并开后续任务） |
+| P2 | workspace 一等公民 | **仅拦新建**：创建 Agent 必有默认可写根；空 root 字符串拒跑；UI/API **不再提供整仓当 workspace**。已有整仓/空 root 行本切片不强制迁移（读取时：空 root 拒跑；整仓仍能打开但文档标明退役）。验收必须包含：`rca_*` 路径经 `workspace/code`（或明确仍走独立 roots 的 waiver 并开后续任务）。**Run 拒整仓见 S5**；**RCA 只走 mount 见 S4** |
 | P3 | Portal 降为装配器 | 删除调查闸 / 任务锁 / turn-surface / skill 预注入 / Prompt 叠层（`catalog_prompt.go`、`web_prompt.go`、`code_analysis_prompt.go`、`datasource_prompt.go` 及 `FormatToolCatalogPrompt` 接线）。**不删** `mea_*.go` / Hub（P4）。`agent_builder` 只装配 Agent `systemPrompt` + Context；无调用者则删 `PostModelPolicy` |
 | P4 | 平行面降级 | 默认路径不再接线 growth/mea/hub/hypertool；SQL heal / query spill 退出**默认**自愈；Insights 退出默认导航；拆 MEA 后删除 `ShouldApplyEvidenceGate`；若仍无调用者再删 `plan_agent.go` |
 
@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S4）
+## 12. P4 之后（S1–S5）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -340,5 +340,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S2 | [context-promptbuilder](./2026-09-05-context-promptbuilder-design.md) | 新建 `framework/context`；L0/L1/L2 迁出 `model`；PromptBuilder Stable/Ephemeral + `prompt_stable_hash`；Provider 内部不再压缩 |
 | S3 | [harness-workspace-rename](./2026-09-05-harness-workspace-rename-design.md) | `agent` → `harness`（可留一季别名）；抽出 `workspace`（pathguard + `code/` 挂载纯函数）。不改循环语义 |
 | S4 | [rca-code-mount-only](./2026-09-05-rca-code-mount-only-design.md) | 关掉 P2 RCA 独立 `roots` waiver：`rca_code`/`rca_symbol` 只走 `workspace/code`；无挂载不注册。整仓 workspace 仍不强制迁移 |
+| S5 | [whole-repo-run-reject](./2026-09-05-whole-repo-run-reject-design.md) | 关掉 P2「已有整仓仍能打开」waiver：Chat / Stream / 快捷 Chat / ExecuteSkill 与 Create 同一错误码拒绝整仓。不自动 `LinkCode`、不改库、不拦 Update |
 
-**顺序**：S1 → S2 → S3 → S4。
+**顺序**：S1 → S2 → S3 → S4 → S5。
