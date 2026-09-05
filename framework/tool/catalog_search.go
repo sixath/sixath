@@ -119,57 +119,6 @@ func SearchCatalog(cat ToolCatalog, query string, limit int) []ToolCatalogEntry 
 	return out
 }
 
-// DefaultAskUserGuardConfig 返回 ask_user / 文本回复守卫的默认配置。
-func DefaultAskUserGuardConfig() AskUserGuardConfig {
-	return AskUserGuardConfig{
-		MinScore:    2.0,
-		ExemptKinds: []string{"confirm", "select"},
-	}
-}
-
-// MatchCredentialSolicitation 检测文本是否在向用户索取已由 catalog 提供的凭据/配置。
-// 用于拦截模型纯文本回复（非 ask_user 工具调用）中的冗余索凭行为。
-func MatchCredentialSolicitation(cat ToolCatalog, text string) (ToolCatalogEntry, bool) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ToolCatalogEntry{}, false
-	}
-	if deniesCredentialSolicitation(text) {
-		return ToolCatalogEntry{}, false
-	}
-	if !looksLikeCredentialSolicitation(text) {
-		return ToolCatalogEntry{}, false
-	}
-	cfg := DefaultAskUserGuardConfig()
-	if match, ok := MatchAskUserIntent(cat, cfg, text, "text"); ok {
-		if isSkillsFamilyTool(match.Name) {
-			return fallbackBoundCredentialTool(cat)
-		}
-		return match, true
-	}
-	match, ok := fallbackBoundCredentialTool(cat)
-	if !ok || isSkillsFamilyTool(match.Name) {
-		return ToolCatalogEntry{}, false
-	}
-	return match, true
-}
-
-func deniesCredentialSolicitation(text string) bool {
-	for _, phrase := range []string{
-		"未向用户索取",
-		"不会再向用户索取",
-		"未索取任何连接",
-		"不需要你提供任何连接",
-		"已由 Agent 绑定",
-		"已绑定",
-	} {
-		if strings.Contains(text, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
 // looksLikeCredentialSolicitation 仅检测祈使子串。连接信息/连接串与双关键词
 // 不再单独开火：规格要求它们必须同时带祈使，而祈使已覆盖该路径。
 func looksLikeCredentialSolicitation(text string) bool {
@@ -179,42 +128,6 @@ func looksLikeCredentialSolicitation(text string) bool {
 		}
 	}
 	return false
-}
-
-func isSkillsFamilyTool(name string) bool {
-	switch name {
-	case "skills_list", "load_skill", "skill_view", "skill_manage", "read_skill_file", "execute_skill_script":
-		return true
-	default:
-		return false
-	}
-}
-
-// FormatCredentialSolicitationRedirect 生成注入对话的纠正指令，引导模型改用已绑定工具。
-func FormatCredentialSolicitationRedirect(match ToolCatalogEntry) string {
-	return "【系统纠正】不要向用户索取数据库连接信息或企微 Webhook——这些已由 Agent 绑定。" +
-		"请立即调用工具 " + match.Name + "（绑定 " + formatBindingsBrief(match.Bindings) + "）完成任务，禁止在回复中列出 host/端口/账号/密码/webhook。"
-}
-
-func formatBindingsBrief(bindings map[string]string) string {
-	if len(bindings) == 0 {
-		return "无"
-	}
-	parts := make([]string, 0, len(bindings))
-	for _, key := range []string{"datasource_id", "channel_id", "channel_type", "type", "db_name", "mcp_server"} {
-		if v := bindings[key]; v != "" {
-			parts = append(parts, key+"="+v)
-		}
-	}
-	if len(parts) == 0 {
-		for k, v := range bindings {
-			if v != "" {
-				parts = append(parts, k+"="+v)
-			}
-		}
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, ", ")
 }
 
 // MatchAskUserIntent 判断 ask_user 是否应被守卫拦截；ok=true 表示应拦截并返回匹配工具。

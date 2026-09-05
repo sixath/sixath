@@ -27,43 +27,21 @@
 
 ### Task 1: 失败锁定测试
 
-- [ ] `TestCatalogSearchGo_omitsPlainTextCredentialRedirect`
-- [ ] 先跑必须红
-
-```go
-func TestCatalogSearchGo_omitsPlainTextCredentialRedirect(t *testing.T) {
-	b, err := os.ReadFile("catalog_search.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(b)
-	for _, needle := range []string{
-		"MatchCredentialSolicitation",
-		"FormatCredentialSolicitationRedirect",
-	} {
-		if strings.Contains(src, needle) {
-			t.Errorf("catalog_search.go must not define %s", needle)
-		}
-	}
-}
-```
-
-Run: `cd framework; $env:GOMAXPROCS='1'; go test ./tool -count=1 -run TestCatalogSearchGo_omitsPlainTextCredentialRedirect`
-
-Expected: FAIL（源码仍含这两个函数名）
+- [x] `TestCatalogSearchGo_omitsPlainTextCredentialRedirect`
+- [x] 先跑必须红
 
 ---
 
 ### Task 2: 删货架函数
 
-- [ ] 从 `catalog_search.go` 删 `MatchCredentialSolicitation`、`FormatCredentialSolicitationRedirect`、`formatBindingsBrief`、`deniesCredentialSolicitation`、`isSkillsFamilyTool`、`DefaultAskUserGuardConfig`
-- [ ] 从 `catalog_search_test.go` 删全部 `TestMatchCredentialSolicitation_*`
-- [ ] 保留 `TestMatchAskUserIntent_*` 与 `looksLikeCredentialSolicitation`
-- [ ] `cd framework && go test ./tool ./harness -count=1`
-- [ ] **Commit** `fix(tool): drop unused plain-text credential solicitation redirect`
+- [x] 从 `catalog_search.go` 删 `MatchCredentialSolicitation`、`FormatCredentialSolicitationRedirect`、`formatBindingsBrief`、`deniesCredentialSolicitation`、`isSkillsFamilyTool`、`DefaultAskUserGuardConfig`
+- [x] 从 `catalog_search_test.go` 删全部 `TestMatchCredentialSolicitation_*`
+- [x] 保留 `TestMatchAskUserIntent_*` 与 `looksLikeCredentialSolicitation`
+- [x] `cd framework && go test ./tool ./harness -count=1`
+- [x] **Commit** `fix(tool): drop unused plain-text credential solicitation redirect`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] 不要 merge/push，除非用户明确要求。
