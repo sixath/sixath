@@ -54,6 +54,5 @@ func BuildSkillsAwarePrompt(skillsIdx *Index) string {
 	}
 
 	b.WriteString("使用建议：Skills 是可选手册。任务与已知 Skill 相关且尚未出现在上下文时，可调用一次 load_skill(name) 获取细节；不要反复加载同一技能。\n")
-	b.WriteString("排障结束后，若得到可复用的修正或经验，请调用 append_learning 写入 .learnings，以便后续自动沉淀为 Skill。\n")
 	return b.String()
 }

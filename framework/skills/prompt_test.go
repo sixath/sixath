@@ -23,3 +23,10 @@ func TestBuildSkillsAwarePrompt_nilIndexHasNoSkillList(t *testing.T) {
 		t.Fatalf("nil index should omit skills list")
 	}
 }
+
+func TestBuildSkillsAwarePrompt_omitsAppendLearning(t *testing.T) {
+	out := BuildSkillsAwarePrompt(nil)
+	if strings.Contains(out, "append_learning") {
+		t.Fatal("skills prompt must not teach append_learning")
+	}
+}
