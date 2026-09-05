@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // VisionAnalyzer analyzes an image (PNG/JPEG bytes) with an optional question.
@@ -73,7 +75,7 @@ func RegisterVisionAnalyzeTool(reg *Registry, analyzer VisionAnalyzer) error {
 			}
 			question, _ := params["question"].(string)
 			ws, _ := ctx.Value(ContextKeyWorkspaceRoot).(string)
-			abs, err := ResolveWorkspacePath(ws, rel)
+			abs, err := fwws.ResolveWorkspacePath(ws, rel)
 			if err != nil {
 				return map[string]any{"ok": false, "error": err.Error(), "error_code": ErrorPermanent}, nil
 			}

@@ -3,10 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"backend/internal/biz"
@@ -14,6 +14,7 @@ import (
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 	kratoshttp "github.com/go-kratos/kratos/v2/transport/http"
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // CodeRootsListHandler serves GET /api/v1/code-roots.
@@ -185,76 +186,23 @@ func workspaceCodeLinkStatus(workspace string) (map[string]any, error) {
 }
 
 // linkWorkspaceCode creates {workspace}/code → absTarget under code_roots.
-func linkWorkspaceCode(workspace, target string, codeRoots []string) (any, error) {
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "agent workspace empty")
-	}
-	absTarget, err := resolveTargetUnderCodeRoots(target, codeRoots)
+func linkWorkspaceCode(wsRoot, target string, codeRoots []string) (any, error) {
+	link, absTarget, err := fwws.LinkCode(wsRoot, target, codeRoots)
 	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		return nil, kratosErrors.InternalServer("INTERNAL", "failed to create workspace: "+err.Error())
-	}
-	link := filepath.Join(workspace, chat.WorkspaceCodeLink)
-	if _, err := os.Lstat(link); err == nil {
-		same, sameErr := sameSymlinkTarget(link, absTarget)
-		if sameErr != nil || !same {
+		switch {
+		case errors.Is(err, fwws.ErrEmptyWorkspace):
+			return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "agent workspace empty")
+		case errors.Is(err, fwws.ErrEmptyTarget):
+			return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "target required")
+		case errors.Is(err, fwws.ErrTargetNotAllowed):
+			return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "target not under code_roots")
+		case errors.Is(err, fwws.ErrLinkConflict):
 			return nil, kratosErrors.Conflict("WORKSPACE_LINK_CONFLICT", "workspace/code already exists with a different target")
+		default:
+			return nil, kratosErrors.InternalServer("INTERNAL", err.Error())
 		}
-		return map[string]any{"link": link, "target": absTarget}, nil
-	} else if !os.IsNotExist(err) {
-		return nil, kratosErrors.InternalServer("INTERNAL", err.Error())
-	}
-	if err := os.Symlink(absTarget, link); err != nil {
-		return nil, kratosErrors.InternalServer("INTERNAL", "failed to create symlink: "+err.Error())
 	}
 	return map[string]any{"link": link, "target": absTarget}, nil
-}
-
-func resolveTargetUnderCodeRoots(target string, codeRoots []string) (string, error) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", kratosErrors.BadRequest("INVALID_ARGUMENT", "target required")
-	}
-	if strings.ContainsRune(target, 0) {
-		return "", kratosErrors.BadRequest("INVALID_ARGUMENT", "target invalid")
-	}
-	abs, err := filepath.Abs(target)
-	if err != nil {
-		return "", kratosErrors.BadRequest("INVALID_ARGUMENT", "target invalid")
-	}
-	abs = filepath.Clean(abs)
-	sep := string(os.PathSeparator)
-	for _, root := range chat.NormalizeCodeRoots(codeRoots) {
-		root = filepath.Clean(root)
-		if abs != root && !strings.HasPrefix(abs, root+sep) {
-			continue
-		}
-		rel, err := filepath.Rel(root, abs)
-		if err != nil {
-			continue
-		}
-		resolved, err := chat.ResolveUnderRoot(root, rel)
-		if err != nil {
-			return "", kratosErrors.BadRequest("INVALID_ARGUMENT", err.Error())
-		}
-		return resolved, nil
-	}
-	return "", kratosErrors.BadRequest("INVALID_ARGUMENT", "target not under code_roots")
-}
-
-func sameSymlinkTarget(link, wantTarget string) (bool, error) {
-	existing, err := resolveLinkTarget(link)
-	if err != nil {
-		return false, err
-	}
-	want, err := resolveLinkTarget(wantTarget)
-	if err != nil {
-		return false, err
-	}
-	return normalizePathForCompare(existing) == normalizePathForCompare(want), nil
 }
 
 func resolveLinkTarget(path string) (string, error) {
@@ -279,13 +227,4 @@ func resolveLinkTarget(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(abs), nil
-}
-
-func normalizePathForCompare(p string) string {
-	p = filepath.Clean(strings.TrimSpace(p))
-	p = strings.TrimPrefix(p, `\\?\`)
-	if runtime.GOOS == "windows" {
-		return strings.ToLower(p)
-	}
-	return p
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	fwws "github.com/sixath/framework/workspace"
 )
 
 const (
@@ -167,7 +169,7 @@ func resolveResultsPath(ws, rel string) (string, string, error) {
 	if rel == "" || !strings.HasPrefix(rel, "tmp/results/") {
 		return "", "", fmt.Errorf("query_spill: path must be under tmp/results/")
 	}
-	full, err := ResolveWorkspacePath(ws, rel)
+	full, err := fwws.ResolveWorkspacePath(ws, rel)
 	if err != nil {
 		return "", "", err
 	}

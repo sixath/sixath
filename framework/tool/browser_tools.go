@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sixath/framework/tool/browser"
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // RegisterBrowserTools registers browser_* tools without confirm (zero-regression default).
@@ -564,7 +565,7 @@ func saveBrowserScreenshot(workspace string, png []byte) (rel, abs string, err e
 		return "", "", fmt.Errorf("workspace_root not set for screenshot")
 	}
 	rel = filepath.ToSlash(filepath.Join(".browser", "screenshots", time.Now().Format("20060102-150405.000")+".png"))
-	full, err := ResolveWorkspacePath(workspace, rel)
+	full, err := fwws.ResolveWorkspacePath(workspace, rel)
 	if err != nil {
 		return "", "", err
 	}

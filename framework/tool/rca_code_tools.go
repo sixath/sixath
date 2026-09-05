@@ -13,7 +13,7 @@ const (
 )
 
 // RegisterRCACodeTools 注册 rca_grep / rca_glob / rca_read 三个多仓库代码检索工具。
-// roots 为允许检索的仓库根白名单(pathguard 守卫作用于每个根)。
+// roots 为允许检索的仓库根白名单（workspace.ResolveWorkspacePath 守卫作用于每个根）。
 func RegisterRCACodeTools(reg *Registry, roots []string) error {
 	if reg == nil {
 		return errors.New("rca code tools: registry is nil")

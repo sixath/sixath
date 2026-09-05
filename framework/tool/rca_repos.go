@@ -3,6 +3,8 @@ package tool
 import (
 	"fmt"
 	"path/filepath"
+
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // repoNameFromRoot 返回仓库根目录的基名,作为该仓库的逻辑名。
@@ -47,7 +49,7 @@ func resolveInRepos(roots []string, repo, rel string) (string, string, error) {
 		return "", "", err
 	}
 	root := sel[0]
-	full, err := ResolveWorkspacePath(root, rel)
+	full, err := fwws.ResolveWorkspacePath(root, rel)
 	if err != nil {
 		return "", "", err
 	}

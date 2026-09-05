@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	fwws "github.com/sixath/framework/workspace"
 )
 
 const (
 	MaxCodeBrowseDepth   = 32
 	MaxCodeBrowseEntries = 500
-	WorkspaceCodeLink    = "code"
+	WorkspaceCodeLink    = fwws.CodeDir
 )
 
 // CodeDirEntry is a directory entry under a code root.
@@ -156,30 +158,7 @@ func ListCodeDirs(root, rel string) ([]CodeDirEntry, error) {
 // ResolveWorkspaceCodeRoot returns the absolute path of workspace/code when it
 // exists as a directory or as a symlink to a directory. Empty if missing.
 func ResolveWorkspaceCodeRoot(workspace string) string {
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return ""
-	}
-	p := filepath.Join(workspace, WorkspaceCodeLink)
-	fi, err := os.Lstat(p)
-	if err != nil {
-		return ""
-	}
-	target := p
-	if fi.Mode()&os.ModeSymlink != 0 {
-		eval, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			return ""
-		}
-		st, err := os.Stat(eval)
-		if err != nil || !st.IsDir() {
-			return ""
-		}
-		target = eval
-	} else if !fi.IsDir() {
-		return ""
-	}
-	return filepath.Clean(target)
+	return fwws.ResolveCodeMount(workspace)
 }
 
 // MergeRCARoots prefers workspace/code when present; otherwise keeps configured roots

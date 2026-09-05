@@ -12,6 +12,7 @@ import (
 	"github.com/sixath/framework/growth"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // SkillManageConfig configures skill_manage runtime writes.
@@ -523,7 +524,7 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 			return nil, fmt.Errorf("content is required for edit")
 		}
 		path := skillSkillMDRel(name)
-		full, err := tool.ResolveWorkspacePath(workspace, path)
+		full, err := fwws.ResolveWorkspacePath(workspace, path)
 		if err != nil {
 			return nil, err
 		}
@@ -548,7 +549,7 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 			return nil, fmt.Errorf("old_string is required for patch")
 		}
 		path := skillSkillMDRel(name)
-		full, err := tool.ResolveWorkspacePath(workspace, path)
+		full, err := fwws.ResolveWorkspacePath(workspace, path)
 		if err != nil {
 			return nil, err
 		}
@@ -583,7 +584,7 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 		if err != nil {
 			return nil, err
 		}
-		full, err := tool.ResolveWorkspacePath(workspace, rel)
+		full, err := fwws.ResolveWorkspacePath(workspace, rel)
 		if err != nil {
 			return nil, err
 		}
@@ -623,7 +624,7 @@ func skillManageToPatches(workspace string, action, name string, params map[stri
 
 func removeSkillDir(workspace, name string) error {
 	rel := filepath.ToSlash(filepath.Join("skills", name))
-	full, err := tool.ResolveWorkspacePath(workspace, rel)
+	full, err := fwws.ResolveWorkspacePath(workspace, rel)
 	if err != nil {
 		return err
 	}
