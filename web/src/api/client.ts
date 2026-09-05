@@ -654,22 +654,6 @@ export const codeRootsApi = {
     ),
 }
 
-export interface GlobalCodeModelSettings {
-  provider?: string
-  model?: string
-  api_key?: string
-  base_url?: string
-}
-
-export const settingsApi = {
-  getCodeModel: () => request<GlobalCodeModelSettings>('/settings/code-model'),
-  putCodeModel: (body: GlobalCodeModelSettings) =>
-    request<GlobalCodeModelSettings>('/settings/code-model', {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
-}
-
 export const agentApi = {
   list: async (params?: { page?: number; page_size?: number }) => {
     const q = new URLSearchParams()

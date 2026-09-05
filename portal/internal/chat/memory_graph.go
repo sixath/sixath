@@ -1,13 +1,11 @@
 package chat
 
 import (
-	"context"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"backend/internal/biz"
 
@@ -17,10 +15,10 @@ import (
 )
 
 var (
-	storedGraphYAML   *config.MemoryGraph
-	graphStoreMu      sync.Mutex
-	sharedGraphStore  memory.GraphStore
-	sharedGraphKey    string
+	storedGraphYAML  *config.MemoryGraph
+	graphStoreMu     sync.Mutex
+	sharedGraphStore memory.GraphStore
+	sharedGraphKey   string
 )
 
 // SetMemoryGraphConfig stores agent_extra memory_graph / memory_store.graph settings.
@@ -190,81 +188,4 @@ func applyMemoryGraphOptions(opts *MemoryStoreOptions) {
 	opts.Graph = g
 	opts.GraphMaxHops = memoryGraphMaxHops()
 	opts.GraphRRFK = memoryGraphRRFK()
-}
-
-// NotifyMemoryGraphFromTurn runs GraphPipeline asynchronously (fail-open).
-func NotifyMemoryGraphFromTurn(
-	ctx context.Context,
-	store memory.MemoryStore,
-	session *biz.ChatSession,
-	userMessage, assistantMessage string,
-	agentMeta *biz.AgentMeta,
-) {
-	if !memoryGraphEnabled() || session == nil {
-		return
-	}
-	if memoryGraphProvider() != "neo4j" {
-		return
-	}
-	g := sharedNeo4jGraphStore()
-	if g == nil {
-		return
-	}
-	userMessage = strings.TrimSpace(userMessage)
-	assistantMessage = strings.TrimSpace(assistantMessage)
-	if userMessage == "" && assistantMessage == "" {
-		return
-	}
-	bg := context.Background()
-	userID := ResolveMemoryUserID(ctx, session)
-	sessionID := session.ID
-	agentID := session.AgentID
-	var metaCopy *biz.AgentMeta
-	if agentMeta != nil {
-		cp := *agentMeta
-		metaCopy = &cp
-	}
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("memory graph panic: session_id=%s recover=%v", sessionID, r)
-			}
-		}()
-		start := time.Now()
-		m, err := resolveGraphModel(metaCopy)
-		if err != nil || m == nil {
-			log.Printf("memory graph skip model: session_id=%s agent_id=%s err=%v", sessionID, agentID, err)
-			return
-		}
-		maxEnt := memoryGraphMaxEntities()
-		pipe := &memory.GraphPipeline{
-			Graph:                 g,
-			Enabled:               true,
-			MaxEntities:           maxEnt,
-			MinRelationConfidence: memoryGraphMinConfidence(),
-			Extractor:             &memory.LLMGraphExtractor{Model: m, MaxEntities: maxEnt},
-		}
-		st, err := pipe.AddGraphFromTurnWithStats(bg, memory.TurnInput{
-			UserID:           userID,
-			SessionID:        sessionID,
-			AgentID:          agentID,
-			UserMessage:      userMessage,
-			AssistantMessage: assistantMessage,
-		})
-		if st.Duration == 0 {
-			st.Duration = time.Since(start)
-		}
-		errStr := ""
-		if err != nil {
-			errStr = err.Error()
-			if len(errStr) > 200 {
-				errStr = errStr[:200] + "…"
-			}
-		}
-		log.Printf(
-			"memory graph done session_id=%s agent_id=%s result=%s cand_ent=%d cand_rel=%d written_ent=%d written_rel=%d drops=%s dur_ms=%d err=%q",
-			sessionID, agentID, st.Result, st.CandidateEntities, st.CandidateRels, st.WrittenEntities, st.WrittenRels,
-			formatGraphDrops(st.Drops), st.Duration.Milliseconds(), errStr,
-		)
-	}()
 }

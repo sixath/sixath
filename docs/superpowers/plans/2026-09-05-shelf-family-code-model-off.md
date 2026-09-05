@@ -29,16 +29,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] 源码锁定：上述文件/字符串不得存在
-- [ ] 先跑应失败
+- [x] 源码锁定：上述文件/字符串不得存在
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 实现
 
-- [ ] 删文件与接线
-- [ ] `cd portal && go test ./internal/chat ./internal/service ./internal/server -count=1`
-- [ ] **Commit** `fix(portal): drop unused shelf family and code-model switch`
+- [x] 删文件与接线
+- [x] `cd portal && go test ./internal/chat ./internal/service ./internal/server -count=1`
+- [x] **Commit** `fix(portal): drop unused shelf family and code-model switch`
 
 ---
 

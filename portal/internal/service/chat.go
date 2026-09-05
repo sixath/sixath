@@ -112,9 +112,6 @@ func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *
 	memoryStore := chat.BuildMemoryStore(sessionUnits, nil, transcriptProvider, chat.DefaultMemoryStoreOptions())
 	chat.StartUnitVectorBackfill(sessionUnits)
 	chatUC.SetSessionSearchBackend(chat.NewSessionSearchBackend(chatUC))
-	chat.SetPrefetchSessionProvider(transcriptProvider)
-	chat.SetPrefetchMemoryStore(memoryStore)
-	chat.RebuildPrefetchMemoryOrchestrator()
 	s := &ChatService{
 		chatUC:       chatUC,
 		agentUC:      agentUC,

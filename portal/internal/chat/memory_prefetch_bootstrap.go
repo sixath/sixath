@@ -57,7 +57,3 @@ func RebuildPrefetchMemoryOrchestrator() {
 	}
 	prefetchMemoryOrchestrator = BuildPrefetchMemoryOrchestrator(storedPrefetchYAML)
 }
-
-func prefetchOrchestratorForReAct() *memory.Orchestrator {
-	return prefetchMemoryOrchestrator
-}

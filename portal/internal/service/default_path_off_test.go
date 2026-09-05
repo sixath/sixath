@@ -17,6 +17,7 @@ func TestChatGo_doesNotWireMemorySidecarsOrToolFamily(t *testing.T) {
 		"NotifyMemoryGraphFromTurn",
 		"BuildToolFamilyIndex",
 		"notifyMemoryExtractAfterAssistant",
+		"RebuildPrefetchMemoryOrchestrator",
 	} {
 		if strings.Contains(src, needle) {
 			t.Errorf("default chat path must not contain %q", needle)

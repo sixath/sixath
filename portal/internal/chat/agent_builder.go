@@ -345,14 +345,6 @@ func SetAllowScriptExecution(allow bool) {
 	AllowScriptExecution = allow
 }
 
-// RegisterLearningTools 注册 append_learning（写入 .learnings，供 Growth 复盘消费）。
-func RegisterLearningTools(reg *tool.Registry) error {
-	if reg == nil {
-		return nil
-	}
-	return toolskill.RegisterAppendLearningTool(reg)
-}
-
 // ExecuteSkillScript 直接执行技能脚本，供 Agent.ExecuteSkill API 使用
 func ExecuteSkillScript(ctx context.Context, workspace string, extraSkillDirs []string, skillName, relPath, input string) (string, error) {
 	if workspace == "" || skillName == "" || relPath == "" {

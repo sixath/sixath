@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/config"
+	agent "github.com/sixath/framework/harness"
 )
 
 var (
@@ -67,7 +67,6 @@ func SetPortalAgentExtra(extra *config.PortalAgentExtra) {
 	} else {
 		SetMemoryGraphConfig(nil)
 	}
-	RebuildPrefetchMemoryOrchestrator()
 	if extra.Portal != nil && extra.Portal.GuardrailHalt != nil {
 		g := extra.Portal.GuardrailHalt
 		if s := strings.TrimSpace(strings.ToLower(g.Display)); s != "" {

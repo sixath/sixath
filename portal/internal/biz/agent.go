@@ -12,7 +12,7 @@ type ModelConfig struct {
 	APIKey          string
 	BaseURL         string
 	MaxOutputTokens int // 单次回复 max_tokens；<=0 使用 Portal 默认
-	// Code* 可选：FamilyCode 激活时覆盖会话模型（也可用 SATH_CODE_* env）。
+	// Code* 已退役的切模字段（FamilyCode 不再激活）；proto/DB 死键，不 regen。
 	CodeProvider string
 	CodeModel    string
 	CodeAPIKey   string
