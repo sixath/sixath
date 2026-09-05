@@ -431,12 +431,6 @@ export interface RuntimeToolsConfig {
   hub_fallback_to_default_on_read_error?: boolean
 }
 
-export interface MemoryHubCatalog {
-  defaults: { governance: string; knowledge: string }
-  governance: string[]
-  knowledge: string[]
-}
-
 type RuntimeToolFlagKey =
   | 'memory_write_enabled'
   | 'skill_runtime_manage_enabled'
@@ -638,87 +632,6 @@ function normalizeAgent(raw: Agent & Record<string, unknown>): Agent {
     created_at: (item.created_at as string | undefined) ?? (item.createdAt as string | undefined) ?? '',
     updated_at: (item.updated_at as string | undefined) ?? (item.updatedAt as string | undefined) ?? '',
   }
-}
-
-export const memoryHubApi = {
-  catalog: async (): Promise<MemoryHubCatalog> => {
-    const data = await request<MemoryHubCatalog>('/memory-hub/catalog')
-    return {
-      defaults: {
-        governance: data?.defaults?.governance || 'local',
-        knowledge: data?.defaults?.knowledge || 'local',
-      },
-      governance: data?.governance || ['local'],
-      knowledge: data?.knowledge || ['local'],
-    }
-  },
-  loadout: async (agentId: string): Promise<HubLoadoutView> => {
-    return request<HubLoadoutView>(`/agents/${agentId}/hub/loadout`)
-  },
-  bindings: async (agentId: string): Promise<HubBindingsView> => {
-    return request<HubBindingsView>(`/agents/${agentId}/hub/bindings`)
-  },
-  bind: async (agentId: string, assets: HubAsset[]) => {
-    return request<{ ok: boolean }>(`/agents/${agentId}/hub/bindings`, {
-      method: 'POST',
-      body: JSON.stringify({ assets }),
-    })
-  },
-  unbind: async (agentId: string, assets: HubAsset[]) => {
-    return request<{ ok: boolean }>(`/agents/${agentId}/hub/bindings`, {
-      method: 'DELETE',
-      body: JSON.stringify({ assets }),
-    })
-  },
-  clearBindings: async (agentId: string) => {
-    return request<{ ok: boolean; cleared: number }>(`/agents/${agentId}/hub/bindings/clear`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    })
-  },
-  setStatus: async (agentId: string, asset: HubAsset, status: string) => {
-    return request<{ ok: boolean }>(`/agents/${agentId}/hub/assets/status`, {
-      method: 'POST',
-      body: JSON.stringify({ asset, status }),
-    })
-  },
-  listKnowledgeDrafts: (agentId: string, source?: string) =>
-    request<{ drafts: KnowledgeDraftItem[] }>(
-      `/agents/${agentId}/hub/knowledge/drafts${source ? `?source=${encodeURIComponent(source)}` : ''}`,
-    ),
-  approveKnowledgeDraft: (agentId: string, body: { source: string; id: string; overwrite?: boolean }) =>
-    request<{ ok: boolean }>(`/agents/${agentId}/hub/knowledge/approve`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-}
-
-export interface KnowledgeDraftItem {
-  source: string
-  id: string
-  title?: string
-  preview?: string
-  updated_at?: string
-}
-
-export interface HubAsset {
-  kind: string
-  id: string
-  hub?: string
-  name?: string
-  status?: string
-}
-
-export interface HubLoadoutView {
-  provider: string
-  items: HubAsset[]
-  total: number
-}
-
-export interface HubBindingsView {
-  provider: string
-  items: HubAsset[]
-  total: number
 }
 
 export interface CodeRootBrowseEntry {

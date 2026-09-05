@@ -4,14 +4,12 @@ import {
   agentApi,
   channelApi,
   codeRootsApi,
-  memoryHubApi,
   CODING_ASSISTANT_RUNTIME_TOOLS,
   RUNTIME_TOOL_FIELDS,
   serializeRuntimeTools,
   type Channel,
   type CodeRootBrowseEntry,
   type CreateAgentRequest,
-  type MemoryHubCatalog,
   type ModelConfig,
   type RuntimeToolsConfig,
 } from '../api/client'
@@ -56,9 +54,6 @@ export default function AgentForm() {
   const [runtimeTools, setRuntimeTools] = useState<RuntimeToolsConfig>(emptyRuntimeTools())
   const [wecomChannelId, setWecomChannelId] = useState('')
   const [wecomChannels, setWecomChannels] = useState<Channel[]>([])
-  const [hubCatalog, setHubCatalog] = useState<MemoryHubCatalog | null>(null)
-  const [initialHubGov, setInitialHubGov] = useState<string>('')
-  const [clearBindingsOnSave, setClearBindingsOnSave] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -87,9 +82,6 @@ export default function AgentForm() {
     channelApi.list({ type: 'wecom', page: 1, page_size: 100 })
       .then((res) => setWecomChannels(res.items))
       .catch(() => setWecomChannels([]))
-    memoryHubApi.catalog()
-      .then(setHubCatalog)
-      .catch(() => setHubCatalog({ defaults: { governance: 'local', knowledge: 'local' }, governance: ['local'], knowledge: ['local'] }))
     codeRootsApi.list()
       .then((res) => {
         const roots = res.roots || []
@@ -112,8 +104,6 @@ export default function AgentForm() {
         setModelConfig(a.model_config || { provider: 'openai', model: 'gpt-4' })
         setDebugRun(a.debug_run ?? false)
         setRuntimeTools(a.runtime_tools ?? emptyRuntimeTools())
-        setInitialHubGov(a.runtime_tools?.hub_governance || '')
-        setClearBindingsOnSave(false)
         setWecomChannelId(a.wecom_channel_id || '')
       }).catch((e) => setError(e.message))
       agentApi
@@ -175,9 +165,6 @@ export default function AgentForm() {
       }
       if (isEdit && id) {
         await agentApi.update(id, data)
-        if (clearBindingsOnSave) {
-          await memoryHubApi.clearBindings(id)
-        }
         if (selectedTarget.trim()) {
           const next = selectedTarget.trim()
           const prev = existingLinkTarget.trim()
@@ -498,27 +485,9 @@ export default function AgentForm() {
                       })
                     }
                   >
-                    <option value="">跟随默认（{hubCatalog?.defaults.governance || 'local'}）</option>
-                    {(hubCatalog?.governance || ['local']).map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
+                    <option value="">跟随默认（local）</option>
+                    <option value="local">local</option>
                   </select>
-                  {isEdit && (runtimeTools.hub_governance || '') !== initialHubGov ? (
-                    <div style={{ marginTop: 8 }}>
-                      <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: 4 }}>
-                        治理面已变更：旧 Loadout Binding 可能失效。
-                      </p>
-                      <label className="checkbox-field">
-                        <input
-                          type="checkbox"
-                          data-testid="hub-clear-on-save"
-                          checked={clearBindingsOnSave}
-                          onChange={(e) => setClearBindingsOnSave(e.target.checked)}
-                        />
-                        <span>保存时清空该 Agent 的显式 Hub Binding</span>
-                      </label>
-                    </div>
-                  ) : null}
                 </div>
                 <div className="form-group">
                   <label>Memory Hub 知识面</label>
@@ -534,10 +503,8 @@ export default function AgentForm() {
                       })
                     }
                   >
-                    <option value="">跟随默认（{hubCatalog?.defaults.knowledge || 'local'}）</option>
-                    {(hubCatalog?.knowledge || ['local']).map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
+                    <option value="">跟随默认（local）</option>
+                    <option value="local">local</option>
                   </select>
                 </div>
                 <div className="checkbox-list__item" style={{ marginTop: 8 }}>

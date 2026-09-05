@@ -133,9 +133,6 @@ func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgent
 		return nil, err
 	}
 	rt := biz.RuntimeToolsFromProto(req.GetRuntimeTools())
-	if err := chat.ValidateAgentHub(rt); err != nil {
-		return nil, errors.BadRequest("INVALID_HUB", err.Error())
-	}
 	workspace := strings.TrimSpace(req.GetWorkspace())
 	if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
 		return nil, biz.ErrWorkspaceWholeRepoRetired
@@ -221,9 +218,6 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 				v := *existing.RuntimeTools.HubFallbackToDefaultOnReadError
 				rt.HubFallbackToDefaultOnReadError = &v
 			}
-		}
-		if err := chat.ValidateAgentHub(rt); err != nil {
-			return nil, errors.BadRequest("INVALID_HUB", err.Error())
 		}
 		updates["runtime_tools"] = rt
 	}
@@ -341,7 +335,6 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		McpServers:     mcpServers,
 		AllowScript:    true,
 		VisionAnalyzer: chat.VisionAnalyzerForModel(m),
-		RuntimeTools:   agentMeta.RuntimeTools,
 	}); err != nil {
 		s.log.Errorf("Chat register runtime tools failed: agent_id=%s err=%v", agentID, err)
 		return nil, err

@@ -58,8 +58,7 @@ func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUs
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, d *data.Data, logger log.Logger) *ChatService {
-	WireMemoryHubFromData(d)
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, _ *data.Data, logger log.Logger) *ChatService {
 	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
 	return s
@@ -386,7 +385,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		MemoryStore:     s.memoryStore,
 		SessionProvider: streamSessionProvider,
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
-		RuntimeTools:    agentMeta.RuntimeTools,
 	}); err != nil {
 		s.log.Errorf("SendMessage register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
@@ -664,7 +662,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		MemoryStore:     s.memoryStore,
 		SessionProvider: streamSessionProvider,
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
-		RuntimeTools:    agentMeta.RuntimeTools,
 	}); err != nil {
 		s.log.Errorf("SendMessageStream register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
