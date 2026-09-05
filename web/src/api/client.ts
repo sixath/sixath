@@ -425,10 +425,6 @@ export interface RuntimeToolsConfig {
   browser_enabled?: boolean
   /** MEA Manage-Execute-Audit; OR-merged with SATH_MEA / SATH_MEA_PILOT_AGENTS */
   mea_enabled?: boolean
-  /** Memory Hub overrides; omit = process defaults. Not in RUNTIME_TOOL_FIELDS. */
-  hub_governance?: string
-  hub_knowledge?: string
-  hub_fallback_to_default_on_read_error?: boolean
 }
 
 type RuntimeToolFlagKey =
@@ -571,12 +567,7 @@ function normalizeModelConfig(raw?: ModelConfig & Record<string, unknown>): Mode
 function normalizeRuntimeTools(raw?: RuntimeToolsConfig | Record<string, unknown>): RuntimeToolsConfig {
   if (!raw) return {}
   const cfg = raw as Record<string, unknown>
-  const hubGov = (cfg.hub_governance as string | undefined) ?? (cfg.hubGovernance as string | undefined)
-  const hubKnow = (cfg.hub_knowledge as string | undefined) ?? (cfg.hubKnowledge as string | undefined)
-  const hubFb =
-    (cfg.hub_fallback_to_default_on_read_error as boolean | undefined) ??
-    (cfg.hubFallbackToDefaultOnReadError as boolean | undefined)
-  const out: RuntimeToolsConfig = {
+  return {
     memory_write_enabled: (cfg.memory_write_enabled as boolean | undefined) ?? (cfg.memoryWriteEnabled as boolean | undefined),
     skill_runtime_manage_enabled: (cfg.skill_runtime_manage_enabled as boolean | undefined) ?? (cfg.skillRuntimeManageEnabled as boolean | undefined),
     todo_enabled: (cfg.todo_enabled as boolean | undefined) ?? (cfg.todoEnabled as boolean | undefined),
@@ -587,10 +578,6 @@ function normalizeRuntimeTools(raw?: RuntimeToolsConfig | Record<string, unknown
     browser_enabled: (cfg.browser_enabled as boolean | undefined) ?? (cfg.browserEnabled as boolean | undefined),
     mea_enabled: (cfg.mea_enabled as boolean | undefined) ?? (cfg.meaEnabled as boolean | undefined),
   }
-  if (typeof hubGov === 'string' && hubGov.trim()) out.hub_governance = hubGov.trim()
-  if (typeof hubKnow === 'string' && hubKnow.trim()) out.hub_knowledge = hubKnow.trim()
-  if (typeof hubFb === 'boolean') out.hub_fallback_to_default_on_read_error = hubFb
-  return out
 }
 
 /** Explicit true/false for every known flag so PUT never drops browser_enabled via sparse objects. */
@@ -599,11 +586,6 @@ export function serializeRuntimeTools(cfg?: RuntimeToolsConfig): RuntimeToolsCon
   const out: RuntimeToolsConfig = {}
   for (const { key } of RUNTIME_TOOL_FIELDS) {
     out[key] = !!n[key]
-  }
-  if (n.hub_governance) out.hub_governance = n.hub_governance
-  if (n.hub_knowledge) out.hub_knowledge = n.hub_knowledge
-  if (typeof n.hub_fallback_to_default_on_read_error === 'boolean') {
-    out.hub_fallback_to_default_on_read_error = n.hub_fallback_to_default_on_read_error
   }
   return out
 }

@@ -12,19 +12,15 @@
 
 ## 1. 背景
 
-S1 CUT：Hub 管理面退出外壳；`framework/memory/hub` 留包。S28 切断了 memory 包根对 hub 的 import。现网磁盘：
+S1 CUT：Hub 管理面退出外壳；`framework/memory/hub` 留包。S28 切断了 memory 包根对 hub 的 import。现网磁盘（以 `Test-Path` 为准，Cursor Grep 会扫到已删文件）：
 
 | leftover | 现网 |
 |----------|------|
-| `http.go` | **已不注册** `/memory-hub/*` 与 `/agents/{id}/hub/*` |
-| `memory_hub*.go` / `service/hub_*.go` | handler 与 ChatService 方法仍在，零路由 |
-| `chat/hub_*.go` | `InitLocalMemoryHub` / `RegisterKnowledgeHubTools` 只被自身测试调用；默认 Chat / `agent_builder` **零调用** |
-| `WireMemoryHubFromData` | 只定义；`chat.go` / `cmd` 不调用 |
-| `binding_store_mysql.go` | 只被 `hub_wire` 使用 |
+| Portal `hub_*.go` / `memory_hub*.go` / `hub_wire.go` / `binding_store_mysql.go` | **已不存在**；`http.go` 也不注册 `/hub/` |
 | Web | Agent 表单/详情仍编辑展示 `hub_governance` / `hub_knowledge` / fallback |
 | proto / DB `hub_*` | 死键，Update 仍 merge |
 
-growth 仍 opt-in，**不在本刀**。
+本刀：锁定 Go 管理面保持消失，并拆 Web 假入口。growth 仍 opt-in，**不在本刀**。
 
 ---
 

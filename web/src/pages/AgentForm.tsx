@@ -431,59 +431,6 @@ export default function AgentForm() {
                     </div>
                   ))}
                 </div>
-                <div className="form-group" style={{ marginTop: 16 }}>
-                  <label>Memory Hub 治理面</label>
-                  <select
-                    data-testid="hub-governance"
-                    value={runtimeTools.hub_governance || ''}
-                    onChange={(e) =>
-                      setRuntimeTools((prev) => {
-                        const next = { ...prev }
-                        if (!e.target.value) delete next.hub_governance
-                        else next.hub_governance = e.target.value
-                        return next
-                      })
-                    }
-                  >
-                    <option value="">跟随默认（local）</option>
-                    <option value="local">local</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Memory Hub 知识面</label>
-                  <select
-                    data-testid="hub-knowledge"
-                    value={runtimeTools.hub_knowledge || ''}
-                    onChange={(e) =>
-                      setRuntimeTools((prev) => {
-                        const next = { ...prev }
-                        if (!e.target.value) delete next.hub_knowledge
-                        else next.hub_knowledge = e.target.value
-                        return next
-                      })
-                    }
-                  >
-                    <option value="">跟随默认（local）</option>
-                    <option value="local">local</option>
-                  </select>
-                </div>
-                <div className="checkbox-list__item" style={{ marginTop: 8 }}>
-                  <label className="checkbox-field">
-                    <input
-                      type="checkbox"
-                      data-testid="hub-fallback"
-                      checked={runtimeTools.hub_fallback_to_default_on_read_error === true}
-                      onChange={(e) =>
-                        setRuntimeTools((prev) => ({
-                          ...prev,
-                          hub_fallback_to_default_on_read_error: e.target.checked,
-                        }))
-                      }
-                    />
-                    <span>读失败时回落默认治理面</span>
-                  </label>
-                  <small className="checkbox-list__hint">对应 hub_fallback_to_default_on_read_error</small>
-                </div>
               </div>
             </div>
           </section>

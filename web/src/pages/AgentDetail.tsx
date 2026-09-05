@@ -233,18 +233,6 @@ export default function AgentDetail() {
                 <span style={{ marginLeft: '0.25rem' }}>未启用（仍可能由全局 env 开启）</span>
               )}
             </div>
-            <p data-testid="hub-governance-display">
-              <strong>Hub 治理：</strong>
-              {agent.runtime_tools?.hub_governance || '跟随默认'}
-            </p>
-            <p data-testid="hub-knowledge-display">
-              <strong>Hub 知识：</strong>
-              {agent.runtime_tools?.hub_knowledge || '跟随默认'}
-            </p>
-            <p data-testid="hub-fallback-display">
-              <strong>Hub 读回落：</strong>
-              {agent.runtime_tools?.hub_fallback_to_default_on_read_error ? '开' : '关/跟随'}
-            </p>
           </div>
         </div>
       </section>
