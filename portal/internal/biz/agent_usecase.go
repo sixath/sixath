@@ -156,6 +156,16 @@ func (uc *AgentUsecase) Update(ctx context.Context, id string, updates map[strin
 	if err != nil {
 		return nil, err
 	}
+	if v, ok := updates["workspace"].(string); ok {
+		ws := strings.TrimSpace(v)
+		if ws == "" {
+			ws = filepath.Join(uc.dataRoot, "agents", id)
+		}
+		if err := os.MkdirAll(ws, 0o755); err != nil {
+			return nil, err
+		}
+		updates["workspace"] = ws
+	}
 	agent, err := uc.repo.Update(ctx, id, updates)
 	if err != nil && errors.Is(err, pkgErrors.ErrNotFound) {
 		return nil, ErrAgentNotFound

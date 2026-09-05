@@ -54,6 +54,9 @@ func (r *hybridAgentRepo) Update(_ context.Context, id string, updates map[strin
 	if v, ok := updates["name"].(string); ok {
 		r.agent.Name = v
 	}
+	if v, ok := updates["workspace"].(string); ok {
+		r.agent.Workspace = v
+	}
 	return r.GetByID(context.Background(), id)
 }
 func (r *hybridAgentRepo) Delete(context.Context, string) error { return nil }

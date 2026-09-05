@@ -157,7 +157,7 @@ export default function AgentForm() {
         name: name.trim(),
         description: description.trim() || undefined,
         system_prompt: systemPrompt.trim() || undefined,
-        workspace: workspace.trim(),
+        workspace: retiredWholeRepo ? '' : workspace.trim(),
         model_config: modelConfig,
         debug_run: debugRun,
         runtime_tools: serializeRuntimeTools(runtimeTools),
@@ -232,7 +232,7 @@ export default function AgentForm() {
               </small>
               {retiredWholeRepo ? (
                 <small style={{ color: 'var(--warning, #b45309)', display: 'block', marginBottom: 8 }}>
-                  整仓作 Workspace 已退役。当前路径不能再跑对话或执行技能；请改成默认可写根并可选挂载 workspace/code。
+                  整仓作 Workspace 已退役。保存会改成默认可写根；可选再挂载 workspace/code。当前路径在保存前不能跑对话。
                 </small>
               ) : null}
             </div>

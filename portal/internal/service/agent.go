@@ -185,7 +185,11 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 		updates["model_config"] = protoToBizModelConfig(req.ModelConfig)
 	}
 	if req.Workspace != nil {
-		updates["workspace"] = *req.Workspace
+		workspace := strings.TrimSpace(*req.Workspace)
+		if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
+			return nil, biz.ErrWorkspaceWholeRepoRetired
+		}
+		updates["workspace"] = workspace
 	}
 	if req.DebugRun != nil {
 		updates["debug_run"] = *req.DebugRun

@@ -115,3 +115,70 @@ func TestExecuteSkill_RejectsWholeRepoWorkspace(t *testing.T) {
 		t.Fatalf("reason = %q, err=%v", kratosErrors.FromError(err).Reason, err)
 	}
 }
+
+func TestUpdateAgent_RejectsWholeRepoWorkspace(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.Mkdir(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc, repo := newHybridUpdateAgentService(t, biz.RuntimeToolsConfig{})
+	svc.codeRoots = []string{root}
+	repo.agent.Workspace = filepath.Join(t.TempDir(), "writable")
+	ctx := biz.WithCallerUserID(context.Background(), "owner")
+	_, err := svc.UpdateAgent(ctx, &agentv1.UpdateAgentRequest{
+		Id:        "agent-1",
+		Workspace: &repoDir,
+	})
+	if err == nil {
+		t.Fatal("expected whole-repo update to fail")
+	}
+	if kratosErrors.FromError(err).Reason != "WORKSPACE_WHOLE_REPO_RETIRED" {
+		t.Fatalf("reason = %q, err=%v", kratosErrors.FromError(err).Reason, err)
+	}
+}
+
+func TestUpdateAgent_EmptyWorkspaceUsesDefault(t *testing.T) {
+	dataRoot := t.TempDir()
+	const agentID = "agent-1"
+	repo := &hybridAgentRepo{agent: &biz.AgentMeta{
+		ID: agentID, Name: "a", Workspace: filepath.Join(dataRoot, "old"),
+	}}
+	res := &hybridResourceRepo{res: &biz.Resource{
+		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
+		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
+	}}
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), dataRoot, log.NewStdLogger(nil))
+	svc := NewAgentService(uc, nil, nil, nil, nil, nil, log.NewStdLogger(nil))
+	ctx := biz.WithCallerUserID(context.Background(), "owner")
+	empty := ""
+	_, err := svc.UpdateAgent(ctx, &agentv1.UpdateAgentRequest{Id: agentID, Workspace: &empty})
+	if err != nil {
+		t.Fatalf("UpdateAgent: %v", err)
+	}
+	want := filepath.Join(dataRoot, "agents", agentID)
+	if repo.agent.Workspace != want {
+		t.Fatalf("workspace = %q, want %q", repo.agent.Workspace, want)
+	}
+	if st, err := os.Stat(want); err != nil || !st.IsDir() {
+		t.Fatalf("default workspace dir: %v", err)
+	}
+}
+
+func TestUpdateAgent_OmitsWorkspace_KeepsStored(t *testing.T) {
+	const kept = "/kept/writable"
+	svc, repo := newHybridUpdateAgentService(t, biz.RuntimeToolsConfig{})
+	repo.agent.Workspace = kept
+	name := "renamed"
+	ctx := biz.WithCallerUserID(context.Background(), "owner")
+	_, err := svc.UpdateAgent(ctx, &agentv1.UpdateAgentRequest{Id: "agent-1", Name: &name})
+	if err != nil {
+		t.Fatalf("UpdateAgent: %v", err)
+	}
+	if repo.agent.Workspace != kept {
+		t.Fatalf("workspace = %q, want %q", repo.agent.Workspace, kept)
+	}
+	if repo.agent.Name != name {
+		t.Fatalf("name = %q, want %q", repo.agent.Name, name)
+	}
+}

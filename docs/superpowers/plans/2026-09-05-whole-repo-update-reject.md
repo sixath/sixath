@@ -32,13 +32,13 @@
 
 **Files:** `agent.go`、`agent_usecase.go`、`agent_update_hybrid_test.go`、`agent_create_workspace_test.go`
 
-- [ ] **Step 1:** `hybridAgentRepo.Update` 应用 `workspace`。测试：`TestUpdateAgent_RejectsWholeRepoWorkspace`；`TestUpdateAgent_EmptyWorkspaceUsesDefault`（`dataRoot` 用 `t.TempDir()`）；`TestUpdateAgent_OmitsWorkspace_KeepsStored`。
+- [x] **Step 1:** `hybridAgentRepo.Update` 应用 `workspace`。测试：`TestUpdateAgent_RejectsWholeRepoWorkspace`；`TestUpdateAgent_EmptyWorkspaceUsesDefault`（`dataRoot` 用 `t.TempDir()`）；`TestUpdateAgent_OmitsWorkspace_KeepsStored`。
 
-- [ ] **Step 2:** `UpdateAgent`：`req.Workspace != nil` 且 `WorkspaceUnderCodeRoots` → `ErrWorkspaceWholeRepoRetired`。usecase `Update`：workspace 空则 `{dataRoot}/agents/{id}` + `MkdirAll`。
+- [x] **Step 2:** `UpdateAgent`：`req.Workspace != nil` 且 `WorkspaceUnderCodeRoots` → `ErrWorkspaceWholeRepoRetired`。usecase `Update`：workspace 空则 `{dataRoot}/agents/{id}` + `MkdirAll`。
 
-- [ ] **Step 3:** `cd portal && go test ./internal/service ./internal/biz -run "TestUpdateAgent_|TestCreateAgent_Rejects|TestChat_Rejects" -count=1`
+- [x] **Step 3:** `cd portal && go test ./internal/service ./internal/biz -run "TestUpdateAgent_|TestCreateAgent_Rejects|TestChat_Rejects" -count=1`
 
-- [ ] **Step 4: Commit** `fix(portal): reject whole-repo workspace on agent update`
+- [x] **Step 4: Commit** `fix(portal): reject whole-repo workspace on agent update`
 
 ---
 
@@ -46,13 +46,13 @@
 
 **Files:** `web/src/pages/AgentForm.tsx`
 
-- [ ] `retiredWholeRepo` 时 submit `workspace: ''`；提示写明保存会改成默认可写根，可选再挂 `code/`。
+- [x] `retiredWholeRepo` 时 submit `workspace: ''`；提示写明保存会改成默认可写根，可选再挂 `code/`。
 
-- [ ] **Commit** `fix(web): migrate retired whole-repo workspace on save`
+- [x] **Commit** `fix(web): migrate retired whole-repo workspace on save`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] `cd portal && go test ./internal/service ./internal/biz -count=1`
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] `cd portal && go test ./internal/service ./internal/biz -count=1`（skip 预存 `TestSearchSessionsWithAgentFilterRequiresAgentUse`）
+- [x] 不要 merge/push，除非用户明确要求。
