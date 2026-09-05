@@ -34,7 +34,6 @@ type ChatService struct {
 	toolUC         *biz.ToolUsecase
 	mcpServerUC    *biz.McpServerUsecase
 	skillUC        *biz.SkillResourceUsecase
-	growthUC       *biz.GrowthUsecase
 	channelUC      *biz.ChannelUsecase
 	sessionHooks   *agent.ChatSessionHookRegistry
 	memoryStore    memory.MemoryStore
@@ -44,19 +43,19 @@ type ChatService struct {
 }
 
 // NewChatService creates a ChatService
-func NewChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *ChatService {
-	return newChatService(chatUC, agentUC, toolUC, nil, skillUC, growthUC, channelUC, memory.NewSessionMemory(), logger)
+func NewChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *ChatService {
+	return newChatService(chatUC, agentUC, toolUC, nil, skillUC, channelUC, memory.NewSessionMemory(), logger)
 }
 
 // NewChatServiceWithMemoryStore creates a ChatService with the durable session
 // memory backend supplied by the data layer.
-func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
-	return newChatService(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
+func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
+	return newChatService(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, _ *data.Data, logger log.Logger) *ChatService {
-	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, _ *data.Data, logger log.Logger) *ChatService {
+	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
 	s.SetCodeRoots(codeRoots)
 	return s
@@ -107,7 +106,7 @@ func (s *ChatService) persistCompactBoundary(ctx context.Context, sessionID stri
 	}
 }
 
-func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
+func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
 	transcriptProvider := chat.NewChatTranscriptProvider(chatUC)
 	chat.SetMemoryAgentGetter(agentUC)
 	memoryStore := chat.BuildMemoryStore(sessionUnits, nil, transcriptProvider, chat.DefaultMemoryStoreOptions())
@@ -122,7 +121,6 @@ func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *
 		toolUC:       toolUC,
 		mcpServerUC:  mcpServerUC,
 		skillUC:      skillUC,
-		growthUC:     growthUC,
 		channelUC:    channelUC,
 		sessionHooks: agent.NewChatSessionHookRegistry(),
 		memoryStore:  memoryStore,

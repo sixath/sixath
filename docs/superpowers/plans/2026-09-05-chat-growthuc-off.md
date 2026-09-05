@@ -29,16 +29,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestChatGo_DoesNotHoldGrowthUC`
-- [ ] 先跑应失败
+- [x] `TestChatGo_DoesNotHoldGrowthUC`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 拆参数
 
-- [ ] 删字段与构造参数；改测试调用；改 `wire_gen.go`
-- [ ] `cd portal && go test ./internal/service ./cmd/backend -count=1`
-- [ ] **Commit** `fix(portal): drop unused growthUC from ChatService`
+- [x] 删字段与构造参数；改测试调用；改 `wire_gen.go`
+- [x] `cd portal && go test ./internal/service ./cmd/backend -count=1`
+- [x] **Commit** `fix(portal): drop unused growthUC from ChatService`
 
 ---
 

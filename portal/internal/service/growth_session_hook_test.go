@@ -21,7 +21,7 @@ func TestDeleteSession_DefaultChatService_noGrowthSessionEndHooks(t *testing.T) 
 	uc.SetSessionEndSkillReviewEnabled(true)
 
 	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil)
-	s := NewChatService(chatUC, nil, nil, nil, uc, nil, log.DefaultLogger)
+	s := NewChatService(chatUC, nil, nil, nil, nil, log.DefaultLogger)
 
 	reply, err := s.DeleteSession(biz.WithCallerUserID(context.Background(), "user-1"), &chatv1.DeleteSessionRequest{Id: "g2-sess"})
 	if err != nil {

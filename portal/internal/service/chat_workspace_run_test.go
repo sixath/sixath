@@ -28,7 +28,7 @@ func TestSendMessage_RejectsWholeRepoWorkspace(t *testing.T) {
 	agentUC := biz.NewAgentUsecase(&hybridAgentRepo{agent: &biz.AgentMeta{
 		ID: agentID, Name: "a", Workspace: ws,
 	}}, nil, nil, t.TempDir(), log.NewStdLogger(nil))
-	s := NewChatService(chatUC, agentUC, nil, nil, nil, nil, log.NewStdLogger(nil))
+	s := NewChatService(chatUC, agentUC, nil, nil, nil, log.NewStdLogger(nil))
 	s.SetCodeRoots([]string{root})
 
 	_, err := s.SendMessage(biz.WithCallerUserID(context.Background(), "owner"), &chatv1.SendMessageRequest{
@@ -58,7 +58,7 @@ func TestSendMessageStream_RejectsWholeRepoWorkspace(t *testing.T) {
 	agentUC := biz.NewAgentUsecase(&hybridAgentRepo{agent: &biz.AgentMeta{
 		ID: agentID, Name: "a", Workspace: ws,
 	}}, nil, nil, t.TempDir(), log.NewStdLogger(nil))
-	s := NewChatService(chatUC, agentUC, nil, nil, nil, nil, log.NewStdLogger(nil))
+	s := NewChatService(chatUC, agentUC, nil, nil, nil, log.NewStdLogger(nil))
 	s.SetCodeRoots([]string{root})
 
 	_, _, err := s.SendMessageStream(biz.WithCallerUserID(context.Background(), "owner"), &chatv1.SendMessageRequest{
