@@ -3,6 +3,7 @@ package tooldata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -292,6 +293,37 @@ func TestExecuteRead_DoesNotSpillOverFiftyRows(t *testing.T) {
 	}
 	if len(res.Rows) != 51 {
 		t.Fatalf("rows=%d", len(res.Rows))
+	}
+}
+
+func schemaErr(msg string) error {
+	return &executor.SchemaRelatedError{Err: fmt.Errorf("executor: query: %s", msg)}
+}
+
+func vmSchema() *metadata.Schema {
+	return &metadata.Schema{
+		Name: "d_1000_game_virtual_machine_info",
+		Tables: []metadata.Table{
+			{
+				Name: "t_game_virtual_machine_info",
+				Columns: []metadata.Column{
+					{Name: "vmid"}, {Name: "mgr_ipv4_address"}, {Name: "flow_id"},
+					{Name: "assign_state"}, {Name: "name"}, {Name: "area_type"},
+				},
+			},
+			{
+				Name: "t_game_virtual_machine_extend_info",
+				Columns: []metadata.Column{
+					{Name: "vmid"}, {Name: "flow_id"}, {Name: "exec_username"},
+				},
+			},
+			{
+				Name: "t_game_virtual_machine_info_test",
+				Columns: []metadata.Column{
+					{Name: "vmid"}, {Name: "flow_id"}, {Name: "mgr_ipv4_address"},
+				},
+			},
+		},
 	}
 }
 

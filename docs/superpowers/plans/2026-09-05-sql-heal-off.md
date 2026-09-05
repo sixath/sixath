@@ -27,16 +27,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestSQLHealGoRemoved`：`os.Stat("sql_heal.go")` 必须失败
-- [ ] 先跑应失败
+- [x] `TestSQLHealGoRemoved`：`os.Stat("sql_heal.go")` 必须失败
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 删文件
 
-- [ ] 删除 `sql_heal.go` 与 `sql_heal_test.go`
-- [ ] `cd framework && go test ./tool/data ./tool -count=1`
-- [ ] **Commit** `fix(tool): drop unused SQL heal after default path unwired`
+- [x] 删除 `sql_heal.go` 与 `sql_heal_test.go`
+- [x] `cd framework && go test ./tool/data ./tool -count=1`
+- [x] **Commit** `fix(tool): drop unused SQL heal after default path unwired`
 
 ---
 
