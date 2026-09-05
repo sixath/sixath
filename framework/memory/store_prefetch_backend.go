@@ -3,8 +3,6 @@ package memory
 import (
 	"context"
 	"strings"
-
-	"github.com/sixath/framework/memory/hub/local"
 )
 
 const (
@@ -163,15 +161,28 @@ func (b *StorePrefetchBackend) Prefetch(ctx context.Context, q PrefetchQuery) ([
 	return nil, firstErr
 }
 
-// prefetchUnitLoadoutEligible skips hub_status=draft (and other non-loadout) units.
+// prefetchUnitLoadoutEligible skips draft/stale/superseded/deleted units.
+// Mirrors hub/local LoadoutEligible(MapUnitToAssetStatus) without importing hub.
 func prefetchUnitLoadoutEligible(h MemoryHit) bool {
-	dbStatus := local.UnitDBActive
+	dbStatus := "active"
 	if h.Metadata != nil {
 		if s, ok := h.Metadata["status"].(string); ok && strings.TrimSpace(s) != "" {
 			dbStatus = strings.ToLower(strings.TrimSpace(s))
 		}
 	}
-	return local.LoadoutEligible(local.MapUnitToAssetStatus(dbStatus, h.Metadata))
+	switch dbStatus {
+	case "superseded", "deleted":
+		return false
+	}
+	if h.Metadata != nil {
+		if s, ok := h.Metadata["hub_status"].(string); ok {
+			switch strings.ToLower(strings.TrimSpace(s)) {
+			case "draft", "stale":
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // applyPrefetchQuota dedupes by ContentHash(TrimSpace) (first wins) then applies max_total.

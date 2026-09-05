@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -396,5 +397,25 @@ func TestStorePrefetchBackend_Prefetch_DefaultMaxTotal(t *testing.T) {
 	}
 	if len(parts) != 8 {
 		t.Fatalf("default max_total: len=%d want 8, %+v", len(parts), parts)
+	}
+}
+
+func TestMemoryPackageDoesNotImportHub(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	needle := "github.com/sixath/framework/memory/" + "hub"
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		b, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), needle) {
+			t.Errorf("%s must not import memory/hub", e.Name())
+		}
 	}
 }
