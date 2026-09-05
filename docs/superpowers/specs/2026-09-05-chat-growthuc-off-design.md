@@ -44,7 +44,7 @@ growth.worker_enabled / curator_enabled 仍可构造各自 worker
 ## 4. 非目标
 
 - 不改 CuratorWorker 门控
-- 不改 `DefaultNudgeConfig`
+- 不改 `DefaultNudgeConfig`（**S18 已默认 false**）
 - 不合 assembler
 
 ---
