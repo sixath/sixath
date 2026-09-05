@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S35）
+## 12. P4 之后（S1–S36）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -371,5 +371,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S33 | [append-learning-off](./2026-09-05-append-learning-off-design.md) | 删无调用者的 `append_learning` 工具与 prompt 教唆。不改 skill_manage、不删 growth |
 | S34 | [remaining-growth-off](./2026-09-05-remaining-growth-off-design.md) | 一次性拆掉剩余 Growth 平行 OS：写盘原语迁 skillops；删 `framework/growth` 与 Portal worker/curator。不改 Channel 路由、不 regen proto |
 | S35 | [mea-shell-off](./2026-09-05-mea-shell-off-design.md) | 拆 Agent 表单/详情的 `mea_enabled` 假入口。不 regen proto、不改 Channel、不改 MaybeSpill |
+| S36 | [remaining-dead-shell-off](./2026-09-05-remaining-dead-shell-off-design.md) | 拆 HyperTool config、Web `code_*`、发货 Growth worker yaml、Portal code 模型 settings。不 regen proto、不改 Channel、不改 MaybeSpill |
 
-**顺序**：S1 → … → S34 → S35。
+**顺序**：S1 → … → S35 → S36。
