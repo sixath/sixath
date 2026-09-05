@@ -10,12 +10,12 @@ import (
 
 	"backend/internal/biz"
 
-	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/config"
 	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/model"
@@ -437,9 +437,6 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 	if globalToolGuardrails != nil {
 		cp := *globalToolGuardrails
 		opts = append(opts, agent.WithReActToolGuardrails(&cp))
-	}
-	if orch := prefetchOrchestratorForReAct(); orch != nil {
-		opts = append(opts, agent.WithReActMemoryOrchestrator(orch))
 	}
 	if ShouldEnableParallelTools(reg) {
 		opts = append(opts, agent.WithReActParallelTools(true))

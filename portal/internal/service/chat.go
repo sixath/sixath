@@ -14,8 +14,8 @@ import (
 	"backend/internal/data"
 
 	"github.com/go-kratos/kratos/v2/log"
-	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/events"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/sessionsearch"
@@ -413,11 +413,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	toolFamily := chat.BuildToolFamilyIndex(reg)
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
 		Reg:          reg,
 		BoundServers: mcpServerMetas,
-		ToolFamily:   toolFamily,
 		Wiring:       catalogInput,
 		Catalog:      catalog,
 	})
@@ -510,8 +508,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(resp.Text), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
-	chat.NotifyMemoryExtractFromTurn(ctx, s.memoryStore, session, content, resp.Text, agentMeta)
-	chat.NotifyMemoryGraphFromTurn(ctx, s.memoryStore, session, content, resp.Text, agentMeta)
 	chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, msg)
 
 	return &chatv1.MessageReply{
@@ -681,11 +677,9 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 
-	toolFamily := chat.BuildToolFamilyIndex(reg)
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
 		Reg:          reg,
 		BoundServers: mcpServerMetas,
-		ToolFamily:   toolFamily,
 		Wiring:       catalogInput,
 		Catalog:      catalog,
 	})
@@ -887,24 +881,8 @@ func (s *ChatService) SaveAssistantMessage(ctx context.Context, sessionID, conte
 	}
 	provider := chat.NewChatTranscriptProvider(s.chatUC)
 	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(content), 1, s.chatUC, s.agentUC, provider)
-	s.notifyMemoryExtractAfterAssistant(ctx, sessionID, content)
 	chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, msg)
 	return messageToReply(msg), nil
-}
-
-func (s *ChatService) notifyMemoryExtractAfterAssistant(ctx context.Context, sessionID, assistantContent string) {
-	session, err := s.chatUC.GetSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return
-	}
-	agentMeta, err := s.agentUC.GetForSession(ctx, session.AgentID)
-	if err != nil {
-		agentMeta = nil
-	}
-	history, _ := s.chatUC.ListMessages(ctx, sessionID, 50)
-	userMsg := chat.LastUserMessageContent(history)
-	chat.NotifyMemoryExtractFromTurn(ctx, s.memoryStore, session, userMsg, assistantContent, agentMeta)
-	chat.NotifyMemoryGraphFromTurn(ctx, s.memoryStore, session, userMsg, assistantContent, agentMeta)
 }
 
 func messageToReply(m *biz.ChatMessage) *chatv1.MessageReply {

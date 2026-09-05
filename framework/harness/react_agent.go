@@ -326,7 +326,6 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 
 	var lastAnswer string
 	noProgress := 0
-	credentialRedirects := 0
 	for step := 0; step < a.config.MaxSteps; step++ {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools"})
 		beginModelInvocation(trace, "tools")
@@ -341,13 +340,6 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
-			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
-				credentialRedirects++
-				trace.Errors = append(trace.Errors, "credential_solicitation_redirect:"+match.Name)
-				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-				messages = append(messages, model.Message{Role: "user", Content: redirect})
-				continue
-			}
 			lastAnswer = gen.Text
 			_ = a.storeAssistant(ctx, lastAnswer)
 			emit(events.RunCompleted, map[string]any{"text_length": len(lastAnswer), "tool_calls": len(trace.ToolCalls)})
@@ -638,7 +630,6 @@ func (a *ReActAgent) runToolEventsSync(
 	sendError func(error, int),
 ) {
 	noProgress := 0
-	credentialRedirects := 0
 	for step := 0; step < a.config.MaxSteps; step++ {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools"})
 		beginModelInvocation(trace, "tools")
@@ -652,13 +643,6 @@ func (a *ReActAgent) runToolEventsSync(
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
-			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
-				credentialRedirects++
-				trace.Errors = append(trace.Errors, "credential_solicitation_redirect:"+match.Name)
-				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-				messages = append(messages, model.Message{Role: "user", Content: redirect})
-				continue
-			}
 			_ = a.storeAssistant(ctx, gen.Text)
 			if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
 				return
@@ -735,7 +719,6 @@ func (a *ReActAgent) runToolEvents(
 	sendError func(error, int),
 ) {
 	noProgress := 0
-	credentialRedirects := 0
 	for step := 0; step < a.config.MaxSteps; step++ {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools_stream"})
 		beginModelInvocation(trace, "tools_stream")
@@ -759,13 +742,6 @@ func (a *ReActAgent) runToolEvents(
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
-			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
-				credentialRedirects++
-				trace.Errors = append(trace.Errors, "credential_solicitation_redirect:"+match.Name)
-				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-				messages = append(messages, model.Message{Role: "user", Content: redirect})
-				continue
-			}
 			_ = a.storeAssistant(ctx, gen.Text)
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
 			_ = send(streamDoneEvent(trace, messages, nil, gen.Text))
@@ -834,27 +810,9 @@ func (a *ReActAgent) runToolEvents(
 
 const ForcedFinalSummaryPrompt = "You have finished collecting tool results. Do not call any tools. Reply directly with a complete answer to the user's original question—cover every section or numbered item they asked for; do not stop after the first few headings. Use Markdown tables where appropriate. Rules: (1) Only include facts present in tool outputs above—never infer hostname/IP patterns from the user's input table or naming conventions. (2) If a host or area was not successfully queried, say so explicitly; do not fill gaps with guessed rows. (3) When summarizing config files (e.g. YAML extra_hosts), list actual entries from stdout; do not collapse them into a simplified template unless every row is verified. (4) If web_search results are in the transcript, synthesize all of them with citations (title + URL), not just the first query."
 
-// AnswerOriginalQuestionPrompt is the shared MaxSteps / idle-drift closer: facts-only answer of Q.
-func AnswerOriginalQuestionPrompt(q string) string {
-	return appendTaskLockToSummaryPrompt(ForcedFinalSummaryPrompt, q)
-}
-
-func appendTaskLockToSummaryPrompt(base, q string) string {
-	q = strings.TrimSpace(q)
-	if q == "" {
-		return base
-	}
-	return base + "\n\n【本轮任务锁】用户问题（不可改写）：" + q
-}
-
-func taskLockQFromRequest(req *Request) string {
-	if req == nil || req.Metadata == nil {
-		return ""
-	}
-	if q, ok := req.Metadata["task_lock_q"].(string); ok {
-		return strings.TrimSpace(q)
-	}
-	return ""
+// AnswerOriginalQuestionPrompt is the MaxSteps closer: facts-only answer, no task lock.
+func AnswerOriginalQuestionPrompt() string {
+	return ForcedFinalSummaryPrompt
 }
 
 func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, emit func(events.Kind, map[string]any)) (*Response, error) {
@@ -863,7 +821,7 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messag
 	}
 	msgs := append(append([]model.Message(nil), messages...), model.Message{
 		Role:    "user",
-		Content: AnswerOriginalQuestionPrompt(taskLockQFromRequest(req)),
+		Content: AnswerOriginalQuestionPrompt(),
 	})
 	emit(events.ModelInvoked, map[string]any{"message_count": len(msgs), "step": -1, "mode": "plain_summary", "forced_summary": true})
 	beginModelInvocation(trace, "plain_summary")
@@ -1313,28 +1271,6 @@ func cloneArgs(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
-}
-
-func credentialSolicitationRedirect(ctx context.Context, text string, retries int, trace *RunTrace, goalG string) (string, tool.ToolCatalogEntry, bool) {
-	if retries >= 1 {
-		return "", tool.ToolCatalogEntry{}, false
-	}
-	if HasSuccessfulBoundEvidence(trace) {
-		return "", tool.ToolCatalogEntry{}, false
-	}
-	cat, ok := ctx.Value(tool.ContextKeyToolCatalog).(tool.ToolCatalog)
-	if !ok || len(cat.Entries) == 0 {
-		return "", tool.ToolCatalogEntry{}, false
-	}
-	match, blocked := tool.MatchCredentialSolicitation(cat, text)
-	if !blocked {
-		return "", tool.ToolCatalogEntry{}, false
-	}
-	prompt := tool.FormatCredentialSolicitationRedirect(match)
-	if g := strings.TrimSpace(goalG); g != "" {
-		prompt += "用已有或即将调用的绑定工具回答：" + g + "。禁止调用 skills_list / load_skill 交差，禁止向用户索取 host/密码/webhook。"
-	}
-	return prompt, match, true
 }
 
 func isPermissionDenied(err error) bool {

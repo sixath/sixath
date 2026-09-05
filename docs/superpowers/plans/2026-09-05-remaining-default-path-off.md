@@ -28,17 +28,17 @@
 
 ### Task 1: 失败测试
 
-- [ ] 源码锁定：react_agent / chat.go / agent_builder 不得含上述字符串
-- [ ] 先跑应失败
+- [x] 源码锁定：react_agent / chat.go / agent_builder 不得含上述字符串
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 实现
 
-- [ ] 拆循环与装配
-- [ ] `cd framework && go test ./harness ./tool -count=1`
-- [ ] `cd portal && go test ./internal/chat ./internal/service -count=1`
-- [ ] **Commit** `fix: unwire remaining default-path leftover gates`
+- [x] 拆循环与装配
+- [x] `cd framework && go test ./harness ./tool -count=1`
+- [x] `cd portal && go test ./internal/chat ./internal/service -count=1`
+- [x] **Commit** `fix: unwire remaining default-path leftover gates`
 
 ---
 

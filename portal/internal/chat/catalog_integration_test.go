@@ -175,7 +175,9 @@ func TestWireCatalogAndToolSearch_MysqlWecomBindingsInCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := RegisterSendToWeComTool(reg, SendToWeComOptions{
-		ResolveWebhook: func(context.Context) (string, error) { return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", nil },
+		ResolveWebhook: func(context.Context) (string, error) {
+			return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", nil
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +430,7 @@ func TestToolDiscoveryIntegration_MysqlStatusGroupByThenWecomPush(t *testing.T) 
 				Used:     true,
 				ToolName: "send_to_wecom",
 				Arguments: map[string]any{
-					"content": "users 按 status 分布：active=42, inactive=7",
+					"content":  "users 按 status 分布：active=42, inactive=7",
 					"msg_type": "text",
 				},
 			},
@@ -602,20 +604,12 @@ func (f *credentialThenToolFakeModel) ChatWithTools(ctx context.Context, message
 	return &model.Generation{Text: f.finalReply, Raw: model.ToolStep{Used: false}}, nil
 }
 
-func TestToolDiscoveryIntegration_PlainTextCredentialAskGetsRedirected(t *testing.T) {
+func TestToolDiscoveryIntegration_PlainTextCredentialAskIsNotRedirected(t *testing.T) {
 	fix := setupMysqlWecomDiscoveryFixture(t, true)
 
 	fake := &credentialThenToolFakeModel{
 		credentialAsk: "请提供 MySQL Host、Port、数据库名、用户名、密码，以及企微 Webhook URL",
-		toolSteps: []model.ToolStep{{
-			Used:     true,
-			ToolName: "execute_read",
-			Arguments: map[string]any{
-				"datasource_id": "prod_mysql",
-				"sql":           "SELECT status, COUNT(*) AS cnt FROM t_archive_clean_task_detail GROUP BY status",
-			},
-		}},
-		finalReply: "统计完成。",
+		finalReply:    "统计完成。",
 	}
 	mem := memory.NewBufferMemory(8)
 	react := agent.NewReActAgent(fake, mem, fix.Reg)
@@ -632,21 +626,17 @@ func TestToolDiscoveryIntegration_PlainTextCredentialAskGetsRedirected(t *testin
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	if resp.Text != fake.credentialAsk {
+		t.Fatalf("without loop redirect, first unused-step text is the answer, got %q", resp.Text)
+	}
 	trace, ok := resp.Metadata["trace"].(*agent.RunTrace)
 	if !ok {
 		t.Fatalf("missing trace: %#v", resp.Metadata)
 	}
-	redirected := false
 	for _, e := range trace.Errors {
 		if strings.Contains(e, "credential_solicitation_redirect") {
-			redirected = true
+			t.Fatalf("credential redirect must be off the default loop: %#v", trace.Errors)
 		}
-	}
-	if !redirected {
-		t.Fatalf("expected credential redirect in trace errors, got %#v", trace.Errors)
-	}
-	if len(trace.ToolCalls) == 0 || trace.ToolCalls[0].ToolName != "execute_read" {
-		t.Fatalf("expected execute_read after redirect, got %#v", trace.ToolCalls)
 	}
 }
 

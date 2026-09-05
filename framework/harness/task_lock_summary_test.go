@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-func TestAppendTaskLockToSummaryPrompt(t *testing.T) {
-	got := AnswerOriginalQuestionPrompt("原问题XYZ")
-	if !strings.Contains(got, "原问题XYZ") {
-		t.Fatal(got)
+func TestAnswerOriginalQuestionPrompt_noTaskLock(t *testing.T) {
+	got := AnswerOriginalQuestionPrompt()
+	if got != ForcedFinalSummaryPrompt {
+		t.Fatalf("got %q", got)
 	}
-	if !strings.Contains(got, ForcedFinalSummaryPrompt) {
-		t.Fatal("shared generator must include forced-summary constraints")
+	if strings.Contains(got, "【本轮任务锁】") {
+		t.Fatal("forced summary must not inject task lock")
 	}
 }
