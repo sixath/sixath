@@ -252,7 +252,7 @@ Cron 留作平台功能，不进入 Harness。
 
 - `framework/mea/` 整包
 - `framework/growth/` 主循环 nudge / fork-agent / curator 作为默认路径
-- Memory Hub / Neo4j graph / procedural five-gate（`framework/memory/procedural_commit.go` 等）
+- Memory Hub / Neo4j graph / procedural five-gate（`framework/memory/procedural_commit.go` 等；five-gate 随 [S40](./2026-09-05-procedural-off-design.md) 删除）
 - `framework/tool/hypertool.go`
 - SQL heal / query spill **作为默认执行自愈**（溢出落盘若仍为器官实现细节，不得成为 Harness 策略）
 
@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S39）
+## 12. P4 之后（S1–S40）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -375,5 +375,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S37 | [proto-dead-keys-off](./2026-09-05-proto-dead-keys-off-design.md) | regen proto：去掉 `code_*` / `hub_*` / `mea_enabled` 与 Growth worker 死字段。保留 `growth.llm`。不改 Channel、不改 MaybeSpill |
 | S38 | [portal-setting-off](./2026-09-05-portal-setting-off-design.md) | 关掉 S36 leftover：停 `PortalSetting` AutoMigrate、删模型。不 DROP 表、不改 Channel、不改 MaybeSpill |
 | S39 | [credential-solicitation-off](./2026-09-05-credential-solicitation-off-design.md) | 关掉 S24 leftover：删无调用者的纯文本凭据回拉。保留 `ask_user` 的 `MatchAskUserIntent`。不改 MaybeSpill |
+| S40 | [procedural-off](./2026-09-05-procedural-off-design.md) | 关掉 S15 leftover：删 five-gate / catalog / prefetch 注入与 yaml 死键。保留 `KindProcedural` 历史过滤与 FailureSignal。不改 Channel、不改 MaybeSpill |
 
-**顺序**：S1 → … → S38 → S39。
+**顺序**：S1 → … → S39 → S40。
