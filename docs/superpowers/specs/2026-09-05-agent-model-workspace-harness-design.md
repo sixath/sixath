@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S6）
+## 12. P4 之后（S1–S7）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -342,5 +342,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S4 | [rca-code-mount-only](./2026-09-05-rca-code-mount-only-design.md) | 关掉 P2 RCA 独立 `roots` waiver：`rca_code`/`rca_symbol` 只走 `workspace/code`；无挂载不注册。整仓 workspace 仍不强制迁移 |
 | S5 | [whole-repo-run-reject](./2026-09-05-whole-repo-run-reject-design.md) | 关掉 P2「已有整仓仍能打开」waiver：Chat / Stream / 快捷 Chat / ExecuteSkill 与 Create 同一错误码拒绝整仓。不自动 `LinkCode`、不改库、不拦 Update |
 | S6 | [whole-repo-update-reject](./2026-09-05-whole-repo-update-reject-design.md) | 关掉 S5「Update 不拦」waiver：Update 写入整仓路径与 Create 同一错误码；空字符串落到 `{data_root}/agents/{id}`。不自动 `LinkCode`、不改未保存的行 |
+| S7 | [cli-rca-code-mount](./2026-09-05-cli-rca-code-mount-design.md) | 关掉 S4 CLI waiver：`templates.registerRCATools` 的 `rca_grep` 只走 `workspace/code`；`config.Workspace` 交给 ReAct。`rca.repos.roots` 运行时忽略。jaeger/ES 不改 |
 
-**顺序**：S1 → S2 → S3 → S4 → S5 → S6。
+**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7。
