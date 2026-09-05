@@ -32,7 +32,7 @@ P1–P4 已把领域闸、调查闸、MEA 旁路、Growth 主循环钩子移出�
 | 死函数 | 删确认无默认调用者的包装函数；器官细节库函数留下 |
 | Hub HTTP | 拆除路由与 Portal 接线；`framework/memory/hub` 包保留 |
 | Hub Web | Agent 详情与创建表单去掉 Loadout / Binding / 知识草稿；不再调用 `memoryHubApi` |
-| Procedural | Portal 预取默认路径不再注入；删无引用的 `procedural_binding.go`；`framework/memory` procedural 实现留包 |
+| Procedural | Portal 预取默认路径不再注入；删无引用的 `procedural_binding.go`；`framework/memory` procedural 实现留包。**S15：连 extra catalog / auto-commit 接线一并拆掉** |
 | Growth | 不删 `framework/growth`；未接线的 `registerGrowthSessionHooks` 可留作可选器官入口 |
 
 ---

@@ -46,7 +46,7 @@ Portal Stream SSE                        → 不变
 ## 4. 非目标
 
 - 不拆 GrowthWorker / FinalizeTurnForBackgroundReview
-- 不删 `portal/internal/chat/procedural_binding.go`
+- 不删 `portal/internal/chat/procedural_binding.go`（**S15 已拆**）
 - 不合 assembler
 - 不改 `middleware.StreamChain` / `StringStreamAdapter`（仍可被别处用）
 
