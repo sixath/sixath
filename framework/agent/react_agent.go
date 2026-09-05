@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
@@ -30,19 +31,21 @@ type ReActAgent struct {
 type ReActConfig struct {
 	MaxSteps             int
 	MaxHistory           int
-	MaxContextRunes      int // 传给 model.WithMaxContextRunes；0 表示关闭上下文压缩
+	MaxContextRunes      int // 传给 context.PipelineConfig；0 表示关闭 L0 压缩
 	MaxContextTokensSoft int
 	TokenEstimateAlpha   float64
 	MaxOutputTokens      int // 单次模型回复上限；0 使用 model 默认（1024）
 	SnipCompactEnabled   bool
 	SystemPrompt         string
+	Workspace            string   // Agent 可写 workspace 根；PromptBuilder 读 MEMORY.md / USER.md / skills
+	SkillsDirs           []string // 额外技能目录（Portal 共享 skills）
 	EventBus             *events.Bus
 	PermissionPolicy     PermissionPolicy
 	MemoryOrchestrator   *memory.Orchestrator  // 可选；非空时在 messages 中注入 prefetch（设计 §4）
 	ToolGuardrails       *ToolGuardrailsConfig // 可选；设计 §6
 	// GuardrailEvaluator 非空时优先于由 ToolGuardrails 构造的默认评估器（设计 §6.2）；WithReActToolGuardrails 会将其置 nil。
 	GuardrailEvaluator GuardrailEvaluator
-	L2Runtime          *model.L2Runtime // 可选；L2 摘要 + 冷却（设计 §5）
+	L2Runtime          *fwctx.L2Runtime // 可选；L2 摘要 + 冷却（设计 §5）
 	// ToolSuccessHook 在工具执行成功且已发出 ToolCompleted 之后调用（可选）；用于成长计数等，须快速返回。
 	ToolSuccessHook func(ctx context.Context, req *Request, rec ToolCallRecord)
 	// ToolHooks 工具生命周期钩子（Before 可 block；After 与 Before 同序）。空切片与未设置行为一致。
@@ -117,6 +120,18 @@ func WithReActSystemPrompt(prompt string) ReActOption {
 	}
 }
 
+func WithReActWorkspace(workspace string) ReActOption {
+	return func(c *ReActConfig) {
+		c.Workspace = workspace
+	}
+}
+
+func WithReActSkillsDirs(dirs []string) ReActOption {
+	return func(c *ReActConfig) {
+		c.SkillsDirs = append([]string(nil), dirs...)
+	}
+}
+
 func WithReActPermissionPolicy(policy PermissionPolicy) ReActOption {
 	return func(c *ReActConfig) {
 		if policy != nil {
@@ -165,9 +180,9 @@ func WithReActContextCompression(cc *ContextCompressionConfig) ReActOption {
 		}
 		alpha := cc.EstimateAlpha
 		if alpha <= 0 {
-			alpha = model.DefaultTokenEstimateAlpha
+			alpha = fwctx.DefaultTokenEstimateAlpha
 		}
-		c.L2Runtime = model.NewL2Runtime(cc.AuxiliaryModel, soft, mf, cs, alpha, cc.ToolContentPrePruneRunes)
+		c.L2Runtime = fwctx.NewL2Runtime(cc.AuxiliaryModel, soft, mf, cs, alpha, cc.ToolContentPrePruneRunes)
 		c.MaxContextTokensSoft = soft
 		c.TokenEstimateAlpha = alpha
 		c.SnipCompactEnabled = cc.SnipCompactEnabled
@@ -260,33 +275,11 @@ func WithReActSnipCompactEnabled(enabled bool) ReActOption {
 	}
 }
 
-func (a *ReActAgent) modelOpts(trace *RunTrace) []model.Option {
-	var opts []model.Option
-	if a.config.MaxContextRunes > 0 {
-		opts = append(opts, model.WithMaxContextRunes(a.config.MaxContextRunes))
-	}
-	if a.config.MaxContextTokensSoft > 0 {
-		opts = append(opts, model.WithMaxContextTokensSoft(a.config.MaxContextTokensSoft))
-	}
-	if a.config.TokenEstimateAlpha > 0 {
-		opts = append(opts, model.WithTokenEstimateAlpha(a.config.TokenEstimateAlpha))
-	}
-	if trace != nil {
-		opts = append(opts, model.WithContextTrace(contextTraceMerge(trace)))
-	}
-	if a.config.L2Runtime != nil {
-		opts = append(opts, model.WithL2Runtime(a.config.L2Runtime))
-	}
-	if a.config.SnipCompactEnabled {
-		opts = append(opts, model.WithSnipCompactEnabled(true))
-	}
+func (a *ReActAgent) modelOpts() []model.Option {
 	if a.config.MaxOutputTokens > 0 {
-		opts = append(opts, model.WithMaxTokens(a.config.MaxOutputTokens))
+		return []model.Option{model.WithMaxTokens(a.config.MaxOutputTokens)}
 	}
-	if len(opts) == 0 {
-		return nil
-	}
-	return opts
+	return nil
 }
 
 // modelRespondedPayload 构造 ModelResponded 事件 payload，附带 token 用量（若有）。
@@ -337,7 +330,8 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 	for step := 0; step < a.config.MaxSteps; step++ {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools"})
 		beginModelInvocation(trace, "tools")
-		gen, err := tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts(trace)...)
+		messages = a.prepareModelMessages(ctx, messages, trace)
+		gen, err := tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts()...)
 		if err != nil {
 			trace.Errors = append(trace.Errors, err.Error())
 			emit(events.RunError, map[string]any{"error": err.Error(), "step": step})
@@ -596,7 +590,8 @@ func (a *ReActAgent) runPlainEvents(
 	sm, hasStream := a.model.(model.StreamingModel)
 	if !hasStream {
 		beginModelInvocation(trace, "plain_stream")
-		gen, err := a.model.Chat(ctx, messages, a.modelOpts(trace)...)
+		messages = a.prepareModelMessages(ctx, messages, trace)
+		gen, err := a.model.Chat(ctx, messages, a.modelOpts()...)
 		if err != nil {
 			sendError(err, -1)
 			return
@@ -612,7 +607,8 @@ func (a *ReActAgent) runPlainEvents(
 	}
 
 	beginModelInvocation(trace, "plain_stream")
-	ch, err := sm.ChatStream(ctx, messages, a.modelOpts(trace)...)
+	messages = a.prepareModelMessages(ctx, messages, trace)
+	ch, err := sm.ChatStream(ctx, messages, a.modelOpts()...)
 	if err != nil {
 		sendError(err, -1)
 		return
@@ -646,7 +642,8 @@ func (a *ReActAgent) runToolEventsSync(
 	for step := 0; step < a.config.MaxSteps; step++ {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools"})
 		beginModelInvocation(trace, "tools")
-		gen, err := tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts(trace)...)
+		messages = a.prepareModelMessages(ctx, messages, trace)
+		gen, err := tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts()...)
 		if err != nil {
 			sendError(err, step)
 			return
@@ -742,7 +739,8 @@ func (a *ReActAgent) runToolEvents(
 	for step := 0; step < a.config.MaxSteps; step++ {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools_stream"})
 		beginModelInvocation(trace, "tools_stream")
-		textCh, genCh, err := tsm.ChatWithToolsStream(ctx, messages, a.tools, a.modelOpts(trace)...)
+		messages = a.prepareModelMessages(ctx, messages, trace)
+		textCh, genCh, err := tsm.ChatWithToolsStream(ctx, messages, a.tools, a.modelOpts()...)
 		if err != nil {
 			sendError(err, step)
 			return
@@ -869,7 +867,8 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messag
 	})
 	emit(events.ModelInvoked, map[string]any{"message_count": len(msgs), "step": -1, "mode": "plain_summary", "forced_summary": true})
 	beginModelInvocation(trace, "plain_summary")
-	gen, err := a.model.Chat(ctx, msgs, a.modelOpts(trace)...)
+	msgs = a.prepareModelMessages(ctx, msgs, trace)
+	gen, err := a.model.Chat(ctx, msgs, a.modelOpts()...)
 	if err != nil {
 		return nil, err
 	}
@@ -1063,7 +1062,8 @@ func (a *ReActAgent) executeOneToolCall(ctx context.Context, req *Request, step 
 func (a *ReActAgent) runPlain(ctx context.Context, messages []model.Message, emit func(events.Kind, map[string]any), trace *RunTrace) (*Response, error) {
 	emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": -1, "mode": "plain"})
 	beginModelInvocation(trace, "plain")
-	gen, err := a.model.Chat(ctx, messages, a.modelOpts(trace)...)
+	messages = a.prepareModelMessages(ctx, messages, trace)
+	gen, err := a.model.Chat(ctx, messages, a.modelOpts()...)
 	if err != nil {
 		trace.Errors = append(trace.Errors, err.Error())
 		emit(events.RunError, map[string]any{"error": err.Error()})

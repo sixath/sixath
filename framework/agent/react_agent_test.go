@@ -42,8 +42,7 @@ func (f *fakeOpenAIClient) Generate(ctx context.Context, prompt string, opts ...
 
 func (f *fakeOpenAIClient) Chat(ctx context.Context, msgs []model.Message, opts ...model.Option) (*model.Generation, error) {
 	_ = ctx
-	cfg := model.ApplyOptions(opts...)
-	msgs = model.PrepareChatContext(msgs, cfg)
+	_ = opts
 	_ = msgs
 	f.chatCalls++
 	if f.err != nil {
@@ -62,8 +61,7 @@ func (f *fakeOpenAIClient) Embed(ctx context.Context, texts []string, opts ...mo
 func (f *fakeOpenAIClient) ChatWithTools(ctx context.Context, messages []model.Message, reg *tool.Registry, opts ...model.Option) (*model.Generation, error) {
 	_ = ctx
 	_ = reg
-	cfg := model.ApplyOptions(opts...)
-	messages = model.PrepareChatContext(messages, cfg)
+	_ = opts
 	f.toolCalls++
 	f.lastToolMessages = append([]model.Message(nil), messages...)
 	if f.err != nil {
@@ -263,7 +261,7 @@ func TestReActAgent_IncludesSystemPrompt(t *testing.T) {
 		t.Fatalf("expected messages to be sent")
 	}
 	first := fake.lastToolMessages[0]
-	if first.Role != "system" || first.Content != "answer as a database assistant" {
+	if first.Role != "system" || !strings.HasPrefix(first.Content, "answer as a database assistant") {
 		t.Fatalf("expected system prompt first, got %#v", fake.lastToolMessages)
 	}
 }
@@ -523,8 +521,7 @@ type fakeStreamingToolClient struct {
 }
 
 func (f *fakeStreamingToolClient) ChatWithToolsStream(ctx context.Context, messages []model.Message, reg *tool.Registry, opts ...model.Option) (<-chan string, <-chan *model.Generation, error) {
-	cfg := model.ApplyOptions(opts...)
-	_ = model.PrepareChatContext(messages, cfg)
+	_ = model.ApplyOptions(opts...)
 	_ = reg
 	ch := make(chan string)
 	genCh := make(chan *model.Generation, 1)
@@ -548,8 +545,7 @@ func (f *fakeStreamingToolClient) ChatWithToolsStream(ctx context.Context, messa
 }
 
 func (f *fakeStreamingToolClient) ChatStream(ctx context.Context, messages []model.Message, opts ...model.Option) (<-chan string, error) {
-	cfg := model.ApplyOptions(opts...)
-	_ = model.PrepareChatContext(messages, cfg)
+	_ = model.ApplyOptions(opts...)
 	ch := make(chan string)
 	go func() {
 		defer close(ch)
@@ -571,8 +567,7 @@ type fakeMissingGenerationStreamClient struct {
 func (f *fakeMissingGenerationStreamClient) ChatWithToolsStream(ctx context.Context, messages []model.Message, reg *tool.Registry, opts ...model.Option) (<-chan string, <-chan *model.Generation, error) {
 	_ = f
 	_ = ctx
-	cfg := model.ApplyOptions(opts...)
-	_ = model.PrepareChatContext(messages, cfg)
+	_ = model.ApplyOptions(opts...)
 	_ = reg
 	textCh := make(chan string)
 	genCh := make(chan *model.Generation)
@@ -588,8 +583,7 @@ type fakeBlockedGenerationStreamClient struct {
 func (f *fakeBlockedGenerationStreamClient) ChatWithToolsStream(ctx context.Context, messages []model.Message, reg *tool.Registry, opts ...model.Option) (<-chan string, <-chan *model.Generation, error) {
 	_ = f
 	_ = ctx
-	cfg := model.ApplyOptions(opts...)
-	_ = model.PrepareChatContext(messages, cfg)
+	_ = model.ApplyOptions(opts...)
 	_ = reg
 	textCh := make(chan string)
 	genCh := make(chan *model.Generation)
@@ -1486,8 +1480,7 @@ type fakeSequencedStreamingToolClient struct {
 }
 
 func (f *fakeSequencedStreamingToolClient) ChatWithToolsStream(ctx context.Context, messages []model.Message, reg *tool.Registry, opts ...model.Option) (<-chan string, <-chan *model.Generation, error) {
-	cfg := model.ApplyOptions(opts...)
-	_ = model.PrepareChatContext(messages, cfg)
+	_ = model.ApplyOptions(opts...)
 	_ = reg
 	idx := f.calls
 	f.calls++

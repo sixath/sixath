@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/sixath/framework/model"
+import fwctx "github.com/sixath/framework/context"
 
 func ensureContextOps(trace *RunTrace) {
 	if trace.ContextOps == nil {
@@ -34,7 +34,7 @@ func beginModelInvocation(trace *RunTrace, mode string) {
 	})
 }
 
-func contextTraceMerge(trace *RunTrace) model.ContextTraceFunc {
+func contextTraceMerge(trace *RunTrace) fwctx.ContextTraceFunc {
 	return func(kind string, detail map[string]any) {
 		if trace == nil {
 			return

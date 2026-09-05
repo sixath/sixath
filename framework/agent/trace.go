@@ -17,11 +17,12 @@ var (
 
 // ContextOpsInvocation 单次进入底层 model.Chat / ChatWithTools 等调用的上下文变换摘要（设计 §8.1、产品 §6.5 O1）。
 type ContextOpsInvocation struct {
-	Index           int    `json:"index"`
-	Mode            string `json:"mode,omitempty"`
-	L2Used          bool   `json:"l2_used,omitempty"`
-	L2SummaryHash   string `json:"l2_summary_hash,omitempty"`
-	SanitizeApplied bool   `json:"sanitize_applied,omitempty"`
+	Index            int    `json:"index"`
+	Mode             string `json:"mode,omitempty"`
+	L2Used           bool   `json:"l2_used,omitempty"`
+	L2SummaryHash    string `json:"l2_summary_hash,omitempty"`
+	SanitizeApplied  bool   `json:"sanitize_applied,omitempty"`
+	PromptStableHash string `json:"prompt_stable_hash,omitempty"`
 	// 下列字段为该次 invocation 内 PrepareChatContext 路径上的增量（与 ContextOpsTrace 聚合字段同源）。
 	L0DroppedMessages          int `json:"l0_dropped,omitempty"`
 	StripOrphanTools           int `json:"strip_orphan_tools,omitempty"`
