@@ -11,7 +11,7 @@ import (
 	"github.com/sixath/framework/skills"
 )
 
-func TestBuildEffectiveSystemPromptForTurn_proceduralBindingSuggest(t *testing.T) {
+func TestProceduralBindingHints_suggest(t *testing.T) {
 	dir := t.TempDir()
 	skillDir := filepath.Join(dir, "skills", "escalation")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
@@ -24,7 +24,6 @@ func TestBuildEffectiveSystemPromptForTurn_proceduralBindingSuggest(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	SetSkillRouteSettings(SkillRouteSettings{Enabled: false})
 	SetProceduralRepairConfig(&config.MemoryProceduralRepair{
 		Enabled: true,
 		Bindings: []config.MemoryProceduralBindingYAML{{
@@ -36,7 +35,7 @@ func TestBuildEffectiveSystemPromptForTurn_proceduralBindingSuggest(t *testing.T
 	})
 	t.Cleanup(func() { SetProceduralRepairConfig(nil) })
 
-	out := BuildEffectiveSystemPromptForTurn("", idx, "用户要求转人工")
+	out := appendProceduralBindingHints("", "用户要求转人工", idx, "", "")
 	if !strings.Contains(out, "过程修复") || !strings.Contains(out, "escalation") {
 		t.Fatalf("expected procedural suggest, got: %s", out)
 	}
@@ -51,7 +50,6 @@ func TestProceduralCatalog_DisableRemovesSuggest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	SetSkillRouteSettings(SkillRouteSettings{Enabled: false})
 	SetProceduralRepairConfig(&config.MemoryProceduralRepair{
 		Enabled: true,
 		Bindings: []config.MemoryProceduralBindingYAML{{
@@ -70,7 +68,7 @@ func TestProceduralCatalog_DisableRemovesSuggest(t *testing.T) {
 	if !DisableProceduralEntry(id) {
 		t.Fatal("disable")
 	}
-	out := BuildEffectiveSystemPromptForTurn("", idx, "转人工")
+	out := appendProceduralBindingHints("", "转人工", idx, "", "")
 	if strings.Contains(out, "过程修复") {
 		t.Fatalf("disabled binding still suggested: %s", out)
 	}

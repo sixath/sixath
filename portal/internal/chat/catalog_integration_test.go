@@ -284,40 +284,23 @@ func TestWireCatalogAndToolSearch_ActivatesBridgeAndRebuildsCatalog(t *testing.T
 	}
 }
 
-func TestBuildAgentSystemPrompt_CatalogPrepended(t *testing.T) {
-	reg := tool.NewRegistry()
-	if err := registerStubDatasourceTools(reg); err != nil {
-		t.Fatal(err)
-	}
-	_ = RegisterSendToWeComTool(reg, SendToWeComOptions{
-		ResolveWebhook: func(context.Context) (string, error) { return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", nil },
-	})
-	catalog, _ := wireDiscoveryAgent(t, reg)
-
+func TestBuildAgentSystemPrompt_NoCatalogPrepend(t *testing.T) {
+	effectivePrompt := BuildEffectiveSystemPrompt("You are a helpful assistant.", nil)
+	effectivePrompt = AppendAskUserToolPrompt(effectivePrompt)
 	dsPrompt := FormatDatasourcePrompt([]DatasourceBinding{{
 		ID: "prod_mysql", Type: "mysql", DBName: "archive", Available: true,
 	}}, "prod_mysql")
-
-	// Mirrors portal/internal/service/chat.go effectivePrompt assembly order.
-	effectivePrompt := FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
+	if dsPrompt == "" || !strings.Contains(dsPrompt, "prod_mysql") {
+		t.Fatalf("datasource catalog text missing prod_mysql: %s", dsPrompt)
 	}
-	effectivePrompt += "You are a helpful assistant."
-	effectivePrompt = AppendDatasourcePrompt(effectivePrompt, dsPrompt)
-
-	if !strings.HasPrefix(effectivePrompt, "## 可用工具目录") {
-		t.Fatalf("catalog block should be first, got prefix: %q", effectivePrompt[:min(80, len(effectivePrompt))])
+	if strings.Contains(effectivePrompt, "本轮任务锁") {
+		t.Fatal(effectivePrompt)
 	}
-	for _, want := range []string{"prod_mysql", "send_to_wecom", "execute_read", "禁止通过 ask_user"} {
-		if !strings.Contains(effectivePrompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, effectivePrompt)
-		}
+	if strings.HasPrefix(strings.TrimSpace(effectivePrompt), "## 可用工具目录") {
+		t.Fatal("catalog block must not be prepended onto system prompt")
 	}
-	idxCatalog := strings.Index(effectivePrompt, "## 可用工具目录")
-	idxAgent := strings.Index(effectivePrompt, "You are a helpful assistant")
-	if idxAgent < idxCatalog {
-		t.Fatal("agent system prompt should follow catalog block")
+	if !strings.Contains(effectivePrompt, "You are a helpful assistant") {
+		t.Fatalf("agent system prompt missing:\n%s", effectivePrompt)
 	}
 }
 

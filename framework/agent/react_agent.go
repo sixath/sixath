@@ -47,8 +47,6 @@ type ReActConfig struct {
 	ToolSuccessHook func(ctx context.Context, req *Request, rec ToolCallRecord)
 	// ToolHooks 工具生命周期钩子（Before 可 block；After 与 Before 同序）。空切片与未设置行为一致。
 	ToolHooks []ToolHook
-	// PostModelPolicy 模型返回后、执行工具前的策略（可丢弃/过滤 tool_calls）；nil 为不启用。
-	PostModelPolicy PostModelPolicy
 	// ParallelTools 为 true 时，同轮多 tool 在无 RequiresSequential 时可并行执行（默认 false）。
 	ParallelTools bool
 	// MaxParallel 并行上限；<=0 时默认 8。
@@ -203,13 +201,6 @@ func WithReActGuardrailEvaluator(ev GuardrailEvaluator) ReActOption {
 	}
 }
 
-// WithReActPostModelPolicy 注入模型返回后的工具执行策略；nil 清除。
-func WithReActPostModelPolicy(p PostModelPolicy) ReActOption {
-	return func(c *ReActConfig) {
-		c.PostModelPolicy = p
-	}
-}
-
 // WithReActParallelTools 启用同轮多 tool 并行（须无 RequiresSequential）；默认 false。
 func WithReActParallelTools(enabled bool) ReActOption {
 	return func(c *ReActConfig) {
@@ -355,12 +346,6 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
-		stepInfo, retryPrompt := a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
-		if retryPrompt != "" {
-			messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-			messages = append(messages, model.Message{Role: "user", Content: retryPrompt})
-			continue
-		}
 		if !stepInfo.Used {
 			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
 				credentialRedirects++
@@ -669,12 +654,6 @@ func (a *ReActAgent) runToolEventsSync(
 		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
-		stepInfo, retryPrompt := a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
-		if retryPrompt != "" {
-			messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-			messages = append(messages, model.Message{Role: "user", Content: retryPrompt})
-			continue
-		}
 		if !stepInfo.Used {
 			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
 				credentialRedirects++
@@ -781,12 +760,6 @@ func (a *ReActAgent) runToolEvents(
 		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
-		stepInfo, retryPrompt := a.applyPostModelPolicy(ctx, req, step, gen.Text, stepInfo, trace)
-		if retryPrompt != "" {
-			messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-			messages = append(messages, model.Message{Role: "user", Content: retryPrompt})
-			continue
-		}
 		if !stepInfo.Used {
 			if redirect, match, ok := credentialSolicitationRedirect(ctx, gen.Text, credentialRedirects, trace, taskLockQFromRequest(req)); ok {
 				credentialRedirects++

@@ -13,12 +13,6 @@ type ChatConfig struct {
 	// PublicInboundEnabled opens legacy /api/v1 Chat create-session and send-message.
 	// Default false: Gateway → /runtime/v1 is the public ingress.
 	PublicInboundEnabled bool `yaml:"public_inbound_enabled"`
-	// TurnToolSurfaceEnabled nil = omit (process default on). false 关闭本轮工具面收窄，全量挂上已绑定 RCA/MCP。
-	// Env SATH_TURN_TOOL_SURFACE overlays when set.
-	TurnToolSurfaceEnabled *bool `yaml:"turn_tool_surface_enabled,omitempty"`
-	// InvestigationGates master switch for investigation gates (HTTP grounding, turn tool surface, task lock).
-	// Default off when omitted or invalid. Env SATH_INVESTIGATION_GATES overlays when set.
-	InvestigationGates string `yaml:"investigation_gates,omitempty"`
 }
 
 type chatConfigYAML struct {
@@ -43,18 +37,13 @@ func LoadChatFromConfigPath(confPath string) (*ChatConfig, error) {
 		}
 		if raw.Chat != nil {
 			out.PublicInboundEnabled = raw.Chat.PublicInboundEnabled
-			out.InvestigationGates = raw.Chat.InvestigationGates
-			if raw.Chat.TurnToolSurfaceEnabled != nil {
-				v := *raw.Chat.TurnToolSurfaceEnabled
-				out.TurnToolSurfaceEnabled = &v
-			}
 		}
 	}
 	EnrichChatFromEnv(out)
 	return out, nil
 }
 
-// EnrichChatFromEnv overlays SATH_CHAT_PUBLIC_INBOUND_ENABLED, SATH_INVESTIGATION_GATES, and SATH_TURN_TOOL_SURFACE when set.
+// EnrichChatFromEnv overlays SATH_CHAT_PUBLIC_INBOUND_ENABLED when set.
 func EnrichChatFromEnv(c *ChatConfig) {
 	if c == nil {
 		return
@@ -66,48 +55,5 @@ func EnrichChatFromEnv(c *ChatConfig) {
 		case "0", "false", "no", "off":
 			c.PublicInboundEnabled = false
 		}
-	}
-	if v := strings.TrimSpace(os.Getenv("SATH_INVESTIGATION_GATES")); v != "" {
-		c.InvestigationGates = v
-	}
-	if v := strings.TrimSpace(os.Getenv("SATH_TURN_TOOL_SURFACE")); v != "" {
-		on := true
-		switch strings.ToLower(v) {
-		case "0", "false", "no", "off":
-			on = false
-		}
-		c.TurnToolSurfaceEnabled = &on
-	}
-}
-
-func (c *ChatConfig) InvestigationGatesNormalized() string {
-	if c == nil {
-		return "off"
-	}
-	switch strings.ToLower(strings.TrimSpace(c.InvestigationGates)) {
-	case "on", "1", "true", "yes":
-		return "on"
-	default:
-		return "off"
-	}
-}
-
-func (c *ChatConfig) InvestigationGatesOn() bool {
-	return c.InvestigationGatesNormalized() == "on"
-}
-
-func (c *ChatConfig) InvestigationGatesInvalid() bool {
-	if c == nil {
-		return false
-	}
-	raw := strings.TrimSpace(c.InvestigationGates)
-	if raw == "" {
-		return false // omit: silent off
-	}
-	switch strings.ToLower(raw) {
-	case "on", "off", "1", "0", "true", "false", "yes", "no":
-		return false
-	default:
-		return true
 	}
 }

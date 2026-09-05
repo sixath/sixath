@@ -488,9 +488,6 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 	if ShouldEnableParallelTools(reg) {
 		opts = append(opts, agent.WithReActParallelTools(true))
 	}
-	if gate := NewTurnIntentGate(); gate != nil {
-		opts = append(opts, agent.WithReActPostModelPolicy(gate))
-	}
 	opts = append(opts, extra...)
 	return agent.NewReActAgent(m, mem, reg, opts...)
 }
@@ -531,6 +528,19 @@ func ShouldApplyEvidenceGate(active map[string]struct{}, userText string) bool {
 		_, ok := active[FamilyRCA]
 		return ok
 	}
-	scores := scoreFamilies(strings.TrimSpace(userText), familySet([]string{FamilyRCA}), nil)
-	return scores[FamilyRCA] > 0
+	return rcaKeywordHit(userText)
+}
+
+func rcaKeywordHit(userText string) bool {
+	lower := strings.ToLower(strings.TrimSpace(userText))
+	if lower == "" {
+		return false
+	}
+	for _, kw := range familyKeywords[FamilyRCA] {
+		kw = strings.ToLower(strings.TrimSpace(kw))
+		if kw != "" && strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }

@@ -165,13 +165,6 @@ func main() {
 		panic(err)
 	} else if chatCfg != nil {
 		server.ConfigurePublicInbound(chatCfg.PublicInboundEnabled)
-		if chatCfg.InvestigationGatesInvalid() {
-			log.NewHelper(logger).Warnf("chat.investigation_gates=%q invalid; treating as off", chatCfg.InvestigationGates)
-		}
-		chat.ApplyInvestigationGates(chatCfg)
-		if !chatCfg.InvestigationGatesOn() {
-			log.NewHelper(logger).Info("investigation gates off (HTTP grounding, turn tool surface, task lock)")
-		}
 	}
 
 	flags := chat.DefaultHermesP0ToolFlags
@@ -184,15 +177,9 @@ func main() {
 	// 技能脚本执行开关：config > 环境变量 SATH_ALLOW_SCRIPT_EXECUTION > 默认 true
 	if bc.Skills != nil {
 		chat.SetAllowScriptExecution(bc.Skills.GetAllowScriptExecution())
-		chat.SetSkillRouteSettings(chat.SkillRouteSettings{
-			Enabled:      bc.Skills.GetAutoRouteEnabled(),
-			MinScore:     int(bc.Skills.GetRouteMinScore()),
-			MaxBodyRunes: int(bc.Skills.GetRouteMaxBodyRunes()),
-		})
 	} else if v := os.Getenv("SATH_ALLOW_SCRIPT_EXECUTION"); v != "" {
 		chat.SetAllowScriptExecution(v == "1" || v == "true" || v == "yes")
 	}
-	// 否则保持默认 true；技能路由默认 DefaultSkillRouteSettings（auto_route 默认 true）
 
 	// growth.llm_review_enabled：YAML 优先；未配置 growth 节时可由 SATH_GROWTH_LLM_REVIEW_ENABLED 开启（二期里程碑 2.1）。
 	llmReviewEnabled := false

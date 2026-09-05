@@ -8,6 +8,7 @@ import (
 
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/memory"
+	"github.com/sixath/framework/skills"
 )
 
 var (
@@ -255,4 +256,40 @@ func DisableProceduralByCode(agentID, failureCode string) int {
 		return 0
 	}
 	return cat.DisableByCode(agentID, failureCode)
+}
+
+func appendProceduralBindingHints(base, userQuery string, skillsIdx *skills.Index, agentID, sessionID string) string {
+	var bindings []memory.ProceduralBinding
+	var cat *memory.ProceduralCatalog
+	if sessionID != "" {
+		bindings, cat = ProceduralBindingsForSkillRouterTurn(agentID, sessionID)
+	} else {
+		bindings, cat = ProceduralBindingsForSkillRouter()
+	}
+	if len(bindings) == 0 || userQuery == "" {
+		return base
+	}
+	matched := memory.MatchProceduralBindings(bindings, agentID, userQuery, nil)
+	var blocks []string
+	var hit []memory.ProceduralBinding
+	for _, b := range matched {
+		if b.ActionKind == memory.BindingActionSkill && b.SkillID != "" && skillsIdx != nil {
+			if _, err := skillsIdx.LoadSkillBody(b.SkillID); err != nil {
+				continue
+			}
+		}
+		blocks = append(blocks, memory.FormatBindingSuggest(b))
+		hit = append(hit, b)
+	}
+	if cat != nil && len(hit) > 0 {
+		cat.RecordHit(memory.ProceduralHitRouter, hit)
+	}
+	if len(blocks) == 0 {
+		return base
+	}
+	hint := strings.Join(blocks, "\n")
+	if base == "" {
+		return hint
+	}
+	return base + "\n\n---\n\n" + hint
 }

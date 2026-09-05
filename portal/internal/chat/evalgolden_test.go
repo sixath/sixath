@@ -1,75 +1,27 @@
 package chat
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"backend/internal/biz"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/mea"
-	"github.com/sixath/framework/model"
 )
 
-func TestEvalGolden_bf26(t *testing.T) {
-	lock := BuildTurnTaskLock(bf26Q, []model.Message{
-		{Role: "user", Content: "这条流水4_a8uva8m5tpsl 正常吗"},
-		{Role: "assistant", Content: "流水 4_a8uva8m5tpsl 正常。uid=104551174 ugid=796"},
-		{Role: "user", Content: bf26Q},
-	})
-	if lock.Q != bf26Q || lock.Delivery != "" {
-		t.Fatalf("%+v", lock)
-	}
-}
-
-func TestEvalGolden_8555(t *testing.T) {
-	gate := TurnIntentGate{ActiveFamilies: familySet([]string{FamilyCore, FamilyCode})}
-	res := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
-		Req:           &agent.Request{Messages: []model.Message{{Role: "user", Content: "会发生什么"}}},
-		AssistantText: "加载手册",
-		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{
-			{ID: "1", Name: "skill_view", Arguments: map[string]any{"name": "demo"}},
-		}},
-	})
-	if res.Decision != agent.PostModelRetry || res.Reason != "family_dropped_all" {
-		t.Fatalf("got %v %q", res.Decision, res.Reason)
-	}
-}
+const bf26Q = "需要看看access-service有没有收到游戏启动成功事件的时间和vm-manager有没有startGame成功"
 
 const meaESGoal = "用 elasticsearch 查一下错误日志"
 
-func TestEvalGolden_19a34f_identLock(t *testing.T) {
-	lock := BuildTurnTaskLock(sess19a34fQ, []model.Message{
-		{Role: "user", Content: sess19a34fOld + " 这个呢"},
-		{Role: "assistant", Content: "自建 4 条 vmid 226667"},
-		{Role: "user", Content: sess19a34fQ},
-	})
-	if len(lock.TraceIDs) != 1 || lock.TraceIDs[0] != sess19a34fTrace {
-		t.Fatalf("TraceIDs=%v", lock.TraceIDs)
+func TestEvalGolden_assemblerPromptHasNoTaskLock(t *testing.T) {
+	p := BuildEffectiveSystemPrompt("You are a helpful assistant.", nil)
+	p = AppendAskUserToolPrompt(p)
+	if strings.Contains(p, "本轮任务锁") {
+		t.Fatal(p)
 	}
-	gate := TurnIntentGate{}
-	idle := gate.EvaluateIdle(context.Background(), agent.PostModelPolicyInput{
-		Req:           testLockReq(sess19a34fQ, lock),
-		AssistantText: "自建 4 条都没有 1058",
-		Trace:         &agent.RunTrace{},
-	})
-	if idle.Decision != agent.PostModelRetry || idle.Reason != "ident_lock" {
-		t.Fatalf("idle %v %q", idle.Decision, idle.Reason)
-	}
-	wrong := gate.Evaluate(context.Background(), agent.PostModelPolicyInput{
-		Req:           testLockReq(sess19a34fQ, lock),
-		AssistantText: "拉 jaeger",
-		ToolStep: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{{
-			ID: "1", Name: "http_request", Arguments: map[string]any{
-				"method": "GET", "url": "http://cg-pro-jaeger.yuntiancloud.com/api/traces/" + sess19a34fOld,
-			},
-		}}},
-		Trace: &agent.RunTrace{},
-	})
-	if wrong.Decision != agent.PostModelRetry || wrong.Reason != "ident_lock" {
-		t.Fatalf("wrong http %v %q", wrong.Decision, wrong.Reason)
+	if strings.HasPrefix(strings.TrimSpace(p), "## 可用工具目录") {
+		t.Fatal("catalog block must not be prepended")
 	}
 }
 
@@ -122,21 +74,12 @@ func TestShouldUseMEA_predicates(t *testing.T) {
 	}
 }
 
-func TestAutoChecks_deliveryUsesQ(t *testing.T) {
-	hist := []model.Message{
-		{Role: "user", Content: meaESGoal},
-		{Role: "assistant", Content: "正在查"},
-		{Role: "user", Content: "没有打印出来呀"},
-	}
-	lock := BuildTurnTaskLock("没有打印出来呀", hist)
-	if lock.Q != meaESGoal {
-		t.Fatalf("Q=%q", lock.Q)
-	}
-	if len(AutoChecks(lock.Q)) != 2 {
+func TestAutoChecks_followupHasNoESGoal(t *testing.T) {
+	if len(AutoChecks(meaESGoal)) != 2 {
 		t.Fatal("AutoChecks(G) must be non-empty")
 	}
-	if len(AutoChecks(lock.Delivery)) != 0 {
-		t.Fatalf("AutoChecks(D) must be empty, D=%q", lock.Delivery)
+	if len(AutoChecks("没有打印出来呀")) != 0 {
+		t.Fatal("follow-up without ES keywords must not auto-check")
 	}
 }
 

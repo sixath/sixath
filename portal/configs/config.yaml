@@ -8,7 +8,7 @@ server:
     timeout: 30s
 skills:
   allow_script_execution: true
-  auto_route_enabled: true       # 用户消息关键词匹配 Top-1 Skill 并预注入 SKILL.md
+  auto_route_enabled: true
   route_min_score: 5
   route_max_body_runes: 12000
 growth:
@@ -48,7 +48,6 @@ chat:
   # 对外 Chat 入站（create session / send message / SSE）默认关闭；走 Gateway → /runtime/v1。
   # 本地直连调试可设 true，或用 SATH_CHAT_PUBLIC_INBOUND_ENABLED=true。
   public_inbound_enabled: false
-  investigation_gates: off   # on 恢复工具面/HTTP 接地/任务锁
 auth:
   # 仅用于本地默认 ACL 锚点；生产环境请替换 token。
   bootstrap_user_id: "bootstrap"

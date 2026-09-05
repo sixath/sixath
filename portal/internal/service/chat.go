@@ -363,20 +363,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	ir := chat.InputResponseFromContext(ctx)
-	userForIntent := chat.UserMessageContentForTurn(content, ir)
-	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
-	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
-		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
-	m, err = chat.ResolveTurnModel(active, m, *agentMeta)
-	if err != nil {
-		s.log.Errorf("resolve turn model failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
-		return nil, err
-	}
-
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active, Workspace: agentMeta.Workspace})
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
@@ -402,7 +391,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		SessionProvider: streamSessionProvider,
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
 		RuntimeTools:    agentMeta.RuntimeTools,
-		ActiveFamilies:  active,
 	}); err != nil {
 		s.log.Errorf("SendMessage register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
@@ -433,20 +421,17 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 
 	toolFamily := chat.BuildToolFamilyIndex(reg)
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
-		Reg:            reg,
-		BoundServers:   mcpServerMetas,
-		ActiveFamilies: active,
-		ToolFamily:     toolFamily,
-		Wiring:         catalogInput,
-		Catalog:        catalog,
+		Reg:          reg,
+		BoundServers: mcpServerMetas,
+		ToolFamily:   toolFamily,
+		Wiring:       catalogInput,
+		Catalog:      catalog,
 	})
 	// 构建 ReActAgent（含成长工具成功钩子，见 growth_chat.go）
 	maxHistory := 20
 	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
 		append(chat.ReActOptionsFromAgent(*agentMeta),
-			append(s.growthReActOptions(agentMeta.Workspace),
-				chat.TurnIntentGateOption(active, toolFamily),
-			)...)...)
+			s.growthReActOptions(agentMeta.Workspace)...)...)
 
 	// 加载历史消息（已包含刚保存的 user 消息）
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
@@ -455,24 +440,10 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	// 转换为 agent.Request.Messages（工具目录置顶，其后为技能/数据源等说明）
-	effectivePrompt := chat.FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
-	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnOnSurface(agentMeta.SystemPrompt, skillsIdx, content, session.AgentID, sessionID, active)
-	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendCodeAnalysisPromptIf(active, effectivePrompt)
-	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
-		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
-	}
+	// 转换为 agent.Request.Messages
+	effectivePrompt := chat.BuildEffectiveSystemPrompt(agentMeta.SystemPrompt, skillsIdx)
 	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	if chat.FamilyActive(active, chat.FamilyData) {
-		effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
-	}
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	lock := buildTurnTaskLockFromHistory(content, history)
-	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
 	messages := make([]model.Message, 0, len(history)+2)
 	if effectivePrompt != "" {
 		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
@@ -505,7 +476,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	// 调用 Agent（附带记忆预取所需 metadata：session/agent/workspace/user_id/identity）
 	resp, err := a.Run(runCtx, &agent.Request{
 		Messages: messages,
-		Metadata: chat.MaybeMergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
+		Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
 	})
 	if err != nil {
 		isH, vis, persist, raw := chat.DecomposeGuardrailRunError(err)
@@ -632,14 +603,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		userForIntent = clean
 		meaAcceptance = acceptance
 	}
-	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
-	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
-		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
-	m, err = chat.ResolveTurnModel(active, m, *agentMeta)
-	if err != nil {
-		s.log.Errorf("resolve turn model failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
-		return nil, "", err
-	}
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
@@ -696,7 +659,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			}
 		}
 	}()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active, Workspace: agentMeta.Workspace})
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
@@ -721,7 +684,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		SessionProvider: streamSessionProvider,
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
 		RuntimeTools:    agentMeta.RuntimeTools,
-		ActiveFamilies:  active,
 	}); err != nil {
 		s.log.Errorf("SendMessageStream register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
@@ -752,12 +714,11 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 
 	toolFamily := chat.BuildToolFamilyIndex(reg)
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
-		Reg:            reg,
-		BoundServers:   mcpServerMetas,
-		ActiveFamilies: active,
-		ToolFamily:     toolFamily,
-		Wiring:         catalogInput,
-		Catalog:        catalog,
+		Reg:          reg,
+		BoundServers: mcpServerMetas,
+		ToolFamily:   toolFamily,
+		Wiring:       catalogInput,
+		Catalog:      catalog,
 	})
 	maxHistory := 20
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
@@ -765,7 +726,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
 		append(chat.ReActOptionsFromAgent(*agentMeta),
 			append(s.growthReActOptions(agentMeta.Workspace),
-				chat.TurnIntentGateOption(active, toolFamily),
 				agent.WithReActEventBus(turnBus),
 			)...)...)
 
@@ -831,23 +791,9 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		}
 	}
 
-	effectivePrompt := chat.FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
-	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnOnSurface(agentMeta.SystemPrompt, skillsIdx, userContent, session.AgentID, sessionID, active)
-	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendCodeAnalysisPromptIf(active, effectivePrompt)
-	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
-		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
-	}
+	effectivePrompt := chat.BuildEffectiveSystemPrompt(agentMeta.SystemPrompt, skillsIdx)
 	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	if chat.FamilyActive(active, chat.FamilyData) {
-		effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
-	}
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	lock := buildTurnTaskLockFromHistory(userContent, history)
-	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
 	messages := make([]model.Message, 0, len(history)+3)
 	if effectivePrompt != "" {
 		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
@@ -900,14 +846,11 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 
 		req := &agent.Request{
 			Messages: messages,
-			Metadata: chat.MaybeMergeTaskLockMetadata(prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID), lock),
+			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
 		}
 
 		enabled := chat.MEAEnabledForAgent(session.AgentID, agentMeta.RuntimeTools.MEAEnabled)
-		g := strings.TrimSpace(lock.Q)
-		if g == "" {
-			g = userContent
-		}
+		g := userContent
 		checks := meaChecks
 		if enabled {
 			checks = chat.ResolveAcceptanceChecks(meaChecks, len(meaChecks) > 0, g)
@@ -1042,24 +985,6 @@ func messageToReply(m *biz.ChatMessage) *chatv1.MessageReply {
 		}
 	}
 	return reply
-}
-
-func buildTurnTaskLockFromHistory(userContent string, history []*biz.ChatMessage) chat.TurnTaskLock {
-	msgs := make([]model.Message, 0, len(history))
-	for _, h := range history {
-		if h == nil {
-			continue
-		}
-		role := strings.ToLower(strings.TrimSpace(h.Role))
-		if role != "user" && role != "assistant" {
-			continue
-		}
-		if strings.TrimSpace(h.Content) == "" {
-			continue
-		}
-		msgs = append(msgs, model.Message{Role: h.Role, Content: h.Content})
-	}
-	return chat.BuildTurnTaskLock(userContent, msgs)
 }
 
 func prefetchRequestMetadata(sessionID, agentID, workspace, userID string) map[string]any {

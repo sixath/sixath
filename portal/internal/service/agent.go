@@ -366,20 +366,9 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 
-	effectivePrompt := chat.FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
-	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurn(agentMeta.SystemPrompt, skillsIdx, content)
-	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendCodeAnalysisPromptIf(nil, effectivePrompt)
-	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
-		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
-	}
-	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
+	effectivePrompt := chat.BuildEffectiveSystemPrompt(agentMeta.SystemPrompt, skillsIdx)
+	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	lock := chat.BuildTurnTaskLock(content, nil)
-	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
 	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, chat.ReActOptionsFromAgent(*agentMeta)...)
 
 	messages := make([]model.Message, 0, 3)
@@ -402,7 +391,6 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	if agentMeta.Workspace != "" {
 		md["workspace_root"] = agentMeta.Workspace
 	}
-	md = chat.MaybeMergeTaskLockMetadata(md, lock)
 	agentReq := &agent.Request{Messages: messages, Metadata: md}
 	resp, err := a.Run(runCtx, agentReq)
 	if err != nil {
