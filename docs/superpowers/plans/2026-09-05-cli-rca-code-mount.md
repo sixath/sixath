@@ -28,21 +28,21 @@
 
 ### Task 1: Config.Workspace
 
-- [ ] YAML `workspace`；`AGENT_WORKSPACE` 写入 FromEnv 与 ApplyEnvOverrides。
-- [ ] `TestRCAConfig_YAML` 可顺带断言 workspace 字段；`TestApplyEnvOverrides` 覆盖 AGENT_WORKSPACE。
+- [x] YAML `workspace`；`AGENT_WORKSPACE` 写入 FromEnv 与 ApplyEnvOverrides。
+- [x] `TestRCAConfig_YAML` 可顺带断言 workspace 字段；`TestApplyEnvOverrides` 覆盖 AGENT_WORKSPACE。
 
 ---
 
 ### Task 2: registerRCATools + skills handler
 
-- [ ] 无 mount、仅 roots → 不注册 rca_grep。有 `workspace/code` → 注册，忽略 roots。
-- [ ] `NewSkillsAwareChatHandlerFromConfig`：非空 workspace → `WithReActWorkspace`。
-- [ ] `cd framework && go test ./config ./templates ./workspace -count=1`
+- [x] 无 mount、仅 roots → 不注册 rca_grep。有 `workspace/code` → 注册，忽略 roots。
+- [x] `NewSkillsAwareChatHandlerFromConfig`：非空 workspace → `WithReActWorkspace`。
+- [x] `cd framework && go test ./config ./templates ./workspace -count=1`
 
-- [ ] **Commit** `fix(templates): register rca_grep only from workspace/code`
+- [x] **Commit** `fix(templates): register rca_grep only from workspace/code`
 
 ---
 
 ### Task 3: 回归
 
-- [ ] 不要 merge/push，除非用户明确要求。
+- [x] 不要 merge/push，除非用户明确要求。

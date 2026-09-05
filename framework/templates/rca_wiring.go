@@ -8,6 +8,7 @@ import (
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/tool"
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // registerRCATools 按配置条件注册 RCA 工具链的三组工具。
@@ -17,13 +18,13 @@ func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 		return nil
 	}
 
-	// 1) 多仓库代码检索:有 roots 才注册。
-	if len(cfg.RCA.Repos.Roots) > 0 {
-		if err := tool.RegisterRCACodeTools(reg, cfg.RCA.Repos.Roots); err != nil {
+	// 1) 多仓库代码检索:只认 workspace/code（忽略 rca.repos.roots）。
+	if code := fwws.ResolveCodeMount(cfg.Workspace); code != "" {
+		if err := tool.RegisterRCACodeTools(reg, []string{code}); err != nil {
 			return err
 		}
 	} else {
-		slog.Info("rca: repos.roots empty, skip rca_grep/rca_glob/rca_read")
+		slog.Info("rca: workspace/code missing, skip rca_grep/rca_glob/rca_read")
 	}
 
 	// 2) Jaeger:有 query_url 才注册。

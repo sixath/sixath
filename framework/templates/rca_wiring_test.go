@@ -1,6 +1,8 @@
 package templates
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sixath/framework/config"
@@ -13,8 +15,18 @@ func hasTool(reg *tool.Registry, name string) bool {
 	return ok
 }
 
+func workspaceWithCode(t *testing.T) string {
+	t.Helper()
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return ws
+}
+
 func TestRegisterRCATools_AllConfigured(t *testing.T) {
 	cfg := config.Config{
+		Workspace: workspaceWithCode(t),
 		DataSources: []datasource.Config{
 			{ID: "es-logs", Type: "elasticsearch", DSN: "http://localhost:9200"},
 		},
@@ -35,7 +47,7 @@ func TestRegisterRCATools_AllConfigured(t *testing.T) {
 	}
 }
 
-func TestRegisterRCATools_PartialSkips(t *testing.T) {
+func TestRegisterRCATools_IgnoresReposRootsWithoutMount(t *testing.T) {
 	cfg := config.Config{
 		RCA: config.RCAConfig{
 			Repos: config.RCAReposConfig{Roots: []string{"/repos/a"}},
@@ -45,8 +57,24 @@ func TestRegisterRCATools_PartialSkips(t *testing.T) {
 	if err := registerRCATools(reg, cfg); err != nil {
 		t.Fatalf("registerRCATools: %v", err)
 	}
+	if hasTool(reg, "rca_grep") {
+		t.Fatal("rca_grep must not register from rca.repos.roots without workspace/code")
+	}
+}
+
+func TestRegisterRCATools_PartialSkips(t *testing.T) {
+	cfg := config.Config{
+		Workspace: workspaceWithCode(t),
+		RCA: config.RCAConfig{
+			Repos: config.RCAReposConfig{Roots: []string{"/repos/a"}},
+		},
+	}
+	reg := tool.NewRegistry()
+	if err := registerRCATools(reg, cfg); err != nil {
+		t.Fatalf("registerRCATools: %v", err)
+	}
 	if !hasTool(reg, "rca_grep") {
-		t.Fatal("rca_grep should be registered when roots set")
+		t.Fatal("rca_grep should be registered when workspace/code exists")
 	}
 	if hasTool(reg, "jaeger_trace") {
 		t.Fatal("jaeger_trace should be skipped when query_url empty")

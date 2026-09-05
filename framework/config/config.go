@@ -91,6 +91,9 @@ type Config struct {
 	// HyperTool 可选；启用可执行代码块 meta-tool，将确定性工具子流程折叠为单次外层调用。
 	HyperTool HyperToolConfig `json:"hypertool" yaml:"hypertool"`
 
+	// Workspace 可写工作区根。空则 CLI 仍可对话；文件器官与 rca_grep 需要它（code/ 挂载）。
+	Workspace string `json:"workspace" yaml:"workspace"`
+
 	// RCA 可选;线上根因分析工具链(Jaeger + ELK + 多仓库代码检索)。
 	RCA RCAConfig `json:"rca" yaml:"rca"`
 }
@@ -211,6 +214,7 @@ func FromEnv() Config {
 		ModelName:   os.Getenv("OPENAI_MODEL"),
 		MaxHistory:  10,
 		Middlewares: []string{},
+		Workspace:   strings.TrimSpace(os.Getenv("AGENT_WORKSPACE")),
 	}
 	if v := os.Getenv("AGENT_MAX_HISTORY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -281,6 +285,9 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("DATA_ALLOW_WRITE"); v != "" {
 		lower := strings.ToLower(strings.TrimSpace(v))
 		cfg.DataAllowWrite = lower == "1" || lower == "true" || lower == "yes"
+	}
+	if v := strings.TrimSpace(os.Getenv("AGENT_WORKSPACE")); v != "" {
+		cfg.Workspace = v
 	}
 }
 
