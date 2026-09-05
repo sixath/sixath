@@ -1205,32 +1205,6 @@ export const chatApi = {
       deactivated_traces: data.deactivated_traces ?? [],
     }
   },
-  /** Phase 2: aggregate turn_traces insights for an agent. */
-  getInsights: async (agentId: string, opts?: { from?: string; to?: string }) => {
-    const q = new URLSearchParams()
-    if (opts?.from) q.set('from', opts.from)
-    if (opts?.to) q.set('to', opts.to)
-    const query = q.toString()
-    const data = await request<AgentInsights & { ret?: BaseResponse }>(
-      `/agents/${agentId}/insights${query ? '?' + query : ''}`
-    )
-    checkRet(data)
-    return data
-  },
-}
-
-export interface AgentInsights {
-  agent_id: string
-  from: string
-  to: string
-  turns: number
-  tool_calls: number
-  error_calls: number
-  error_rate: number
-  blocked_calls: number
-  top_tools: { name: string; calls: number; errors: number }[]
-  top_sessions: { session_id: string; turns: number; errors: number }[]
-  truncated?: boolean
 }
 
 // Channel API

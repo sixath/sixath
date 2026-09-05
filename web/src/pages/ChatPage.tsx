@@ -639,7 +639,7 @@ export default function ChatPage(props?: ChatPageProps) {
         onDone: () => {
           finishStreamUi()
           // Replace ephemeral stream ids (and empty user id) with persisted message ids
-          // so Rewind / Insights-facing actions can call the API with real UUIDs.
+          // so Rewind can call the API with real UUIDs.
           if (sid) {
             void reloadMessages(sid).catch(() => {
               /* keep streamed content if reload fails */

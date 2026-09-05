@@ -29,17 +29,17 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestHTTP_OmitsInsightsRoute`：读 `http.go`，断言不含 `/insights`。先跑应失败。
+- [x] `TestHTTP_OmitsInsightsRoute`：读 `http.go`，断言不含 `/insights`。先跑应失败。
 
 ---
 
 ### Task 2: 拆除
 
-- [ ] 去路由、Handler、service、页面、client。
-- [ ] Rewind 仍注册。
-- [ ] `cd portal && go test ./internal/server ./internal/service -count=1`
+- [x] 去路由、Handler、service、页面、client。
+- [x] Rewind 仍注册。
+- [x] `cd portal && go test ./internal/server ./internal/service -count=1`
 
-- [ ] **Commit** `fix(portal): remove Insights from product shell`
+- [x] **Commit** `fix(portal): remove Insights from product shell`
 
 ---
 
