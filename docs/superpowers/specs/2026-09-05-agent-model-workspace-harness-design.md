@@ -200,7 +200,7 @@ Model tool_calls
 
 | 层 | KEEP | 不进入 Harness |
 |----|------|----------------|
-| Web | 对话、Agent（含 workspace picker）、sessions、tools/MCP、登录/设置、Confirm cards | Insights 随 Growth 降级；Hub Loadout/Binding 随 [S1](./2026-09-05-dead-code-hub-off-design.md) 退出外壳 |
+| Web | 对话、Agent（含 workspace picker）、sessions、tools/MCP、登录/设置、Confirm cards | Insights 随 [S11](./2026-09-05-insights-shell-off-design.md) 退出外壳；Hub Loadout/Binding 随 [S1](./2026-09-05-dead-code-hub-off-design.md) 退出外壳 |
 | Gateway | Web SSE/session 代理、Runtime 桥、Webhook、企微长连接（分发层） | 不跑 ReAct |
 | Portal | 会话持久化、Auth/ACL/Org、Agent CRUD、workspace 绑定、Runtime API、Tools/MCP/Skills 管理、Channel 投递、SSE/rewind/turn-trace、Confirm 协议 | 调查闸、技能预注入、MEA 旁路、Hub/Growth 主循环；Hub HTTP 管理面随 S1 拆除 |
 
@@ -256,7 +256,7 @@ Cron 留作平台功能，不进入 Harness。
 - `framework/tool/hypertool.go`
 - SQL heal / query spill **作为默认执行自愈**（溢出落盘若仍为器官实现细节，不得成为 Harness 策略）
 
-Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导航）。
+Web `/agents/:id/insights` 随 [S11](./2026-09-05-insights-shell-off-design.md) 退出外壳（不再保留隐藏路由）。
 
 ### 6.4 复活规则
 
@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S10）
+## 12. P4 之后（S1–S11）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -346,5 +346,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S8 | [cli-templates-workspace](./2026-09-05-cli-templates-workspace-design.md) | 关掉 S7 dataquery/MCP waiver：非空 workspace 交给 dataquery 与 MCP 的 ReAct。ChatAgent / 空 workspace 拒跑 / RCA 不改 |
 | S9 | [chat-agent-workspace](./2026-09-05-chat-agent-workspace-design.md) | 关掉 S8 ChatAgent waiver：非空 workspace 时 ChatAgent 用 PromptBuilder 读 MEMORY.md/USER.md。不改成 ReAct、不删一季别名 |
 | S10 | [cli-default-workspace](./2026-09-05-cli-default-workspace-design.md) | 关掉 S7「CLI 空 workspace 仍可对话且无根」waiver：空配置落到 `{cwd}/.sath/workspace`。不拒跑、不改 Portal |
+| S11 | [insights-shell-off](./2026-09-05-insights-shell-off-design.md) | 关掉 S1「Insights 隐藏路由留下」waiver：拆 Web 页与 `GET .../insights`。Rewind / turn-trace 不改 |
 
-**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10。
+**顺序**：S1 → S2 → S3 → S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11。
