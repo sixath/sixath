@@ -330,7 +330,7 @@ Web `/agents/:id/insights` 随 Growth 降级（可隐藏路由，不进默认导
 
 P1 是减肉主路径，单独成实施计划。P1 允许改 Portal **仅限**去掉对已删 framework 类型的引用，不算提前做 P3。**P1 必须保留** `framework/agent/evidence_tools.go`（`IsSkillsFamilyToolName` / `HasSuccessfulBoundEvidence`：P3 的 `turn_intent_gate.go` 仍引用）。
 
-## 12. P4 之后（S1–S3）
+## 12. P4 之后（S1–S4）
 
 P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改包名。
 
@@ -339,5 +339,6 @@ P1–P4 完成后的下一轮。禁止一份 PR 同时清扫 + 迁管道 + 改�
 | S1 | [dead-code-hub-off](./2026-09-05-dead-code-hub-off-design.md) | 删 ActiveFamilies / turn-surface 开关 / `queryWithSchemaHeal`；Hub HTTP+Web UI 拆除；procedural 退出默认预取。不删 `framework/memory/hub`、`growth`、`mea` |
 | S2 | [context-promptbuilder](./2026-09-05-context-promptbuilder-design.md) | 新建 `framework/context`；L0/L1/L2 迁出 `model`；PromptBuilder Stable/Ephemeral + `prompt_stable_hash`；Provider 内部不再压缩 |
 | S3 | [harness-workspace-rename](./2026-09-05-harness-workspace-rename-design.md) | `agent` → `harness`（可留一季别名）；抽出 `workspace`（pathguard + `code/` 挂载纯函数）。不改循环语义 |
+| S4 | [rca-code-mount-only](./2026-09-05-rca-code-mount-only-design.md) | 关掉 P2 RCA 独立 `roots` waiver：`rca_code`/`rca_symbol` 只走 `workspace/code`；无挂载不注册。整仓 workspace 仍不强制迁移 |
 
-**顺序**：S1 → S2 → S3。
+**顺序**：S1 → S2 → S3 → S4。
