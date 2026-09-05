@@ -28,16 +28,16 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestHyperToolGoRemoved`：`os.Stat("hypertool.go")` 必须失败
-- [ ] 先跑应失败
+- [x] `TestHyperToolGoRemoved`：`os.Stat("hypertool.go")` 必须失败
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 删文件
 
-- [ ] 删除 hypertool 实现与 runner
-- [ ] `cd framework && go test ./tool ./templates -count=1`
-- [ ] **Commit** `fix(tool): drop unused hypertool after default path unwired`
+- [x] 删除 hypertool 实现与 runner
+- [x] `cd framework && go test ./tool ./templates -count=1`
+- [x] **Commit** `fix(tool): drop unused hypertool after default path unwired`
 
 ---
 
