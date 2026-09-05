@@ -11,7 +11,6 @@ import (
 	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/mea"
 	"github.com/sixath/framework/model"
-	"github.com/sixath/framework/tool"
 )
 
 func TestEvalGolden_bf26(t *testing.T) {
@@ -183,34 +182,6 @@ func TestEvalGolden_close_gate_chat(t *testing.T) {
 	}
 	if len(AutoChecks("你好")) != 0 {
 		t.Fatal("share C chat skip; do not fork keyword table")
-	}
-
-	reg := tool.NewRegistry()
-	if err := reg.Register(tool.Tool{
-		Name: "es_log_query", Description: "es",
-		Parameters: map[string]any{"type": "object"},
-		Execute:    func(context.Context, map[string]any) (any, error) { return nil, nil },
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if !ShouldEnableEvidenceGate(reg) {
-		t.Fatal("es bound")
-	}
-
-	hello := BuildReActAgent(&builderGateFake{finalReply: "hi"}, reg, "", 10,
-		agent.WithReActMaxSteps(2),
-		EvidenceGateTurnOption(reg, nil, "你好"),
-	).(*agent.ReActAgent)
-	if hello.EvidenceGateEnabled() {
-		t.Fatal("hello must disable EvidenceGate")
-	}
-
-	es := BuildReActAgent(&builderGateFake{finalReply: "root cause"}, reg, "", 10,
-		agent.WithReActMaxSteps(2),
-		EvidenceGateTurnOption(reg, nil, meaESGoal),
-	).(*agent.ReActAgent)
-	if !es.EvidenceGateEnabled() {
-		t.Fatal("investigation must keep EvidenceGate")
 	}
 }
 

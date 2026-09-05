@@ -442,8 +442,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
 		append(chat.ReActOptionsFromAgent(*agentMeta),
 			append(s.growthReActOptions(agentMeta.Workspace),
-				chat.EvidenceGateTurnOption(reg, active, userForIntent),
-				chat.CodeClaimGateTurnOption(reg, active, m),
 				chat.TurnIntentGateOption(active, toolFamily),
 			)...)...)
 
@@ -761,8 +759,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
 		append(chat.ReActOptionsFromAgent(*agentMeta),
 			append(s.growthReActOptions(agentMeta.Workspace),
-				chat.EvidenceGateTurnOption(reg, active, userForIntent),
-				chat.CodeClaimGateTurnOption(reg, active, m),
 				chat.TurnIntentGateOption(active, toolFamily),
 				agent.WithReActEventBus(turnBus),
 			)...)...)

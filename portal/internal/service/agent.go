@@ -373,9 +373,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
 	lock := chat.BuildTurnTaskLock(content, nil)
 	effectivePrompt = chat.MaybeApplyTaskLock(effectivePrompt, lock)
-	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, append(chat.ReActOptionsFromAgent(*agentMeta),
-		chat.CodeClaimGateTurnOption(reg, nil, m),
-	)...)
+	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, chat.ReActOptionsFromAgent(*agentMeta)...)
 
 	messages := make([]model.Message, 0, 3)
 	if effectivePrompt != "" {

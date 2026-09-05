@@ -256,15 +256,8 @@ func (a RulesAuditor) runTraceCheck(check AcceptanceCheck, o ExecutionReport) (o
 		}
 		return false, "no stamped es_log_query/execute_read/rca_grep hit_status", nil
 	case "empty_hit_speak":
-		got := agent.EvaluateEmptyHitSpeakGate(runTraceFromHits(o.ToolHits), o.FinalText)
-		if !got.Allow {
-			ex := got.Reason
-			if got.Prompt != "" {
-				ex = got.Prompt
-			}
-			return false, ex, nil
-		}
-		return true, "pass", nil
+		// P1: answer-gate removed from harness; MEA check is a no-op until P4.
+		return true, "skipped", nil
 	default:
 		return false, fmt.Sprintf("unknown check type %q", check.Type), nil
 	}

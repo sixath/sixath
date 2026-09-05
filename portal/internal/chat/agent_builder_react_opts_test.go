@@ -66,7 +66,7 @@ func TestShouldEnableEvidenceGate(t *testing.T) {
 	}
 }
 
-func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
+func TestBuildReActAgent_jaegerDoesNotSoftInject(t *testing.T) {
 	reg := tool.NewRegistry()
 	if err := reg.Register(tool.Tool{
 		Name:        "jaeger_trace",
@@ -85,9 +85,6 @@ func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ReActAgent, got %T", a)
 	}
-	if !react.EvidenceGateEnabled() {
-		t.Fatal("BuildReActAgent with jaeger_trace must enable EvidenceGate")
-	}
 	if react.ParallelToolsEnabled() {
 		t.Fatal("jaeger-only registry must not enable ParallelTools")
 	}
@@ -98,23 +95,32 @@ func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	tr, _ := resp.Metadata["trace"].(*agent.RunTrace)
-	if tr == nil || tr.EvidenceNudges != 1 {
-		t.Fatalf("expected Soft inject (EvidenceNudges=1), got %#v", tr)
+	if resp == nil || resp.Text != "premature RCA answer" {
+		t.Fatalf("expected final answer without Soft inject, got %#v", resp)
 	}
-	if resp.Metadata["evidence_incomplete"] != true {
-		t.Fatalf("expected evidence_incomplete after Soft retry, got %#v", resp.Metadata)
+	tr, _ := resp.Metadata["trace"].(*agent.RunTrace)
+	if tr != nil && tr.EvidenceNudges != 0 {
+		t.Fatalf("EvidenceNudges=%d want 0", tr.EvidenceNudges)
+	}
+	if resp.Metadata["evidence_incomplete"] == true {
+		t.Fatalf("must not set evidence_incomplete: %#v", resp.Metadata)
 	}
 }
 
-func TestBuildReActAgent_noEvidenceGateWithoutRCATools(t *testing.T) {
+func TestBuildReActAgent_calculatorRunsWithoutRCATools(t *testing.T) {
 	reg := tool.NewRegistry()
 	_ = tool.RegisterCalculatorTool(reg)
 	fake := &builderGateFake{finalReply: "ok"}
 	a := BuildReActAgent(fake, reg, "", 10, agent.WithReActMaxSteps(2))
 	react := a.(*agent.ReActAgent)
-	if react.EvidenceGateEnabled() {
-		t.Fatal("non-RCA registry must leave EvidenceGate disabled")
+	resp, err := react.Run(context.Background(), &agent.Request{
+		Messages: []model.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil || resp.Text != "ok" {
+		t.Fatalf("got %#v", resp)
 	}
 }
 
@@ -134,60 +140,13 @@ func TestShouldApplyEvidenceGate(t *testing.T) {
 	}
 }
 
-func TestEvidenceGateTurnOption_DisablesOnMongoLookup(t *testing.T) {
-	reg := tool.NewRegistry()
-	if err := reg.Register(tool.Tool{
-		Name:        "es_log_query",
-		Description: "es",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	fake := &builderGateFake{finalReply: "found 2 rows"}
-	a := BuildReActAgent(fake, reg, "", 10,
-		agent.WithReActMaxSteps(2),
-		EvidenceGateTurnOption(reg, nil, "查询mongodb下uu=193218288的记录"),
-	)
+func TestBuildReActAgent_rcaReadEnablesParallelTools(t *testing.T) {
+	reg := registerTestRCARead(t)
+	fake := &builderGateFake{finalReply: "ok"}
+	a := BuildReActAgent(fake, reg, "", 10, agent.WithReActMaxSteps(2))
 	react := a.(*agent.ReActAgent)
-	if react.EvidenceGateEnabled() {
-		t.Fatal("Mongo lookup turn must disable EvidenceGate even when es_log_query is bound")
-	}
-
-	resp, err := react.Run(context.Background(), &agent.Request{
-		Messages: []model.Message{{Role: "user", Content: "查询mongodb下uu=193218288的记录"}},
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	tr, _ := resp.Metadata["trace"].(*agent.RunTrace)
-	if tr != nil && tr.EvidenceNudges != 0 {
-		t.Fatalf("Mongo lookup must not Soft-inject ES, nudges=%d", tr.EvidenceNudges)
-	}
-}
-
-func TestEvidenceGateTurnOption_KeepsGateOnLogQuery(t *testing.T) {
-	reg := tool.NewRegistry()
-	if err := reg.Register(tool.Tool{
-		Name:        "es_log_query",
-		Description: "es",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	fake := &builderGateFake{finalReply: "root cause is timeout"}
-	a := BuildReActAgent(fake, reg, "", 10,
-		agent.WithReActMaxSteps(3),
-		EvidenceGateTurnOption(reg, nil, "用 elasticsearch 查错误日志"),
-	)
-	react := a.(*agent.ReActAgent)
-	if !react.EvidenceGateEnabled() {
-		t.Fatal("log query turn must keep EvidenceGate")
+	if !react.ParallelToolsEnabled() {
+		t.Fatal("rca_read registry must enable ParallelTools")
 	}
 }
 
@@ -205,69 +164,6 @@ func registerTestRCARead(t *testing.T) *tool.Registry {
 		t.Fatalf("register rca_read: %v", err)
 	}
 	return reg
-}
-
-func TestShouldEnableCodeClaimGate(t *testing.T) {
-	if ShouldEnableCodeClaimGate(nil, nil) {
-		t.Fatal("nil registry must be false")
-	}
-	empty := tool.NewRegistry()
-	if ShouldEnableCodeClaimGate(empty, nil) {
-		t.Fatal("surface-off without rca tools must not enable")
-	}
-	if ShouldEnableCodeClaimGate(empty, familySet([]string{FamilyCore, "mcp:gitlab"})) {
-		t.Fatal("gitlab-only must not enable code claim gate")
-	}
-	if !ShouldEnableCodeClaimGate(empty, familySet([]string{FamilyCode})) {
-		t.Fatal("code family must enable even before rca_read is listed")
-	}
-	reg := registerTestRCARead(t)
-	if !ShouldEnableCodeClaimGate(reg, nil) {
-		t.Fatal("rca_read in registry (surface off) must enable")
-	}
-}
-
-func TestCodeClaimGateTurnOption_enablesOnCodeFamily(t *testing.T) {
-	reg := registerTestRCARead(t)
-	fake := &builderGateFake{finalReply: "ok"}
-	active := familySet([]string{FamilyCore, FamilyCode})
-	a := BuildReActAgent(fake, reg, "", 10,
-		agent.WithReActMaxSteps(2),
-		CodeClaimGateTurnOption(reg, active, fake),
-	)
-	react, ok := a.(*agent.ReActAgent)
-	if !ok {
-		t.Fatalf("expected *ReActAgent, got %T", a)
-	}
-	if !react.CodeClaimGateEnabled() {
-		t.Fatal("code family turn must enable CodeClaimGate")
-	}
-	if !react.ParallelToolsEnabled() {
-		t.Fatal("rca_read registry must enable ParallelTools")
-	}
-}
-
-func TestCodeClaimGateTurnOption_skipsGitlabOnly(t *testing.T) {
-	reg := tool.NewRegistry()
-	if err := reg.Register(tool.Tool{
-		Name:        "gitlab_search",
-		Description: "gitlab",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	fake := &builderGateFake{finalReply: "ok"}
-	a := BuildReActAgent(fake, reg, "", 10,
-		agent.WithReActMaxSteps(2),
-		CodeClaimGateTurnOption(reg, familySet([]string{FamilyCore, "mcp:gitlab"}), fake),
-	)
-	react := a.(*agent.ReActAgent)
-	if react.CodeClaimGateEnabled() {
-		t.Fatal("gitlab-only turn must not enable CodeClaimGate")
-	}
 }
 
 type builderGateFake struct {

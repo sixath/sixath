@@ -47,10 +47,6 @@ type ReActConfig struct {
 	ToolSuccessHook func(ctx context.Context, req *Request, rec ToolCallRecord)
 	// ToolHooks 工具生命周期钩子（Before 可 block；After 与 Before 同序）。空切片与未设置行为一致。
 	ToolHooks []ToolHook
-	// EvidenceGate final-answer 证据门（默认 Enabled=false）。
-	EvidenceGate EvidenceGateConfig
-	// CodeClaimGate 源码声明审计（机检 + LLM）；默认 Enabled=false。
-	CodeClaimGate CodeClaimGateConfig
 	// PostModelPolicy 模型返回后、执行工具前的策略（可丢弃/过滤 tool_calls）；nil 为不启用。
 	PostModelPolicy PostModelPolicy
 	// ParallelTools 为 true 时，同轮多 tool 在无 RequiresSequential 时可并行执行（默认 false）。
@@ -207,20 +203,6 @@ func WithReActGuardrailEvaluator(ev GuardrailEvaluator) ReActOption {
 	}
 }
 
-// WithReActEvidenceGate 配置 final-answer EvidenceGate；默认 Enabled=false。
-func WithReActEvidenceGate(cfg EvidenceGateConfig) ReActOption {
-	return func(c *ReActConfig) {
-		c.EvidenceGate = cfg
-	}
-}
-
-// WithReActCodeClaimGate 配置源码声明审计；默认 Enabled=false。
-func WithReActCodeClaimGate(cfg CodeClaimGateConfig) ReActOption {
-	return func(c *ReActConfig) {
-		c.CodeClaimGate = cfg
-	}
-}
-
 // WithReActPostModelPolicy 注入模型返回后的工具执行策略；nil 清除。
 func WithReActPostModelPolicy(p PostModelPolicy) ReActOption {
 	return func(c *ReActConfig) {
@@ -240,16 +222,6 @@ func WithReActMaxParallel(n int) ReActOption {
 	return func(c *ReActConfig) {
 		c.MaxParallel = n
 	}
-}
-
-// EvidenceGateEnabled reports whether Soft/Hard EvidenceGate is enabled (for builders/tests).
-func (a *ReActAgent) EvidenceGateEnabled() bool {
-	return a != nil && a.config.EvidenceGate.Enabled
-}
-
-// CodeClaimGateEnabled reports whether the source-claim cascade is enabled.
-func (a *ReActAgent) CodeClaimGateEnabled() bool {
-	return a != nil && a.config.CodeClaimGate.Enabled
 }
 
 func (a *ReActAgent) ParallelToolsEnabled() bool {
@@ -397,30 +369,16 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 				messages = append(messages, model.Message{Role: "user", Content: redirect})
 				continue
 			}
-			gate := a.checkAnswerGates(ctx, req, messages, trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
-			if gate.HaltErr != nil {
-				trace.Errors = append(trace.Errors, gate.HaltErr.Error())
-				emit(events.RunError, map[string]any{"error": gate.HaltErr.Error(), "step": step, "evidence_gate_halt": true})
-				return nil, runError(gate.HaltErr, trace)
-			}
-			if gate.Inject {
-				applyAnswerGateInject(trace, gate)
-				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-				messages = append(messages, model.Message{Role: "user", Content: gate.Prompt})
-				continue
-			}
 			lastAnswer = gen.Text
 			_ = a.storeAssistant(ctx, lastAnswer)
 			emit(events.RunCompleted, map[string]any{"text_length": len(lastAnswer), "tool_calls": len(trace.ToolCalls)})
-			resp := responseWithTrace(lastAnswer, gen.TokenUsage, trace, messages)
-			applyAnswerGateMeta(resp, gate)
-			return resp, nil
+			return responseWithTrace(lastAnswer, gen.TokenUsage, trace, messages), nil
 		}
 
 		messages = append(messages, toolRequestMessage(gen.Text, stepInfo))
 		records, err := a.executeToolStep(ctx, req, step, stepInfo, trace, emit)
 		trace.ToolCalls = append(trace.ToolCalls, records...)
-		messages = appendToolResultsWithWorkset(messages, records, trace.ToolCalls)
+		messages = appendToolResultMessages(messages, records)
 		noProgress++
 		if a.guardrailEval().Evaluate(trace.ToolCalls, noProgress, emit).Halt {
 			trace.GuardrailHalt = true
@@ -725,23 +683,12 @@ func (a *ReActAgent) runToolEventsSync(
 				messages = append(messages, model.Message{Role: "user", Content: redirect})
 				continue
 			}
-			gate := a.checkAnswerGates(ctx, req, messages, trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
-			if gate.HaltErr != nil {
-				sendError(gate.HaltErr, step)
-				return
-			}
-			if gate.Inject {
-				applyAnswerGateInject(trace, gate)
-				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-				messages = append(messages, model.Message{Role: "user", Content: gate.Prompt})
-				continue
-			}
 			_ = a.storeAssistant(ctx, gen.Text)
 			if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
 				return
 			}
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate), gen.Text))
+			_ = send(streamDoneEvent(trace, messages, nil, gen.Text))
 			return
 		}
 
@@ -760,7 +707,7 @@ func (a *ReActAgent) runToolEventsSync(
 		messages = append(messages, toolRequestMessage(gen.Text, stepInfo))
 		records, err := a.executeToolStep(ctx, req, step, stepInfo, trace, emit)
 		trace.ToolCalls = append(trace.ToolCalls, records...)
-		messages = appendToolResultsWithWorkset(messages, records, trace.ToolCalls)
+		messages = appendToolResultMessages(messages, records)
 		for i := range records {
 			record := records[i]
 			eventType := StreamEventToolCompleted
@@ -821,13 +768,7 @@ func (a *ReActAgent) runToolEvents(
 			sendError(err, step)
 			return
 		}
-		buffer := a.shouldBufferCodeClaim(trace)
-		var held strings.Builder
 		for s := range textCh {
-			if buffer {
-				held.WriteString(s)
-				continue
-			}
 			if !send(StreamEvent{Type: StreamEventDelta, Text: s, Trace: trace}) {
 				return
 			}
@@ -854,32 +795,10 @@ func (a *ReActAgent) runToolEvents(
 				messages = append(messages, model.Message{Role: "user", Content: redirect})
 				continue
 			}
-			gate := a.checkAnswerGates(ctx, req, messages, trace, gen.Text, true, step+1 < a.config.MaxSteps, emit)
-			if gate.HaltErr != nil {
-				sendError(gate.HaltErr, step)
-				return
-			}
-			if gate.Inject {
-				applyAnswerGateInject(trace, gate)
-				messages = append(messages, assistantHistoryMessage(gen.Text, stepInfo))
-				messages = append(messages, model.Message{Role: "user", Content: gate.Prompt})
-				continue
-			}
-			if buffer && held.Len() > 0 {
-				if !send(StreamEvent{Type: StreamEventDelta, Text: held.String(), Trace: trace}) {
-					return
-				}
-			}
 			_ = a.storeAssistant(ctx, gen.Text)
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
-			_ = send(streamDoneEvent(trace, messages, gateDoneMeta(gate), gen.Text))
+			_ = send(streamDoneEvent(trace, messages, nil, gen.Text))
 			return
-		}
-
-		if buffer && held.Len() > 0 {
-			if !send(StreamEvent{Type: StreamEventDelta, Text: held.String(), Trace: trace}) {
-				return
-			}
 		}
 
 		for _, call := range toolCallsFromStep(stepInfo) {
@@ -898,7 +817,7 @@ func (a *ReActAgent) runToolEvents(
 		records, err := a.executeToolStep(ctx, req, step, stepInfo, trace, emit)
 		// tools_stream 路径每轮在工具后不再强制 plain 收尾：按「连续仅工具」多轮计数 R3。
 		trace.ToolCalls = append(trace.ToolCalls, records...)
-		messages = appendToolResultsWithWorkset(messages, records, trace.ToolCalls)
+		messages = appendToolResultMessages(messages, records)
 		for i := range records {
 			record := records[i]
 			eventType := StreamEventToolCompleted
@@ -985,20 +904,13 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messag
 	if text == "" {
 		return nil, nil
 	}
-	// Soft: only Metadata + event; never inject/continue. HardHalt → error.
-	gate := a.checkAnswerGates(ctx, req, messages, trace, text, false, false, emit)
-	if gate.HaltErr != nil {
-		return nil, gate.HaltErr
-	}
 	_ = a.storeAssistant(ctx, text)
 	emit(events.RunCompleted, map[string]any{
 		"text_length":    len(text),
 		"tool_calls":     len(trace.ToolCalls),
 		"forced_summary": true,
 	})
-	resp := responseWithTrace(text, gen.TokenUsage, trace, messages)
-	applyAnswerGateMeta(resp, gate)
-	return resp, nil
+	return responseWithTrace(text, gen.TokenUsage, trace, messages), nil
 }
 
 func (a *ReActAgent) forceFinalSummaryStream(
@@ -1349,261 +1261,6 @@ func streamDoneEvent(trace *RunTrace, messages []model.Message, metadata map[str
 	}
 }
 
-func markEvidenceIncomplete(resp *Response) {
-	if resp == nil {
-		return
-	}
-	if resp.Metadata == nil {
-		resp.Metadata = map[string]any{}
-	}
-	resp.Metadata["evidence_incomplete"] = true
-}
-
-func markCodeClaimMismatch(resp *Response) {
-	if resp == nil {
-		return
-	}
-	if resp.Metadata == nil {
-		resp.Metadata = map[string]any{}
-	}
-	resp.Metadata["code_claim_mismatch"] = true
-}
-
-func applyAnswerGateMeta(resp *Response, gate evidenceGateCheck) {
-	if gate.Incomplete {
-		markEvidenceIncomplete(resp)
-	}
-	if gate.CodeClaimMismatch {
-		markCodeClaimMismatch(resp)
-	}
-}
-
-func applyAnswerGateInject(trace *RunTrace, gate evidenceGateCheck) {
-	if trace == nil {
-		return
-	}
-	if gate.EmptyHit {
-		trace.EmptyHitNudges++
-		return
-	}
-	if gate.EmptyIdle {
-		trace.EmptyIdleNudges++
-		return
-	}
-	if gate.TruncatedPage {
-		trace.TruncatedPageNudges++
-		return
-	}
-	if gate.CodeClaim {
-		trace.CodeClaimNudges++
-		return
-	}
-	trace.EvidenceNudges++
-}
-
-func gateDoneMeta(gate evidenceGateCheck) map[string]any {
-	var m map[string]any
-	if gate.Incomplete {
-		m = map[string]any{"evidence_incomplete": true}
-	}
-	if gate.CodeClaimMismatch {
-		if m == nil {
-			m = map[string]any{}
-		}
-		m["code_claim_mismatch"] = true
-	}
-	return m
-}
-
-type evidenceGateCheck struct {
-	Inject            bool
-	Incomplete        bool
-	HaltErr           error
-	Prompt            string
-	CodeClaim         bool
-	CodeClaimMismatch bool
-	EmptyHit          bool
-	EmptyIdle         bool
-	TruncatedPage     bool
-}
-
-func collectEvidenceRefsFromTrace(trace *RunTrace) []tool.EvidenceRef {
-	if trace == nil || len(trace.ToolCalls) == 0 {
-		return nil
-	}
-	results := make([]any, 0, len(trace.ToolCalls))
-	for _, tc := range trace.ToolCalls {
-		results = append(results, tc.Result)
-	}
-	return tool.CollectEvidenceRefs(results...)
-}
-
-// checkEvidenceGate evaluates Soft/Hard at final-answer points.
-// allowInject: loop !Used may Soft-inject once; forceFinal must pass false.
-// hasStepRoom: whether another MaxSteps iteration remains for Soft inject.
-func (a *ReActAgent) checkEvidenceGate(trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
-	if a == nil || !a.config.EvidenceGate.Enabled {
-		return evidenceGateCheck{}
-	}
-	refs := collectEvidenceRefsFromTrace(trace)
-	result := EvaluateEvidenceGate(a.config.EvidenceGate, refs, finalText)
-	if result.Allow {
-		return evidenceGateCheck{}
-	}
-	if result.Action == "halt" {
-		return evidenceGateCheck{HaltErr: fmt.Errorf("%w: %s", ErrEvidenceGateHalt, result.Reason)}
-	}
-	if allowInject && result.Action == "inject" && trace != nil && trace.EvidenceNudges == 0 && hasStepRoom {
-		return evidenceGateCheck{Inject: true, Prompt: result.Prompt}
-	}
-	if emit != nil {
-		payload := map[string]any{"reason": result.Reason}
-		if trace != nil {
-			payload["evidence_nudges"] = trace.EvidenceNudges
-		}
-		emit(events.EvidenceIncomplete, payload)
-	}
-	return evidenceGateCheck{Incomplete: true}
-}
-
-func (a *ReActAgent) checkAnswerGates(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
-	eh := a.checkEmptyHitSpeakGate(trace, finalText, allowInject, hasStepRoom, emit)
-	if eh.HaltErr != nil || eh.Inject {
-		return eh
-	}
-	tp := a.checkTruncatedPageGate(req, messages, trace, allowInject, hasStepRoom)
-	if tp.Inject {
-		return tp
-	}
-	ev := a.checkEvidenceGate(trace, finalText, allowInject, hasStepRoom, emit)
-	if ev.HaltErr != nil || ev.Inject {
-		if eh.Incomplete {
-			ev.Incomplete = true
-		}
-		return ev
-	}
-	cc := a.checkCodeClaimGate(ctx, req, messages, trace, finalText, allowInject, hasStepRoom, emit)
-	if eh.Incomplete {
-		cc.Incomplete = true
-	}
-	if ev.Incomplete {
-		cc.Incomplete = true
-	}
-	if cc.HaltErr != nil || cc.Inject {
-		return cc
-	}
-	idle := a.checkEmptyIdleGate(req, messages, trace, finalText, allowInject, hasStepRoom)
-	if idle.Inject {
-		idle.Incomplete = cc.Incomplete
-		return idle
-	}
-	return cc
-}
-
-func (a *ReActAgent) shouldBufferCodeClaim(trace *RunTrace) bool {
-	if a == nil || !a.config.CodeClaimGate.Enabled {
-		return false
-	}
-	if trace == nil {
-		return false
-	}
-	if len(CollectCodeQuoteSources(trace.ToolCalls)) > 0 {
-		return true
-	}
-	for _, rec := range trace.ToolCalls {
-		if recordLooksLikeSurrogate(rec) {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *ReActAgent) checkCodeClaimGate(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, finalText string, allowInject, hasStepRoom bool, emit func(events.Kind, map[string]any)) evidenceGateCheck {
-	if a == nil || !a.config.CodeClaimGate.Enabled {
-		return evidenceGateCheck{}
-	}
-	var records []ToolCallRecord
-	if trace != nil {
-		records = trace.ToolCalls
-	}
-	if inbound := EvaluateInboundCompletenessGate(records, finalText); !inbound.Allow {
-		return a.finishCodeClaimGate(inbound, allowInject, hasStepRoom, trace, emit)
-	}
-	if surrogate := EvaluateSurrogateSourceGate(records, finalText); !surrogate.Allow {
-		return a.finishCodeClaimGate(surrogate, allowInject, hasStepRoom, trace, emit)
-	}
-	sources := CollectCodeQuoteSources(records)
-	if len(sources) == 0 {
-		return evidenceGateCheck{}
-	}
-	auditor := a.config.CodeClaimGate.Auditor
-	if auditor == nil {
-		auditor = a.model
-	}
-	timeout := a.config.CodeClaimGate.Timeout
-	if timeout <= 0 {
-		timeout = defaultCodeClaimAuditorTimeout
-	}
-	actx := ctx
-	cancel := func() {}
-	if ctx != nil {
-		actx, cancel = context.WithTimeout(ctx, timeout)
-	}
-	defer cancel()
-
-	userQ := originalUserQuestion(req, messages)
-	result := EvaluateCodeClaimCascade(actx, auditor, userQ, finalText, sources)
-	if result.Allow {
-		return evidenceGateCheck{}
-	}
-	return a.finishCodeClaimGate(result, allowInject, hasStepRoom, trace, emit)
-}
-
-func (a *ReActAgent) finishCodeClaimGate(result EvidenceGateResult, allowInject, hasStepRoom bool, trace *RunTrace, emit func(events.Kind, map[string]any)) evidenceGateCheck {
-	if result.Allow {
-		return evidenceGateCheck{}
-	}
-	if allowInject && result.Action == "inject" && trace != nil && trace.CodeClaimNudges == 0 && hasStepRoom {
-		return evidenceGateCheck{Inject: true, CodeClaim: true, Prompt: result.Prompt}
-	}
-	if emit != nil {
-		payload := map[string]any{"reason": result.Reason}
-		if trace != nil {
-			payload["code_claim_nudges"] = trace.CodeClaimNudges
-		}
-		emit(events.CodeClaimMismatch, payload)
-	}
-	return evidenceGateCheck{CodeClaimMismatch: true}
-}
-
-func requestUserText(req *Request) string {
-	if req == nil {
-		return ""
-	}
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
-			return req.Messages[i].Content
-		}
-	}
-	return ""
-}
-
-func originalUserQuestion(req *Request, messages []model.Message) string {
-	if t := requestUserText(req); t != "" {
-		return t
-	}
-	for _, m := range messages {
-		if m.Role == "user" && !isForcedSummaryUser(m.Content) {
-			return m.Content
-		}
-	}
-	return ""
-}
-
-func isForcedSummaryUser(content string) bool {
-	return content == ForcedFinalSummaryPrompt || strings.HasPrefix(content, ForcedFinalSummaryPrompt)
-}
-
 func toolMessageContent(record ToolCallRecord) string {
 	payload := map[string]any{
 		"tool":   record.ToolName,
@@ -1661,11 +1318,6 @@ func appendToolResultMessages(messages []model.Message, records []ToolCallRecord
 		})
 	}
 	return messages
-}
-
-func appendToolResultsWithWorkset(messages []model.Message, records, all []ToolCallRecord) []model.Message {
-	messages = appendToolResultMessages(messages, records)
-	return upsertCodeWorksetMessage(messages, CollectCodeWorkset(all))
 }
 
 func toolCallsFromStep(step model.ToolStep) []model.ToolCall {

@@ -21,23 +21,6 @@ func TestEvalGolden_mea_empty_speak(t *testing.T) {
 	aud := RulesAuditor{WorkDir: ""}
 	c := Contract{Round: 1, TargetRecordID: "r1", AcceptanceChecks: autoTraceChecks()}
 
-	t.Run("deny", func(t *testing.T) {
-		v, err := aud.Audit(context.Background(), TaskState{}, c, ExecutionReport{
-			ClaimComplete: true,
-			FinalText:     "该服务从未参与",
-			ToolHits:      []ToolHit{esEmptyHit()},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v.Completion != CompletionIncomplete {
-			t.Fatalf("T-speak %+v", v)
-		}
-		if len(v.ProposedUpdates) != 0 {
-			t.Fatalf("must not propose completed: %+v", v.ProposedUpdates)
-		}
-	})
-
 	t.Run("ok", func(t *testing.T) {
 		v, err := aud.Audit(context.Background(), TaskState{}, c, ExecutionReport{
 			FinalText: "该索引 0 条，不能据此说从未参与，查了 vm-manager-*",

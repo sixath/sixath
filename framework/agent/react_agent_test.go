@@ -104,7 +104,7 @@ func TestReActAgent_ModelErrorReturnsRunErrorWithTrace(t *testing.T) {
 	}
 }
 
-func TestReActAgent_EmptyIdleAfterToolsInjectsThenAnswers(t *testing.T) {
+func TestReActAgent_EmptyIdleAfterToolsDoesNotInject(t *testing.T) {
 	mem := memory.NewBufferMemory(5)
 	fake := &fakeOpenAIClient{
 		toolSteps: []model.ToolStep{
@@ -114,9 +114,8 @@ func TestReActAgent_EmptyIdleAfterToolsInjectsThenAnswers(t *testing.T) {
 				Arguments: map[string]any{"a": float64(1), "b": float64(1)},
 			},
 			{Used: false},
-			{Used: false},
 		},
-		plainReplies: []string{"", "\n\n", "没有远程暂停进程的工具"},
+		plainReplies: []string{""},
 	}
 	reg := tool.NewRegistry()
 	_ = tool.RegisterCalculatorTool(reg)
@@ -128,34 +127,20 @@ func TestReActAgent_EmptyIdleAfterToolsInjectsThenAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err=%v", err)
 	}
-	if resp == nil || resp.Text != "没有远程暂停进程的工具" {
-		t.Fatalf("expected retry to produce an answer, got %#v", resp)
+	if resp == nil {
+		t.Fatal("expected response")
 	}
-	if fake.toolCalls < 3 {
-		t.Fatalf("expected empty idle to inject another model round, toolCalls=%d", fake.toolCalls)
+	if fake.toolCalls != 2 {
+		t.Fatalf("toolCalls=%d want 2 (no idle inject round)", fake.toolCalls)
 	}
 	trace, _ := resp.Metadata["trace"].(*RunTrace)
-	if trace == nil || trace.EmptyIdleNudges != 1 {
-		t.Fatalf("EmptyIdleNudges=%v", trace)
+	if trace != nil && trace.EmptyIdleNudges != 0 {
+		t.Fatalf("EmptyIdleNudges=%d want 0", trace.EmptyIdleNudges)
 	}
-	foundNudge := false
-	for _, e := range trace.Errors {
-		if strings.Contains(e, "empty_idle") {
-			foundNudge = true
-		}
-	}
-	if !foundNudge {
-		t.Fatalf("trace.Errors=%v", trace.Errors)
-	}
-	saw := false
 	for _, m := range fake.lastToolMessages {
 		if m.Role == "user" && strings.Contains(m.Content, "没有写出给用户看的正文") {
-			saw = true
-			break
+			t.Fatalf("must not inject empty-idle prompt: %#v", m)
 		}
-	}
-	if !saw {
-		t.Fatalf("expected empty-idle retry prompt, last=%#v", fake.lastToolMessages)
 	}
 }
 
@@ -176,6 +161,35 @@ func TestReActAgent_EmptyIdleWithoutToolsFinishes(t *testing.T) {
 	}
 	if fake.toolCalls != 1 {
 		t.Fatalf("toolCalls=%d want 1", fake.toolCalls)
+	}
+}
+
+func TestReActAgent_toolResultsDoNotInsertCodeWorkset(t *testing.T) {
+	mem := memory.NewBufferMemory(5)
+	fake := &fakeOpenAIClient{
+		toolSteps: []model.ToolStep{
+			{
+				Used:      true,
+				ToolName:  "calculator_add",
+				Arguments: map[string]any{"a": float64(1), "b": float64(1)},
+			},
+			{Used: false},
+		},
+		plainReplies: []string{"done"},
+	}
+	reg := tool.NewRegistry()
+	_ = tool.RegisterCalculatorTool(reg)
+	react := NewReActAgent(fake, mem, reg, WithReActMaxSteps(5))
+	_, err := react.Run(context.Background(), &Request{
+		Messages: []model.Message{{Role: "user", Content: "1+1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range fake.lastToolMessages {
+		if strings.Contains(m.Content, "[code_workset]") {
+			t.Fatalf("workset card must not appear: %#v", m)
+		}
 	}
 }
 
