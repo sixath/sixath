@@ -63,9 +63,9 @@ type GrowthUsecase struct {
 	sessionEndSkillReview bool
 	// backgroundReviewEnabled 开启 C3：FinalizeTurnForBackgroundReview 同步写计数/pending，不 Wake；
 	// OnToolSuccess / OnAssistantTurn 计数路径关闭以免双计。默认 false（NewGrowthUsecase）；
-	// ProvideGrowthUsecase 从 SATH_BACKGROUND_REVIEW 注入（缺省 true）。
+	// ProvideGrowthUsecase 从 SATH_BACKGROUND_REVIEW 注入（缺省 false）。
 	backgroundReviewEnabled bool
-	// nudge 控制 OnToolSuccess / OnAssistantTurn 阈值触发（G1）；构造默认 Enabled=true。
+	// nudge 控制 OnToolSuccess / OnAssistantTurn 阈值触发（G1）；构造默认 Enabled=false。
 	nudge growth.NudgeConfig
 }
 
@@ -74,7 +74,7 @@ func NewGrowthUsecase(repo GrowthRepo) *GrowthUsecase {
 	return &GrowthUsecase{repo: repo, nudge: growth.DefaultNudgeConfig()}
 }
 
-// SetNudgeConfig 覆盖 G1 阈值 nudge（Enabled 默认 true；interval<=0 用 framework Defaults）。
+// SetNudgeConfig 覆盖 G1 阈值 nudge（Enabled 默认 false；interval<=0 用 framework Defaults）。
 func (uc *GrowthUsecase) SetNudgeConfig(cfg growth.NudgeConfig) {
 	if uc == nil {
 		return

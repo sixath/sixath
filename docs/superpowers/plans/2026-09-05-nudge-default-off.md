@@ -28,17 +28,17 @@
 
 ### Task 1: 失败测试
 
-- [ ] `TestDefaultNudgeConfig_enabledFalse`
-- [ ] 先跑应失败
+- [x] `TestDefaultNudgeConfig_enabledFalse`
+- [x] 先跑应失败
 
 ---
 
 ### Task 2: 改默认并修单测
 
-- [ ] `DefaultNudgeConfig` Enabled=false；pending 用例显式打开
-- [ ] `cd framework && go test ./growth -count=1`
-- [ ] `cd portal && go test ./internal/biz ./internal/service -count=1`
-- [ ] **Commit** `fix(growth): default nudge off the product path`
+- [x] `DefaultNudgeConfig` Enabled=false；pending 用例显式打开
+- [x] `cd framework && go test ./growth -count=1`
+- [x] `cd portal && go test ./internal/biz ./internal/service -count=1`
+- [x] **Commit** `fix(growth): default nudge off the product path`
 
 ---
 

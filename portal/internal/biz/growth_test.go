@@ -59,6 +59,7 @@ func (f *fakeGrowthRepo) ListIdleSessions(ctx context.Context, idleInterval time
 func TestGrowthUsecase_OnToolSuccess_setsPendingAndResetsCounter(t *testing.T) {
 	repo := &fakeGrowthRepo{state: &ChatGrowthState{SessionID: "s1"}}
 	uc := NewGrowthUsecase(repo)
+	uc.SetNudgeConfig(growth.NudgeConfig{Enabled: true})
 	ctx := context.Background()
 	for i := 0; i < 9; i++ {
 		if err := uc.OnToolSuccess(ctx, "s1"); err != nil {
@@ -231,6 +232,7 @@ func TestGrowthUsecase_RecordReviewRunFailure(t *testing.T) {
 func TestGrowthUsecase_OnAssistantTurn_setsPendingMemory(t *testing.T) {
 	repo := &fakeGrowthRepo{state: &ChatGrowthState{SessionID: "s2"}}
 	uc := NewGrowthUsecase(repo)
+	uc.SetNudgeConfig(growth.NudgeConfig{Enabled: true})
 	ctx := context.Background()
 	for i := 0; i < 2; i++ {
 		if err := uc.OnAssistantTurn(ctx, "s2"); err != nil {
@@ -521,6 +523,7 @@ func TestStateMachine_clearThenRetry_success(t *testing.T) {
 	t.Run("skill_review_lifecycle", func(t *testing.T) {
 		repo := &fakeGrowthRepo{state: &ChatGrowthState{SessionID: "lc1"}}
 		uc := NewGrowthUsecase(repo)
+		uc.SetNudgeConfig(growth.NudgeConfig{Enabled: true})
 		ctx := context.Background()
 
 		// Phase 1: accumulate tool successes until pending

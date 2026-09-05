@@ -21,10 +21,10 @@ func TestNewDefaults_positive(t *testing.T) {
 	}
 }
 
-func TestDefaultNudgeConfig_enabledTrue(t *testing.T) {
+func TestDefaultNudgeConfig_enabledFalse(t *testing.T) {
 	n := DefaultNudgeConfig()
-	if !n.Enabled {
-		t.Fatal("DefaultNudgeConfig.Enabled must be true (code default, not proto zero)")
+	if n.Enabled {
+		t.Fatal("DefaultNudgeConfig.Enabled must be false (growth off default path)")
 	}
 	if n.SkillToolInterval != 0 || n.MemoryTurnInterval != 0 {
 		t.Fatalf("intervals should be 0 meaning use NewDefaults(), got skill=%d memory=%d",

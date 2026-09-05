@@ -9,7 +9,7 @@ import (
 )
 
 // nudgeConfigFromEnv builds G1 NudgeConfig from env (no conf.proto fields — Windows
-// proto regen avoided). Unset vars keep DefaultNudgeConfig (Enabled=true, interval 0).
+// proto regen avoided). Unset vars keep DefaultNudgeConfig (Enabled=false, interval 0).
 //
 //	SATH_GROWTH_NUDGE_ENABLED           — "0"/"false"/"no" disables; "1"/"true"/"yes" enables
 //	SATH_GROWTH_NUDGE_SKILL_TOOL_INTERVAL — >0 overrides; 0/unset → framework Defaults

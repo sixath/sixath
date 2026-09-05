@@ -34,8 +34,7 @@ func NewDefaults() Defaults {
 // never treat 0 as "fire every time".
 type NudgeConfig struct {
 	// Enabled when false: counters still advance (capped at interval) but never
-	// set pending_* or Wake. Default true via DefaultNudgeConfig (code default,
-	// not proto3 bool zero-value).
+	// set pending_* or Wake. Default false via DefaultNudgeConfig (growth off default path).
 	Enabled bool
 	// SkillToolInterval overrides Defaults.SkillToolInterval when > 0.
 	SkillToolInterval int
@@ -43,9 +42,9 @@ type NudgeConfig struct {
 	MemoryTurnInterval int
 }
 
-// DefaultNudgeConfig returns Enabled=true and intervals 0 (framework Defaults).
+// DefaultNudgeConfig returns Enabled=false and intervals 0 (framework Defaults).
 func DefaultNudgeConfig() NudgeConfig {
-	return NudgeConfig{Enabled: true}
+	return NudgeConfig{Enabled: false}
 }
 
 // EffectiveSkillToolInterval returns SkillToolInterval, or NewDefaults().SkillToolInterval when <= 0.
