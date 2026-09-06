@@ -16,6 +16,9 @@ func TestToolConfigRoundTrip_RCA(t *testing.T) {
 			"datasource_id":  "es-logs",
 			"default_index":  "app-*",
 			"trace_id_field": "trace_id",
+			"endpoint":       "http://es:9200",
+			"user":           "esuser",
+			"password":       "secret",
 		},
 	})
 	if err != nil {
@@ -27,7 +30,8 @@ func TestToolConfigRoundTrip_RCA(t *testing.T) {
 	}
 	if proto.Rca.FuncPath != "es_log_query" || proto.Rca.DatasourceId != "es-logs" ||
 		proto.Rca.DefaultIndex != "app-*" || proto.Rca.TraceIdField != "trace_id" ||
-		proto.Rca.QueryUrl != "http://j:16686" {
+		proto.Rca.QueryUrl != "http://j:16686" || proto.Rca.Endpoint != "http://es:9200" ||
+		proto.Rca.User != "esuser" || proto.Rca.Password != "secret" {
 		t.Fatalf("proto.Rca fields wrong: %+v", proto.Rca)
 	}
 	if len(proto.Rca.Roots) != 1 || proto.Rca.Roots[0] != "/repos/a" {

@@ -295,6 +295,17 @@ func TestFileTools_RejectPathEscape(t *testing.T) {
 	}
 }
 
+func TestSearchFiles_DescriptionPrefersRCAForSource(t *testing.T) {
+	reg := registerFileToolsForTest(t)
+	tl, ok := reg.Get("search_files")
+	if !ok {
+		t.Fatal("search_files missing")
+	}
+	if !strings.Contains(tl.Description, "rca_grep") && !strings.Contains(tl.Description, "rca_") {
+		t.Fatalf("search_files should prefer rca_* for source analysis, got %q", tl.Description)
+	}
+}
+
 func TestSearchFiles_ContentFallback(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "one.go"), []byte("package one\nfunc Foo() {}\n"), 0o644); err != nil {
@@ -417,5 +428,12 @@ func TestWorkspaceFile_ConfirmErrorCode_Expired(t *testing.T) {
 	}
 	if m["error"] != "确认已过期，请让助手重新发起操作" {
 		t.Fatalf("error: %#v", m)
+	}
+}
+
+func TestRegisterWorkspaceFileTools_IncludesRunResultScript(t *testing.T) {
+	reg := registerFileToolsForTest(t)
+	if _, ok := reg.Get("run_result_script"); !ok {
+		t.Fatal("run_result_script not registered")
 	}
 }

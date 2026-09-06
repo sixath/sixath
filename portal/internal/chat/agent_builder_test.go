@@ -83,9 +83,11 @@ func TestBuildRegistry_AllDatasourcesFailIncludesDetail(t *testing.T) {
 func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
 	cfg, err := structpb.NewStruct(map[string]interface{}{
 		"datasource": map[string]interface{}{
-			"id":   "zj-es",
-			"type": "elasticsearch",
-			"dsn":  "http://127.0.0.1:9200",
+			"id":            "zj-es",
+			"type":          "elasticsearch",
+			"dsn":           "http://127.0.0.1:9200",
+			"default_index": "app-*",
+			"purpose":       "应用日志",
 		},
 	})
 	if err != nil {
@@ -109,8 +111,46 @@ func TestBuildRegistry_ElasticsearchOnly_NoDataTrio(t *testing.T) {
 	if res == nil || !strings.Contains(res.DatasourcePrompt, "es_log_query") {
 		t.Fatalf("prompt=%q", res.DatasourcePrompt)
 	}
+	if !strings.Contains(res.DatasourcePrompt, "cluster=zj-es") {
+		t.Fatalf("want cluster=<toolname> in prompt, got %q", res.DatasourcePrompt)
+	}
+	if !strings.Contains(res.DatasourcePrompt, "应用日志") || !strings.Contains(res.DatasourcePrompt, "app-*") {
+		t.Fatalf("want purpose/default_index from tool config map, got %q", res.DatasourcePrompt)
+	}
+	if strings.Contains(res.DatasourcePrompt, "**zj-es**") {
+		t.Fatalf("ES id must not appear in data trio list: %s", res.DatasourcePrompt)
+	}
 	if len(res.DsBindings) != 1 || !res.DsBindings[0].SkipDataTools {
 		t.Fatalf("bindings=%+v", res.DsBindings)
+	}
+	if res.DsBindings[0].Purpose != "应用日志" || res.DsBindings[0].DefaultIndex != "app-*" {
+		t.Fatalf("bindings must copy purpose/index from map, got %+v", res.DsBindings[0])
+	}
+	if _, ok := reg.Get("es_log_query"); !ok {
+		t.Fatal("ES-only agent must register es_log_query")
+	}
+}
+
+func TestBuildRegistry_RegistersAllBoundRCATools(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, WorkspaceCodeLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	codeTool := &biz.ToolMeta{Name: "migu-rca", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "rca_code", map[string]any{
+		"roots": []any{t.TempDir()},
+	})}
+	esTool := &biz.ToolMeta{Name: "mg-rca-es", Type: biz.ToolTypeRCA, Config: mustRCAStruct(t, "es_log_query", map[string]any{
+		"endpoint": "http://es",
+	})}
+	reg := tool.NewRegistry()
+	if _, err := BuildRegistry([]*biz.ToolMeta{codeTool, esTool}, nil, reg, RegistryBuildOptions{Workspace: ws}); err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	if _, ok := reg.Get("rca_grep"); !ok {
+		t.Fatal("code RCA tools must register without a family surface")
+	}
+	if _, ok := reg.Get("es_log_query"); !ok {
+		t.Fatal("es RCA tools must register without a family surface")
 	}
 }
 
@@ -211,3 +251,4 @@ func TestBuildRegistry_RegisterSSHExecBuiltin(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 }
+

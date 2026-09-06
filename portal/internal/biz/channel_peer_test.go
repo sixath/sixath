@@ -294,6 +294,61 @@ func TestResolve_OmitsAgentUsesDefault(t *testing.T) {
 	}
 }
 
+func TestResolve_OmitsAgentContinuesNonDefaultBinding(t *testing.T) {
+	uc, _, _ := newPeerUsecase(t, "ch-1", "agent-default", []string{"agent-default", "agent-b"})
+
+	r1, err := uc.Resolve(context.Background(), resolveIn("ch-1", "peer-a", "agent-b", true))
+	if err != nil {
+		t.Fatalf("force switch: %v", err)
+	}
+	if r1.AgentID != "agent-b" {
+		t.Fatalf("agent=%q want agent-b", r1.AgentID)
+	}
+
+	// WeCom/Gateway normal messages omit agent_id; must continue the bound non-default agent.
+	r2, err := uc.Resolve(context.Background(), resolveIn("ch-1", "peer-a", "", false))
+	if err != nil {
+		t.Fatalf("continue: %v", err)
+	}
+	if r2.Created {
+		t.Fatalf("want created=false")
+	}
+	if r2.SessionID != r1.SessionID || r2.AgentID != "agent-b" {
+		t.Fatalf("got %+v want session=%s agent-b", r2, r1.SessionID)
+	}
+}
+
+func TestResolve_ForceNewOmitsAgentReusesBoundAgent(t *testing.T) {
+	uc, peerRepo, _ := newPeerUsecase(t, "ch-1", "agent-default", []string{"agent-default", "agent-b"})
+
+	r1, err := uc.Resolve(context.Background(), resolveIn("ch-1", "peer-a", "agent-b", true))
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	r2, err := uc.Resolve(context.Background(), ChannelPeerResolveInput{
+		ChannelID: "ch-1",
+		PeerID:    "peer-a",
+		ForceNew:  true,
+		Reason:    "slash_new",
+	})
+	if err != nil {
+		t.Fatalf("/new: %v", err)
+	}
+	if !r2.Created || r2.SessionID == r1.SessionID {
+		t.Fatalf("want new session, got %+v (old=%s)", r2, r1.SessionID)
+	}
+	if r2.AgentID != "agent-b" {
+		t.Fatalf("agent=%q want agent-b (current binding)", r2.AgentID)
+	}
+	mapped, err := peerRepo.Get(context.Background(), "ch-1", "peer-a")
+	if err != nil {
+		t.Fatalf("mapping: %v", err)
+	}
+	if mapped.AgentID != "agent-b" || mapped.SessionID != r2.SessionID {
+		t.Fatalf("mapping=%+v", mapped)
+	}
+}
+
 func TestChannelPeerResolve_SameKeySameSession(t *testing.T) {
 	uc, _, _ := newPeerUsecase(t, "ch-1", "agent-a", []string{"agent-a", "agent-b"})
 

@@ -73,6 +73,8 @@ func main() {
 		Idempotency:   idem,
 		PendingSwitch: pendingSwitch,
 		TurnTimeout:   turnTimeout,
+		// Refresh WeCom progress card while tools/LLM run (avoid stale「处理中…」).
+		ProgressTick: 3 * time.Second,
 	}
 	mgr := adapter.NewWecomBotManager(ctx, botDeps)
 	syncer := channelsync.NewRunner(channelsync.Config{

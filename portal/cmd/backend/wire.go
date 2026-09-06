@@ -20,7 +20,7 @@ import (
 )
 
 // wireApp init kratos application.
-func wireApp(*conf.Server, *conf.Data, *conf.Auth, llmReviewEnabledInput, growthReviewPatchFileInput, curatorPatchFileInput, workerEnabledInput, *conf.Growth, log.Logger) (*kratos.App, func(), error) {
+func wireApp(*conf.Server, *conf.Data, *conf.Auth, *conf.Growth, log.Logger) (*kratos.App, func(), error) {
 	panic(wire.Build(
 		server.ProviderSet,
 		data.ProviderSet,
@@ -31,12 +31,11 @@ func wireApp(*conf.Server, *conf.Data, *conf.Auth, llmReviewEnabledInput, growth
 		service.NewAgentService,
 		service.ProvideChatServiceWithTurnTrace,
 		service.NewChannelService,
+		runtime.ProvideAgentRouteUsecase,
 		runtime.NewService,
 		wire.Bind(new(runtime.RewindBackend), new(*service.ChatService)),
 		wire.Bind(new(runtime.TurnBackend), new(*service.ChatService)),
 		wire.Bind(new(server.DBPinger), new(*data.Data)),
-		provideGrowthWorker,
-		provideCuratorWorker,
 		newApp,
 	))
 }

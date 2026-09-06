@@ -40,7 +40,7 @@ func TestRegisterAgentRuntimeTools_DefaultFlagsSkipP0Tools(t *testing.T) {
 	if err := RegisterAgentRuntimeTools(reg, AgentRuntimeToolsOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"todo", "memory", "memory_search", "session_search", "read_file", "web_search", "terminal", "cronjob", "skills_list", "skill_manage", "browser_navigate"} {
+	for _, name := range []string{"todo", "memory", "memory_search", "session_search", "read_file", "web_search", "terminal", "cronjob", "skills_list", "skill_manage", "browser_navigate", "knowledge_search", "knowledge_read"} {
 		if _, ok := reg.Get(name); ok {
 			t.Fatalf("expected %q absent with default flags", name)
 		}
@@ -48,11 +48,6 @@ func TestRegisterAgentRuntimeTools_DefaultFlagsSkipP0Tools(t *testing.T) {
 	for _, name := range []string{"memory_remember", "memory_recall", "memory_get"} {
 		if _, ok := reg.Get(name); !ok {
 			t.Fatalf("expected %q registered", name)
-		}
-	}
-	for _, name := range []string{"knowledge_search", "knowledge_read"} {
-		if _, ok := reg.Get(name); !ok {
-			t.Fatalf("expected hub knowledge tool %q registered", name)
 		}
 	}
 }
@@ -79,9 +74,14 @@ func TestRegisterAgentRuntimeTools_AllFlagsEnabled(t *testing.T) {
 	if err := RegisterAgentRuntimeTools(reg, AgentRuntimeToolsOptions{Flags: &flags, SkillsIdx: skillsIdx}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"todo", "memory_remember", "memory_recall", "memory_get", "read_file", "web_search", "terminal", "cronjob", "skills_list", "skill_manage", "knowledge_search", "knowledge_read"} {
+	for _, name := range []string{"todo", "memory_remember", "memory_recall", "memory_get", "read_file", "web_search", "terminal", "cronjob", "skills_list", "skill_manage"} {
 		if _, ok := reg.Get(name); !ok {
 			t.Fatalf("expected %q registered", name)
+		}
+	}
+	for _, name := range []string{"knowledge_search", "knowledge_read", "knowledge_write", "knowledge_approve"} {
+		if _, ok := reg.Get(name); ok {
+			t.Fatalf("expected hub knowledge tool %q absent", name)
 		}
 	}
 	for _, name := range []string{"memory", "memory_search", "session_search"} {

@@ -36,27 +36,30 @@ func (f *fakeChannelRepo) Create(_ context.Context, ch *ChannelCreate) (*Channel
 		botNames = []string{}
 	}
 	meta := &ChannelMeta{
-		ID:               id,
-		ChannelID:        ch.ChannelID,
-		Type:             ch.Type,
-		DefaultAgent:     ch.DefaultAgent,
-		AllowedAgents:    append([]string(nil), allowed...),
-		Enabled:          ch.Enabled,
-		WebhookPath:      ch.WebhookPath,
-		WebhookSecret:    ch.WebhookSecret,
-		IPWhitelist:      append([]string(nil), ch.IPWhitelist...),
-		AppToken:         ch.AppToken,
-		DefaultUids:      append([]string(nil), ch.DefaultUids...),
-		WebhookURL:       ch.WebhookURL,
-		BotID:            ch.BotID,
-		BotSecret:        ch.BotSecret,
-		BotNames:         append([]string(nil), botNames...),
-		WSURL:            ch.WSURL,
-		CorpID:           ch.CorpID,
-		CorpSecret:       ch.CorpSecret,
-		DefaultReplyMode: ch.DefaultReplyMode,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ID:                  id,
+		ChannelID:           ch.ChannelID,
+		Type:                ch.Type,
+		DefaultAgent:        ch.DefaultAgent,
+		AllowedAgents:       append([]string(nil), allowed...),
+		Enabled:             ch.Enabled,
+		WebhookPath:        ch.WebhookPath,
+		WebhookSecret:      ch.WebhookSecret,
+		IPWhitelist:         append([]string(nil), ch.IPWhitelist...),
+		AppToken:            ch.AppToken,
+		DefaultUids:         append([]string(nil), ch.DefaultUids...),
+		WebhookURL:          ch.WebhookURL,
+		BotID:               ch.BotID,
+		BotSecret:           ch.BotSecret,
+		BotNames:            append([]string(nil), botNames...),
+		WSURL:               ch.WSURL,
+		CorpID:              ch.CorpID,
+		CorpSecret:          ch.CorpSecret,
+		DefaultReplyMode:   ch.DefaultReplyMode,
+		AutoRouteEnabled:    ch.AutoRouteEnabled,
+		AutoRouteMention:    ch.AutoRouteMention,
+		AutoRouteClassifier: ch.AutoRouteClassifier,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 	f.byID[id] = meta
 	cp := *meta
@@ -140,6 +143,15 @@ func (f *fakeChannelRepo) Update(_ context.Context, id string, updates map[strin
 	}
 	if v, ok := updates["default_reply_mode"].(string); ok {
 		cp.DefaultReplyMode = v
+	}
+	if v, ok := updates["auto_route_enabled"].(bool); ok {
+		cp.AutoRouteEnabled = v
+	}
+	if v, ok := updates["auto_route_mention"].(bool); ok {
+		cp.AutoRouteMention = v
+	}
+	if v, ok := updates["auto_route_classifier"].(bool); ok {
+		cp.AutoRouteClassifier = v
 	}
 	cp.UpdatedAt = time.Now()
 	f.byID[id] = &cp

@@ -2,7 +2,11 @@ package memory
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/sixath/framework/model"
 )
 
 type stubGraphExtractor struct {
@@ -134,5 +138,68 @@ func TestLLMGraphExtractor_ParseJSON(t *testing.T) {
 	}
 	if len(got.Entities) != 1 || got.Entities[0].Name != "Alice" {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestLLMGraphExtractor_SalvagesTruncatedJSON(t *testing.T) {
+	// Mid-object cut, same shape as max_tokens truncation.
+	truncated := `{"entities":[{"name":"union-servo","type":"system","scope":"session","confidence":0.9},{"name":"area-servo","type":"system","scope":"session","confidence":0.9}],"relations":[{"subject":"union-servo","predicate":"calls","object":"area-servo","scope":"session","confidence":0.8},{"subject":"union-servo","predicate":"uses"`
+	ex := &LLMGraphExtractor{Model: stubChatModel{text: truncated}}
+	got, err := ex.Extract(context.Background(), TurnInput{UserMessage: "register", AssistantMessage: "flow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entities) != 2 {
+		t.Fatalf("entities=%#v", got.Entities)
+	}
+	if len(got.Relations) != 1 || got.Relations[0].Predicate != "calls" {
+		t.Fatalf("relations=%#v", got.Relations)
+	}
+}
+
+func TestLLMGraphExtractor_ParseFailIsErrGraphExtractParse(t *testing.T) {
+	ex := &LLMGraphExtractor{Model: stubChatModel{text: "not-json"}}
+	_, err := ex.Extract(context.Background(), TurnInput{UserMessage: "u", AssistantMessage: "a"})
+	if !errors.Is(err, ErrGraphExtractParse) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestGraphPipeline_ParseFailResult(t *testing.T) {
+	g := newFakeGraphStore()
+	p := &GraphPipeline{
+		Graph: g, Enabled: true,
+		Extractor: stubGraphExtractor{err: fmt.Errorf("%w: unexpected end of JSON input", ErrGraphExtractParse)},
+	}
+	st, err := p.AddGraphFromTurnWithStats(context.Background(), TurnInput{SessionID: "s1", UserMessage: "hi"})
+	if err == nil || st.Result != GraphResultParseFail {
+		t.Fatalf("st=%+v err=%v", st, err)
+	}
+}
+
+type recordingGraphChatModel struct {
+	text string
+	cfg  *model.CallConfig
+}
+
+func (s *recordingGraphChatModel) Generate(ctx context.Context, prompt string, opts ...model.Option) (*model.Generation, error) {
+	return s.Chat(ctx, []model.Message{{Role: "user", Content: prompt}}, opts...)
+}
+func (s *recordingGraphChatModel) Chat(ctx context.Context, messages []model.Message, opts ...model.Option) (*model.Generation, error) {
+	s.cfg = model.ApplyOptions(opts...)
+	return &model.Generation{Text: s.text}, nil
+}
+func (s *recordingGraphChatModel) Embed(ctx context.Context, texts []string, opts ...model.Option) ([]model.Embedding, error) {
+	return nil, nil
+}
+
+func TestLLMGraphExtractor_RequestsLargerMaxTokens(t *testing.T) {
+	m := &recordingGraphChatModel{text: `{"entities":[],"relations":[]}`}
+	ex := &LLMGraphExtractor{Model: m}
+	if _, err := ex.Extract(context.Background(), TurnInput{UserMessage: "x", AssistantMessage: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	if m.cfg == nil || m.cfg.MaxTokens < maxGraphExtractOutTokens {
+		t.Fatalf("max_tokens=%v want >= %d", m.cfg, maxGraphExtractOutTokens)
 	}
 }

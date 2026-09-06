@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,8 +11,13 @@ import (
 	"github.com/sixath/framework/model"
 )
 
+// ErrGraphExtractParse is returned when the model output is not valid graph JSON
+// (including truncated completions that cannot be salvaged).
+var ErrGraphExtractParse = errors.New("memory: parse graph extraction JSON")
+
 const (
-	maxGraphExtractInputRunes = 8000
+	maxGraphExtractInputRunes = 4000
+	maxGraphExtractOutTokens  = 4096
 	defaultGraphMaxEntities   = 32
 	defaultGraphMinConfidence = 0.7
 
@@ -23,6 +29,7 @@ Rules:
 - Prefer specific names as written in the turn; keep original spelling
 - entity.type: short open label (e.g. person, org, place, product, concept, system, component)
 - Relations: short snake_case predicates for clear factual edges (e.g. works_at, owns, related_to, depends_on, uses, contains, located_at). Use the most precise verb that fits; do not invent weak links
+- Cap output: at most %d entities and %d relations; skip duplicates; keep JSON compact so it finishes
 - When many high-confidence edges are stated, extract them rather than summarizing into fewer
 - Pure preferences or chatter with no extractable entities → {"entities":[],"relations":[]}
 - scope "user": should persist across sessions (stable identity, lasting affiliations, durable preferences tied to named entities)
@@ -64,6 +71,7 @@ const (
 	GraphResultDisabled   = "disabled"
 	GraphResultEmptyInput = "empty_input"
 	GraphResultModelFail  = "model_fail"
+	GraphResultParseFail  = "parse_fail"
 	GraphResultError      = "error"
 	GraphResultSuccess    = "success"
 )
@@ -124,6 +132,10 @@ func (p *GraphPipeline) AddGraphFromTurnWithStats(ctx context.Context, in TurnIn
 
 	ex, err := p.Extractor.Extract(ctx, in)
 	if err != nil {
+		if errors.Is(err, ErrGraphExtractParse) {
+			st.Result = GraphResultParseFail
+			return st, err
+		}
 		st.Result = GraphResultModelFail
 		return st, err
 	}
@@ -282,11 +294,12 @@ func (e *LLMGraphExtractor) Extract(ctx context.Context, in TurnInput) (GraphExt
 	user := truncateRunes(strings.TrimSpace(in.UserMessage), maxGraphExtractInputRunes)
 	asst := truncateRunes(strings.TrimSpace(in.AssistantMessage), maxGraphExtractInputRunes)
 	prompt := fmt.Sprintf("User:\n%s\n\nAssistant:\n%s\n\nExtract graph JSON.", user, asst)
+	sys := fmt.Sprintf(llmGraphExtractSystemPrompt, maxEnt, maxEnt)
 
 	gen, err := e.Model.Chat(ctx, []model.Message{
-		{Role: "system", Content: llmGraphExtractSystemPrompt},
+		{Role: "system", Content: sys},
 		{Role: "user", Content: prompt},
-	})
+	}, model.WithTemperature(0), model.WithMaxTokens(maxGraphExtractOutTokens))
 	if err != nil {
 		return GraphExtract{}, err
 	}
@@ -294,9 +307,9 @@ func (e *LLMGraphExtractor) Extract(ctx context.Context, in TurnInput) (GraphExt
 		return GraphExtract{}, fmt.Errorf("memory: empty graph extraction generation")
 	}
 	raw := stripJSONFences(strings.TrimSpace(gen.Text))
-	var parsed llmGraphExtractResponse
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return GraphExtract{}, fmt.Errorf("memory: parse graph extraction JSON: %w", err)
+	parsed, err := unmarshalGraphExtractJSON(raw)
+	if err != nil {
+		return GraphExtract{}, fmt.Errorf("%w: %v", ErrGraphExtractParse, err)
 	}
 
 	out := GraphExtract{}
@@ -324,4 +337,84 @@ func (e *LLMGraphExtractor) Extract(ctx context.Context, in TurnInput) (GraphExt
 		})
 	}
 	return out, nil
+}
+
+func unmarshalGraphExtractJSON(raw string) (llmGraphExtractResponse, error) {
+	var parsed llmGraphExtractResponse
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return parsed, fmt.Errorf("empty")
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+		return parsed, nil
+	}
+	// Completions often hit max_tokens mid-object. Walk back to a '}' and close open brackets.
+	for i := len(raw) - 1; i >= 0; i-- {
+		if raw[i] != '}' {
+			continue
+		}
+		closed := closeTruncatedJSON(raw[:i+1])
+		if err := json.Unmarshal([]byte(closed), &parsed); err == nil {
+			return parsed, nil
+		}
+	}
+	closed := closeTruncatedJSON(raw)
+	if err := json.Unmarshal([]byte(closed), &parsed); err == nil {
+		return parsed, nil
+	}
+	return parsed, json.Unmarshal([]byte(raw), &parsed)
+}
+
+// closeTruncatedJSON closes an unterminated string and any unclosed { / [ so a
+// length-capped model reply can still Unmarshal.
+func closeTruncatedJSON(s string) string {
+	var stack []byte
+	inStr := false
+	esc := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			if esc {
+				esc = false
+				continue
+			}
+			if c == '\\' {
+				esc = true
+				continue
+			}
+			if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{', '[':
+			stack = append(stack, c)
+		case '}':
+			if n := len(stack); n > 0 && stack[n-1] == '{' {
+				stack = stack[:n-1]
+			}
+		case ']':
+			if n := len(stack); n > 0 && stack[n-1] == '[' {
+				stack = stack[:n-1]
+			}
+		}
+	}
+	out := s
+	if inStr {
+		if esc && len(out) > 0 && out[len(out)-1] == '\\' {
+			out = out[:len(out)-1]
+		}
+		out += `"`
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			out += "}"
+		} else {
+			out += "]"
+		}
+	}
+	return out
 }

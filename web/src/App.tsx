@@ -7,7 +7,6 @@ import McpServerForm from './pages/McpServerForm'
 import AgentList from './pages/AgentList'
 import AgentForm from './pages/AgentForm'
 import AgentDetail from './pages/AgentDetail'
-import AgentInsightsPage from './pages/AgentInsightsPage'
 import ChatPage from './pages/ChatPage'
 import ChatHome from './pages/ChatHome'
 import ChannelList from './pages/ChannelList'
@@ -207,7 +206,6 @@ function AppShell() {
             <Route path="/agents/new" element={<AgentForm />} />
             <Route path="/agents/:id/edit" element={<AgentForm />} />
             <Route path="/agents/:id" element={<AgentDetail />} />
-            <Route path="/agents/:id/insights" element={<AgentInsightsPage />} />
             <Route path="/agents/:id/chat" element={<ChatPage />} />
             <Route path="/agents/:id/chat/:sessionId" element={<ChatPage />} />
             <Route path="/channels" element={<ChannelList />} />

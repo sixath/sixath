@@ -1,7 +1,7 @@
 # Gateway 消息级自动路由（@Agent + Portal 分类器）
 
 **日期**: 2026-08-10  
-**状态**: 设计已确认；待实现规划  
+**状态**: 设计已确认；实现已合入 `feat/gateway-message-auto-route`  
 **目标**: 在一期「Portal 白名单 + 显式 `/agent` 改绑」之上，让普通业务消息可通过 `@Agent` 或轻量分类器自动选中白名单 Agent，并在换人时 `force_new` 新开 session 后直接进入本条 Turn。
 
 **关联**:

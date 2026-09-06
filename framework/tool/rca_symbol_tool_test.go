@@ -70,8 +70,8 @@ func TestRCASymbol_DefinitionByLine(t *testing.T) {
 	if !ok {
 		t.Fatal("rca_symbol not registered")
 	}
-	if tl.Toolset != ToolsetRCA || !tl.RequiresSequential {
-		t.Fatalf("tool metadata = %+v", tl)
+	if tl.Toolset != ToolsetRCA || tl.RequiresSequential {
+		t.Fatalf("tool metadata = %+v (rca_symbol must not force the whole batch sequential)", tl)
 	}
 
 	out, err := tl.Execute(context.Background(), map[string]any{
@@ -297,6 +297,118 @@ func TestRCASymbol_ReferencesByLine(t *testing.T) {
 	assertRCAEvidenceOK(t, m, "rca_symbol")
 	if m["truncated"].(bool) {
 		t.Fatal("unexpected truncation")
+	}
+	if m["symbol_ok"] != true {
+		t.Fatalf("symbol_ok=%v", m["symbol_ok"])
+	}
+	callers := m["callers"].([]map[string]any)
+	if len(callers) != 1 || callers[0]["path"] != "ref.go:11" {
+		t.Fatalf("callers = %#v", callers)
+	}
+}
+
+func TestRCASymbol_ReferencesInboundEmptyOK(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "service-a")
+	server := &fakeRCASymbolServer{
+		definitionFn: func(context.Context, string, string, lsp.Position) ([]lsp.Location, error) { return nil, nil },
+		referencesFn: func(context.Context, string, string, lsp.Position, bool) ([]lsp.Location, error) {
+			return []lsp.Location{{File: filepath.Join(filepath.Dir(root), "outside.go"), Line: 9}}, nil
+		},
+	}
+	reg := newRCASymbolRegistry(t, []string{root}, server)
+	tl, _ := reg.Get("rca_symbol")
+	out, _ := tl.Execute(context.Background(), map[string]any{
+		"action": "references", "repo": "service-a", "file": "a.go", "line": 1,
+	})
+	m := out.(map[string]any)
+	assertRCAEvidenceOK(t, m, "rca_symbol")
+	if m["inbound_empty"] != true {
+		t.Fatalf("inbound_empty=%v payload=%#v", m["inbound_empty"], m)
+	}
+	if callers := m["callers"].([]map[string]any); len(callers) != 0 {
+		t.Fatalf("callers=%#v", callers)
+	}
+}
+
+func TestRCASymbol_ReferencesIncludesOtherRoots(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	repoB := filepath.Join(base, "service-b")
+	writeRCASymbolSource(t, repoA, "pkg/decl.go", "package pkg\n\nfunc CrossRepoUniqueTarget() {}\n")
+	writeRCASymbolSource(t, repoB, "cmd/main.go", "package main\n\nfunc run() { CrossRepoUniqueTarget() }\n")
+	server := &fakeRCASymbolServer{
+		definitionFn: func(context.Context, string, string, lsp.Position) ([]lsp.Location, error) { return nil, nil },
+		referencesFn: func(context.Context, string, string, lsp.Position, bool) ([]lsp.Location, error) {
+			return []lsp.Location{{File: filepath.Join(repoA, "pkg", "decl.go"), Line: 3, Name: "CrossRepoUniqueTarget"}}, nil
+		},
+	}
+	reg := newRCASymbolRegistry(t, []string{repoA, repoB}, server)
+	tl, _ := reg.Get("rca_symbol")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"action": "references", "repo": "service-a", "file": "pkg/decl.go", "line": 3, "symbol": "CrossRepoUniqueTarget",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	m := out.(map[string]any)
+	assertRCAEvidenceOK(t, m, "rca_symbol")
+	if m["cross_repo"] != true {
+		t.Fatalf("cross_repo=%v payload=%#v", m["cross_repo"], m)
+	}
+	if m["inbound_empty"] == true {
+		t.Fatalf("expected cross-repo callers, payload=%#v", m)
+	}
+	callers := m["callers"].([]map[string]any)
+	found := false
+	for _, c := range callers {
+		if c["repo"] == "service-b" && strings.Contains(fmt.Sprint(c["path"]), "cmd/main.go") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want service-b caller, got %#v", callers)
+	}
+	scanned, _ := m["repos_scanned"].([]string)
+	if len(scanned) < 2 {
+		t.Fatalf("repos_scanned=%v", m["repos_scanned"])
+	}
+}
+
+func TestRCASymbol_ReferencesLSPFailFallsBackToGrep(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "service-a")
+	writeRCASymbolSource(t, root, "pkg/decl.go", "package pkg\n\nfunc UniqueTarget() {}\n")
+	writeRCASymbolSource(t, root, "cmd/main.go", "package main\n\nfunc run() { UniqueTarget() }\n")
+	server := &fakeRCASymbolServer{
+		definitionFn: func(context.Context, string, string, lsp.Position) ([]lsp.Location, error) {
+			t.Fatal("Definition should not be called")
+			return nil, nil
+		},
+		referencesFn: func(context.Context, string, string, lsp.Position, bool) ([]lsp.Location, error) {
+			return nil, errors.New("gopls unavailable")
+		},
+	}
+	reg := newRCASymbolRegistry(t, []string{root}, server)
+	tl, _ := reg.Get("rca_symbol")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"action": "references", "repo": "service-a", "file": "pkg/decl.go", "line": 3, "symbol": "UniqueTarget",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	m := out.(map[string]any)
+	assertRCAEvidenceOK(t, m, "rca_symbol")
+	if m["symbol_ok"] != false || m["fallback"] != "grep" {
+		t.Fatalf("fallback payload=%#v", m)
+	}
+	callers := m["callers"].([]map[string]any)
+	found := false
+	for _, c := range callers {
+		if c["path"] == "cmd/main.go:3" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want caller cmd/main.go:3, got %#v", callers)
 	}
 }
 

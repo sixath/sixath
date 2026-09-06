@@ -1,8 +1,11 @@
 package service
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/sixath/framework/tool"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -56,6 +59,56 @@ func TestMetadataWithTimeline_StructpbCompatible(t *testing.T) {
 		Allowed: true, DurationMS: 5, Arguments: map[string]any{"q": "x"},
 	})
 	a.ApplyModelCall(&ModelCallPayload{Step: 0, Phase: "responded", Model: "m", InputTokens: 2})
+	md := MetadataWithTimeline(a.Finalize())
+	st, err := structpb.NewStruct(md)
+	if err != nil {
+		t.Fatalf("structpb.NewStruct: %v", err)
+	}
+	if st.Fields["timeline"] == nil {
+		t.Fatal("missing timeline field")
+	}
+}
+
+func TestTimelineAccumulator_SpillStubMarshalHasPathNotHits(t *testing.T) {
+	stub := &tool.QuerySpillStub{
+		Spilled: true,
+		Path:    "tmp/results/sess/ok.jsonl",
+		Count:   3,
+		OK:      true,
+		Sample:  []map[string]any{{"i": 1}},
+	}
+	var a TimelineAccumulator
+	a.ApplyToolCall(&ToolCallPayload{
+		ID: "c-spill", Step: 1, Phase: "completed", ToolName: "es_log_query",
+		Allowed: true, Result: stub,
+	})
+	nodes := a.Finalize()
+	raw, err := json.Marshal(nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, "spilled") || !strings.Contains(s, "path") {
+		t.Fatalf("want spilled/path keys, got %s", s)
+	}
+	if strings.Contains(s, `"hits"`) {
+		t.Fatal("must not marshal hits array")
+	}
+}
+
+func TestMetadataWithTimeline_SpillStubStructpbCompatible(t *testing.T) {
+	stub := &tool.QuerySpillStub{
+		Spilled: true,
+		Path:    "tmp/results/sess/ok.jsonl",
+		Count:   3,
+		OK:      true,
+		Sample:  []map[string]any{{"i": 1}},
+	}
+	var a TimelineAccumulator
+	a.ApplyToolCall(&ToolCallPayload{
+		ID: "c-spill", Step: 1, Phase: "completed", ToolName: "es_log_query",
+		Allowed: true, Result: stub,
+	})
 	md := MetadataWithTimeline(a.Finalize())
 	st, err := structpb.NewStruct(md)
 	if err != nil {

@@ -107,6 +107,9 @@ export interface DatasourceConfig {
   password?: string
   dbname?: string
   read_only?: boolean
+  default_index?: string
+  trace_id_field?: string
+  purpose?: string
 }
 
 export interface ToolConfig {
@@ -126,6 +129,9 @@ export interface ToolConfig {
     datasource_id?: string
     default_index?: string
     trace_id_field?: string
+    endpoint?: string
+    user?: string
+    password?: string
     gopls_path?: string
     ready_timeout_sec?: number
     request_timeout_sec?: number
@@ -180,8 +186,27 @@ export function normalizeToolConfig(raw?: ToolConfig & Record<string, unknown>):
     mcp_backend: (cfg.mcp_backend as string | undefined) ?? (cfg.mcpBackend as string | undefined),
     timeout_sec: (cfg.timeout_sec as number | undefined) ?? (cfg.timeoutSec as number | undefined),
     mcp: cfg.mcp as McpConfig | undefined,
-    datasource: cfg.datasource as DatasourceConfig | undefined,
+    datasource: normalizeDatasourceConfig(cfg.datasource),
     rca: normalizeRCAConfig(cfg.rca),
+  }
+}
+
+function normalizeDatasourceConfig(raw: unknown): DatasourceConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  return {
+    id: r.id as string | undefined,
+    type: r.type as string | undefined,
+    dsn: r.dsn as string | undefined,
+    host: r.host as string | undefined,
+    port: r.port as number | undefined,
+    user: r.user as string | undefined,
+    password: r.password as string | undefined,
+    dbname: (r.dbname as string | undefined) ?? (r.dbName as string | undefined),
+    read_only: (r.read_only as boolean | undefined) ?? (r.readOnly as boolean | undefined),
+    default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
+    trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
+    purpose: r.purpose as string | undefined,
   }
 }
 
@@ -197,6 +222,9 @@ function normalizeRCAConfig(raw: unknown): ToolConfig['rca'] | undefined {
     datasource_id: (r.datasource_id as string | undefined) ?? (r.datasourceId as string | undefined),
     default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
     trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
+    endpoint: (r.endpoint as string | undefined) ?? undefined,
+    user: (r.user as string | undefined) ?? undefined,
+    password: (r.password as string | undefined) ?? undefined,
     gopls_path: (r.gopls_path as string | undefined) ?? (r.goplsPath as string | undefined),
     ready_timeout_sec: (r.ready_timeout_sec as number | undefined) ?? (r.readyTimeoutSec as number | undefined),
     request_timeout_sec: (r.request_timeout_sec as number | undefined) ?? (r.requestTimeoutSec as number | undefined),
@@ -377,7 +405,7 @@ export interface ModelConfig {
   model: string
   api_key?: string
   base_url?: string
-  /** 单次回复 max_tokens；0 或未设则用服务端默认 8192 */
+  /** 单次回复 max_tokens；0 或未设则用服务端默认 32768 */
   max_output_tokens?: number
 }
 
@@ -390,16 +418,6 @@ export interface RuntimeToolsConfig {
   terminal_local_enabled?: boolean
   cronjob_tool_enabled?: boolean
   browser_enabled?: boolean
-  /** Memory Hub overrides; omit = process defaults. Not in RUNTIME_TOOL_FIELDS. */
-  hub_governance?: string
-  hub_knowledge?: string
-  hub_fallback_to_default_on_read_error?: boolean
-}
-
-export interface MemoryHubCatalog {
-  defaults: { governance: string; knowledge: string }
-  governance: string[]
-  knowledge: string[]
 }
 
 type RuntimeToolFlagKey =
@@ -532,12 +550,7 @@ function normalizeModelConfig(raw?: ModelConfig & Record<string, unknown>): Mode
 function normalizeRuntimeTools(raw?: RuntimeToolsConfig | Record<string, unknown>): RuntimeToolsConfig {
   if (!raw) return {}
   const cfg = raw as Record<string, unknown>
-  const hubGov = (cfg.hub_governance as string | undefined) ?? (cfg.hubGovernance as string | undefined)
-  const hubKnow = (cfg.hub_knowledge as string | undefined) ?? (cfg.hubKnowledge as string | undefined)
-  const hubFb =
-    (cfg.hub_fallback_to_default_on_read_error as boolean | undefined) ??
-    (cfg.hubFallbackToDefaultOnReadError as boolean | undefined)
-  const out: RuntimeToolsConfig = {
+  return {
     memory_write_enabled: (cfg.memory_write_enabled as boolean | undefined) ?? (cfg.memoryWriteEnabled as boolean | undefined),
     skill_runtime_manage_enabled: (cfg.skill_runtime_manage_enabled as boolean | undefined) ?? (cfg.skillRuntimeManageEnabled as boolean | undefined),
     todo_enabled: (cfg.todo_enabled as boolean | undefined) ?? (cfg.todoEnabled as boolean | undefined),
@@ -547,10 +560,6 @@ function normalizeRuntimeTools(raw?: RuntimeToolsConfig | Record<string, unknown
     cronjob_tool_enabled: (cfg.cronjob_tool_enabled as boolean | undefined) ?? (cfg.cronjobToolEnabled as boolean | undefined),
     browser_enabled: (cfg.browser_enabled as boolean | undefined) ?? (cfg.browserEnabled as boolean | undefined),
   }
-  if (typeof hubGov === 'string' && hubGov.trim()) out.hub_governance = hubGov.trim()
-  if (typeof hubKnow === 'string' && hubKnow.trim()) out.hub_knowledge = hubKnow.trim()
-  if (typeof hubFb === 'boolean') out.hub_fallback_to_default_on_read_error = hubFb
-  return out
 }
 
 /** Explicit true/false for every known flag so PUT never drops browser_enabled via sparse objects. */
@@ -559,11 +568,6 @@ export function serializeRuntimeTools(cfg?: RuntimeToolsConfig): RuntimeToolsCon
   const out: RuntimeToolsConfig = {}
   for (const { key } of RUNTIME_TOOL_FIELDS) {
     out[key] = !!n[key]
-  }
-  if (n.hub_governance) out.hub_governance = n.hub_governance
-  if (n.hub_knowledge) out.hub_knowledge = n.hub_knowledge
-  if (typeof n.hub_fallback_to_default_on_read_error === 'boolean') {
-    out.hub_fallback_to_default_on_read_error = n.hub_fallback_to_default_on_read_error
   }
   return out
 }
@@ -594,85 +598,24 @@ function normalizeAgent(raw: Agent & Record<string, unknown>): Agent {
   }
 }
 
-export const memoryHubApi = {
-  catalog: async (): Promise<MemoryHubCatalog> => {
-    const data = await request<MemoryHubCatalog>('/memory-hub/catalog')
-    return {
-      defaults: {
-        governance: data?.defaults?.governance || 'local',
-        knowledge: data?.defaults?.knowledge || 'local',
-      },
-      governance: data?.governance || ['local'],
-      knowledge: data?.knowledge || ['local'],
-    }
-  },
-  loadout: async (agentId: string): Promise<HubLoadoutView> => {
-    return request<HubLoadoutView>(`/agents/${agentId}/hub/loadout`)
-  },
-  bindings: async (agentId: string): Promise<HubBindingsView> => {
-    return request<HubBindingsView>(`/agents/${agentId}/hub/bindings`)
-  },
-  bind: async (agentId: string, assets: HubAsset[]) => {
-    return request<{ ok: boolean }>(`/agents/${agentId}/hub/bindings`, {
-      method: 'POST',
-      body: JSON.stringify({ assets }),
-    })
-  },
-  unbind: async (agentId: string, assets: HubAsset[]) => {
-    return request<{ ok: boolean }>(`/agents/${agentId}/hub/bindings`, {
-      method: 'DELETE',
-      body: JSON.stringify({ assets }),
-    })
-  },
-  clearBindings: async (agentId: string) => {
-    return request<{ ok: boolean; cleared: number }>(`/agents/${agentId}/hub/bindings/clear`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    })
-  },
-  setStatus: async (agentId: string, asset: HubAsset, status: string) => {
-    return request<{ ok: boolean }>(`/agents/${agentId}/hub/assets/status`, {
-      method: 'POST',
-      body: JSON.stringify({ asset, status }),
-    })
-  },
-  listKnowledgeDrafts: (agentId: string, source?: string) =>
-    request<{ drafts: KnowledgeDraftItem[] }>(
-      `/agents/${agentId}/hub/knowledge/drafts${source ? `?source=${encodeURIComponent(source)}` : ''}`,
+export interface CodeRootBrowseEntry {
+  name: string
+  path: string
+  type: string
+}
+
+export interface CodeRootBrowseResponse {
+  root: string
+  path: string
+  entries: CodeRootBrowseEntry[]
+}
+
+export const codeRootsApi = {
+  list: () => request<{ roots: string[] }>('/code-roots'),
+  browse: (root: string, path = '') =>
+    request<CodeRootBrowseResponse>(
+      `/code-roots/browse?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`,
     ),
-  approveKnowledgeDraft: (agentId: string, body: { source: string; id: string; overwrite?: boolean }) =>
-    request<{ ok: boolean }>(`/agents/${agentId}/hub/knowledge/approve`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-}
-
-export interface KnowledgeDraftItem {
-  source: string
-  id: string
-  title?: string
-  preview?: string
-  updated_at?: string
-}
-
-export interface HubAsset {
-  kind: string
-  id: string
-  hub?: string
-  name?: string
-  status?: string
-}
-
-export interface HubLoadoutView {
-  provider: string
-  items: HubAsset[]
-  total: number
-}
-
-export interface HubBindingsView {
-  provider: string
-  items: HubAsset[]
-  total: number
 }
 
 export const agentApi = {
@@ -707,6 +650,17 @@ export const agentApi = {
     const res = await request<{ ret?: BaseResponse }>(`/agents/${id}`, { method: 'DELETE' })
     checkRet(res)
   },
+  /** Create workspace/code → target symlink under code_roots. */
+  workspaceLink: (id: string, target: string) =>
+    request<{ link?: string; target?: string }>(`/agents/${id}/workspace-link`, {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
+  /** Current workspace/code link status (edit hydrate). */
+  workspaceLinkStatus: (id: string) =>
+    request<{ exists?: boolean; link?: string; target?: string; is_dir?: boolean }>(
+      `/agents/${id}/workspace-link`,
+    ),
   bindTools: async (id: string, toolIds: string[]) => {
     const res = await request<{ ret?: BaseResponse }>(`/agents/${id}/tools`, {
       method: 'POST',
@@ -1005,6 +959,19 @@ export const chatApi = {
       items: (data.items ?? []).map((item) => normalizeChatMessage(item)),
     }
   },
+  listResultFile: async (sessionId: string, path: string) => {
+    const q = new URLSearchParams()
+    q.set('path', path)
+    const data = await request<{ ret?: BaseResponse; path?: string; total?: number; items?: Record<string, unknown>[] }>(
+      `/sessions/${sessionId}/result-files?${q.toString()}`
+    )
+    checkRet(data)
+    return {
+      path: data.path ?? path,
+      total: data.total ?? (data.items ?? []).length,
+      items: data.items ?? [],
+    }
+  },
   getSession: async (id: string) => {
     const data = await request<Record<string, unknown> & { ret?: BaseResponse }>(`/sessions/${id}`)
     checkRet(data)
@@ -1186,32 +1153,6 @@ export const chatApi = {
       deactivated_traces: data.deactivated_traces ?? [],
     }
   },
-  /** Phase 2: aggregate turn_traces insights for an agent. */
-  getInsights: async (agentId: string, opts?: { from?: string; to?: string }) => {
-    const q = new URLSearchParams()
-    if (opts?.from) q.set('from', opts.from)
-    if (opts?.to) q.set('to', opts.to)
-    const query = q.toString()
-    const data = await request<AgentInsights & { ret?: BaseResponse }>(
-      `/agents/${agentId}/insights${query ? '?' + query : ''}`
-    )
-    checkRet(data)
-    return data
-  },
-}
-
-export interface AgentInsights {
-  agent_id: string
-  from: string
-  to: string
-  turns: number
-  tool_calls: number
-  error_calls: number
-  error_rate: number
-  blocked_calls: number
-  top_tools: { name: string; calls: number; errors: number }[]
-  top_sessions: { session_id: string; turns: number; errors: number }[]
-  truncated?: boolean
 }
 
 // Channel API
@@ -1231,6 +1172,9 @@ export interface Channel {
   default_agent: string
   allowed_agents?: string[]
   enabled: boolean
+  auto_route_enabled?: boolean
+  auto_route_mention?: boolean
+  auto_route_classifier?: boolean
   webhook_path?: string
   webhook_url_masked?: string
   ip_whitelist?: string[]
@@ -1258,6 +1202,9 @@ export interface CreateChannelRequest {
   default_agent?: string
   allowed_agents?: string[]
   enabled?: boolean
+  auto_route_enabled?: boolean
+  auto_route_mention?: boolean
+  auto_route_classifier?: boolean
   webhook_path?: string
   webhook_secret?: string
   webhook_url?: string
@@ -1297,6 +1244,18 @@ function normalizeChannel(raw: Channel & Record<string, unknown>): Channel {
     allowed_agents:
       (raw.allowed_agents as string[] | undefined) ?? (raw.allowedAgents as string[] | undefined),
     enabled: (raw.enabled as boolean) ?? false,
+    auto_route_enabled:
+      (raw.auto_route_enabled as boolean | undefined) ??
+      (raw.autoRouteEnabled as boolean | undefined) ??
+      true,
+    auto_route_mention:
+      (raw.auto_route_mention as boolean | undefined) ??
+      (raw.autoRouteMention as boolean | undefined) ??
+      true,
+    auto_route_classifier:
+      (raw.auto_route_classifier as boolean | undefined) ??
+      (raw.autoRouteClassifier as boolean | undefined) ??
+      true,
     webhook_path: (raw.webhook_path as string) ?? (raw.webhookPath as string),
     webhook_url_masked: (raw.webhook_url_masked as string) ?? (raw.webhookUrlMasked as string),
     ip_whitelist: (raw.ip_whitelist as string[]) ?? (raw.ipWhitelist as string[]),

@@ -60,21 +60,6 @@ tool_guardrails:
 #     # auxiliary:                  # 可选；缺省复用 extraction.auxiliary
 #     #   provider: openai
 #     #   model: gpt-4o-mini
-#   procedural_repair:              # P3-A…E；默认关；试点 zone-4100-agent
-#     enabled: false
-#     auto_commit: false            # 仅 pilot_agents 可写 kind=procedural
-#     min_support: 2
-#     max_procedural: 3
-#     mode: suggest
-#     pilot_agents: ["zone-4100-agent"]
-#     inject:
-#       prefetch: true
-#       skill_router: true
-#     bindings:
-#       - trigger_code: tool_failed
-#         action_kind: skill
-#         skill_id: escalation      # 须为该 Agent 已有 Skill
-#         mode: suggest
 
 # —— 以下顶层键仍可读（无 memory_store 覆盖时）；文档视为 deprecated ——
 

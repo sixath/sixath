@@ -48,14 +48,12 @@ func EnrichChatFromEnv(c *ChatConfig) {
 	if c == nil {
 		return
 	}
-	v := strings.TrimSpace(os.Getenv("SATH_CHAT_PUBLIC_INBOUND_ENABLED"))
-	if v == "" {
-		return
-	}
-	switch strings.ToLower(v) {
-	case "1", "true", "yes", "on":
-		c.PublicInboundEnabled = true
-	case "0", "false", "no", "off":
-		c.PublicInboundEnabled = false
+	if v := strings.TrimSpace(os.Getenv("SATH_CHAT_PUBLIC_INBOUND_ENABLED")); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.PublicInboundEnabled = true
+		case "0", "false", "no", "off":
+			c.PublicInboundEnabled = false
+		}
 	}
 }

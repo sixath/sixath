@@ -1125,6 +1125,9 @@ components:
                     type: boolean
                 browserEnabled:
                     type: boolean
+                meaEnabled:
+                    type: boolean
+                    description: MEA（Manage-Execute-Audit）；与 SATH_MEA / SATH_MEA_PILOT_AGENTS OR 合并
                 hybridRecall:
                     type: boolean
                     description: unset = on（默认开启混合召回）；presence 全链路保留
@@ -1769,6 +1772,13 @@ components:
                 defaultIndex:
                     type: string
                 traceIdField:
+                    type: string
+                endpoint:
+                    type: string
+                    description: es_log_query inline ES URL (DSN); mutually exclusive with datasourceId
+                user:
+                    type: string
+                password:
                     type: string
             description: RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
         tool.v1.ToolConfig:

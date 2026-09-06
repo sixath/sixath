@@ -26,7 +26,7 @@ Thin workflow skill for Sixath RCA tools. **Do not invent traces, logs, or file 
 ## Standard order (lock)
 
 1. **Trace** — `jaeger_trace` with `trace_id` (or service/operation search if id unknown).
-2. **Logs** — `es_log_query` with the same `trace_id` (and time window / service filters if available).
+2. **Logs** — `es_log_query(cluster="<elasticsearch tool name>", trace_id=...)` with the same `trace_id` (and time window / service filters if available). `cluster` is required (bound elasticsearch datasource name). A call without `cluster` does not succeed. The same task may call a second `cluster` for another bound ES.
 3. **Code** — from error messages / stack frames / class names found above, use `rca_grep` → `rca_glob` → `rca_read` to pin files and lines.
 
 Do **not** jump to code before you have either a failing span or a log line that names a symbol/path.

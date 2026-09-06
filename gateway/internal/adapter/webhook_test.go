@@ -286,6 +286,63 @@ func TestWebhook_Sync_200(t *testing.T) {
 	}
 }
 
+func TestWebhook_MentionAutoRoute_StripAndRebind(t *testing.T) {
+	var gotResolve map[string]any
+	var gotTurn map[string]any
+	var resolveN int32
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/runtime/v1/channels/demo-webhook/agents":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_agent":         "agent-1",
+				"auto_route_enabled":    true,
+				"auto_route_mention":    true,
+				"auto_route_classifier": true,
+				"agents": []map[string]string{
+					{"id": "agent-1", "name": "Alpha"},
+					{"id": "agent-2", "name": "Ops Bot"},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/sessions/resolve":
+			n := atomic.AddInt32(&resolveN, 1)
+			_ = json.Unmarshal(body, &gotResolve)
+			if n == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"reason":"AGENT_BOUND"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "sess-2", "agent_id": "agent-2", "user_id": "u1", "created": true,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/turns":
+			_ = json.Unmarshal(body, &gotTurn)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "content": "pong"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer portal.Close()
+
+	h, _, cleanup := newWebhookFixtureWithPortal(t, channelYAML(true, nil), portal.URL)
+	defer cleanup()
+
+	rr := postHook(t, h, "demo-webhook", "dev-webhook-secret", "127.0.0.1:1", map[string]any{
+		"content":    "@Ops Bot hello world",
+		"peer_id":    "peer-1",
+		"reply_mode": "sync",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if gotResolve["agent_id"] != "agent-2" || gotResolve["force_new"] != true {
+		t.Fatalf("resolve=%v", gotResolve)
+	}
+	if gotTurn["content"] != "hello world" {
+		t.Fatalf("turn=%v", gotTurn)
+	}
+}
+
 func TestWebhook_AgentSwitchCommand_NoTurn_ForceNew(t *testing.T) {
 	var turns int32
 	var gotResolve map[string]any

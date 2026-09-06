@@ -2,11 +2,13 @@ package chat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"backend/internal/biz"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
@@ -26,47 +28,36 @@ func TestReActOptionsFromAgent_zeroOmits(t *testing.T) {
 	}
 }
 
-func TestShouldEnableEvidenceGate(t *testing.T) {
-	if ShouldEnableEvidenceGate(nil) {
-		t.Fatal("nil registry must be false")
+func TestHarnessReActOptions_LoadsWorkspaceHooks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "harness"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	empty := tool.NewRegistry()
-	if ShouldEnableEvidenceGate(empty) {
-		t.Fatal("empty registry must be false")
+	body := []byte(`
+version: 1
+rules:
+  - id: block-demo
+    tools: [demo]
+    action: block
+    reason: "no demo"
+`)
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	jaeger := tool.NewRegistry()
-	if err := jaeger.Register(tool.Tool{
-		Name:        "jaeger_trace",
-		Description: "jaeger",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register jaeger: %v", err)
+	opts := HarnessReActOptions(root, nil)
+	var cfg agent.ReActConfig
+	for _, o := range opts {
+		o(&cfg)
 	}
-	if !ShouldEnableEvidenceGate(jaeger) {
-		t.Fatal("jaeger_trace registry must enable gate")
+	if cfg.Workspace != root {
+		t.Fatalf("workspace=%q", cfg.Workspace)
 	}
-
-	es := tool.NewRegistry()
-	if err := es.Register(tool.Tool{
-		Name:        "es_log_query",
-		Description: "es",
-		Parameters:  map[string]any{"type": "object"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, nil
-		},
-	}); err != nil {
-		t.Fatalf("register es: %v", err)
-	}
-	if !ShouldEnableEvidenceGate(es) {
-		t.Fatal("es_log_query registry must enable gate")
+	if len(cfg.ToolHooks) != 1 {
+		t.Fatalf("ToolHooks=%d want 1", len(cfg.ToolHooks))
 	}
 }
 
-func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
+func TestBuildReActAgent_jaegerDoesNotSoftInject(t *testing.T) {
 	reg := tool.NewRegistry()
 	if err := reg.Register(tool.Tool{
 		Name:        "jaeger_trace",
@@ -85,8 +76,8 @@ func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ReActAgent, got %T", a)
 	}
-	if !react.EvidenceGateEnabled() {
-		t.Fatal("BuildReActAgent with jaeger_trace must enable EvidenceGate")
+	if react.ParallelToolsEnabled() {
+		t.Fatal("jaeger-only registry must not enable ParallelTools")
 	}
 
 	resp, err := react.Run(context.Background(), &agent.Request{
@@ -95,24 +86,59 @@ func TestBuildReActAgent_enablesEvidenceGateForJaeger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	tr, _ := resp.Metadata["trace"].(*agent.RunTrace)
-	if tr == nil || tr.EvidenceNudges != 1 {
-		t.Fatalf("expected Soft inject (EvidenceNudges=1), got %#v", tr)
+	if resp == nil || resp.Text != "premature RCA answer" {
+		t.Fatalf("expected final answer without Soft inject, got %#v", resp)
 	}
-	if resp.Metadata["evidence_incomplete"] != true {
-		t.Fatalf("expected evidence_incomplete after Soft retry, got %#v", resp.Metadata)
+	tr, _ := resp.Metadata["trace"].(*agent.RunTrace)
+	if tr != nil && tr.EvidenceNudges != 0 {
+		t.Fatalf("EvidenceNudges=%d want 0", tr.EvidenceNudges)
+	}
+	if resp.Metadata["evidence_incomplete"] == true {
+		t.Fatalf("must not set evidence_incomplete: %#v", resp.Metadata)
 	}
 }
 
-func TestBuildReActAgent_noEvidenceGateWithoutRCATools(t *testing.T) {
+func TestBuildReActAgent_calculatorRunsWithoutRCATools(t *testing.T) {
 	reg := tool.NewRegistry()
 	_ = tool.RegisterCalculatorTool(reg)
 	fake := &builderGateFake{finalReply: "ok"}
 	a := BuildReActAgent(fake, reg, "", 10, agent.WithReActMaxSteps(2))
 	react := a.(*agent.ReActAgent)
-	if react.EvidenceGateEnabled() {
-		t.Fatal("non-RCA registry must leave EvidenceGate disabled")
+	resp, err := react.Run(context.Background(), &agent.Request{
+		Messages: []model.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if resp == nil || resp.Text != "ok" {
+		t.Fatalf("got %#v", resp)
+	}
+}
+
+func TestBuildReActAgent_rcaReadEnablesParallelTools(t *testing.T) {
+	reg := registerTestRCARead(t)
+	fake := &builderGateFake{finalReply: "ok"}
+	a := BuildReActAgent(fake, reg, "", 10, agent.WithReActMaxSteps(2))
+	react := a.(*agent.ReActAgent)
+	if !react.ParallelToolsEnabled() {
+		t.Fatal("rca_read registry must enable ParallelTools")
+	}
+}
+
+func registerTestRCARead(t *testing.T) *tool.Registry {
+	t.Helper()
+	reg := tool.NewRegistry()
+	if err := reg.Register(tool.Tool{
+		Name:        "rca_read",
+		Description: "read",
+		Parameters:  map[string]any{"type": "object"},
+		Execute: func(ctx context.Context, params map[string]any) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register rca_read: %v", err)
+	}
+	return reg
 }
 
 type builderGateFake struct {

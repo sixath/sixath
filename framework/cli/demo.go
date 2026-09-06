@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/middleware"
 	"github.com/sixath/framework/model"
@@ -24,6 +24,9 @@ func NewDemoCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			cfg := config.FromEnv()
+			if err := applyCLIWorkspace(&cfg); err != nil {
+				return err
+			}
 
 			m, err := model.NewOpenAIClient()
 			if err != nil {
@@ -31,7 +34,7 @@ func NewDemoCommand() *cobra.Command {
 			}
 
 			mem := memory.NewBufferMemory(cfg.MaxHistory)
-			core := agent.NewChatAgent(m, mem, agent.WithMaxHistory(cfg.MaxHistory))
+			core := agent.NewChatAgent(m, mem, agent.WithMaxHistory(cfg.MaxHistory), agent.WithChatWorkspace(cfg.Workspace))
 			handler := middleware.Chain(
 				func(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 					return core.Run(ctx, req)

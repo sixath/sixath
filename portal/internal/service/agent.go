@@ -16,7 +16,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
@@ -29,20 +29,34 @@ func baseFail(code int32, msg string) *common.BaseResponse {
 	return &common.BaseResponse{Code: code, Message: msg}
 }
 
+func protoToBizModelConfig(mc *agentv1.ModelConfig) biz.ModelConfig {
+	if mc == nil {
+		return biz.ModelConfig{}
+	}
+	return biz.ModelConfig{
+		Provider:        mc.GetProvider(),
+		Model:           mc.GetModel(),
+		APIKey:          mc.GetApiKey(),
+		BaseURL:         mc.GetBaseUrl(),
+		MaxOutputTokens: int(mc.GetMaxOutputTokens()),
+	}
+}
+
 // AgentService implements agent.v1.AgentHTTPServer and agent.v1.AgentServer
 type AgentService struct {
 	agentv1.UnimplementedAgentServer
-	uc           *biz.AgentUsecase
-	toolUC       *biz.ToolUsecase
-	mcpServerUC  *biz.McpServerUsecase
-	skillUC      *biz.SkillResourceUsecase
-	channelUC    *biz.ChannelUsecase
-	log          *log.Helper
+	uc          *biz.AgentUsecase
+	toolUC      *biz.ToolUsecase
+	mcpServerUC *biz.McpServerUsecase
+	skillUC     *biz.SkillResourceUsecase
+	channelUC   *biz.ChannelUsecase
+	codeRoots   []string
+	log         *log.Helper
 }
 
 // NewAgentService creates an AgentService
-func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *AgentService {
-	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, log: log.NewHelper(logger)}
+func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, codeRoots []string, logger log.Logger) *AgentService {
+	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, codeRoots: codeRoots, log: log.NewHelper(logger)}
 }
 
 func (s *AgentService) sharedSkillDirs(ctx context.Context, agentID string) ([]string, error) {
@@ -106,21 +120,16 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 // CreateAgent implements agent.v1.AgentHTTPServer
 func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgentRequest) (*agentv1.AgentReply, error) {
 	mc := req.GetModelConfig()
-	modelConfig := biz.ModelConfig{
-		Provider:        mc.GetProvider(),
-		Model:           mc.GetModel(),
-		APIKey:          mc.GetApiKey(),
-		BaseURL:         mc.GetBaseUrl(),
-		MaxOutputTokens: int(mc.GetMaxOutputTokens()),
-	}
+	modelConfig := protoToBizModelConfig(mc)
 	if err := s.validateWecomChannel(ctx, req.GetWecomChannelId()); err != nil {
 		return nil, err
 	}
 	rt := biz.RuntimeToolsFromProto(req.GetRuntimeTools())
-	if err := chat.ValidateAgentHub(rt); err != nil {
-		return nil, errors.BadRequest("INVALID_HUB", err.Error())
+	workspace := strings.TrimSpace(req.GetWorkspace())
+	if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
+		return nil, biz.ErrWorkspaceWholeRepoRetired
 	}
-	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), req.GetWorkspace(), modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds())
+	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), workspace, modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds())
 	if err != nil {
 		s.log.Errorf("CreateAgent failed: name=%s workspace=%s err=%v", req.GetName(), req.GetWorkspace(), err)
 		return nil, err
@@ -165,51 +174,30 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 		updates["system_prompt"] = *req.SystemPrompt
 	}
 	if req.ModelConfig != nil {
-		updates["model_config"] = biz.ModelConfig{
-			Provider:        req.ModelConfig.GetProvider(),
-			Model:           req.ModelConfig.GetModel(),
-			APIKey:          req.ModelConfig.GetApiKey(),
-			BaseURL:         req.ModelConfig.GetBaseUrl(),
-			MaxOutputTokens: int(req.ModelConfig.GetMaxOutputTokens()),
-		}
+		updates["model_config"] = protoToBizModelConfig(req.ModelConfig)
 	}
 	if req.Workspace != nil {
-		updates["workspace"] = *req.Workspace
+		workspace := strings.TrimSpace(*req.Workspace)
+		if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
+			return nil, biz.ErrWorkspaceWholeRepoRetired
+		}
+		updates["workspace"] = workspace
 	}
 	if req.DebugRun != nil {
 		updates["debug_run"] = *req.DebugRun
 	}
 	if req.RuntimeTools != nil {
 		rt := biz.RuntimeToolsFromProto(req.RuntimeTools)
-		// Old clients may omit optional presence fields; preserve stored values.
-		needPreserve := req.RuntimeTools.HybridRecall == nil ||
-			req.RuntimeTools.HubGovernance == nil ||
-			req.RuntimeTools.HubKnowledge == nil ||
-			req.RuntimeTools.HubFallbackToDefaultOnReadError == nil
-		if needPreserve {
+		// Old clients may omit optional presence fields; preserve stored hybrid_recall.
+		if req.RuntimeTools.HybridRecall == nil {
 			existing, err := s.uc.GetForEdit(ctx, req.GetId())
 			if err != nil {
 				return nil, err
 			}
-			if req.RuntimeTools.HybridRecall == nil && existing.RuntimeTools.HybridRecall != nil {
+			if existing.RuntimeTools.HybridRecall != nil {
 				v := *existing.RuntimeTools.HybridRecall
 				rt.HybridRecall = &v
 			}
-			if req.RuntimeTools.HubGovernance == nil && existing.RuntimeTools.HubGovernance != nil {
-				v := *existing.RuntimeTools.HubGovernance
-				rt.HubGovernance = &v
-			}
-			if req.RuntimeTools.HubKnowledge == nil && existing.RuntimeTools.HubKnowledge != nil {
-				v := *existing.RuntimeTools.HubKnowledge
-				rt.HubKnowledge = &v
-			}
-			if req.RuntimeTools.HubFallbackToDefaultOnReadError == nil && existing.RuntimeTools.HubFallbackToDefaultOnReadError != nil {
-				v := *existing.RuntimeTools.HubFallbackToDefaultOnReadError
-				rt.HubFallbackToDefaultOnReadError = &v
-			}
-		}
-		if err := chat.ValidateAgentHub(rt); err != nil {
-			return nil, errors.BadRequest("INVALID_HUB", err.Error())
 		}
 		updates["runtime_tools"] = rt
 	}
@@ -279,6 +267,9 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat get agent failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
+		return nil, err
+	}
 
 	tools, err := s.toolUC.ListByAgent(ctx, agentID)
 	if err != nil {
@@ -302,7 +293,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 	reg := tool.NewRegistry()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg)
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("Chat build tool registry failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
@@ -324,13 +315,8 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		McpServers:     mcpServers,
 		AllowScript:    true,
 		VisionAnalyzer: chat.VisionAnalyzerForModel(m),
-		RuntimeTools:   agentMeta.RuntimeTools,
 	}); err != nil {
 		s.log.Errorf("Chat register runtime tools failed: agent_id=%s err=%v", agentID, err)
-		return nil, err
-	}
-	if err := chat.RegisterLearningTools(reg); err != nil {
-		s.log.Errorf("Chat register append_learning failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
@@ -349,23 +335,12 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 
-	effectivePrompt := chat.FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
-	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurn(agentMeta.SystemPrompt, skillsIdx, content)
-	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
-	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
-		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
-	}
-	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
-	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, chat.ReActOptionsFromAgent(*agentMeta)...)
+	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
+	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	a := chat.BuildReActAgent(m, reg, agentText, 20, opts...)
 
-	messages := make([]model.Message, 0, 3)
-	if effectivePrompt != "" {
-		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
-	}
+	messages := make([]model.Message, 0, 1)
 	messages = append(messages, model.Message{Role: "user", Content: content})
 
 	runCtx := context.WithValue(ctx, tool.ContextKeyWorkspaceRoot, agentMeta.Workspace)
@@ -376,13 +351,13 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		runCtx = context.WithValue(runCtx, tool.ContextKeyToolSearchActive, true)
 	}
 	md := chat.RequestMetadataFromContext(runCtx)
-	if md != nil && agentMeta.Workspace != "" {
+	if md == nil {
+		md = map[string]any{}
+	}
+	if agentMeta.Workspace != "" {
 		md["workspace_root"] = agentMeta.Workspace
 	}
-	agentReq := &agent.Request{Messages: messages}
-	if md != nil {
-		agentReq.Metadata = md
-	}
+	agentReq := &agent.Request{Messages: messages, Metadata: md}
 	resp, err := a.Run(runCtx, agentReq)
 	if err != nil {
 		isH, vis, _, raw := chat.DecomposeGuardrailRunError(err)
@@ -433,6 +408,14 @@ func (s *AgentService) UploadSkillPackage(ctx context.Context, req *agentv1.Uplo
 		s.log.Errorf("UploadSkillPackage get agent failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
+	if chat.WorkspaceUnderCodeRoots(agent.Workspace, s.codeRoots) {
+		const msg = "workspace is under read-only code root; use subdirectory mode (workspace/code)"
+		return &agentv1.UploadSkillPackageReply{
+			Ret:     baseFail(400, msg),
+			Success: false,
+			Message: msg,
+		}, nil
+	}
 	result := validator.ValidateSkillPackage(req.GetFile())
 	if !result.Valid {
 		return &agentv1.UploadSkillPackageReply{
@@ -468,6 +451,9 @@ func (s *AgentService) ExecuteSkill(ctx context.Context, req *agentv1.ExecuteSki
 	agentMeta, err := s.uc.GetForUse(ctx, agentID)
 	if err != nil {
 		s.log.Errorf("ExecuteSkill get agent failed: agent_id=%s err=%v", agentID, err)
+		return nil, err
+	}
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
 		return nil, err
 	}
 

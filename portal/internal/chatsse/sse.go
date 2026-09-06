@@ -97,6 +97,10 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 				timeline.ApplyModelCall(event.ModelCall)
 				WriteEvent(w, "model_call", map[string]any{"model_call": event.ModelCall})
 			}
+		case service.ChatStreamEventMEA:
+			if event.MEA != nil {
+				WriteEvent(w, "mea", map[string]any{"mea": event.MEA})
+			}
 		default:
 			if event.Content != "" {
 				out := event.Content
@@ -123,13 +127,16 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 	}
 
 	res.Content = full.String()
-	if res.Failed {
-		return res
+	persistContent := res.Content
+	if res.Failed && strings.TrimSpace(persistContent) == "" && res.Error != "" {
+		persistContent = "Error: " + res.Error
 	}
-
 	meta := service.MetadataWithTimeline(timeline.Finalize())
-	if persist != nil {
-		if err := persist(persistCtx, sessionID, res.Content, meta); err != nil {
+	if persist != nil && (res.Failed || persistContent != "" || meta != nil) {
+		if err := persist(persistCtx, sessionID, persistContent, meta); err != nil {
+			if res.Failed {
+				return res
+			}
 			if suppressTerminalStreamError(err, full.Len() > 0) {
 				WriteEvent(w, "done", map[string]any{"content": "", "done": true})
 				flush(w)
@@ -141,6 +148,9 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 			flush(w)
 			return res
 		}
+	}
+	if res.Failed {
+		return res
 	}
 
 	WriteEvent(w, "done", map[string]any{"content": "", "done": true})
@@ -183,7 +193,7 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 			res.Failed = true
 			res.Error = event.Error
 		case service.ChatStreamEventDebug, service.ChatStreamEventToolCall, service.ChatStreamEventModelCall,
-			service.ChatStreamEventConfirmResult:
+			service.ChatStreamEventConfirmResult, service.ChatStreamEventMEA:
 			// Observability / HITL side-channels — never part of the assistant answer body.
 		default:
 			// Unknown types: ignore non-chunk content to avoid leaking protocol payloads into IM replies.

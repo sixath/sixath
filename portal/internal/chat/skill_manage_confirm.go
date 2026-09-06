@@ -54,20 +54,8 @@ func SkillManageToolConfigForGrowthReview(idx *skills.Index) *toolskill.SkillMan
 	return cfg
 }
 
-// FailureCaptureEnabled 为 true 时主对话注入 FailureCaptureHook（默认 false；SATH_GROWTH_FAILURE_CAPTURE）。
-var FailureCaptureEnabled = false
-
-// SetFailureCaptureEnabled 由 env 设置。
-func SetFailureCaptureEnabled(v bool) {
-	FailureCaptureEnabled = v
-}
-
-// EnrichFailureCaptureFromEnv reads SATH_GROWTH_FAILURE_CAPTURE (1/true/yes).
-func EnrichFailureCaptureFromEnv() {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("SATH_GROWTH_FAILURE_CAPTURE")))
-	if v == "1" || v == "true" || v == "yes" {
-		FailureCaptureEnabled = true
-	}
+// EnrichSkillManageConfirmFromEnv reads SATH_SKILL_MANAGE_CONFIRM_PATCH (1/true/yes).
+func EnrichSkillManageConfirmFromEnv() {
 	if v := strings.TrimSpace(os.Getenv("SATH_SKILL_MANAGE_CONFIRM_PATCH")); v != "" {
 		lv := strings.ToLower(v)
 		SkillManageConfirmPatch = lv == "1" || lv == "true" || lv == "yes"

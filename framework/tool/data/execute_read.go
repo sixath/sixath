@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sixath/framework/events"
+	"strings"
 	"time"
 
 	"github.com/sixath/framework/datasource"
+	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
+	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/obs"
 	"github.com/sixath/framework/tool"
 )
@@ -18,6 +20,7 @@ type ExecuteReadConfig struct {
 	Reader              executor.Reader
 	Exec                executor.Executor    // Deprecated: use Reader; 若 Reader 为空且 Exec 非空则经 executorAsReader 适配
 	Registry            *datasource.Registry // 可选：用于将误传的 datasource_id "default" 解析为实际默认 id
+	Store               *metadata.InMemoryStore
 	DefaultDatasourceID string
 	// DefaultTimeoutSec 默认超时时间（秒），0 表示无限制。
 	DefaultTimeoutSec int
@@ -162,9 +165,6 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 		res, err := reader.Query(ctx, datasourceID, dsl, qo)
 		if err != nil {
 			status = "error"
-			if executor.IsSchemaRelated(err) {
-				return nil, fmt.Errorf("execute_read: %w; 请先对该表/索引调用 describe_table 获取正确结构后再重试 execute_read。", err)
-			}
 			return nil, fmt.Errorf("execute_read: %w", err)
 		}
 		rid, _ := ctx.Value(tool.ContextKeyRequestID).(string)
@@ -178,8 +178,35 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 			RequestID: rid,
 			Payload:   invokedPayload,
 		})
+		if res == nil {
+			return res, nil
+		}
+		n := len(res.Rows)
+		idx := ""
+		if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
+			idx = strings.TrimSpace(v)
+		}
+		res.HitStatus = tool.HitStatusFromCount(true, n)
+		res.QueriedIndex = idx
 		return res, nil
 	}
+}
+
+func queryResultRows(res *executor.QueryResult) []map[string]any {
+	if res == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		m := make(map[string]any, len(res.Columns))
+		for i, col := range res.Columns {
+			if i < len(row) {
+				m[col] = row[i]
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func sliceAny(v any) []any {

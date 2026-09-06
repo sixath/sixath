@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { agentApi, chatApi, DEFAULT_SESSION_TITLE, type Agent, type ChatMessage } from '../api/client'
-import { buildConfirmSubmitBody, buildInputSubmitBody, inputProvidedLabel, type ChatConfirmationRequest, type ChatInputRequest, type ConfirmResultPayload, type WebSourceItem } from '../api/chatStream'
+import {
+  buildConfirmSubmitBody,
+  buildInputSubmitBody,
+  inputProvidedLabel,
+  restoreConfirmationsFromMessages,
+  restoreInputsFromMessages,
+  type ChatConfirmationRequest,
+  type ChatInputRequest,
+  type ConfirmResultPayload,
+  type WebSourceItem,
+} from '../api/chatStream'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
 import { SourcesPanel } from '../components/SourcesPanel'
+import { SpillResultTable, useSpillTable } from '../components/SpillResultTable'
 import { isCompactBoundaryMessage, isMessageVisibleAtIndex } from '../utils/compactBoundary'
 import { applyToolCall, applyModelCall, finalizeTimeline, type TimelineNode } from './timelineReducer'
 import { toolVerb } from './toolVerbMap'
@@ -46,7 +57,7 @@ interface ChatConfirmationItem extends ChatConfirmationRequest {
 
 interface ChatInputItem extends ChatInputRequest {
   messageKey: string
-  status: 'pending' | 'submitting' | 'submitted' | 'cancelled'
+  status: 'pending' | 'submitting' | 'submitted' | 'cancelled' | 'expired'
   draft: string
   error?: string
 }
@@ -138,6 +149,32 @@ function confirmButtonLabel(status: ChatConfirmationItem['status']): string {
     default:
       return 'Confirm'
   }
+}
+
+function AssistantReplyBody({
+  sessionId,
+  content,
+  nodes,
+  showCursor,
+  interrupted,
+}: {
+  sessionId?: string
+  content: string
+  nodes: TimelineNode[]
+  showCursor: boolean
+  interrupted: boolean
+}) {
+  const spill = useSpillTable(sessionId, content, nodes)
+  const banner = spill.table
+    ? `标题写的行数多于对话里贴出的表格；下面已加载工具落盘的完整 ${spill.table.rows.length} 行。`
+    : spill.hint ?? (interrupted ? '这条回复在生成时被中断，内容可能不完整。' : null)
+  return (
+    <>
+      {banner && <p className="chat-truncated-banner">{banner}{spill.loading ? ' 正在加载…' : ''}{spill.error ? ` ${spill.error}` : ''}</p>}
+      {spill.table && <SpillResultTable columns={spill.table.columns} rows={spill.table.rows} />}
+      <MarkdownContent showCursor={showCursor}>{spill.displayContent}</MarkdownContent>
+    </>
+  )
 }
 
 function TimelineView({ nodes }: { nodes: TimelineNode[] }) {
@@ -369,8 +406,8 @@ export default function ChatPage(props?: ChatPageProps) {
         setMessageTimelines({})
         setMessageSources({})
         setCollapsedBoundaries(new Set())
-        setConfirmations([])
-        setInputs([])
+        setConfirmations(restoreConfirmationsFromMessages(res.items))
+        setInputs(restoreInputsFromMessages(res.items))
         setError('')
       })
       .catch((e) => {
@@ -395,8 +432,8 @@ export default function ChatPage(props?: ChatPageProps) {
     setMessageTimelines({})
     setMessageSources({})
     setCollapsedBoundaries(new Set())
-    setConfirmations([])
-    setInputs([])
+    setConfirmations(restoreConfirmationsFromMessages(res.items))
+    setInputs(restoreInputsFromMessages(res.items))
   }, [])
 
   const handleRewind = useCallback(async (messageId: string) => {
@@ -602,7 +639,7 @@ export default function ChatPage(props?: ChatPageProps) {
         onDone: () => {
           finishStreamUi()
           // Replace ephemeral stream ids (and empty user id) with persisted message ids
-          // so Rewind / Insights-facing actions can call the API with real UUIDs.
+          // so Rewind can call the API with real UUIDs.
           if (sid) {
             void reloadMessages(sid).catch(() => {
               /* keep streamed content if reload fails */
@@ -644,10 +681,13 @@ export default function ChatPage(props?: ChatPageProps) {
           opts?.onConfirmResult?.(result)
         },
         onInputRequired: (inputRequest) => {
-          setInputs((prev) => [
-            ...prev,
-            { ...inputRequest, messageKey: assistantKey, status: 'pending', draft: '' },
-          ])
+          setInputs((prev) => {
+            if (prev.some((c) => c.token === inputRequest.token)) return prev
+            return [
+              ...prev,
+              { ...inputRequest, messageKey: assistantKey, status: 'pending', draft: '' },
+            ]
+          })
         },
         onSourcesBrowsed: (payload) => {
           setMessageSources((prev) => {
@@ -915,10 +955,22 @@ export default function ChatPage(props?: ChatPageProps) {
                               <TimelineView nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []} />
                             )}
                             <SourcesPanel sources={sources} />
-                            <MarkdownContent showCursor={streaming && idx === messages.length - 1}>
-                              {m.content}
-                            </MarkdownContent>
-                            {inputs.filter((c) => c.messageKey === messageKey).map((c) => (
+                            <AssistantReplyBody
+                              sessionId={sessionId}
+                              content={m.content}
+                              nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []}
+                              showCursor={streaming && idx === messages.length - 1}
+                              interrupted={(messageTimelines[messageKey] ?? m.metadata?.timeline ?? []).some((n) => n.phase === 'interrupted')}
+                            />
+                            {(() => {
+                              const messageInputs = inputs.filter((c) => {
+                                if (c.messageKey === messageKey) return true
+                                return (
+                                  isLastAssistant &&
+                                  (c.status === 'pending' || c.status === 'submitting')
+                                )
+                              })
+                              return messageInputs.map((c) => (
                               <div key={`${c.messageKey}-${c.token}`} className={`chat-input-card chat-input-card-${c.severity || 'default'}`}>
                                 <div className="chat-input-title">{c.title}</div>
                                 <div className="chat-input-description">{c.prompt}</div>
@@ -953,7 +1005,7 @@ export default function ChatPage(props?: ChatPageProps) {
                                     disabled={c.status !== 'pending' || streaming}
                                     onClick={() => handleInputSubmit(c)}
                                   >
-                                    {c.status === 'submitting' ? 'Submitting...' : c.status === 'submitted' ? 'Submitted' : c.kind === 'confirm' ? 'Confirm' : 'Submit'}
+                                    {c.status === 'submitting' ? 'Submitting...' : c.status === 'submitted' ? 'Submitted' : c.status === 'expired' ? 'Expired' : c.kind === 'confirm' ? 'Confirm' : 'Submit'}
                                   </button>
                                   <button
                                     type="button"
@@ -965,7 +1017,8 @@ export default function ChatPage(props?: ChatPageProps) {
                                   </button>
                                 </div>
                               </div>
-                            ))}
+                              ))
+                            })()}
                             {messageConfirmations.map((c) => {
                               const remaining = remainingConfirmSeconds(c, nowMs)
                               const inactive = c.status !== 'pending'

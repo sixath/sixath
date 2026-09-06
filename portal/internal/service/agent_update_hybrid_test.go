@@ -54,6 +54,9 @@ func (r *hybridAgentRepo) Update(_ context.Context, id string, updates map[strin
 	if v, ok := updates["name"].(string); ok {
 		r.agent.Name = v
 	}
+	if v, ok := updates["workspace"].(string); ok {
+		r.agent.Workspace = v
+	}
 	return r.GetByID(context.Background(), id)
 }
 func (r *hybridAgentRepo) Delete(context.Context, string) error { return nil }
@@ -62,12 +65,6 @@ func (r *hybridAgentRepo) BindTools(context.Context, string, []string) error {
 }
 func (r *hybridAgentRepo) UnbindTools(context.Context, string, []string) error {
 	return nil
-}
-func (r *hybridAgentRepo) ListDistinctWorkspaces(context.Context, int) ([]biz.CuratorWorkspace, error) {
-	return nil, nil
-}
-func (r *hybridAgentRepo) ListAgentIDsByWorkspace(context.Context, string) ([]string, error) {
-	return nil, nil
 }
 
 type hybridResourceRepo struct {
@@ -116,7 +113,7 @@ func newHybridUpdateAgentService(t *testing.T, stored biz.RuntimeToolsConfig) (*
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
 	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), "/tmp", log.NewStdLogger(nil))
-	return NewAgentService(uc, nil, nil, nil, nil, log.NewStdLogger(nil)), repo
+	return NewAgentService(uc, nil, nil, nil, nil, nil, log.NewStdLogger(nil)), repo
 }
 
 func TestUpdateAgent_OmitsHybridRecall_PreservesStored(t *testing.T) {

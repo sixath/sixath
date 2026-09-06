@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	toolskill "github.com/sixath/framework/tool/skillops"
 )
 

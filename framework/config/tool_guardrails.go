@@ -114,35 +114,6 @@ type MemoryStoreAgentWorkspace struct {
 	WriteEnabled bool `json:"write_enabled" yaml:"write_enabled"`
 }
 
-// MemoryProceduralRepair configures hand-written procedural bindings (P3-C) and future auto-commit (P3-E).
-type MemoryProceduralRepair struct {
-	Enabled        bool                        `json:"enabled" yaml:"enabled"`
-	AutoCommit     bool                        `json:"auto_commit" yaml:"auto_commit"` // P3-E; ignore if true in P3-C
-	MinSupport     int                         `json:"min_support" yaml:"min_support"`
-	MaxProcedural  int                         `json:"max_procedural" yaml:"max_procedural"`
-	Mode           string                      `json:"mode" yaml:"mode"` // default suggest
-	PilotAgents    []string                    `json:"pilot_agents" yaml:"pilot_agents"`
-	Bindings       []MemoryProceduralBindingYAML `json:"bindings" yaml:"bindings"`
-	Inject         *MemoryProceduralInject     `json:"inject" yaml:"inject"`
-}
-
-// MemoryProceduralBindingYAML is the config shape for one hand-written binding.
-type MemoryProceduralBindingYAML struct {
-	TriggerCode  string   `json:"trigger_code" yaml:"trigger_code"`
-	TriggerQuery string   `json:"trigger_query" yaml:"trigger_query"`
-	ActionKind   string   `json:"action_kind" yaml:"action_kind"`
-	SkillID      string   `json:"skill_id" yaml:"skill_id"`
-	ToolNames    []string `json:"tool_names" yaml:"tool_names"`
-	Mode         string   `json:"mode" yaml:"mode"`
-	AgentID      string   `json:"agent_id" yaml:"agent_id"`
-}
-
-// MemoryProceduralInject toggles dual-channel exposure.
-type MemoryProceduralInject struct {
-	Prefetch    *bool `json:"prefetch" yaml:"prefetch"`
-	SkillRouter *bool `json:"skill_router" yaml:"skill_router"`
-}
-
 // MemoryStoreBlock is the nested memory_store shell in agent_extra (P2-G).
 // Nested fields override legacy top-level keys when non-nil.
 type MemoryStoreBlock struct {
@@ -152,7 +123,6 @@ type MemoryStoreBlock struct {
 	Conflict          *MemoryConflict             `json:"conflict" yaml:"conflict"`
 	Vector            *MemoryVector               `json:"vector" yaml:"vector"`
 	Graph             *MemoryGraph                `json:"graph" yaml:"graph"`
-	ProceduralRepair  *MemoryProceduralRepair     `json:"procedural_repair" yaml:"procedural_repair"`
 }
 
 // PortalAgentExtra 可选叠加配置（与 Kratos Bootstrap 分离，避免改 proto 即可迭代）。
@@ -177,8 +147,6 @@ type PortalAgentExtra struct {
 	// MemoryGraph 启用时为 units 装配 Neo4j 图 Sidecar（默认关）。
 	// Deprecated: prefer memory_store.graph.
 	MemoryGraph *MemoryGraph `json:"memory_graph" yaml:"memory_graph"`
-	// MemoryProceduralRepair hand-written bindings (P3-C); prefer memory_store.procedural_repair.
-	MemoryProceduralRepair *MemoryProceduralRepair `json:"memory_procedural_repair" yaml:"memory_procedural_repair"`
 	// Web 联网搜索（web_search / web_extract）；与 config.yaml 中 web 节同形。
 	Web *WebTools `json:"web" yaml:"web"`
 }
@@ -209,9 +177,6 @@ func NormalizePortalAgentExtra(extra *PortalAgentExtra) {
 	if ms.Graph != nil {
 		extra.MemoryGraph = ms.Graph
 	}
-	if ms.ProceduralRepair != nil {
-		extra.MemoryProceduralRepair = ms.ProceduralRepair
-	}
 }
 
 // LoadPortalAgentExtra 从 path 读取 YAML；文件不存在时返回 (nil, nil)。
@@ -236,7 +201,7 @@ func LoadPortalAgentExtra(path string) (*PortalAgentExtra, error) {
 	if extra.ToolGuardrails == nil && extra.Portal == nil && extra.MemoryStore == nil &&
 		extra.MemoryOrchestratorPrefetch == nil &&
 		extra.MemoryExtraction == nil && extra.MemoryConflict == nil && extra.MemoryVector == nil &&
-		extra.MemoryGraph == nil && extra.MemoryProceduralRepair == nil && extra.Web == nil {
+		extra.MemoryGraph == nil && extra.Web == nil {
 		return nil, nil
 	}
 	return &extra, nil

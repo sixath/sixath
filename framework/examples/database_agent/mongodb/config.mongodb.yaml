@@ -12,13 +12,16 @@ middlewares: ["logging", "metrics"]
 data_sources:
   - id: "main"
     type: "mongodb"
-    host: "10.19.240.106"
+    host: "127.0.0.1"
     port: 27017
     user: "admin"
-    password: "AdminPass456!"
-    dbname: "Migu@2233"
+    password: "secret"
+    dbname: "appdb"
+    # 认证库对应 mongo --authenticationDatabase；缺省即为 admin
+    # auth_source: "admin"
     # 若使用完整连接串，可注释 host/port/user/password/dbname，仅保留：
-    # dsn: "mongodb://user:pass@127.0.0.1:27017/test"
+    # 密码含 @ 时请写成 %40，并带上 authSource=admin
+    # dsn: "mongodb://admin:p%40ss@127.0.0.1:27017/appdb?authSource=admin"
     max_open_conns: 10
     read_only: true
 

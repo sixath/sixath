@@ -14,10 +14,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	fwws "github.com/sixath/framework/workspace"
 )
 
 const (
 	workspaceFileScopeHint = "For workspace files use read_file/write_file/patch/search_files; " +
+		"for source / call-chain analysis prefer rca_grep/rca_glob/rca_read when those tools are available; " +
 		"for datasource/SQL use execute_read/execute_write/list_tables/describe_table."
 
 	readFileDefaultLimit = 500
@@ -46,7 +49,13 @@ func RegisterWorkspaceFileToolsWithConfig(reg *Registry, cfg *WorkspaceFileConfi
 	if err := registerPatchFileTool(reg, c); err != nil {
 		return err
 	}
-	return registerSearchFilesTool(reg)
+	if err := registerSearchFilesTool(reg); err != nil {
+		return err
+	}
+	if err := RegisterResultStatsTool(reg); err != nil {
+		return err
+	}
+	return RegisterRunResultScriptTool(reg)
 }
 
 func workspaceFileConfigOrDefault(cfg *WorkspaceFileConfig) *WorkspaceFileConfig {
@@ -129,7 +138,7 @@ func registerReadFileTool(reg *Registry) error {
 			if strings.TrimSpace(rel) == "" {
 				return map[string]any{"error": "path is required"}, nil
 			}
-			full, err := ResolveWorkspacePath(ws, rel)
+			full, err := fwws.ResolveWorkspacePath(ws, rel)
 			if err != nil {
 				return map[string]any{"error": err.Error()}, nil
 			}
@@ -240,7 +249,7 @@ func registerWriteFileTool(reg *Registry, c *WorkspaceFileConfig) error {
 				}
 				// No confirm store: legacy direct write (zero regression).
 			}
-			full, err := ResolveWorkspacePath(ws, rel)
+			full, err := fwws.ResolveWorkspacePath(ws, rel)
 			if err != nil {
 				return map[string]any{"error": err.Error()}, nil
 			}
@@ -315,7 +324,7 @@ func registerPatchFileTool(reg *Registry, c *WorkspaceFileConfig) error {
 					})
 				}
 			}
-			full, err := ResolveWorkspacePath(ws, rel)
+			full, err := fwws.ResolveWorkspacePath(ws, rel)
 			if err != nil {
 				return map[string]any{"error": err.Error()}, nil
 			}
@@ -418,7 +427,7 @@ func confirmWorkspaceFile(ctx context.Context, c *WorkspaceFileConfig, expectedA
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
-	full, err := ResolveWorkspacePath(ws, pending.Path)
+	full, err := fwws.ResolveWorkspacePath(ws, pending.Path)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
@@ -511,7 +520,7 @@ func registerSearchFilesTool(reg *Registry) error {
 			fileGlob, _ := params["file_glob"].(string)
 			limit := intFromParam(params["limit"], 50)
 			offset := intFromParam(params["offset"], 0)
-			root, err := ResolveWorkspacePath(ws, searchPath)
+			root, err := fwws.ResolveWorkspacePath(ws, searchPath)
 			if err != nil {
 				return map[string]any{"error": err.Error()}, nil
 			}
@@ -561,7 +570,7 @@ func intFromParam(v any, defaultVal int) int {
 func suggestSimilarFiles(workspaceRoot, rel string) []string {
 	base := filepath.Base(rel)
 	dir := filepath.Dir(rel)
-	searchDir, err := ResolveWorkspacePath(workspaceRoot, dir)
+	searchDir, err := fwws.ResolveWorkspacePath(workspaceRoot, dir)
 	if err != nil {
 		return nil
 	}

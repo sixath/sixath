@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	pkgErrors "backend/internal/pkg/errors"
@@ -105,6 +106,12 @@ func (uc *ToolUsecase) Create(ctx context.Context, name, description, toolType s
 	if !IsValidToolType(toolType) {
 		tt = ToolTypeBuiltin
 	}
+	if err := ValidateCreateRCAESLog(tt, config); err != nil {
+		return nil, err
+	}
+	if err := ValidateElasticsearchDatasource(tt, config); err != nil {
+		return nil, err
+	}
 	tool, err := uc.repo.Create(ctx, name, description, tt, config)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
 		return nil, ErrToolDuplicateName
@@ -204,6 +211,25 @@ func (uc *ToolUsecase) Update(ctx context.Context, id string, toolType, name, de
 	resource, err := uc.requireToolPerm(ctx, id, PermEdit)
 	if err != nil {
 		return nil, err
+	}
+	if config != nil {
+		existing, gerr := uc.repo.GetByID(ctx, id)
+		if gerr != nil && errors.Is(gerr, pkgErrors.ErrNotFound) {
+			return nil, ErrToolNotFound
+		}
+		if gerr != nil {
+			return nil, gerr
+		}
+		effective := existing.Type
+		if toolType != nil && strings.TrimSpace(*toolType) != "" {
+			effective = ToolType(*toolType)
+		}
+		if err := ValidateUpdateRCAESLog(existing.Config, effective, config); err != nil {
+			return nil, err
+		}
+		if err := ValidateElasticsearchDatasource(effective, config); err != nil {
+			return nil, err
+		}
 	}
 	updates := make(map[string]any)
 	if name != nil {

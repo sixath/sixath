@@ -70,6 +70,38 @@ func stringSliceContains(ss []string, v string) bool {
 	return false
 }
 
+func coerceBool(v any) (bool, bool) {
+	switch x := v.(type) {
+	case bool:
+		return x, true
+	default:
+		return false, false
+	}
+}
+
+func defaultCreateAutoRouteFlags(ch *ChannelCreate) {
+	if !ch.AutoRouteEnabled && !ch.AutoRouteMention && !ch.AutoRouteClassifier {
+		ch.AutoRouteEnabled = true
+		ch.AutoRouteMention = true
+		ch.AutoRouteClassifier = true
+	}
+}
+
+func normalizeChannelBoolUpdates(updates map[string]any) error {
+	for _, k := range []string{"enabled", "auto_route_enabled", "auto_route_mention", "auto_route_classifier"} {
+		v, ok := updates[k]
+		if !ok {
+			continue
+		}
+		b, ok := coerceBool(v)
+		if !ok {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", k+" must be a boolean")
+		}
+		updates[k] = b
+	}
+	return nil
+}
+
 func coerceStringSlice(v any) ([]string, bool) {
 	if v == nil {
 		return nil, true
@@ -168,6 +200,7 @@ func (uc *ChannelUsecase) Create(ctx context.Context, ch *ChannelCreate) (*Chann
 	if err := validateChannelProtocol(ch.Type, ch.Enabled, ch.BotID, ch.BotSecret, ch.DefaultReplyMode); err != nil {
 		return nil, err
 	}
+	defaultCreateAutoRouteFlags(ch)
 	meta, err := uc.repo.Create(ctx, ch)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
 		return nil, ErrChannelDuplicateID
@@ -243,6 +276,9 @@ func (uc *ChannelUsecase) Update(ctx context.Context, id string, updates map[str
 	}
 	if allowedPresent {
 		updates["allowed_agents"] = normalized
+	}
+	if err := normalizeChannelBoolUpdates(updates); err != nil {
+		return nil, err
 	}
 	ch, err := uc.repo.Update(ctx, id, updates)
 	if err != nil && errors.Is(err, pkgErrors.ErrNotFound) {

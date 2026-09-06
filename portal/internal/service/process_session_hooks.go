@@ -5,7 +5,7 @@ import (
 
 	"backend/internal/chat"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 // registerProcessSessionHooks kills background terminal processes for the chat session.

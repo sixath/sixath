@@ -5,7 +5,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"golang.org/x/sync/singleflight"
 )
 

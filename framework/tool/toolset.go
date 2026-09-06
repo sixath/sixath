@@ -51,6 +51,8 @@ var builtinDefaultToolset = map[string]string{
 	"write_file":           ToolsetFile,
 	"patch":                ToolsetFile,
 	"search_files":         ToolsetFile,
+	"result_stats":         ToolsetFile,
+	"run_result_script":    ToolsetFile,
 	"web_search":           ToolsetWeb,
 	"web_extract":          ToolsetWeb,
 	"ask_user":             ToolsetCore,

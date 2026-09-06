@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/auth"
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/events"
+	agent "github.com/sixath/framework/harness"
 
 	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/memory"
@@ -355,6 +355,9 @@ type DataQueryConfig struct {
 
 	// ToolGuardrails 可选；与根配置 tool_guardrails 同语义，由 NewDataQueryHandlerFromConfig 注入。
 	ToolGuardrails *agent.ToolGuardrailsConfig
+
+	// Workspace 可选可写根；非空时交给 ReAct（MEMORY.md / USER.md / 文件器官）。
+	Workspace string
 }
 
 // NewDataQueryHandlerFromConfig 根据 Config 装配数据查询 ReAct Agent 与中间件链。
@@ -413,6 +416,7 @@ func NewDataQueryHandlerFromConfig(cfg config.Config, middlewareByName map[strin
 		WriteConfirmTTLSeconds: 300,
 		DefaultWriteTimeoutSec: 0,
 		MCPServers:             cfg.Skills.MCPServers,
+		Workspace:              cfg.Workspace,
 	}
 	if tg := agent.ToolGuardrailsFromConfig(cfg.ToolGuardrails); tg != nil {
 		cp := *tg
@@ -453,6 +457,7 @@ func registerDataQueryTools(reg *tool.Registry, cfg DataQueryConfig, desc *TypeD
 				Reader:              cfg.Reader,
 				Exec:                cfg.Exec,
 				Registry:            cfg.DatasourceRegistry,
+				Store:               cfg.MetadataStore,
 				DefaultDatasourceID: cfg.DefaultDatasourceID,
 				DefaultTimeoutSec:   cfg.DefaultReadTimeoutSec,
 				DefaultMaxRows:      cfg.DefaultReadMaxRows,
@@ -533,6 +538,7 @@ func NewDataQueryHandler(m model.Model, mem memory.Memory, cfg DataQueryConfig, 
 		}
 		registerDataQueryTools(reg, cfg, descriptor)
 		reactOpts := []agent.ReActOption{agent.WithReActMaxSteps(cfg.MaxReActSteps)}
+		reactOpts = appendWorkspaceOpt(reactOpts, cfg.Workspace)
 		if bus := events.DefaultBus(); bus != nil {
 			reactOpts = append(reactOpts, agent.WithReActEventBus(bus))
 		}

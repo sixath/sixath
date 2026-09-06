@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/errs"
+	agent "github.com/sixath/framework/harness"
 )
 
 func recoveryHandler(logger *slog.Logger, next Handler) Handler {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/errs"
+	agent "github.com/sixath/framework/harness"
 	"golang.org/x/sync/singleflight"
 )
 

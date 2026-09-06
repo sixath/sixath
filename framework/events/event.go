@@ -26,8 +26,10 @@ const (
 	HookBlocked      Kind = "agent.hook.blocked"
 	// EvidenceIncomplete final-answer lacked required RCA evidence (EvidenceGate Soft/Hard).
 	EvidenceIncomplete Kind = "agent.evidence.incomplete"
-	RunCompleted       Kind = "agent.run.completed"
-	RunError           Kind = "agent.run.error"
+	// CodeClaimMismatch final-answer quoted/claimed code that does not match rca_read.
+	CodeClaimMismatch Kind = "agent.code_claim.mismatch"
+	RunCompleted      Kind = "agent.run.completed"
+	RunError          Kind = "agent.run.error"
 
 	// MemoryPrefetchSkipped 记忆预取未注入（fail-open 跳过或空结果），载荷含 reason（设计 §4.6）。
 	MemoryPrefetchSkipped Kind = "agent.memory.prefetch_skipped"

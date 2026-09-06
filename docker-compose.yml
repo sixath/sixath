@@ -47,6 +47,7 @@ services:
       - ./portal/configs/config.docker.yaml:/data/conf-ro/config.yaml:ro
       # Persist data_root (agents/{id}/skills, org skills/, vectors, …) across restarts.
       - ${PORTAL_DATA_DIR:-./data/portal}:/data/portal
+      - ${HOST_CODE_ROOT:-./codes}:/mnt/codes:ro
     tmpfs:
       - /data/conf:mode=1777
     depends_on:

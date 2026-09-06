@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
@@ -175,7 +175,9 @@ func TestWireCatalogAndToolSearch_MysqlWecomBindingsInCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := RegisterSendToWeComTool(reg, SendToWeComOptions{
-		ResolveWebhook: func(context.Context) (string, error) { return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", nil },
+		ResolveWebhook: func(context.Context) (string, error) {
+			return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", nil
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -284,40 +286,23 @@ func TestWireCatalogAndToolSearch_ActivatesBridgeAndRebuildsCatalog(t *testing.T
 	}
 }
 
-func TestBuildAgentSystemPrompt_CatalogPrepended(t *testing.T) {
-	reg := tool.NewRegistry()
-	if err := registerStubDatasourceTools(reg); err != nil {
-		t.Fatal(err)
-	}
-	_ = RegisterSendToWeComTool(reg, SendToWeComOptions{
-		ResolveWebhook: func(context.Context) (string, error) { return "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test", nil },
-	})
-	catalog, _ := wireDiscoveryAgent(t, reg)
-
+func TestBuildAgentSystemPrompt_NoCatalogPrepend(t *testing.T) {
+	effectivePrompt := BuildEffectiveSystemPrompt("You are a helpful assistant.", nil)
+	effectivePrompt = AppendAskUserToolPrompt(effectivePrompt)
 	dsPrompt := FormatDatasourcePrompt([]DatasourceBinding{{
 		ID: "prod_mysql", Type: "mysql", DBName: "archive", Available: true,
 	}}, "prod_mysql")
-
-	// Mirrors portal/internal/service/chat.go effectivePrompt assembly order.
-	effectivePrompt := FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
+	if dsPrompt == "" || !strings.Contains(dsPrompt, "prod_mysql") {
+		t.Fatalf("datasource catalog text missing prod_mysql: %s", dsPrompt)
 	}
-	effectivePrompt += "You are a helpful assistant."
-	effectivePrompt = AppendDatasourcePrompt(effectivePrompt, dsPrompt)
-
-	if !strings.HasPrefix(effectivePrompt, "## 可用工具目录") {
-		t.Fatalf("catalog block should be first, got prefix: %q", effectivePrompt[:min(80, len(effectivePrompt))])
+	if strings.Contains(effectivePrompt, "本轮任务锁") {
+		t.Fatal(effectivePrompt)
 	}
-	for _, want := range []string{"prod_mysql", "send_to_wecom", "execute_read", "禁止通过 ask_user"} {
-		if !strings.Contains(effectivePrompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, effectivePrompt)
-		}
+	if strings.HasPrefix(strings.TrimSpace(effectivePrompt), "## 可用工具目录") {
+		t.Fatal("catalog block must not be prepended onto system prompt")
 	}
-	idxCatalog := strings.Index(effectivePrompt, "## 可用工具目录")
-	idxAgent := strings.Index(effectivePrompt, "You are a helpful assistant")
-	if idxAgent < idxCatalog {
-		t.Fatal("agent system prompt should follow catalog block")
+	if !strings.Contains(effectivePrompt, "You are a helpful assistant") {
+		t.Fatalf("agent system prompt missing:\n%s", effectivePrompt)
 	}
 }
 
@@ -445,7 +430,7 @@ func TestToolDiscoveryIntegration_MysqlStatusGroupByThenWecomPush(t *testing.T) 
 				Used:     true,
 				ToolName: "send_to_wecom",
 				Arguments: map[string]any{
-					"content": "users 按 status 分布：active=42, inactive=7",
+					"content":  "users 按 status 分布：active=42, inactive=7",
 					"msg_type": "text",
 				},
 			},
@@ -619,20 +604,12 @@ func (f *credentialThenToolFakeModel) ChatWithTools(ctx context.Context, message
 	return &model.Generation{Text: f.finalReply, Raw: model.ToolStep{Used: false}}, nil
 }
 
-func TestToolDiscoveryIntegration_PlainTextCredentialAskGetsRedirected(t *testing.T) {
+func TestToolDiscoveryIntegration_PlainTextCredentialAskIsNotRedirected(t *testing.T) {
 	fix := setupMysqlWecomDiscoveryFixture(t, true)
 
 	fake := &credentialThenToolFakeModel{
 		credentialAsk: "请提供 MySQL Host、Port、数据库名、用户名、密码，以及企微 Webhook URL",
-		toolSteps: []model.ToolStep{{
-			Used:     true,
-			ToolName: "execute_read",
-			Arguments: map[string]any{
-				"datasource_id": "prod_mysql",
-				"sql":           "SELECT status, COUNT(*) AS cnt FROM t_archive_clean_task_detail GROUP BY status",
-			},
-		}},
-		finalReply: "统计完成。",
+		finalReply:    "统计完成。",
 	}
 	mem := memory.NewBufferMemory(8)
 	react := agent.NewReActAgent(fake, mem, fix.Reg)
@@ -649,21 +626,17 @@ func TestToolDiscoveryIntegration_PlainTextCredentialAskGetsRedirected(t *testin
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	if resp.Text != fake.credentialAsk {
+		t.Fatalf("without loop redirect, first unused-step text is the answer, got %q", resp.Text)
+	}
 	trace, ok := resp.Metadata["trace"].(*agent.RunTrace)
 	if !ok {
 		t.Fatalf("missing trace: %#v", resp.Metadata)
 	}
-	redirected := false
 	for _, e := range trace.Errors {
 		if strings.Contains(e, "credential_solicitation_redirect") {
-			redirected = true
+			t.Fatalf("credential redirect must be off the default loop: %#v", trace.Errors)
 		}
-	}
-	if !redirected {
-		t.Fatalf("expected credential redirect in trace errors, got %#v", trace.Errors)
-	}
-	if len(trace.ToolCalls) == 0 || trace.ToolCalls[0].ToolName != "execute_read" {
-		t.Fatalf("expected execute_read after redirect, got %#v", trace.ToolCalls)
 	}
 }
 

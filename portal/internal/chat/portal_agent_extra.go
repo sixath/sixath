@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
+	agent "github.com/sixath/framework/harness"
 )
 
 var (
@@ -28,7 +28,6 @@ func SetPortalAgentExtra(extra *config.PortalAgentExtra) {
 	if extra == nil {
 		return
 	}
-	InitLocalMemoryHub() // idempotent; Catalog ready even before NewChatService
 	config.NormalizePortalAgentExtra(extra)
 	if extra.ToolGuardrails != nil {
 		SetGlobalToolGuardrails(agent.ToolGuardrailsFromConfig(extra.ToolGuardrails))
@@ -68,12 +67,6 @@ func SetPortalAgentExtra(extra *config.PortalAgentExtra) {
 	} else {
 		SetMemoryGraphConfig(nil)
 	}
-	if extra.MemoryProceduralRepair != nil {
-		SetProceduralRepairConfig(extra.MemoryProceduralRepair)
-	} else {
-		SetProceduralRepairConfig(nil)
-	}
-	RebuildPrefetchMemoryOrchestrator()
 	if extra.Portal != nil && extra.Portal.GuardrailHalt != nil {
 		g := extra.Portal.GuardrailHalt
 		if s := strings.TrimSpace(strings.ToLower(g.Display)); s != "" {

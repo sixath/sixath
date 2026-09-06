@@ -13,10 +13,6 @@ type RuntimeToolsConfig struct {
 	CronjobToolEnabled        bool  `json:"cronjob_tool_enabled"`
 	BrowserEnabled            bool  `json:"browser_enabled"`
 	HybridRecall              *bool `json:"hybrid_recall,omitempty"` // unset = on; presence preserved end-to-end
-	// Memory Hub overrides (P1): nil/empty = process defaults.
-	HubGovernance                   *string `json:"hub_governance,omitempty"`
-	HubKnowledge                    *string `json:"hub_knowledge,omitempty"`
-	HubFallbackToDefaultOnReadError *bool   `json:"hub_fallback_to_default_on_read_error,omitempty"`
 }
 
 // RuntimeToolsFromProto maps API proto to biz.
@@ -34,22 +30,9 @@ func RuntimeToolsFromProto(p *agentv1.RuntimeToolsConfig) RuntimeToolsConfig {
 		CronjobToolEnabled:        p.GetCronjobToolEnabled(),
 		BrowserEnabled:            p.GetBrowserEnabled(),
 	}
-	// Presence must be preserved (do not use GetHybridRecall / GetHub*).
 	if p.HybridRecall != nil {
 		v := *p.HybridRecall
 		cfg.HybridRecall = &v
-	}
-	if p.HubGovernance != nil {
-		v := *p.HubGovernance
-		cfg.HubGovernance = &v
-	}
-	if p.HubKnowledge != nil {
-		v := *p.HubKnowledge
-		cfg.HubKnowledge = &v
-	}
-	if p.HubFallbackToDefaultOnReadError != nil {
-		v := *p.HubFallbackToDefaultOnReadError
-		cfg.HubFallbackToDefaultOnReadError = &v
 	}
 	return cfg
 }
@@ -69,18 +52,6 @@ func RuntimeToolsToProto(c RuntimeToolsConfig) *agentv1.RuntimeToolsConfig {
 	if c.HybridRecall != nil {
 		v := *c.HybridRecall
 		out.HybridRecall = &v
-	}
-	if c.HubGovernance != nil {
-		v := *c.HubGovernance
-		out.HubGovernance = &v
-	}
-	if c.HubKnowledge != nil {
-		v := *c.HubKnowledge
-		out.HubKnowledge = &v
-	}
-	if c.HubFallbackToDefaultOnReadError != nil {
-		v := *c.HubFallbackToDefaultOnReadError
-		out.HubFallbackToDefaultOnReadError = &v
 	}
 	return out
 }

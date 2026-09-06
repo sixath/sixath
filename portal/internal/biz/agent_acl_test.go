@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -104,12 +105,6 @@ func (f *fakeAgentACLRepo) Delete(_ context.Context, id string) error {
 }
 func (f *fakeAgentACLRepo) BindTools(context.Context, string, []string) error   { return nil }
 func (f *fakeAgentACLRepo) UnbindTools(context.Context, string, []string) error { return nil }
-func (f *fakeAgentACLRepo) ListDistinctWorkspaces(context.Context, int) ([]CuratorWorkspace, error) {
-	return nil, nil
-}
-func (f *fakeAgentACLRepo) ListAgentIDsByWorkspace(context.Context, string) ([]string, error) {
-	return nil, nil
-}
 
 type fakeAgentResourceRepo struct {
 	fakeResourceReader
@@ -163,6 +158,10 @@ func (f *fakeAgentResourceRepo) ListGrantsByResourceIDs(_ context.Context, resou
 }
 
 func newAgentACLUsecase() (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo) {
+	return newAgentACLUsecaseAt("/portal-data")
+}
+
+func newAgentACLUsecaseAt(dataRoot string) (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo) {
 	agents := &fakeAgentACLRepo{agents: map[string]*AgentMeta{}}
 	resources := &fakeAgentResourceRepo{
 		fakeResourceReader: fakeResourceReader{
@@ -172,11 +171,12 @@ func newAgentACLUsecase() (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceR
 		},
 		byPayload: map[string]*Resource{},
 	}
-	return NewAgentUsecase(agents, resources, NewAccessChecker(resources), "/portal-data", log.NewStdLogger(nil)), agents, resources
+	return NewAgentUsecase(agents, resources, NewAccessChecker(resources), dataRoot, log.NewStdLogger(nil)), agents, resources
 }
 
 func TestAgentCreateCreatesPrivateResourceForCaller(t *testing.T) {
-	uc, agents, resources := newAgentACLUsecase()
+	root := t.TempDir()
+	uc, agents, resources := newAgentACLUsecaseAt(root)
 	ctx := WithOrgID(WithCallerUserID(context.Background(), "user-1"), "org-1")
 
 	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", RuntimeToolsConfig{}, nil)
@@ -186,8 +186,11 @@ func TestAgentCreateCreatesPrivateResourceForCaller(t *testing.T) {
 	if agents.created != agent {
 		t.Fatal("Create did not persist the returned agent")
 	}
-	if want := filepath.Join("/portal-data", "agents", agent.ID); agent.Workspace != want {
+	if want := filepath.Join(root, "agents", agent.ID); agent.Workspace != want {
 		t.Fatalf("workspace = %q, want %q", agent.Workspace, want)
+	}
+	if st, err := os.Stat(agent.Workspace); err != nil || !st.IsDir() {
+		t.Fatalf("workspace dir missing: %v", err)
 	}
 	if len(resources.created) != 1 {
 		t.Fatalf("created resources = %d, want 1", len(resources.created))
@@ -303,4 +306,13 @@ func TestAgentBindToolsRequiresAgentEditAndToolUse(t *testing.T) {
 
 func isReason(err error, reason string) bool {
 	return err != nil && kratosErrors.FromError(err).Reason == reason
+}
+
+func TestRequireWorkspaceRoot(t *testing.T) {
+	if err := RequireWorkspaceRoot("  "); err != ErrWorkspaceRequired {
+		t.Fatalf("empty = %v, want ErrWorkspaceRequired", err)
+	}
+	if err := RequireWorkspaceRoot("/ws"); err != nil {
+		t.Fatalf("non-empty: %v", err)
+	}
 }

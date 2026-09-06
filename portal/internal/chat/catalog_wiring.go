@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"strings"
 
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
@@ -52,16 +51,4 @@ func WireCatalogAndToolSearch(ctx context.Context, in CatalogWiringInput) (tool.
 		catalog = BuildCatalogForAgent(ctx, in) // rebuild after bridge tools registered
 	}
 	return catalog, active, nil
-}
-
-// AppendToolCatalogPrompt 将工具目录块置顶拼接到 base system prompt 之前。
-func AppendToolCatalogPrompt(base string, catalog tool.ToolCatalog) string {
-	p := FormatToolCatalogPrompt(catalog)
-	if p == "" {
-		return base
-	}
-	if strings.TrimSpace(base) == "" {
-		return p
-	}
-	return p + "\n\n---\n\n" + base
 }

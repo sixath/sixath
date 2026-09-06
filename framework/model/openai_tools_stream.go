@@ -33,7 +33,7 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 		modelName = callCfg.ModelName
 	}
 
-	msgs := PrepareChatContextCtx(ctx, messages, callCfg)
+	msgs := messages
 
 	deferActive, _ := ctx.Value(tool.ContextKeyToolSearchActive).(bool)
 	tools := reg.ListForAPIWithDefer(ctx, nil, deferActive)

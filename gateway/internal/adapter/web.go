@@ -39,6 +39,7 @@ func MountWeb(mux *http.ServeMux, deps WebDeps) {
 	mux.HandleFunc("PUT /api/v1/sessions/{id}", h.updateSession)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", h.deleteSession)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", h.listMessages)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/result-files", h.listResultFiles)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/messages/stream", h.streamMessages)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/rewind", h.rewind)
 }
@@ -149,6 +150,15 @@ func (h *WebHandler) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, err := h.runtime.ListMessages(r.Context(), userID, r.PathValue("id"))
+	writeRuntimeJSON(w, raw, err)
+}
+
+func (h *WebHandler) listResultFiles(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUser(w, r)
+	if !ok {
+		return
+	}
+	raw, err := h.runtime.ListResultFile(r.Context(), userID, r.PathValue("id"), r.URL.Query().Get("path"))
 	writeRuntimeJSON(w, raw, err)
 }
 

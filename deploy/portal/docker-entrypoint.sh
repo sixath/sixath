@@ -20,4 +20,15 @@ if [ -n "${NEO4J_PW:-}" ] && [ -f /data/conf/agent_extra.yaml ]; then
   awk -v pw="$NEO4J_PW" '{gsub(/REPLACE_ME/, pw); print}' /data/conf/agent_extra.yaml > /data/conf/agent_extra.yaml.tmp
   mv /data/conf/agent_extra.yaml.tmp /data/conf/agent_extra.yaml
 fi
+# After Docker daemon restarts, containers come up in parallel; wait for MySQL before backend dial.
+echo "waiting for mysql:3306..."
+i=0
+while [ "$i" -lt 90 ]; do
+  if bash -c 'echo > /dev/tcp/mysql/3306' >/dev/null 2>&1; then
+    echo "mysql is up"
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
 exec ./backend -conf /data/conf

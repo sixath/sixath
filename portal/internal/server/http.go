@@ -30,7 +30,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, runtimeSvc *runtime.Service, pinger DBPinger, logger log.Logger) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -89,21 +89,13 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.POST("/api/v1/orgs/{id}/members", AddOrgMemberHandler(aclAPI))
 	r.POST("/api/v1/resources/{id}/grants", CreateResourceGrantHandler(aclAPI))
 	r.POST("/api/v1/users/{id}/tokens", IssueUserTokenHandler(aclAPI))
-	// E2: growth 指标 JSON 端点（spec phase2 §E2）。便于人工排查；正式生产可接 Prometheus collector。
-	r.GET("/api/v1/growth/metrics", GrowthMetricsHandler())
-	// Trajectory utilization: message-level SearchAnchored for UI (hand-written; not in chat.proto).
 	r.GET("/api/v1/agents/{agent_id}/transcript/search", TranscriptSearchHandler(chat))
-	r.GET("/api/v1/agents/{agent_id}/insights", InsightsHandler(chat))
+	// Code roots browse + agent workspace/code symlink (hand-written).
+	r.GET("/api/v1/code-roots", CodeRootsListHandler(codeRoots))
+	r.GET("/api/v1/code-roots/browse", CodeRootsBrowseHandler(codeRoots))
+	r.GET("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkGetHandler(agentUC))
+	r.POST("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkHandler(agentUC, codeRoots))
 	r.POST("/api/v1/sessions/{session_id}/rewind", RewindHandler(chat))
-	r.GET("/api/v1/memory-hub/catalog", MemoryHubCatalogHandler())
-	r.GET("/api/v1/agents/{agent_id}/hub/loadout", AgentHubLoadoutHandler(chat))
-	r.GET("/api/v1/agents/{agent_id}/hub/bindings", AgentHubBindingsHandler(chat))
-	r.POST("/api/v1/agents/{agent_id}/hub/bindings", AgentHubBindHandler(chat))
-	r.DELETE("/api/v1/agents/{agent_id}/hub/bindings", AgentHubUnbindHandler(chat))
-	r.POST("/api/v1/agents/{agent_id}/hub/bindings/clear", AgentHubClearBindingsHandler(chat))
-	r.POST("/api/v1/agents/{agent_id}/hub/assets/status", AgentHubSetStatusHandler(chat))
-	r.GET("/api/v1/agents/{agent_id}/hub/knowledge/drafts", AgentHubKnowledgeDraftsHandler(chat))
-	r.POST("/api/v1/agents/{agent_id}/hub/knowledge/approve", AgentHubKnowledgeApproveHandler(chat))
 	r.POST("/api/v1/mcp-servers", CreateMcpServerHandler(mcpServer))
 	r.GET("/api/v1/mcp-servers", ListMcpServersHandler(mcpServer))
 	r.GET("/api/v1/mcp-servers/{id}", GetMcpServerHandler(mcpServer))

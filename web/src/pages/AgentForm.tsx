@@ -1,20 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   agentApi,
   channelApi,
-  memoryHubApi,
+  codeRootsApi,
   CODING_ASSISTANT_RUNTIME_TOOLS,
   RUNTIME_TOOL_FIELDS,
   serializeRuntimeTools,
   type Channel,
+  type CodeRootBrowseEntry,
   type CreateAgentRequest,
-  type MemoryHubCatalog,
   type ModelConfig,
   type RuntimeToolsConfig,
 } from '../api/client'
 
 const emptyRuntimeTools = (): RuntimeToolsConfig => ({})
+
+function joinRootPath(root: string, path: string): string {
+  const r = root.replace(/[/\\]+$/, '')
+  const p = path.replace(/^[/\\]+/, '').replace(/[/\\]+$/, '')
+  if (!p) return r
+  return `${r}/${p}`
+}
+
+function workspaceUnderCodeRoots(ws: string, roots: string[]): boolean {
+  const n = ws.replace(/[/\\]+$/, '').toLowerCase()
+  if (!n) return false
+  return roots.some((r) => {
+    const root = r.replace(/[/\\]+$/, '').toLowerCase()
+    return n === root || n.startsWith(`${root}/`) || n.startsWith(`${root}\\`)
+  })
+}
 
 export default function AgentForm() {
   const { id } = useParams()
@@ -25,25 +41,58 @@ export default function AgentForm() {
   const [description, setDescription] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [workspace, setWorkspace] = useState('')
+  const [selectedTarget, setSelectedTarget] = useState('')
+  const [existingLinkTarget, setExistingLinkTarget] = useState('')
+  const [codeRoots, setCodeRoots] = useState<string[]>([])
+  const [browseRoot, setBrowseRoot] = useState('')
+  const [browsePath, setBrowsePath] = useState('')
+  const [browseEntries, setBrowseEntries] = useState<CodeRootBrowseEntry[]>([])
+  const [browseLoading, setBrowseLoading] = useState(false)
+  const [browseError, setBrowseError] = useState('')
   const [modelConfig, setModelConfig] = useState<ModelConfig>({ provider: 'openai', model: 'gpt-4' })
   const [debugRun, setDebugRun] = useState(false)
   const [runtimeTools, setRuntimeTools] = useState<RuntimeToolsConfig>(emptyRuntimeTools())
   const [wecomChannelId, setWecomChannelId] = useState('')
   const [wecomChannels, setWecomChannels] = useState<Channel[]>([])
-  const [hubCatalog, setHubCatalog] = useState<MemoryHubCatalog | null>(null)
-  const [initialHubGov, setInitialHubGov] = useState<string>('')
-  const [clearBindingsOnSave, setClearBindingsOnSave] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const loadBrowse = useCallback(async (root: string, path = '') => {
+    if (!root) {
+      setBrowseEntries([])
+      setBrowsePath('')
+      return
+    }
+    setBrowseLoading(true)
+    setBrowseError('')
+    try {
+      const res = await codeRootsApi.browse(root, path)
+      setBrowseRoot(res.root || root)
+      setBrowsePath(res.path ?? path)
+      setBrowseEntries(res.entries || [])
+    } catch (e) {
+      setBrowseError((e as Error).message)
+      setBrowseEntries([])
+    } finally {
+      setBrowseLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     channelApi.list({ type: 'wecom', page: 1, page_size: 100 })
       .then((res) => setWecomChannels(res.items))
       .catch(() => setWecomChannels([]))
-    memoryHubApi.catalog()
-      .then(setHubCatalog)
-      .catch(() => setHubCatalog({ defaults: { governance: 'local', knowledge: 'local' }, governance: ['local'], knowledge: ['local'] }))
-  }, [])
+    codeRootsApi.list()
+      .then((res) => {
+        const roots = res.roots || []
+        setCodeRoots(roots)
+        if (roots.length > 0) {
+          setBrowseRoot(roots[0])
+          void loadBrowse(roots[0], '')
+        }
+      })
+      .catch(() => setCodeRoots([]))
+  }, [loadBrowse])
 
   useEffect(() => {
     if (isEdit && id) {
@@ -55,10 +104,20 @@ export default function AgentForm() {
         setModelConfig(a.model_config || { provider: 'openai', model: 'gpt-4' })
         setDebugRun(a.debug_run ?? false)
         setRuntimeTools(a.runtime_tools ?? emptyRuntimeTools())
-        setInitialHubGov(a.runtime_tools?.hub_governance || '')
-        setClearBindingsOnSave(false)
         setWecomChannelId(a.wecom_channel_id || '')
       }).catch((e) => setError(e.message))
+      agentApi
+        .workspaceLinkStatus(id)
+        .then((st) => {
+          const target = (st.target || '').trim()
+          if (st.exists && target) {
+            setExistingLinkTarget(target)
+            setSelectedTarget((prev) => prev || target)
+          } else {
+            setExistingLinkTarget('')
+          }
+        })
+        .catch(() => setExistingLinkTarget(''))
     }
   }, [id, isEdit])
 
@@ -70,15 +129,22 @@ export default function AgentForm() {
     setRuntimeTools({ ...CODING_ASSISTANT_RUNTIME_TOOLS })
   }
 
+  const breadcrumbParts = browsePath
+    ? browsePath.split(/[/\\]/).filter(Boolean)
+    : []
+
+  const selectCurrentDir = () => {
+    if (!browseRoot) return
+    setSelectedTarget(joinRootPath(browseRoot, browsePath))
+  }
+
+  const retiredWholeRepo = isEdit && workspaceUnderCodeRoots(workspace, codeRoots)
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     if (!name.trim()) {
       setError('请输入 Agent 名称')
-      return
-    }
-    if (!workspace.trim()) {
-      setError('请输入工作空间路径')
       return
     }
     if (!modelConfig.provider || !modelConfig.model) {
@@ -91,7 +157,7 @@ export default function AgentForm() {
         name: name.trim(),
         description: description.trim() || undefined,
         system_prompt: systemPrompt.trim() || undefined,
-        workspace: workspace.trim(),
+        workspace: retiredWholeRepo ? '' : workspace.trim(),
         model_config: modelConfig,
         debug_run: debugRun,
         runtime_tools: serializeRuntimeTools(runtimeTools),
@@ -99,11 +165,33 @@ export default function AgentForm() {
       }
       if (isEdit && id) {
         await agentApi.update(id, data)
-        if (clearBindingsOnSave) {
-          await memoryHubApi.clearBindings(id)
+        if (selectedTarget.trim()) {
+          const next = selectedTarget.trim()
+          const prev = existingLinkTarget.trim()
+          const same =
+            prev !== '' &&
+            next.replace(/[/\\]+$/, '').toLowerCase() === prev.replace(/[/\\]+$/, '').toLowerCase()
+          if (!same) {
+            try {
+              await agentApi.workspaceLink(id, next)
+            } catch (linkErr) {
+              setError(`Agent 已更新，但 workspace/code 链接失败：${(linkErr as Error).message}`)
+              return
+            }
+          }
         }
       } else {
-        await agentApi.create(data)
+        const created = await agentApi.create(data)
+        if (selectedTarget.trim()) {
+          try {
+            await agentApi.workspaceLink(created.id, selectedTarget.trim())
+          } catch (linkErr) {
+            setError(
+              `Agent 已创建（id=${created.id}），但 workspace/code 链接失败：${(linkErr as Error).message}。可编辑该 Agent 后重试链接。`,
+            )
+            return
+          }
+        }
       }
       navigate('/agents')
     } catch (e) {
@@ -135,10 +223,126 @@ export default function AgentForm() {
               <label>系统提示词</label>
               <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={4} placeholder="角色与行为设定" />
             </div>
+
             <div className="form-group">
-              <label>工作空间路径 *</label>
-              <input value={workspace} onChange={(e) => setWorkspace(e.target.value)} placeholder="/data/agents/my-agent" />
-              <small>技能包将解压到 workspace/skills/</small>
+              <label>Workspace</label>
+              <small style={{ display: 'block', marginBottom: 8 }}>
+                可写目录由平台默认为 data_root/agents/{'{id}'}；代码根可选，保存后挂到 workspace/code。
+                {isEdit ? ' 编辑时可不重选，将保留已有挂载。' : ' 新建可不选代码目录。'}
+              </small>
+              {retiredWholeRepo ? (
+                <small style={{ color: 'var(--warning, #b45309)', display: 'block', marginBottom: 8 }}>
+                  整仓作 Workspace 已退役。保存会改成默认可写根；可选再挂载 workspace/code。当前路径在保存前不能跑对话。
+                </small>
+              ) : null}
+            </div>
+
+            <div className="form-group">
+              <label>浏览代码根</label>
+              {codeRoots.length === 0 ? (
+                <p className="form-panel__desc">未配置 code_roots，请手动填写工作空间路径。</p>
+              ) : (
+                <div className="form-panel">
+                  <div className="form-group" style={{ marginBottom: 8 }}>
+                    <label>代码根</label>
+                    <select
+                      value={browseRoot}
+                      onChange={(e) => {
+                        const root = e.target.value
+                        setBrowseRoot(root)
+                        void loadBrowse(root, '')
+                      }}
+                    >
+                      {codeRoots.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', marginBottom: 8, wordBreak: 'break-all' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginRight: 6 }}
+                      disabled={!browseRoot || browseLoading}
+                      onClick={() => void loadBrowse(browseRoot, '')}
+                    >
+                      {browseRoot || '根'}
+                    </button>
+                    {breadcrumbParts.map((seg, i) => {
+                      const sub = breadcrumbParts.slice(0, i + 1).join('/')
+                      return (
+                        <span key={sub}>
+                          <span style={{ margin: '0 4px', color: 'var(--muted)' }}>/</span>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={browseLoading}
+                            onClick={() => void loadBrowse(browseRoot, sub)}
+                          >
+                            {seg}
+                          </button>
+                        </span>
+                      )
+                    })}
+                  </div>
+                  {browseLoading ? (
+                    <p className="form-panel__desc">加载中…</p>
+                  ) : browseError ? (
+                    <div className="error">{browseError}</div>
+                  ) : (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px', maxHeight: 200, overflow: 'auto' }}>
+                      {browseEntries.length === 0 ? (
+                        <li style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>（空目录）</li>
+                      ) : (
+                        browseEntries.map((ent) => (
+                          <li key={ent.path}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ marginBottom: 4, width: '100%', textAlign: 'left' }}
+                              onClick={() => void loadBrowse(browseRoot, ent.path)}
+                            >
+                              {ent.name}/
+                            </button>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={!browseRoot || browseLoading}
+                    onClick={selectCurrentDir}
+                  >
+                    选择当前目录
+                  </button>
+                  {selectedTarget ? (
+                    <p style={{ marginTop: 8, fontSize: '0.85rem', wordBreak: 'break-all' }}>
+                      已选：{selectedTarget}
+                      {existingLinkTarget &&
+                      selectedTarget.replace(/[/\\]+$/, '').toLowerCase() ===
+                        existingLinkTarget.replace(/[/\\]+$/, '').toLowerCase()
+                        ? '（当前已挂载）'
+                        : ''}
+                    </p>
+                  ) : isEdit && existingLinkTarget ? (
+                    <p style={{ marginTop: 8, fontSize: '0.85rem', wordBreak: 'break-all' }}>
+                      当前已挂载：{existingLinkTarget}（保存时可不改）
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label>工作空间路径（高级 / 可留空）</label>
+              <input
+                value={workspace}
+                onChange={(e) => setWorkspace(e.target.value)}
+                placeholder="留空则服务端默认 data_root/agents/{id}"
+              />
+              <small>技能包解压到可写 workspace/skills/；不要把代码根填成 workspace。</small>
             </div>
           </section>
 
@@ -226,79 +430,6 @@ export default function AgentForm() {
                       {hint ? <small className="checkbox-list__hint">{hint}</small> : null}
                     </div>
                   ))}
-                </div>
-                <div className="form-group" style={{ marginTop: 16 }}>
-                  <label>Memory Hub 治理面</label>
-                  <select
-                    data-testid="hub-governance"
-                    value={runtimeTools.hub_governance || ''}
-                    onChange={(e) =>
-                      setRuntimeTools((prev) => {
-                        const next = { ...prev }
-                        if (!e.target.value) delete next.hub_governance
-                        else next.hub_governance = e.target.value
-                        return next
-                      })
-                    }
-                  >
-                    <option value="">跟随默认（{hubCatalog?.defaults.governance || 'local'}）</option>
-                    {(hubCatalog?.governance || ['local']).map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                  {isEdit && (runtimeTools.hub_governance || '') !== initialHubGov ? (
-                    <div style={{ marginTop: 8 }}>
-                      <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: 4 }}>
-                        治理面已变更：旧 Loadout Binding 可能失效。
-                      </p>
-                      <label className="checkbox-field">
-                        <input
-                          type="checkbox"
-                          data-testid="hub-clear-on-save"
-                          checked={clearBindingsOnSave}
-                          onChange={(e) => setClearBindingsOnSave(e.target.checked)}
-                        />
-                        <span>保存时清空该 Agent 的显式 Hub Binding</span>
-                      </label>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="form-group">
-                  <label>Memory Hub 知识面</label>
-                  <select
-                    data-testid="hub-knowledge"
-                    value={runtimeTools.hub_knowledge || ''}
-                    onChange={(e) =>
-                      setRuntimeTools((prev) => {
-                        const next = { ...prev }
-                        if (!e.target.value) delete next.hub_knowledge
-                        else next.hub_knowledge = e.target.value
-                        return next
-                      })
-                    }
-                  >
-                    <option value="">跟随默认（{hubCatalog?.defaults.knowledge || 'local'}）</option>
-                    {(hubCatalog?.knowledge || ['local']).map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="checkbox-list__item" style={{ marginTop: 8 }}>
-                  <label className="checkbox-field">
-                    <input
-                      type="checkbox"
-                      data-testid="hub-fallback"
-                      checked={runtimeTools.hub_fallback_to_default_on_read_error === true}
-                      onChange={(e) =>
-                        setRuntimeTools((prev) => ({
-                          ...prev,
-                          hub_fallback_to_default_on_read_error: e.target.checked,
-                        }))
-                      }
-                    />
-                    <span>读失败时回落默认治理面</span>
-                  </label>
-                  <small className="checkbox-list__hint">对应 hub_fallback_to_default_on_read_error</small>
                 </div>
               </div>
             </div>

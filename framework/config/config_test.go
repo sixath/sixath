@@ -59,12 +59,14 @@ func TestApplyEnvOverrides(t *testing.T) {
 	cfg := Config{ModelName: "openai/gpt-4", MaxHistory: 5}
 	os.Setenv("OPENAI_MODEL", "openai/gpt-3.5-turbo")
 	os.Setenv("AGENT_MAX_HISTORY", "20")
+	os.Setenv("AGENT_WORKSPACE", "/ws/cli")
 	defer func() {
 		os.Unsetenv("OPENAI_MODEL")
 		os.Unsetenv("AGENT_MAX_HISTORY")
+		os.Unsetenv("AGENT_WORKSPACE")
 	}()
 	ApplyEnvOverrides(&cfg)
-	if cfg.ModelName != "openai/gpt-3.5-turbo" || cfg.MaxHistory != 20 {
+	if cfg.ModelName != "openai/gpt-3.5-turbo" || cfg.MaxHistory != 20 || cfg.Workspace != "/ws/cli" {
 		t.Fatalf("expected overrides applied: %#v", cfg)
 	}
 }
@@ -566,6 +568,7 @@ memory_store:
 func TestRCAConfig_YAML(t *testing.T) {
 	yml := []byte(`
 model: openai/gpt-4o
+workspace: /ws/agent
 rca:
   jaeger:
     query_url: http://jaeger:16686
@@ -581,6 +584,9 @@ rca:
 	var cfg Config
 	if err := yaml.Unmarshal(yml, &cfg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Workspace != "/ws/agent" {
+		t.Fatalf("workspace = %q", cfg.Workspace)
 	}
 	if cfg.RCA.Jaeger.QueryURL != "http://jaeger:16686" {
 		t.Fatalf("jaeger url = %q", cfg.RCA.Jaeger.QueryURL)

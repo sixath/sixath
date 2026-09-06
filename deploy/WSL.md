@@ -11,6 +11,8 @@
 | `deploy/deploy-wsl.ps1` | 从 Windows PowerShell 唤起 WSL 部署 |
 | `deploy/wsl-up.cmd` | 资源管理器双击起栈（等价 `-Build`） |
 | `deploy/repair-wsl.ps1` | 修复 WSL `E_UNEXPECTED` 等启动故障（管理员） |
+| `deploy/expose-wsl-ports.ps1` | 局域网入站：portproxy + 防火墙（管理员） |
+| `deploy/win10-network.ps1` | Win10 网络一键：portproxy/防火墙 + 出站代理说明（管理员） |
 | `deploy/deploy.sh` | 通用 Compose 部署（被 `deploy-wsl.sh` 调用） |
 
 密钥说明见 [`secrets/README.md`](../secrets/README.md)。整体 Compose 设计见 [`docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md`](../docs/superpowers/specs/2026-08-10-docker-compose-prod-design.md)。
@@ -164,47 +166,63 @@ cd sixath
 
 ---
 
-## 6. 局域网 / 外部机器访问
+## 6. Win10 网络（继续用 Win10，无 mirrored）
 
-WSL2 默认只把容器端口转到 **本机** `127.0.0.1`，所以：
+Win10 **不能** 用 `networkingMode=mirrored`（需 Win11）。WSL/容器在 NAT 后面，和 Windows「同一网卡」做不到，用下面两段补齐。
 
-- 本机浏览器：`http://127.0.0.1:18080` ✅  
-- 同一局域网其它电脑：`http://<你的Windows局域网IP>:18080` ❌（默认不通）
+| 方向 | 做法 |
+|------|------|
+| **入站**（别的电脑访问 Web） | `portproxy` + 防火墙：Windows LAN IP → WSL eth0 |
+| **出站**（容器访问公司内网如 `10.19.x`） | Windows 上跑 TCP 代理；容器访问 `http://<vEthernet-WSL-IP>:<端口>` |
 
-### 一次性放开（管理员 PowerShell）
+### 6.1 一键刷新入站（管理员 PowerShell）
 
 ```powershell
 cd E:\workspace\github\sixath\sixath
+powershell -ExecutionPolicy Bypass -File .\deploy\win10-network.ps1
+# 或仅入站：
 powershell -ExecutionPolicy Bypass -File .\deploy\expose-wsl-ports.ps1
 ```
 
-脚本会：
+然后其它机器打开：`http://<Windows局域网IP>:18080`（例：`http://10.86.32.78:18080`）。
 
-1. 读取当前 WSL `eth0` IP  
-2. 用 `netsh portproxy` 把 `0.0.0.0:18080/18000/18088/19000` 转到 WSL  
-3. 添加 Windows 防火墙入站放行  
+**注意：** `wsl --shutdown` / 重启后 WSL eth0 IP 会变，需再跑一次。
 
-然后用 **Windows 网卡 IP**（不是 WSL 的 `192.168.x`）访问，例如：
+建议 `%USERPROFILE%\.wslconfig` 保持：
+
+```ini
+[wsl2]
+vmIdleTimeout=-1
+```
+
+（避免 WSL 空闲休眠导致 portproxy 空转。）
+
+### 6.2 出站：公司内网（例 ES `10.19.240.122:29200`）
+
+1. 在 **Windows** 起用户态转发（示例脚本 `C:\Users\Admin\tools\run-es-proxy.ps1`）：本机 `0.0.0.0:29200` → `10.19.240.122:29200`  
+2. 查 Windows 侧 WSL 网关（常见 `192.168.176.1`）：
+
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -like '*WSL*' }
+```
+
+3. **容器 / Agent 工具**里不要直连 `10.19.x`，改用：
 
 ```text
-http://10.x.x.x:18080
+http://192.168.176.1:29200
 ```
 
-查看本机局域网 IP：
+（以你机器上 vEthernet (WSL) 的实际 IP 为准。）
 
-```powershell
-ipconfig
+### 6.3 Win11 可选
+
+公司策略允许时可改用 mirrored（本仓库 Win10 环境不要开）：
+
+```ini
+[wsl2]
+networkingMode=mirrored
+dnsTunneling=true
 ```
-
-取消转发：
-
-```powershell
-.\deploy\expose-wsl-ports.ps1 -Remove
-```
-
-**注意：** `wsl --shutdown` 或重启后 WSL IP 会变，需再跑一次 `expose-wsl-ports.ps1`。
-
-可选：Windows 11 可在 `%UserProfile%\.wslconfig` 使用 `networkingMode=mirrored`（公司策略允许时），再配合防火墙放行。
 
 ---
 

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +14,8 @@ import (
 	"backend/internal/data"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/events"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/sessionsearch"
@@ -35,34 +34,30 @@ type ChatService struct {
 	toolUC         *biz.ToolUsecase
 	mcpServerUC    *biz.McpServerUsecase
 	skillUC        *biz.SkillResourceUsecase
-	growthUC       *biz.GrowthUsecase
 	channelUC      *biz.ChannelUsecase
 	sessionHooks   *agent.ChatSessionHookRegistry
 	memoryStore    memory.MemoryStore
 	turnTraceStore turntrace.Store
-	// bgReviewer is the C3 in-process fork (GrowthWorker); optional until newApp wires it.
-	bgReviewer BackgroundReviewer
-	// bgReviewSpawnHook overrides spawnBackgroundReviewOnce in tests (sync spy).
-	bgReviewSpawnHook func(BackgroundReviewParams)
-	log               *log.Helper
+	codeRoots      []string
+	log            *log.Helper
 }
 
 // NewChatService creates a ChatService
-func NewChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *ChatService {
-	return newChatService(chatUC, agentUC, toolUC, nil, skillUC, growthUC, channelUC, memory.NewSessionMemory(), logger)
+func NewChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *ChatService {
+	return newChatService(chatUC, agentUC, toolUC, nil, skillUC, channelUC, memory.NewSessionMemory(), logger)
 }
 
 // NewChatServiceWithMemoryStore creates a ChatService with the durable session
 // memory backend supplied by the data layer.
-func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
-	return newChatService(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
+func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
+	return newChatService(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, d *data.Data, logger log.Logger) *ChatService {
-	WireMemoryHubFromData(d)
-	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, _ *data.Data, logger log.Logger) *ChatService {
+	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
+	s.SetCodeRoots(codeRoots)
 	return s
 }
 
@@ -72,6 +67,14 @@ func (s *ChatService) SetTurnTraceStore(st turntrace.Store) {
 		return
 	}
 	s.turnTraceStore = st
+}
+
+// SetCodeRoots sets the configured code-root whitelist used to reject whole-repo workspaces.
+func (s *ChatService) SetCodeRoots(roots []string) {
+	if s == nil {
+		return
+	}
+	s.codeRoots = roots
 }
 
 func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
@@ -103,30 +106,23 @@ func (s *ChatService) persistCompactBoundary(ctx context.Context, sessionID stri
 	}
 }
 
-func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, growthUC *biz.GrowthUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
+func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
 	transcriptProvider := chat.NewChatTranscriptProvider(chatUC)
 	chat.SetMemoryAgentGetter(agentUC)
 	memoryStore := chat.BuildMemoryStore(sessionUnits, nil, transcriptProvider, chat.DefaultMemoryStoreOptions())
 	chat.StartUnitVectorBackfill(sessionUnits)
 	chatUC.SetSessionSearchBackend(chat.NewSessionSearchBackend(chatUC))
-	chat.SetPrefetchSessionProvider(transcriptProvider)
-	chat.SetPrefetchMemoryStore(memoryStore)
-	chat.SetHubUnitWriter(chat.NewGatedMemoryUnitWriter(memoryStore, agentUC))
-	chat.InitLocalMemoryHub() // Catalog defaults=local (+ UnitsWrite); does not change Prefetch
-	chat.RebuildPrefetchMemoryOrchestrator()
 	s := &ChatService{
 		chatUC:       chatUC,
 		agentUC:      agentUC,
 		toolUC:       toolUC,
 		mcpServerUC:  mcpServerUC,
 		skillUC:      skillUC,
-		growthUC:     growthUC,
 		channelUC:    channelUC,
 		sessionHooks: agent.NewChatSessionHookRegistry(),
 		memoryStore:  memoryStore,
 		log:          log.NewHelper(logger),
 	}
-	s.registerGrowthSessionHooks()
 	s.registerBrowserSessionHooks()
 	s.registerProcessSessionHooks()
 	s.registerProcessNotifyWake()
@@ -326,6 +322,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage get agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
+		return nil, err
+	}
 
 	// 保存 user 消息
 	userMsg, err := s.chatUC.CreateMessage(ctx, sessionID, "user", content)
@@ -360,15 +359,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	ir := chat.InputResponseFromContext(ctx)
-	userForIntent := chat.UserMessageContentForTurn(content, ir)
-	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
-	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
-		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
-
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active})
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
@@ -393,14 +386,8 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		MemoryStore:     s.memoryStore,
 		SessionProvider: streamSessionProvider,
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
-		RuntimeTools:    agentMeta.RuntimeTools,
-		ActiveFamilies:  active,
 	}); err != nil {
 		s.log.Errorf("SendMessage register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
-		return nil, err
-	}
-	if err := chat.RegisterLearningTools(reg); err != nil {
-		s.log.Errorf("SendMessage register append_learning failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
 	if err := chat.RegisterAskUserTools(reg); err != nil {
@@ -423,22 +410,18 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	toolFamily := chat.BuildToolFamilyIndex(reg)
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
-		Reg:            reg,
-		BoundServers:   mcpServerMetas,
-		ActiveFamilies: active,
-		ToolFamily:     toolFamily,
-		Wiring:         catalogInput,
-		Catalog:        catalog,
+		Reg:          reg,
+		BoundServers: mcpServerMetas,
+		Wiring:       catalogInput,
+		Catalog:      catalog,
 	})
-	// 构建 ReActAgent（含成长工具成功钩子，见 growth_chat.go）
+	// 构建 ReActAgent
 	maxHistory := 20
-	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
-		append(chat.ReActOptionsFromAgent(*agentMeta),
-			append(s.growthReActOptions(agentMeta.Workspace),
-				chat.TurnIntentGateOption(active, toolFamily),
-			)...)...)
+	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
+	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
 
 	// 加载历史消息（已包含刚保存的 user 消息）
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
@@ -447,23 +430,8 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	// 转换为 agent.Request.Messages（工具目录置顶，其后为技能/数据源等说明）
-	effectivePrompt := chat.FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
-	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnScoped(agentMeta.SystemPrompt, skillsIdx, content, session.AgentID, sessionID)
-	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
-	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
-		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
-	}
-	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
-	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	messages := make([]model.Message, 0, len(history)+2)
-	if effectivePrompt != "" {
-		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
-	}
+	// 转换为 agent.Request.Messages（system 由 Harness PromptBuilder 写入）
+	messages := make([]model.Message, 0, len(history)+1)
 	for _, h := range history {
 		if h.Role == "system" {
 			continue
@@ -503,7 +471,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 					s.log.Errorf("SendMessage save guardrail banner failed: session_id=%s err=%v", sessionID, cerr)
 					return nil, cerr
 				}
-				s.notifyGrowthAssistantTurn(sessionID)
 				go chat.NotifyMemorySessionDirty(ctx, sessionID, len(vis), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
 				chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, msg)
 				return &chatv1.MessageReply{
@@ -530,7 +497,6 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	tr := chat.RunTraceFromMetadata(resp.Metadata)
 	s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
 	s.persistCompactBoundary(runCtx, sessionID, tr)
-	s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, resp.Messages, tr)
 
 	// 保存 assistant 消息
 	msg, err := s.chatUC.CreateMessage(ctx, sessionID, "assistant", resp.Text)
@@ -538,10 +504,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage save assistant message failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	s.notifyGrowthAssistantTurn(sessionID)
 	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(resp.Text), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
-	chat.NotifyMemoryExtractFromTurn(ctx, s.memoryStore, session, content, resp.Text, agentMeta)
-	chat.NotifyMemoryGraphFromTurn(ctx, s.memoryStore, session, content, resp.Text, agentMeta)
 	chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, msg)
 
 	return &chatv1.MessageReply{
@@ -578,6 +541,9 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream get agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
 	}
+	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
+		return nil, "", err
+	}
 
 	if cr != nil && cr.Kind == "skill_manage" && cr.Token != "" {
 		return s.streamSkillManageConfirm(ctx, sessionID, agentMeta.Workspace, *cr)
@@ -604,11 +570,6 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream build model failed: session_id=%s agent_id=%s provider=%s model=%s err=%v", sessionID, session.AgentID, agentMeta.ModelConfig.Provider, agentMeta.ModelConfig.Model, err)
 		return nil, "", err
 	}
-
-	userForIntent := chat.UserMessageContentForTurn(content, ir)
-	active, surfaceRes := chat.PrepareTurnToolSurface(ctx, userForIntent, tools, mcpServerMetas, agentMeta, m)
-	s.log.Infof("turn tool surface: session_id=%s source=%s conf=%s active=%v candidates=%v reason=%s",
-		sessionID, surfaceRes.Source, surfaceRes.Confidence, surfaceRes.ActiveFamilies, surfaceRes.Candidates, surfaceRes.Reason)
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
@@ -665,7 +626,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			}
 		}
 	}()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{ActiveFamilies: active})
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
 	if err != nil {
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
@@ -689,14 +650,8 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		MemoryStore:     s.memoryStore,
 		SessionProvider: streamSessionProvider,
 		VisionAnalyzer:  chat.VisionAnalyzerForModel(m),
-		RuntimeTools:    agentMeta.RuntimeTools,
-		ActiveFamilies:  active,
 	}); err != nil {
 		s.log.Errorf("SendMessageStream register runtime tools failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
-		return nil, "", err
-	}
-	if err := chat.RegisterLearningTools(reg); err != nil {
-		s.log.Errorf("SendMessageStream register append_learning failed: session_id=%s err=%v", sessionID, err)
 		return nil, "", err
 	}
 	if err := chat.RegisterAskUserTools(reg); err != nil {
@@ -719,24 +674,20 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 
-	toolFamily := chat.BuildToolFamilyIndex(reg)
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
-		Reg:            reg,
-		BoundServers:   mcpServerMetas,
-		ActiveFamilies: active,
-		ToolFamily:     toolFamily,
-		Wiring:         catalogInput,
-		Catalog:        catalog,
+		Reg:          reg,
+		BoundServers: mcpServerMetas,
+		Wiring:       catalogInput,
+		Catalog:      catalog,
 	})
 	maxHistory := 20
+	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
+	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	opts = append(opts, agent.WithReActEventBus(turnBus))
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。
-	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
-		append(chat.ReActOptionsFromAgent(*agentMeta),
-			append(s.growthReActOptions(agentMeta.Workspace),
-				chat.TurnIntentGateOption(active, toolFamily),
-				agent.WithReActEventBus(turnBus),
-			)...)...)
+	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
 
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
 	if err != nil {
@@ -788,22 +739,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		}
 	}
 
-	effectivePrompt := chat.FormatToolCatalogPrompt(catalog)
-	if effectivePrompt != "" {
-		effectivePrompt += "\n\n---\n\n"
-	}
-	effectivePrompt += chat.BuildEffectiveSystemPromptForTurnScoped(agentMeta.SystemPrompt, skillsIdx, userContent, session.AgentID, sessionID)
-	effectivePrompt = chat.AppendTurnIntentPrompt(effectivePrompt)
-	if chat.ShouldAppendWebToolsPrompt(chat.RuntimeToolsForAgent(agentMeta)) {
-		effectivePrompt = chat.AppendWebToolsPrompt(effectivePrompt)
-	}
-	effectivePrompt = chat.AppendAskUserToolPrompt(effectivePrompt)
-	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
-	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
 	messages := make([]model.Message, 0, len(history)+3)
-	if effectivePrompt != "" {
-		messages = append(messages, model.Message{Role: "system", Content: effectivePrompt})
-	}
 	for _, h := range history {
 		if h.Role == "system" {
 			continue
@@ -855,79 +791,8 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
 		}
 
-		ea, ok := a.(agent.EventStreamableAgent)
-		if !ok {
-			resp, err := a.Run(runCtx, req)
-			if err != nil {
-				s.handleStreamRunError(ctx, sessionID, session.AgentID, streamSessionProvider, ch, err)
-				return
-			}
-			tr := chat.RunTraceFromMetadata(resp.Metadata)
-			s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
-			s.persistCompactBoundary(runCtx, sessionID, tr)
-			s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, resp.Messages, tr)
-			for _, event := range streamEventsFromResponse(resp) {
-				ch <- event
-			}
+		if _, err := s.streamAgentEvents(runCtx, sessionID, session.AgentID, agentMeta.Workspace, a, req, streamSessionProvider, ch); err != nil {
 			return
-		}
-
-		evCh, err := ea.RunEvents(runCtx, req)
-		if err != nil {
-			ch <- ChatStreamEvent{Type: ChatStreamEventError, Error: err.Error()}
-			return
-		}
-		for ev := range evCh {
-			switch ev.Type {
-			case agent.StreamEventDelta:
-				if ev.Text != "" {
-					ch <- ChatStreamEvent{Type: ChatStreamEventChunk, Content: ev.Text}
-				}
-			case agent.StreamEventToolStarted:
-				if ev.ToolCall != nil {
-					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "started")}
-				}
-			case agent.StreamEventToolCompleted:
-				if ev.ToolCall != nil {
-					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "completed")}
-				}
-			case agent.StreamEventToolFailed, agent.StreamEventPermissionDenied, agent.StreamEventHookBlocked:
-				if ev.ToolCall != nil {
-					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "failed")}
-				}
-			case agent.StreamEventError:
-				// 错误是终止性的：处理后退出 goroutine（触发 defer 清理），与旧 a.Run 行为一致。
-				s.handleStreamRunError(ctx, sessionID, session.AgentID, streamSessionProvider, ch, errors.New(ev.Error))
-				return
-			case agent.StreamEventDone:
-				// RunEvents 的文本已通过 Delta 增量下发，这里仅从 trace 派生
-				// input_required / confirm_required 事件（ask_user / execute_write / skill_manage / terminal / workspace_file / browser）。
-				if ev.Trace != nil {
-					s.persistTurnTrace(runCtx, sessionID, session.AgentID, ev.Trace)
-					s.persistCompactBoundary(runCtx, sessionID, ev.Trace)
-					s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, ev.Messages, ev.Trace)
-					resp := &agent.Response{Metadata: map[string]any{"trace": ev.Trace}}
-					for _, item := range inputRequestsFromResponse(resp) {
-						input := item
-						ch <- ChatStreamEvent{Type: ChatStreamEventInputRequired, Input: &input}
-					}
-					for _, item := range confirmationRequestsFromResponse(resp) {
-						confirmation := item
-						// Drop skill_manage cards whose pending was already consumed (e.g. race
-						// or stale trace) so the UI never offers an already_used token.
-						if confirmation.Kind == "skill_manage" {
-							store := chat.SkillManagePendingStore()
-							if store != nil {
-								p, _ := store.GetPending(ctx, sessionID, confirmation.Token)
-								if p == nil {
-									continue
-								}
-							}
-						}
-						ch <- ChatStreamEvent{Type: ChatStreamEventConfirmRequired, Confirmation: &confirmation}
-					}
-				}
-			}
 		}
 	}()
 	return ch, sessionID, nil
@@ -943,7 +808,6 @@ func (s *ChatService) handleStreamRunError(ctx context.Context, sessionID, agent
 			if gmsg, cerr := s.chatUC.CreateMessage(ctx, sessionID, "assistant", vis); cerr != nil {
 				s.log.Errorf("SendMessageStream persist guardrail banner failed: session_id=%s err=%v", sessionID, cerr)
 			} else {
-				s.notifyGrowthAssistantTurn(sessionID)
 				go chat.NotifyMemorySessionDirty(ctx, sessionID, len(vis), 1, s.chatUC, s.agentUC, provider)
 				chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, gmsg)
 			}
@@ -1012,27 +876,10 @@ func (s *ChatService) SaveAssistantMessage(ctx context.Context, sessionID, conte
 		s.log.Errorf("SaveAssistantMessage failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	s.notifyGrowthAssistantTurn(sessionID)
 	provider := chat.NewChatTranscriptProvider(s.chatUC)
 	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(content), 1, s.chatUC, s.agentUC, provider)
-	s.notifyMemoryExtractAfterAssistant(ctx, sessionID, content)
 	chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, msg)
 	return messageToReply(msg), nil
-}
-
-func (s *ChatService) notifyMemoryExtractAfterAssistant(ctx context.Context, sessionID, assistantContent string) {
-	session, err := s.chatUC.GetSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return
-	}
-	agentMeta, err := s.agentUC.GetForSession(ctx, session.AgentID)
-	if err != nil {
-		agentMeta = nil
-	}
-	history, _ := s.chatUC.ListMessages(ctx, sessionID, 50)
-	userMsg := chat.LastUserMessageContent(history)
-	chat.NotifyMemoryExtractFromTurn(ctx, s.memoryStore, session, userMsg, assistantContent, agentMeta)
-	chat.NotifyMemoryGraphFromTurn(ctx, s.memoryStore, session, userMsg, assistantContent, agentMeta)
 }
 
 func messageToReply(m *biz.ChatMessage) *chatv1.MessageReply {

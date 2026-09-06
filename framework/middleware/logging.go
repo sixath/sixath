@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 )
 
 func requestAttrs(req *agent.Request) []slog.Attr {

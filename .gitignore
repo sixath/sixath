@@ -40,3 +40,6 @@ portal/internal/service/data/
 
 # Compose Portal data_root bind mount (skills / workspaces)
 /data/
+
+# Compose HOST_CODE_ROOT default bind mount (code browse / workspace-link)
+/codes/

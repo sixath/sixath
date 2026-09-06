@@ -66,6 +66,8 @@ func NewChannelPeerUsecase(peerRepo ChannelPeerSessionRepo, sessionRepo ChatSess
 }
 
 // Resolve returns the session for channel_id+peer_id using the agent allowlist / force_new decision table.
+// Empty AgentID means: continue the existing peer binding when present; otherwise use channel.DefaultAgent
+// (and on ForceNew with a binding, rebind to the same agent — used by /new).
 func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, in ChannelPeerResolveInput) (*ChannelPeerResolveResult, error) {
 	channelID := strings.TrimSpace(in.ChannelID)
 	peerID := strings.TrimSpace(in.PeerID)
@@ -81,23 +83,17 @@ func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, in ChannelPeerResolve
 		return nil, err
 	}
 
-	agentID := strings.TrimSpace(in.AgentID)
-	if agentID == "" {
-		agentID = strings.TrimSpace(ch.DefaultAgent)
-	}
-	if agentID == "" {
-		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "agent_id is required")
-	}
-	if !agentAllowed(ch, agentID) {
-		return nil, ErrAgentNotAllowed
-	}
-
 	existing, err := uc.peerRepo.Get(ctx, channelID, peerID)
 	if err != nil && !errors.Is(err, pkgErrors.ErrNotFound) {
 		return nil, err
 	}
-	if err == nil && existing != nil && !in.ForceNew {
-		if existing.AgentID == agentID {
+	if errors.Is(err, pkgErrors.ErrNotFound) {
+		existing = nil
+	}
+
+	requested := strings.TrimSpace(in.AgentID)
+	if existing != nil && !in.ForceNew {
+		if requested == "" || existing.AgentID == requested {
 			return &ChannelPeerResolveResult{
 				SessionID: existing.SessionID,
 				AgentID:   existing.AgentID,
@@ -105,6 +101,22 @@ func (uc *ChannelPeerUsecase) Resolve(ctx context.Context, in ChannelPeerResolve
 			}, nil
 		}
 		return nil, ErrAgentBound
+	}
+
+	agentID := requested
+	if agentID == "" {
+		if existing != nil {
+			agentID = strings.TrimSpace(existing.AgentID)
+		}
+		if agentID == "" {
+			agentID = strings.TrimSpace(ch.DefaultAgent)
+		}
+	}
+	if agentID == "" {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "agent_id is required")
+	}
+	if !agentAllowed(ch, agentID) {
+		return nil, ErrAgentNotAllowed
 	}
 
 	title := fmt.Sprintf("channel:%s peer:%s", channelID, peerID)

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/errs"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/model"
 )
 

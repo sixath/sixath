@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { toolApi, type CreateToolRequest, type ToolConfig } from '../api/client'
+import { copyTool } from '../utils/toolCopy'
 
 function linesToStringArray(text: string): string[] {
   return text.split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean)
@@ -124,20 +125,38 @@ export default function ToolForm() {
       submitConfig = { ...config, mcp: { endpoint: config.mcp_endpoint || config.mcp?.endpoint, id: config.mcp_server_id || config.mcp?.id, backend: config.mcp_backend || config.mcp?.backend } }
     } else if (type === 'datasource') {
       const ds = config.datasource ?? {}
+      const dsType = ds.type || 'mysql'
+      if (dsType === 'elasticsearch' || dsType === 'es') {
+        if (!(ds.default_index || '').trim() || !(ds.purpose || '').trim()) {
+          setError('请填写默认索引和用途')
+          return
+        }
+      }
       submitConfig = {
         ...config,
         datasource: {
           ...ds,
-          type: ds.type || 'mysql', // 与下拉框默认展示一致，确保 type 始终传递
+          type: dsType, // 与下拉框默认展示一致，确保 type 始终传递
         },
       }
     } else if (type === 'rca') {
       // 下拉框用 || 'rca_code' 展示默认值，但未改动时 config.rca.func_path 可能仍为空；
       // 提交必须显式写入，否则运行时 registerRCATool 会因空 func_path 静默跳过。
+      const funcPath = config.rca?.func_path || 'rca_code'
+      if (funcPath === 'es_log_query') {
+        const ep = (config.rca?.endpoint || '').trim()
+        const ds = (config.rca?.datasource_id || '').trim()
+        if ((ep && ds) || (!ep && !ds)) {
+          setError(ep && ds
+            ? 'ES 地址与 datasource 工具名互斥，请只保留其一'
+            : '请填写 ES 地址，或填写已绑定的 datasource 工具名（二选一）')
+          return
+        }
+      }
       submitConfig = {
         rca: {
           ...(config.rca || {}),
-          func_path: config.rca?.func_path || 'rca_code',
+          func_path: funcPath,
         },
       }
     }
@@ -321,6 +340,34 @@ export default function ToolForm() {
                 {' '}只读
               </label>
             </div>
+            {(config.datasource?.type === 'elasticsearch' || config.datasource?.type === 'es') && (
+              <>
+                <div className="form-group">
+                  <label>默认索引 *</label>
+                  <input
+                    value={config.datasource?.default_index || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), default_index: e.target.value } }))}
+                    placeholder="app-*"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>trace 字段</label>
+                  <input
+                    value={config.datasource?.trace_id_field || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), trace_id_field: e.target.value } }))}
+                    placeholder="trace_id"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>用途 *</label>
+                  <input
+                    value={config.datasource?.purpose || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), purpose: e.target.value } }))}
+                    placeholder="如 应用日志"
+                  />
+                </div>
+              </>
+            )}
           </>
         )}
         {type === 'rca' && (
@@ -334,18 +381,17 @@ export default function ToolForm() {
                 <option value="rca_code">代码检索 (grep/glob/read)</option>
                 <option value="rca_symbol">符号导航 (definition/references)</option>
                 <option value="jaeger_trace">Jaeger 链路</option>
-                <option value="es_log_query">ELK 日志</option>
+                {isEdit && config.rca?.func_path === 'es_log_query' ? (
+                  <option value="es_log_query">ELK 日志</option>
+                ) : null}
               </select>
             </div>
 
             {(['rca_code', 'rca_symbol'] as const).includes((config.rca?.func_path || 'rca_code') as 'rca_code' | 'rca_symbol') && (
               <div className="form-group">
-                <label>仓库根路径(每行一个绝对路径)</label>
-                <textarea
-                  value={(config.rca?.roots || []).join('\n')}
-                  onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), roots: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } }))}
-                  placeholder={'/abs/path/service-a\n/abs/path/service-b'}
-                />
+                <p className="form-panel__desc">
+                  代码检索 / 符号导航只使用该 Agent 的 workspace/code。未挂载则不会注册 rca_grep 等工具，请在 Agent 表单里挂载代码根。
+                </p>
               </div>
             )}
 
@@ -408,7 +454,34 @@ export default function ToolForm() {
             {config.rca?.func_path === 'es_log_query' && (
               <>
                 <div className="form-group">
-                  <label>ES 数据源工具 ID(需先创建 datasource 工具并绑定给同一 Agent)</label>
+                  <label>ES 地址（推荐直接填写）</label>
+                  <input
+                    value={config.rca?.endpoint || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), endpoint: e.target.value } }))}
+                    placeholder="http://host:9200"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>用户（可选）</label>
+                  <input
+                    value={config.rca?.user || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), user: e.target.value } }))}
+                    placeholder="basic auth user"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>密码（可选）</label>
+                  <input
+                    type="password"
+                    value={config.rca?.password || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), password: e.target.value } }))}
+                    placeholder="basic auth password"
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>或：引用已绑定 datasource 工具名（与上方地址二选一）</label>
                   <input
                     value={config.rca?.datasource_id || ''}
                     onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), datasource_id: e.target.value } }))}
@@ -797,6 +870,32 @@ export default function ToolForm() {
         {error && <div className="error">{error}</div>}
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
           <button type="submit" className="btn" disabled={loading}>{loading ? '提交中...' : '保存'}</button>
+          {isEdit && id ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={loading}
+              onClick={async () => {
+                setError('')
+                setLoading(true)
+                try {
+                  const created = await copyTool({
+                    name,
+                    description,
+                    type,
+                    config,
+                  })
+                  navigate(`/tools/${created.id}/edit`)
+                } catch (e) {
+                  setError((e as Error).message)
+                } finally {
+                  setLoading(false)
+                }
+              }}
+            >
+              复制为新工具
+            </button>
+          ) : null}
           <Link to="/tools" className="btn btn-secondary">取消</Link>
         </div>
         </form>

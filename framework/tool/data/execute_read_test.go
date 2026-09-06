@@ -3,16 +3,20 @@ package tooldata
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sixath/framework/executor"
+	"github.com/sixath/framework/metadata"
 	core "github.com/sixath/framework/tool"
 )
 
 type fakeExecutor struct {
-	calls []execCall
-	ret   *executor.Result
-	err   error
+	calls          []execCall
+	ret            *executor.Result
+	err            error
+	failIfContains string
 }
 
 type execCall struct {
@@ -40,6 +44,9 @@ func (f *fakeExecutor) Query(ctx context.Context, datasourceID, dsl string, opts
 			Params:  opts.Params,
 		},
 	})
+	if f.failIfContains != "" && strings.Contains(dsl, f.failIfContains) {
+		return nil, f.err
+	}
 	if f.ret == nil {
 		return nil, f.err
 	}
@@ -48,7 +55,7 @@ func (f *fakeExecutor) Query(ctx context.Context, datasourceID, dsl string, opts
 		Rows:           f.ret.Rows,
 		Truncated:      f.ret.Truncated,
 		EstimatedTotal: f.ret.EstimatedTotal,
-	}, f.err
+	}, nil
 }
 
 func TestExecuteRead_Basic(t *testing.T) {
@@ -236,5 +243,182 @@ func TestExecuteRead_ExecutorErrorWrapped(t *testing.T) {
 	}
 	if !errors.Is(err, inner) {
 		t.Fatalf("expected wrapped inner error, got: %v", err)
+	}
+}
+
+func TestExecuteRead_DoesNotSpillOverFiftyRows(t *testing.T) {
+	rows := make([][]any, 51)
+	for i := range rows {
+		rows[i] = []any{int64(i)}
+	}
+	f := &fakeExecutor{
+		ret: &executor.Result{
+			Columns: []string{"id"},
+			Rows:    rows,
+		},
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		DefaultDatasourceID: "ds1",
+		DefaultTimeoutSec:   10,
+		DefaultMaxRows:      100,
+	}
+
+	reg := core.NewRegistry()
+	if err := RegisterExecuteReadTool(reg, cfg); err != nil {
+		t.Fatalf("RegisterExecuteReadTool: %v", err)
+	}
+	tl, ok := reg.Get("execute_read")
+	if !ok {
+		t.Fatal("execute_read not found")
+	}
+
+	root := t.TempDir()
+	ctx := context.WithValue(context.Background(), core.ContextKeyWorkspaceRoot, root)
+	ctx = context.WithValue(ctx, core.ContextKeySessionID, "sess-1")
+
+	out, err := tl.Execute(ctx, map[string]any{
+		"dsl": "SELECT id FROM t",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, ok := out.(*core.QuerySpillStub); ok {
+		t.Fatal("default execute_read must not spill")
+	}
+	res, ok := out.(*executor.QueryResult)
+	if !ok {
+		t.Fatalf("unexpected result type: %T", out)
+	}
+	if len(res.Rows) != 51 {
+		t.Fatalf("rows=%d", len(res.Rows))
+	}
+}
+
+func schemaErr(msg string) error {
+	return &executor.SchemaRelatedError{Err: fmt.Errorf("executor: query: %s", msg)}
+}
+
+func vmSchema() *metadata.Schema {
+	return &metadata.Schema{
+		Name: "d_1000_game_virtual_machine_info",
+		Tables: []metadata.Table{
+			{
+				Name: "t_game_virtual_machine_info",
+				Columns: []metadata.Column{
+					{Name: "vmid"}, {Name: "mgr_ipv4_address"}, {Name: "flow_id"},
+					{Name: "assign_state"}, {Name: "name"}, {Name: "area_type"},
+				},
+			},
+			{
+				Name: "t_game_virtual_machine_extend_info",
+				Columns: []metadata.Column{
+					{Name: "vmid"}, {Name: "flow_id"}, {Name: "exec_username"},
+				},
+			},
+			{
+				Name: "t_game_virtual_machine_info_test",
+				Columns: []metadata.Column{
+					{Name: "vmid"}, {Name: "flow_id"}, {Name: "mgr_ipv4_address"},
+				},
+			},
+		},
+	}
+}
+
+func testHealStore(t *testing.T) *metadata.InMemoryStore {
+	t.Helper()
+	store := metadata.NewInMemoryStore(func(ctx context.Context) (*metadata.Schema, error) {
+		return vmSchema(), nil
+	})
+	if _, err := store.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func TestExecuteRead_doesNotAutoHealUnknownSelectColumn(t *testing.T) {
+	f := &fakeExecutor{
+		ret: &executor.Result{
+			Columns: []string{"vmid", "mgr_ipv4_address"},
+			Rows:    [][]any{{int64(9076), "10.1.2.3"}},
+		},
+		err:            schemaErr("Error 1054 (42S22): Unknown column 'ecn_id' in 'field list'"),
+		failIfContains: "ecn_id",
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		Store:               testHealStore(t),
+		DefaultDatasourceID: "ds1",
+	}
+	reg := core.NewRegistry()
+	if err := RegisterExecuteReadTool(reg, cfg); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("execute_read")
+	_, err := tl.Execute(context.Background(), map[string]any{
+		"dsl": "SELECT vmid, mgr_ipv4_address, ecn_id FROM t_game_virtual_machine_info WHERE vmid = 9076",
+	})
+	if err == nil {
+		t.Fatal("default execute_read must not auto-heal schema errors")
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("want single query, calls=%d", len(f.calls))
+	}
+}
+
+func TestExecuteRead_doesNotAutoHealSchemaUsedAsTable(t *testing.T) {
+	f := &fakeExecutor{
+		ret: &executor.Result{
+			Columns: []string{"vmid", "mgr_ipv4_address"},
+			Rows:    [][]any{{int64(9076), "10.1.2.3"}},
+		},
+		err:            schemaErr("Error 1146 (42S02): Table 'd_1000_game_virtual_machine_info.d_1000_game_virtual_machine_info' doesn't exist"),
+		failIfContains: "FROM d_1000_game_virtual_machine_info WHERE",
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		Store:               testHealStore(t),
+		DefaultDatasourceID: "ds1",
+	}
+	reg := core.NewRegistry()
+	_ = RegisterExecuteReadTool(reg, cfg)
+	tl, _ := reg.Get("execute_read")
+	_, err := tl.Execute(context.Background(), map[string]any{
+		"query": "SELECT * FROM d_1000_game_virtual_machine_info WHERE flow_id = '9999_zjvplfx19vdv'",
+	})
+	if err == nil {
+		t.Fatal("default execute_read must not auto-heal schema errors")
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("want single query, calls=%d", len(f.calls))
+	}
+}
+
+func TestExecuteRead_unknownTableHint(t *testing.T) {
+	f := &fakeExecutor{
+		err: schemaErr("Error 1146 (42S02): Table 'd_1000_game_virtual_machine_info.t_flow' doesn't exist"),
+	}
+	cfg := &ExecuteReadConfig{
+		Reader:              f,
+		Exec:                f,
+		Store:               testHealStore(t),
+		DefaultDatasourceID: "ds1",
+	}
+	reg := core.NewRegistry()
+	_ = RegisterExecuteReadTool(reg, cfg)
+	tl, _ := reg.Get("execute_read")
+	_, err := tl.Execute(context.Background(), map[string]any{
+		"dsl": "SELECT * FROM t_flow WHERE flow_id = 'x'",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "doesn't exist") && !strings.Contains(msg, "t_flow") {
+		t.Fatalf("want original schema error, got %s", msg)
 	}
 }

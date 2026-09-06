@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	fwws "github.com/sixath/framework/workspace"
 )
 
 const (
@@ -419,7 +421,7 @@ func terminalWorkdir(ctx context.Context, params map[string]any) (string, error)
 	if ws == "" {
 		return "", fmt.Errorf("workspace_root not set for workdir %q", workdir)
 	}
-	full, err := ResolveWorkspacePath(ws, workdir)
+	full, err := fwws.ResolveWorkspacePath(ws, workdir)
 	if err != nil {
 		return "", err
 	}

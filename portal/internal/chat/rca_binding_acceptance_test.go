@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"backend/internal/biz"
@@ -48,6 +50,10 @@ func TestE5_RCABindingAcceptance(t *testing.T) {
 	})
 
 	t.Run("3_BuildRegistry_registers_expected_tools", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.Mkdir(filepath.Join(ws, WorkspaceCodeLink), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		jaeger, _ := structpb.NewStruct(map[string]any{
 			"rca": map[string]any{"func_path": "jaeger_trace", "query_url": "http://j:16686"},
 		})
@@ -72,7 +78,7 @@ func TestE5_RCABindingAcceptance(t *testing.T) {
 			{Name: "rca-es", Type: biz.ToolTypeRCA, Config: esLog},
 		}
 		reg := tool.NewRegistry()
-		if _, err := BuildRegistry(tools, nil, reg); err != nil {
+		if _, err := BuildRegistry(tools, nil, reg, RegistryBuildOptions{Workspace: ws}); err != nil {
 			t.Fatalf("BuildRegistry: %v", err)
 		}
 		want := []string{"jaeger_trace", "es_log_query", "rca_grep", "rca_glob", "rca_read"}
@@ -84,6 +90,10 @@ func TestE5_RCABindingAcceptance(t *testing.T) {
 	})
 
 	t.Run("4_List_and_ListForAPI_expose_names", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.Mkdir(filepath.Join(ws, WorkspaceCodeLink), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		jaeger, _ := structpb.NewStruct(map[string]any{
 			"rca": map[string]any{"func_path": "jaeger_trace", "query_url": "http://j:16686"},
 		})
@@ -108,7 +118,7 @@ func TestE5_RCABindingAcceptance(t *testing.T) {
 			{Name: "rca-es", Type: biz.ToolTypeRCA, Config: esLog},
 		}
 		reg := tool.NewRegistry()
-		if _, err := BuildRegistry(tools, nil, reg); err != nil {
+		if _, err := BuildRegistry(tools, nil, reg, RegistryBuildOptions{Workspace: ws}); err != nil {
 			t.Fatalf("BuildRegistry: %v", err)
 		}
 

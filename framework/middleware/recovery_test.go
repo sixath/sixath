@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/errs"
+	agent "github.com/sixath/framework/harness"
 )
 
 func TestRecoveryMiddleware_PanicToError(t *testing.T) {
@@ -59,5 +59,5 @@ func TestRecoveryMiddlewareWithLogger_LogsPanic(t *testing.T) {
 
 type runtimeError string
 
-func (runtimeError) RuntimeError() {}
+func (runtimeError) RuntimeError()   {}
 func (e runtimeError) Error() string { return string(e) }

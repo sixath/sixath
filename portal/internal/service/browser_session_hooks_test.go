@@ -28,7 +28,7 @@ func TestDeleteSession_ClosesBrowserBackend(t *testing.T) {
 	}
 
 	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil)
-	s := NewChatService(chatUC, nil, nil, nil, nil, nil, log.DefaultLogger)
+	s := NewChatService(chatUC, nil, nil, nil, nil, log.DefaultLogger)
 
 	reply, err := s.DeleteSession(biz.WithCallerUserID(context.Background(), "user-1"), &chatv1.DeleteSessionRequest{Id: sessionID})
 	if err != nil {

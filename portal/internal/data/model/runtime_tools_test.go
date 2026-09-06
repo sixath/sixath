@@ -63,37 +63,3 @@ func TestRuntimeToolsConfig_HybridRecallJSONRoundTrip(t *testing.T) {
 		}
 	})
 }
-
-func TestRuntimeToolsConfig_HubFieldsJSONRoundTrip(t *testing.T) {
-	t.Run("unset_omitted", func(t *testing.T) {
-		b, err := json.Marshal(RuntimeToolsConfig{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		s := string(b)
-		for _, key := range []string{"hub_governance", "hub_knowledge", "hub_fallback_to_default_on_read_error"} {
-			if strings.Contains(s, key) {
-				t.Fatalf("unset must omit %s, got %s", key, s)
-			}
-		}
-	})
-	t.Run("explicit", func(t *testing.T) {
-		g, k := "local", "local"
-		fb := false
-		c := RuntimeToolsConfig{HubGovernance: &g, HubKnowledge: &k, HubFallbackToDefaultOnReadError: &fb}
-		b, err := json.Marshal(c)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out RuntimeToolsConfig
-		if err := json.Unmarshal(b, &out); err != nil {
-			t.Fatal(err)
-		}
-		if out.HubGovernance == nil || *out.HubGovernance != "local" {
-			t.Fatalf("%+v", out.HubGovernance)
-		}
-		if out.HubFallbackToDefaultOnReadError == nil || *out.HubFallbackToDefaultOnReadError {
-			t.Fatalf("%+v", out.HubFallbackToDefaultOnReadError)
-		}
-	})
-}

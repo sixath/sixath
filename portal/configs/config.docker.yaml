@@ -8,23 +8,13 @@ server:
     timeout: 30s
 skills:
   allow_script_execution: true
-  auto_route_enabled: true
-  route_min_score: 5
-  route_max_body_runes: 12000
 growth:
-  llm_review_enabled: true
-  worker_enabled: true
-  worker_poll_interval: 45s
-  idle_sweep_interval: 600s
-  idle_check_interval: 600s
-  combined_review_enabled: false
-  session_end_memory_review_enabled: false
-  session_end_skill_review_enabled: true
-  max_retry: 5
-  curator_enabled: false
-  learnings_review_enabled: true
-  learnings_max_runes: 6000
-  review_patch_file: "growth_review_patch.example.json"
+  # /route 分类器读 llm；未配则 fail-open。也可用 SATH_GROWTH_LLM_*。
+  # llm:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   api_key: "your-key"
+  #   base_url: "https://api.openai.com/v1"
 runtime:
   # Gateway → Portal Runtime service token（可用 SATH_RUNTIME_TOKEN 覆盖）。
   service_token: "dev-runtime-token"
@@ -38,6 +28,8 @@ auth:
 data:
   # Persist agent workspaces + skills across container recreate (compose mounts this path).
   data_root: /data/portal
+  code_roots:
+    - /mnt/codes
   database:
     driver: mysql
     source: root:root@tcp(mysql:3306)/sath?parseTime=True&loc=Local&charset=utf8mb4

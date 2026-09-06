@@ -62,29 +62,3 @@ func TestRuntimeTools_HybridRecallTriState(t *testing.T) {
 		}
 	})
 }
-
-func TestRuntimeTools_HubFieldsPresence(t *testing.T) {
-	t.Run("unset", func(t *testing.T) {
-		bizCfg := RuntimeToolsFromProto(&agentv1.RuntimeToolsConfig{})
-		if bizCfg.HubGovernance != nil || bizCfg.HubKnowledge != nil || bizCfg.HubFallbackToDefaultOnReadError != nil {
-			t.Fatalf("%+v", bizCfg)
-		}
-		out := RuntimeToolsToProto(bizCfg)
-		if out.HubGovernance != nil || out.HubKnowledge != nil || out.HubFallbackToDefaultOnReadError != nil {
-			t.Fatalf("%+v", out)
-		}
-	})
-	t.Run("explicit", func(t *testing.T) {
-		g, k := "local", "local"
-		fb := true
-		in := &agentv1.RuntimeToolsConfig{HubGovernance: &g, HubKnowledge: &k, HubFallbackToDefaultOnReadError: &fb}
-		bizCfg := RuntimeToolsFromProto(in)
-		if bizCfg.HubGovernance == nil || *bizCfg.HubGovernance != "local" {
-			t.Fatalf("%+v", bizCfg.HubGovernance)
-		}
-		out := RuntimeToolsToProto(bizCfg)
-		if out.GetHubGovernance() != "local" || out.GetHubKnowledge() != "local" || !out.GetHubFallbackToDefaultOnReadError() {
-			t.Fatalf("%+v", out)
-		}
-	})
-}

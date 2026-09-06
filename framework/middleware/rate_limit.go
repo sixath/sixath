@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/errs"
+	agent "github.com/sixath/framework/harness"
 )
 
 // 简单的基于内存的令牌桶限流实现。

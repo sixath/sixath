@@ -43,6 +43,11 @@ type QueryResult struct {
 	Rows           [][]any
 	Truncated      bool
 	EstimatedTotal int64
+	HitStatus      string `json:"hit_status,omitempty"`
+	QueriedIndex   string `json:"queried_index,omitempty"`
+	// RepairedSQL / RepairNote are set when execute_read auto-rewrote a schema error.
+	RepairedSQL string `json:"repaired_sql,omitempty"`
+	RepairNote  string `json:"repair_note,omitempty"`
 }
 
 func queryResultFromResult(r *Result) *QueryResult {

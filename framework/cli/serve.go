@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/errs"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/middleware"
 	"github.com/sixath/framework/model"
@@ -42,6 +42,9 @@ func NewServeCommand() *cobra.Command {
 				}
 			} else {
 				cfg = config.FromEnv()
+			}
+			if err := applyCLIWorkspace(&cfg); err != nil {
+				return err
 			}
 
 			var handler middleware.Handler
@@ -71,7 +74,7 @@ func NewServeCommand() *cobra.Command {
 					middleware.LoggingMiddleware,
 					middleware.MetricsMiddleware,
 				}
-				handler = templates.NewChatAgentHandler(m, mem, mws...)
+				handler = templates.NewChatAgentHandlerWithWorkspace(m, mem, cfg.Workspace, mws...)
 			}
 			if debug {
 				handler = middleware.DebugMiddleware(true)(handler)

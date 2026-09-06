@@ -10,11 +10,12 @@ import (
 
 	"backend/internal/biz"
 
-	"github.com/sixath/framework/agent"
 	"github.com/sixath/framework/config"
+	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/model"
@@ -59,10 +60,10 @@ type RegistryBuildResult struct {
 	DsBindings       []DatasourceBinding
 }
 
-// RegistryBuildOptions optional surface filter for BuildRegistry.
+// RegistryBuildOptions optional inputs for BuildRegistry.
 type RegistryBuildOptions struct {
-	// ActiveFamilies nil => no filtering (legacy full bind).
-	ActiveFamilies map[string]struct{}
+	// Workspace is the agent writable root; rca_* uses workspace/code when present.
+	Workspace string
 }
 
 // BuildRegistry 根据 Agent 绑定的工具与 MCP Server 列表构建 tool.Registry。
@@ -72,8 +73,6 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	tools = filterToolsForSurface(tools, o.ActiveFamilies)
-	servers = filterServersForSurface(servers, o.ActiveFamilies)
 
 	reg.SetEventBus(events.DefaultBus())
 
@@ -103,9 +102,13 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 			}
 			dsCfg = canonicalDatasourceConfig(t.Name, dsCfg)
 			datasourceConfigs = append(datasourceConfigs, dsCfg)
-			dsBindings = append(dsBindings, bindingFromConfig(t.Name, dsCfg, nil))
+			b := bindingFromConfig(t.Name, dsCfg, nil)
+			// purpose / default_index live on the tool config map, not datasource.Config.
+			b.DefaultIndex = mapStringField(dsMap, "default_index", "defaultIndex")
+			b.Purpose = mapStringField(dsMap, "purpose")
+			dsBindings = append(dsBindings, b)
 		case biz.ToolTypeRCA:
-			registerRCATool(reg, cfg, tools)
+			registerRCATool(reg, cfg, o.Workspace)
 		}
 	}
 
@@ -131,56 +134,9 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 		dsPrompt = prompt
 	}
 
+	registerESLogFromAgentTools(reg, tools)
+
 	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
-}
-
-func filterServersForSurface(servers []*biz.McpServerMeta, active map[string]struct{}) []*biz.McpServerMeta {
-	if active == nil {
-		return servers
-	}
-	var out []*biz.McpServerMeta
-	for _, s := range servers {
-		if s == nil {
-			continue
-		}
-		if FamilyActive(active, MCPFamilyID(s.ID)) {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func filterToolsForSurface(tools []*biz.ToolMeta, active map[string]struct{}) []*biz.ToolMeta {
-	if active == nil {
-		return tools
-	}
-	var out []*biz.ToolMeta
-	for _, t := range tools {
-		if t == nil {
-			continue
-		}
-		switch t.Type {
-		case biz.ToolTypeRCA:
-			if FamilyActive(active, FamilyRCA) {
-				out = append(out, t)
-			}
-		case biz.ToolTypeMCP:
-			mc := tool.McpConfigFromMap(toolConfigToMap(t.Config))
-			fid := LegacyMCPFamilyID(t.Name)
-			if mc != nil && mc.Id != "" {
-				fid = MCPFamilyID(mc.Id)
-			}
-			if FamilyActive(active, fid) {
-				out = append(out, t)
-			}
-		default:
-			// datasource + builtin → core lane
-			if FamilyActive(active, FamilyCore) {
-				out = append(out, t)
-			}
-		}
-	}
-	return out
 }
 
 func mcpEntryFromConfig(mc *tool.McpConfig) toolskill.McpServerEntry {
@@ -235,7 +191,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 		if isElasticsearchType(cfg.Type) {
 			b.SkipDataTools = true
 			b.Available = false
-			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query 或 http_request"
+			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query(cluster=…) 或 http_request"
 			outBindings = append(outBindings, b)
 			continue
 		}
@@ -320,6 +276,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 			_ = tooldata.RegisterExecuteReadTool(reg, &tooldata.ExecuteReadConfig{
 				Exec:                exec,
 				Registry:            dsReg,
+				Store:               store,
 				DefaultDatasourceID: defaultDSID,
 			}, opts)
 		}
@@ -388,14 +345,6 @@ func SetAllowScriptExecution(allow bool) {
 	AllowScriptExecution = allow
 }
 
-// RegisterLearningTools 注册 append_learning（写入 .learnings，供 Growth 复盘消费）。
-func RegisterLearningTools(reg *tool.Registry) error {
-	if reg == nil {
-		return nil
-	}
-	return toolskill.RegisterAppendLearningTool(reg)
-}
-
 // ExecuteSkillScript 直接执行技能脚本，供 Agent.ExecuteSkill API 使用
 func ExecuteSkillScript(ctx context.Context, workspace string, extraSkillDirs []string, skillName, relPath, input string) (string, error) {
 	if workspace == "" || skillName == "" || relPath == "" {
@@ -423,21 +372,34 @@ func ExecuteSkillScript(ctx context.Context, workspace string, extraSkillDirs []
 	return fmt.Sprint(result), nil
 }
 
-// BuildEffectiveSystemPrompt 根据 Agent 的 systemPrompt 与 skills 构建最终注入的系统提示。
-// 当 skillsIdx 非空时，若用户未配置 systemPrompt，则使用完整的技能说明；若已配置，则在其后追加技能摘要。
+// BuildEffectiveSystemPrompt 返回装配进 Harness 的 Agent 文案。
+// Skills 索引由 Harness PromptBuilder 负责，这里不再拼接。
 func BuildEffectiveSystemPrompt(userPrompt string, skillsIdx *skills.Index) string {
-	if skillsIdx == nil {
-		return userPrompt
+	_ = skillsIdx
+	return userPrompt
+}
+
+// HarnessReActOptions 把 workspace、额外 skills 目录与 workspace hooks 交给 Harness。
+func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReActOption {
+	opts := []agent.ReActOption{agent.WithReActWorkspace(workspace)}
+	if len(extraSkillDirs) > 0 {
+		opts = append(opts, agent.WithReActSkillsDirs(extraSkillDirs))
 	}
-	skillsPrompt := templates.BuildSkillsAwarePrompt(skillsIdx)
-	if userPrompt == "" {
-		return skillsPrompt
+	var hooks []agent.ToolHook
+	if ws := strings.TrimSpace(workspace); ws != "" {
+		if loaded, err := agent.LoadWorkspaceHarnessHooks(ws); err == nil {
+			hooks = append(hooks, loaded...)
+		}
 	}
-	return userPrompt + "\n\n---\n\n" + skillsPrompt
+	if len(hooks) > 0 {
+		opts = append(opts, agent.WithReActToolHooks(hooks...))
+	}
+	return opts
 }
 
 // DefaultMaxOutputTokens Portal 对话默认单次回复 token 上限（框架 CallConfig 默认为 1024）。
-const DefaultMaxOutputTokens = 8192
+// 8192 会把「完整映射表（468 条）」这类长表截在约 350 行；RCA 明细需要更高上限。
+const DefaultMaxOutputTokens = 32768
 
 // ReActOptionsFromAgent 按 Agent 模型配置追加 ReAct 选项（如 max_output_tokens）。
 func ReActOptionsFromAgent(meta biz.AgentMeta) []agent.ReActOption {
@@ -455,9 +417,9 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 		maxHistory = 20
 	}
 	opts := []agent.ReActOption{
-		agent.WithReActMaxSteps(40),
+		agent.WithReActMaxSteps(80),
 		agent.WithReActMaxHistory(maxHistory),
-		agent.WithReActMaxContextRunes(model.DefaultMaxContextRunes),
+		agent.WithReActMaxContextRunes(fwctx.DefaultMaxContextRunes),
 		agent.WithReActMaxOutputTokens(DefaultMaxOutputTokens),
 		agent.WithReActEventBus(events.DefaultBus()),
 	}
@@ -465,30 +427,23 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 		cp := *globalToolGuardrails
 		opts = append(opts, agent.WithReActToolGuardrails(&cp))
 	}
-	if orch := prefetchOrchestratorForReAct(); orch != nil {
-		opts = append(opts, agent.WithReActMemoryOrchestrator(orch))
-	}
-	if ShouldEnableEvidenceGate(reg) {
-		opts = append(opts, agent.WithReActEvidenceGate(agent.EvidenceGateConfig{Enabled: true}))
-	}
-	if gate := NewTurnIntentGate(); gate != nil {
-		opts = append(opts, agent.WithReActPostModelPolicy(gate))
+	if ShouldEnableParallelTools(reg) {
+		opts = append(opts, agent.WithReActParallelTools(true))
 	}
 	opts = append(opts, extra...)
 	return agent.NewReActAgent(m, mem, reg, opts...)
 }
 
-// ShouldEnableEvidenceGate reports whether the registry has RCA evidence tools
-// (jaeger_trace or es_log_query) that warrant Soft EvidenceGate on ReAct.
-func ShouldEnableEvidenceGate(reg *tool.Registry) bool {
+// ShouldEnableParallelTools is true when the registry has code-root tools that
+// are safe to run together in one ReAct step (grep/read/symbol).
+func ShouldEnableParallelTools(reg *tool.Registry) bool {
 	if reg == nil {
 		return false
 	}
-	if _, ok := reg.Get("jaeger_trace"); ok {
-		return true
-	}
-	if _, ok := reg.Get("es_log_query"); ok {
-		return true
+	for _, name := range []string{"rca_read", "rca_grep", "rca_glob", "rca_symbol"} {
+		if _, ok := reg.Get(name); ok {
+			return true
+		}
 	}
 	return false
 }

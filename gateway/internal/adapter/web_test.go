@@ -249,6 +249,7 @@ func TestWeb_SessionRoutesWired(t *testing.T) {
 		{http.MethodPut, "/api/v1/sessions/s1", `{"title":"n"}`, "/runtime/v1/sessions/s1"},
 		{http.MethodDelete, "/api/v1/sessions/s1", "", "/runtime/v1/sessions/s1"},
 		{http.MethodGet, "/api/v1/sessions/s1/messages", "", "/runtime/v1/sessions/s1/messages"},
+		{http.MethodGet, "/api/v1/sessions/s1/result-files?path=tmp/results/s1/a.jsonl", "", "/runtime/v1/sessions/s1/result-files"},
 		{http.MethodPost, "/api/v1/sessions/s1/rewind", `{"message_id":"m1"}`, "/runtime/v1/sessions/s1/rewind"},
 	}
 	for _, c := range calls {

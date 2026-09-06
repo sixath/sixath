@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -45,7 +46,7 @@ func RegisterHTTPTool(reg *Registry) error {
 				},
 				"timeout_seconds": map[string]any{
 					"type":        "number",
-					"description": "Optional timeout in seconds for the request (default 30s, max 300s).",
+					"description": "Optional overall timeout in seconds (default 20s, max 60s). Dial fails fast (~5s) on unreachable hosts.",
 				},
 			},
 			"required": []string{"method", "url"},
@@ -82,11 +83,11 @@ func RegisterHTTPTool(reg *Registry) error {
 				}
 			}
 
-			// 解析 timeout
-			timeout := 30 * time.Second
+			// 解析 timeout：默认 20s、上限 60s，避免模型把 timeout 拉到数分钟导致企微长时间「处理中」。
+			timeout := 20 * time.Second
 			if t, ok := params["timeout_seconds"].(float64); ok && t > 0 {
-				if t > 300 {
-					t = 300
+				if t > 60 {
+					t = 60
 				}
 				timeout = time.Duration(t * float64(time.Second))
 			}
@@ -113,8 +114,13 @@ func RegisterHTTPTool(reg *Registry) error {
 				}
 			}
 
+			// Fail fast on unreachable addresses (common in Docker/WSL → corp LAN).
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
+			transport.ResponseHeaderTimeout = 15 * time.Second
 			client := &http.Client{
-				Timeout: timeout,
+				Timeout:   timeout,
+				Transport: transport,
 			}
 
 			resp, err := client.Do(req)

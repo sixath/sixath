@@ -9,8 +9,6 @@ import (
 	"github.com/sixath/framework/tool/browser"
 	toolmem "github.com/sixath/framework/tool/memory"
 	toolskill "github.com/sixath/framework/tool/skillops"
-
-	"backend/internal/biz"
 )
 
 // AgentRuntimeToolsOptions supplies context for RegisterAgentRuntimeTools.
@@ -27,10 +25,6 @@ type AgentRuntimeToolsOptions struct {
 	BrowserFactory func() (browser.Backend, error)
 	// VisionAnalyzer enables browser_vision LLM analysis + vision_analyze (optional).
 	VisionAnalyzer tool.VisionAnalyzer
-	// RuntimeTools drives Memory Hub Resolve for knowledge_* registration (P1).
-	RuntimeTools biz.RuntimeToolsConfig
-	// ActiveFamilies nil => no surface filter (legacy full runtime bind).
-	ActiveFamilies map[string]struct{}
 }
 
 // RegisterAgentRuntimeTools registers Hermes P0 runtime tools according to flags (spec §14).
@@ -72,7 +66,7 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 			return err
 		}
 	}
-	if flags.WebToolsEnabled && FamilyActive(opts.ActiveFamilies, FamilyWeb) {
+	if flags.WebToolsEnabled {
 		if err := registerWebTools(reg, true); err != nil {
 			return err
 		}
@@ -89,11 +83,6 @@ func RegisterAgentRuntimeTools(reg *tool.Registry, opts AgentRuntimeToolsOptions
 	}
 	if flags.BrowserEnabled {
 		if err := RegisterBrowserRuntimeTools(reg, true, opts.BrowserStore, opts.BrowserFactory, opts.VisionAnalyzer); err != nil {
-			return err
-		}
-	}
-	if FamilyActive(opts.ActiveFamilies, FamilyKnowledge) {
-		if err := RegisterKnowledgeHubTools(reg, opts.RuntimeTools); err != nil {
 			return err
 		}
 	}

@@ -18,6 +18,7 @@ test.describe('Agent runtime tools (P0) UI', () => {
     await expect(page.getByTestId('runtime-tool-memory_write_enabled')).toBeVisible()
     await expect(page.getByTestId('runtime-tool-web_tools_enabled')).toBeVisible()
     await expect(page.getByTestId('runtime-tool-terminal_local_enabled')).toBeVisible()
+    await expect(page.getByTestId('runtime-tool-mea_enabled')).toHaveCount(0)
   })
 
   test('编码助手预设勾选常用工具', async ({ page }) => {
@@ -40,7 +41,7 @@ test.describe('Agent runtime tools (P0) UI', () => {
 
     await page.goto('/agents/new')
     await page.getByPlaceholder('如 my-agent').fill('e2e-agent')
-    await page.getByPlaceholder('/data/agents/my-agent').fill('/data/e2e/workspace')
+    await page.getByPlaceholder('留空则服务端默认 data_root/agents/{id}').fill('/data/e2e/workspace')
     await page.getByTestId('coding-assistant-preset').click()
     await page.getByRole('button', { name: '保存' }).click()
 
@@ -63,6 +64,7 @@ test.describe('Agent runtime tools (P0) UI', () => {
     await expect(page.getByTestId('runtime-tools-badges')).toContainText('记忆写入 (memory)')
     await expect(page.getByTestId('runtime-tools-badges')).toContainText('任务列表 (todo)')
     await expect(page.getByTestId('runtime-tools-badges')).toContainText('工作区文件')
+    await expect(page.getByTestId('runtime-tools-badges')).not.toContainText('MEA')
   })
 
   test('编辑 Agent 时加载已保存的 runtime_tools', async ({ page }) => {

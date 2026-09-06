@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -38,7 +39,9 @@ func (m *mongoDataSource) MongoDatabase() *mongo.Database {
 }
 
 // NewMongoDataSource 根据 Config 创建 MongoDB 数据源。
-// DSN 形如 mongodb://user:pass@host:port/dbname；若 DSN 为空则使用 Host/Port/User/Password/DBName 组装。
+// DSN 形如 mongodb://user:pass@host:port/dbname?authSource=admin；
+// 若 DSN 为空则使用 Host/Port/User/Password/DBName 组装。
+// 密码中的 @ 会做百分号编码；分字段组装时认证库默认 admin（可用 AuthSource 覆盖）。
 func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 	if cfg.ID == "" {
 		return nil, fmt.Errorf("mongodb datasource: missing id")
@@ -47,7 +50,7 @@ func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 		return nil, fmt.Errorf("mongodb datasource: missing dbname for id=%s", cfg.ID)
 	}
 
-	uri := cfg.DSN
+	uri := strings.TrimSpace(cfg.DSN)
 	if uri == "" {
 		host := cfg.Host
 		if host == "" {
@@ -57,7 +60,10 @@ func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 		if port == 0 {
 			port = 27017
 		}
-		uri = buildMongoURI(host, port, cfg.User, cfg.Password, cfg.DBName)
+		uri = buildMongoURI(host, port, cfg.User, cfg.Password, cfg.DBName, mongoAuthSource(cfg))
+	} else {
+		uri = encodeMongoURIUserinfo(uri)
+		uri = ensureMongoAuthSource(uri, mongoAuthSource(cfg))
 	}
 
 	clientOpts := options.Client().ApplyURI(uri)
@@ -78,8 +84,19 @@ func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 	return &mongoDataSource{id: cfg.ID, db: db}, nil
 }
 
+func mongoAuthSource(cfg Config) string {
+	if s := strings.TrimSpace(cfg.AuthSource); s != "" {
+		return s
+	}
+	if strings.TrimSpace(cfg.User) != "" || strings.TrimSpace(cfg.DSN) != "" {
+		return "admin"
+	}
+	return ""
+}
+
 // buildMongoURI 用 net/url 组装连接串，对 user/password 做百分号编码（避免密码中的 @、: 等破坏 URI）。
-func buildMongoURI(host string, port int, user, password, dbName string) string {
+// authSource 对应 mongo shell 的 --authenticationDatabase；有账号时默认 admin。
+func buildMongoURI(host string, port int, user, password, dbName, authSource string) string {
 	u := &url.URL{
 		Scheme: "mongodb",
 		Host:   fmt.Sprintf("%s:%d", host, port),
@@ -90,6 +107,44 @@ func buildMongoURI(host string, port int, user, password, dbName string) string 
 	}
 	q := u.Query()
 	q.Set("readPreference", "secondaryPreferred")
+	if authSource != "" {
+		q.Set("authSource", authSource)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// encodeMongoURIUserinfo 把 userinfo 里未转义的 @ : / 等编进密码，避免 ApplyURI 直接失败。
+func encodeMongoURIUserinfo(uri string) string {
+	scheme, rest, ok := strings.Cut(uri, "://")
+	if !ok {
+		return uri
+	}
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return uri
+	}
+	userinfo, hostpart := rest[:at], rest[at+1:]
+	user, pass, hasPass := strings.Cut(userinfo, ":")
+	if !hasPass || !strings.ContainsAny(pass, "@:/?#[]") {
+		return uri
+	}
+	return scheme + "://" + url.UserPassword(user, pass).String() + "@" + hostpart
+}
+
+func ensureMongoAuthSource(uri, authSource string) string {
+	if strings.TrimSpace(authSource) == "" {
+		return uri
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return uri
+	}
+	q := u.Query()
+	if q.Get("authSource") != "" || q.Get("authsource") != "" {
+		return uri
+	}
+	q.Set("authSource", authSource)
 	u.RawQuery = q.Encode()
 	return u.String()
 }

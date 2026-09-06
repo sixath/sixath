@@ -1,6 +1,9 @@
 package service
 
-import "sort"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // TimelineNode is the persisted shape of a tool/model call node (camelCase JSON).
 // Matches web/src/pages/timelineReducer.ts TimelineNode for zero-transform replay.
@@ -208,10 +211,10 @@ func timelineNodeToMap(n TimelineNode) map[string]any {
 		m["toolName"] = n.ToolName
 	}
 	if n.Arguments != nil {
-		m["arguments"] = n.Arguments
+		m["arguments"] = jsonRoundTripAny(n.Arguments)
 	}
 	if n.Result != nil {
-		m["result"] = n.Result
+		m["result"] = jsonRoundTripAny(n.Result)
 	}
 	if n.Error != "" {
 		m["error"] = n.Error
@@ -244,4 +247,21 @@ func timelineNodeToMap(n TimelineNode) map[string]any {
 		m["messageCount"] = *n.MessageCount
 	}
 	return m
+}
+
+// jsonRoundTripAny converts structs (e.g. *tool.QuerySpillStub) into JSON maps
+// so structpb.NewStruct can persist timeline metadata.
+func jsonRoundTripAny(v any) any {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return v
+	}
+	return out
 }

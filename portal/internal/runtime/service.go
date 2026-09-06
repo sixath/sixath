@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	stderrors "errors"
+	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	chatv1 "backend/api/chat/v1"
 	"backend/api/common"
@@ -61,6 +63,10 @@ type TurnBackend interface {
 	SaveAssistantMessage(ctx context.Context, sessionID, content string, metadata map[string]any) (*chatv1.MessageReply, error)
 }
 
+type routeBackend interface {
+	Route(ctx context.Context, in biz.AgentRouteInput) (*biz.AgentRouteResult, error)
+}
+
 // Service exposes Portal Runtime session operations for the inbound Gateway.
 type Service struct {
 	chat          chatBackend
@@ -71,10 +77,11 @@ type Service struct {
 	runtimeStatus biz.ChannelRuntimeRepo
 	rewinder      RewindBackend
 	turns         TurnBackend
+	router        routeBackend
 }
 
 // NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
-func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, runtimeStatus biz.ChannelRuntimeRepo, rewinder RewindBackend, turns TurnBackend) *Service {
+func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, runtimeStatus biz.ChannelRuntimeRepo, rewinder RewindBackend, turns TurnBackend, routeUC *biz.AgentRouteUsecase) *Service {
 	return &Service{
 		chat:          chatUC,
 		peer:          peerUC,
@@ -84,6 +91,7 @@ func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channel
 		runtimeStatus: runtimeStatus,
 		rewinder:      rewinder,
 		turns:         turns,
+		router:        routeUC,
 	}
 }
 
@@ -136,13 +144,30 @@ type turnFinalReply struct {
 }
 
 type channelAgentItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 type channelAgentsReply struct {
-	DefaultAgent string             `json:"default_agent"`
-	Agents       []channelAgentItem `json:"agents"`
+	DefaultAgent        string             `json:"default_agent"`
+	Agents              []channelAgentItem `json:"agents"`
+	AutoRouteEnabled    bool               `json:"auto_route_enabled"`
+	AutoRouteMention    bool               `json:"auto_route_mention"`
+	AutoRouteClassifier bool               `json:"auto_route_classifier"`
+}
+
+const channelAgentDescriptionMaxRunes = 200
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max])
 }
 
 type gatewayChannelItem struct {
@@ -330,6 +355,7 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 			continue
 		}
 		name := ""
+		desc := ""
 		if s.agents != nil {
 			meta, getErr := s.agents.GetForSession(ctx, id)
 			if getErr != nil {
@@ -341,13 +367,53 @@ func (s *Service) listChannelAgents(ctx context.Context, channelID string) (*cha
 			}
 			if meta != nil {
 				name = meta.Name
+				desc = truncateRunes(meta.Description, channelAgentDescriptionMaxRunes)
 			}
 		}
-		agents = append(agents, channelAgentItem{ID: id, Name: name})
+		agents = append(agents, channelAgentItem{ID: id, Name: name, Description: desc})
 	}
 	return &channelAgentsReply{
-		DefaultAgent: ch.DefaultAgent,
-		Agents:       agents,
+		DefaultAgent:        ch.DefaultAgent,
+		Agents:              agents,
+		AutoRouteEnabled:    ch.AutoRouteEnabled,
+		AutoRouteMention:    ch.AutoRouteMention,
+		AutoRouteClassifier: ch.AutoRouteClassifier,
+	}, nil
+}
+
+type routeRequest struct {
+	Text   string `json:"text"`
+	PeerID string `json:"peer_id"`
+}
+
+type routeReply struct {
+	AgentID    string `json:"agent_id"`
+	Confidence string `json:"confidence"`
+	Source     string `json:"source"`
+	Reason     string `json:"reason"`
+}
+
+func (s *Service) routeChannel(ctx context.Context, channelID string, req routeRequest) (*routeReply, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", "channel_id is required")
+	}
+	if s.router == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "route classifier unavailable")
+	}
+	out, err := s.router.Route(ctx, biz.AgentRouteInput{
+		ChannelID: channelID,
+		PeerID:    req.PeerID,
+		Text:      req.Text,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &routeReply{
+		AgentID:    out.AgentID,
+		Confidence: string(out.Confidence),
+		Source:     string(out.Source),
+		Reason:     out.Reason,
 	}, nil
 }
 
@@ -459,6 +525,50 @@ func (s *Service) listMessages(ctx context.Context, sessionID string) (*chatv1.L
 	return &chatv1.ListMessagesReply{
 		Ret:   &common.BaseResponse{Code: 0, Message: "ok"},
 		Items: replies,
+	}, nil
+}
+
+type resultFileReply struct {
+	Ret   *common.BaseResponse `json:"ret"`
+	Path  string               `json:"path"`
+	Total int                  `json:"total"`
+	Items []map[string]any     `json:"items"`
+}
+
+func (s *Service) listResultFile(ctx context.Context, sessionID, rel string) (*resultFileReply, error) {
+	if err := s.requireSessionOwner(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if s.sessions == nil || s.agents == nil {
+		return nil, errors.InternalServer("UNAVAILABLE", "session store unavailable")
+	}
+	sess, err := s.sessions.GetByID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	agent, err := s.agents.GetForSession(ctx, sess.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := portalchat.ResolveSessionResultAbs(agent.Workspace, sessionID, rel)
+	if err != nil {
+		return nil, errors.BadRequest("INVALID_ARGUMENT", err.Error())
+	}
+	items, err := portalchat.ReadJSONLResultFile(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.NotFound("NOT_FOUND", "result file not found")
+		}
+		if stderrors.Is(err, portalchat.ErrResultFileTooBig) {
+			return nil, errors.BadRequest("INVALID_ARGUMENT", err.Error())
+		}
+		return nil, err
+	}
+	return &resultFileReply{
+		Ret:   &common.BaseResponse{Code: 0, Message: "ok"},
+		Path:  rel,
+		Total: len(items),
+		Items: items,
 	}, nil
 }
 

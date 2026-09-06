@@ -32,11 +32,13 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 	r.GET("/runtime/v1/channels/{channel_id}/agents", svc.wrap(svc.handleListChannelAgents))
 	r.GET("/runtime/v1/gateway/channels", svc.wrap(svc.handleListGatewayChannels))
 	r.POST("/runtime/v1/gateway/channels/{channel_id}/status", svc.wrap(svc.handlePostChannelStatus))
+	r.POST("/runtime/v1/channels/{channel_id}/route", svc.wrap(svc.handleRoute))
 	r.GET("/runtime/v1/agents/{agent_id}/sessions", svc.wrap(svc.handleListByAgent))
 	r.GET("/runtime/v1/sessions/{id}", svc.wrap(svc.handleGet))
 	r.PUT("/runtime/v1/sessions/{id}", svc.wrap(svc.handleUpdate))
 	r.DELETE("/runtime/v1/sessions/{id}", svc.wrap(svc.handleDelete))
 	r.GET("/runtime/v1/sessions/{id}/messages", svc.wrap(svc.handleMessages))
+	r.GET("/runtime/v1/sessions/{id}/result-files", svc.wrap(svc.handleResultFile))
 	r.POST("/runtime/v1/sessions/{id}/rewind", svc.wrap(svc.handleRewind))
 	r.POST("/runtime/v1/turns", svc.wrap(svc.handleTurns))
 }
@@ -138,6 +140,19 @@ func (s *Service) handleListGatewayChannels(ctx context.Context, hctx khttp.Cont
 	return hctx.JSON(200, out)
 }
 
+func (s *Service) handleRoute(ctx context.Context, hctx khttp.Context) error {
+	channelID := strings.TrimSpace(hctx.Vars().Get("channel_id"))
+	var req routeRequest
+	if err := decodeJSON(hctx, &req); err != nil {
+		return err
+	}
+	out, err := s.routeChannel(ctx, channelID, req)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
+}
+
 func (s *Service) handlePostChannelStatus(ctx context.Context, hctx khttp.Context) error {
 	channelID := strings.TrimSpace(hctx.Vars().Get("channel_id"))
 	var req postChannelStatusRequest
@@ -149,7 +164,6 @@ func (s *Service) handlePostChannelStatus(ctx context.Context, hctx khttp.Contex
 	}
 	return hctx.JSON(200, map[string]any{"ok": true})
 }
-
 func (s *Service) handleCreate(ctx context.Context, hctx khttp.Context) error {
 	var req createSessionRequest
 	if err := decodeJSON(hctx, &req); err != nil {
@@ -220,6 +234,16 @@ func (s *Service) handleDelete(ctx context.Context, hctx khttp.Context) error {
 func (s *Service) handleMessages(ctx context.Context, hctx khttp.Context) error {
 	id := strings.TrimSpace(hctx.Vars().Get("id"))
 	out, err := s.listMessages(ctx, id)
+	if err != nil {
+		return err
+	}
+	return hctx.JSON(200, out)
+}
+
+func (s *Service) handleResultFile(ctx context.Context, hctx khttp.Context) error {
+	id := strings.TrimSpace(hctx.Vars().Get("id"))
+	rel := strings.TrimSpace(hctx.Query().Get("path"))
+	out, err := s.listResultFile(ctx, id, rel)
 	if err != nil {
 		return err
 	}

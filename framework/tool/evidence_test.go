@@ -3,6 +3,8 @@ package tool
 import (
 	"errors"
 	"testing"
+
+	"github.com/sixath/framework/executor"
 )
 
 func TestNormalizeEvidenceResult_okWithRefs(t *testing.T) {
@@ -176,6 +178,14 @@ func TestDeriveEvidenceRefs_RCASymbol_emptyLocations(t *testing.T) {
 	}
 }
 
+func TestDeriveEvidenceRefs_RCASymbol_emptyReferencesSummary(t *testing.T) {
+	payload := map[string]any{"action": "references", "repo": "svc", "locations": []any{}}
+	refs := deriveEvidenceRefs("rca_symbol", payload)
+	if len(refs) != 1 || refs[0].Summary != "no inbound callers" || refs[0].Repo != "svc" {
+		t.Fatalf("refs=%#v", refs)
+	}
+}
+
 func TestClassifyRCAError(t *testing.T) {
 	cases := []struct {
 		err  error
@@ -196,5 +206,63 @@ func TestClassifyRCAError(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("classifyRCAError(%v)=%q, want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+func TestStampHitContract_empty(t *testing.T) {
+	out := StampHitContract(map[string]any{"hits": []any{}}, HitStamp{Status: HitStatusEmpty, QueriedIndex: "vm-manager-*"})
+	if out["hit_status"] != HitStatusEmpty || out["queried_index"] != "vm-manager-*" {
+		t.Fatalf("%#v", out)
+	}
+}
+
+func TestHitContractFromResult_missingNotHits(t *testing.T) {
+	st, _, _ := HitContractFromResult(map[string]any{"hits": []any{}})
+	if st != "" {
+		t.Fatalf("missing hit_status must not be hits, got %q", st)
+	}
+	st, idx, repo := HitContractFromResult(map[string]any{
+		"hit_status": HitStatusEmpty, "queried_index": "vm-manager-*", "repo": "svc",
+	})
+	if st != HitStatusEmpty || idx != "vm-manager-*" || repo != "svc" {
+		t.Fatalf("%q %q %q", st, idx, repo)
+	}
+
+	qr := &executor.QueryResult{HitStatus: HitStatusEmpty}
+	st, idx, repo = HitContractFromResult(qr)
+	if st != HitStatusEmpty || idx != "" || repo != "" {
+		t.Fatalf("QueryResult ptr %q %q %q", st, idx, repo)
+	}
+	st, idx, repo = HitContractFromResult(*qr)
+	if st != HitStatusEmpty || idx != "" || repo != "" {
+		t.Fatalf("QueryResult val %q %q %q", st, idx, repo)
+	}
+}
+
+func TestHitStatusFromCount(t *testing.T) {
+	if HitStatusFromCount(true, 0) != HitStatusEmpty || HitStatusFromCount(true, 2) != HitStatusHits || HitStatusFromCount(false, 0) != HitStatusError {
+		t.Fatal("HitStatusFromCount")
+	}
+}
+
+func TestHitContractFromResult_SpillStub(t *testing.T) {
+	st, idx, _ := HitContractFromResult(&QuerySpillStub{
+		HitStatus: HitStatusHits, QueriedIndex: "backend-cgsession-*",
+	})
+	if st != HitStatusHits || idx != "backend-cgsession-*" {
+		t.Fatalf("%q %q", st, idx)
+	}
+}
+
+func TestCollectEvidenceRefs_SpillStub(t *testing.T) {
+	stub := &QuerySpillStub{
+		Spilled: true, Path: "tmp/results/s/1.jsonl", Count: 51, OK: true,
+		HitStatus: HitStatusHits,
+		EvidenceRefs: []EvidenceRef{{Kind: "es_log_query", TraceID: "t1"}},
+		Sample: []map[string]any{{"i": 1}},
+	}
+	refs := CollectEvidenceRefs(stub)
+	if len(refs) != 1 || refs[0].Kind != "es_log_query" || refs[0].Summary == "no hits" {
+		t.Fatalf("%#v", refs)
 	}
 }

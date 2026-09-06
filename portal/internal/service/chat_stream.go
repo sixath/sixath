@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sixath/framework/agent"
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/events"
 	toolskill "github.com/sixath/framework/tool/skillops"
 )
@@ -22,6 +22,7 @@ const (
 	ChatStreamEventDebug           ChatStreamEventType = "debug"
 	ChatStreamEventToolCall        ChatStreamEventType = "tool_call"
 	ChatStreamEventModelCall       ChatStreamEventType = "model_call"
+	ChatStreamEventMEA             ChatStreamEventType = "mea"
 )
 
 const toolPayloadFieldLimit = 8 * 1024 // 单字段截断上限（字节）
@@ -35,6 +36,17 @@ type ChatStreamEvent struct {
 	Input         *ChatInputRequest
 	ToolCall      *ToolCallPayload
 	ModelCall     *ModelCallPayload
+	MEA           *MEAStreamPayload
+}
+
+// MEAStreamPayload is emitted after a Manage-Execute-Audit round or final result (M0.5).
+type MEAStreamPayload struct {
+	Phase    string `json:"phase"` // started | round | finished
+	Reason   string `json:"reason,omitempty"`
+	Round    int    `json:"round,omitempty"`
+	Pending  int    `json:"pending,omitempty"`
+	Completed int   `json:"completed,omitempty"`
+	Goal     string `json:"goal,omitempty"`
 }
 
 type ConfirmResultPayload struct {
@@ -446,52 +458,58 @@ func inputRequestsFromResponse(resp *agent.Response) []ChatInputRequest {
 	}
 	items := make([]ChatInputRequest, 0, 1)
 	for _, call := range trace.ToolCalls {
-		if call.ToolName != "ask_user" {
-			continue
+		if item := inputRequestFromToolRecord(call); item != nil {
+			items = append(items, *item)
 		}
-		result, ok := call.Result.(map[string]any)
-		if !ok {
-			continue
-		}
-		status, _ := result["status"].(string)
-		token, _ := result["token"].(string)
-		requestID, _ := result["request_id"].(string)
-		if status != "pending" || token == "" || requestID == "" {
-			continue
-		}
-		kind, _ := result["kind"].(string)
-		field, _ := result["field"].(string)
-		prompt, _ := result["prompt"].(string)
-		title, _ := result["title"].(string)
-		required, _ := result["required"].(bool)
-		var options []string
-		if raw, ok := result["options"].([]any); ok {
-			for _, item := range raw {
-				if s, ok := item.(string); ok && s != "" {
-					options = append(options, s)
-				}
-			}
-		}
-		severity := "default"
-		if kind == "password" {
-			severity = "warning"
-		}
-		items = append(items, ChatInputRequest{
-			ID:         fmt.Sprintf("%s:%s", call.ToolCallID, token),
-			ToolCallID: call.ToolCallID,
-			RequestID:  requestID,
-			Token:      token,
-			Kind:       kind,
-			Field:      field,
-			Title:      title,
-			Prompt:     prompt,
-			Options:    options,
-			Required:   required,
-			ExpiresIn:  intFromAny(result["expires_in"]),
-			Severity:   severity,
-		})
 	}
 	return items
+}
+
+func inputRequestFromToolRecord(call agent.ToolCallRecord) *ChatInputRequest {
+	if call.ToolName != "ask_user" {
+		return nil
+	}
+	result, ok := call.Result.(map[string]any)
+	if !ok {
+		return nil
+	}
+	status, _ := result["status"].(string)
+	token, _ := result["token"].(string)
+	requestID, _ := result["request_id"].(string)
+	if status != "pending" || token == "" || requestID == "" {
+		return nil
+	}
+	kind, _ := result["kind"].(string)
+	field, _ := result["field"].(string)
+	prompt, _ := result["prompt"].(string)
+	title, _ := result["title"].(string)
+	required, _ := result["required"].(bool)
+	var options []string
+	if raw, ok := result["options"].([]any); ok {
+		for _, item := range raw {
+			if s, ok := item.(string); ok && s != "" {
+				options = append(options, s)
+			}
+		}
+	}
+	severity := "default"
+	if kind == "password" {
+		severity = "warning"
+	}
+	return &ChatInputRequest{
+		ID:         fmt.Sprintf("%s:%s", call.ToolCallID, token),
+		ToolCallID: call.ToolCallID,
+		RequestID:  requestID,
+		Token:      token,
+		Kind:       kind,
+		Field:      field,
+		Title:      title,
+		Prompt:     prompt,
+		Options:    options,
+		Required:   required,
+		ExpiresIn:  intFromAny(result["expires_in"]),
+		Severity:   severity,
+	}
 }
 
 func streamEventsFromResponse(resp *agent.Response) []ChatStreamEvent {

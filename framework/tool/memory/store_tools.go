@@ -9,6 +9,7 @@ import (
 
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/tool"
+	fwws "github.com/sixath/framework/workspace"
 )
 
 // StoreToolsOptions configures MemoryStore-backed tools.
@@ -323,7 +324,7 @@ func allowedMemoryPath(workspaceRoot, rel string, extraPaths []string) bool {
 	if rel == "" || filepath.IsAbs(rel) {
 		return false
 	}
-	if _, err := tool.ResolveWorkspacePath(workspaceRoot, rel); err != nil {
+	if _, err := fwws.ResolveWorkspacePath(workspaceRoot, rel); err != nil {
 		return false
 	}
 	clean := path.Clean(filepath.ToSlash(rel))

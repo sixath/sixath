@@ -17,9 +17,6 @@ type RuntimeToolsConfig struct {
 	CronjobToolEnabled        bool  `json:"cronjob_tool_enabled"`
 	BrowserEnabled            bool  `json:"browser_enabled"`
 	HybridRecall              *bool `json:"hybrid_recall,omitempty"` // unset = on; presence preserved
-	HubGovernance                   *string `json:"hub_governance,omitempty"`
-	HubKnowledge                    *string `json:"hub_knowledge,omitempty"`
-	HubFallbackToDefaultOnReadError *bool   `json:"hub_fallback_to_default_on_read_error,omitempty"`
 }
 
 func (c RuntimeToolsConfig) Value() (driver.Value, error) {
