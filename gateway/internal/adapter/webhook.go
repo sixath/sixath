@@ -40,7 +40,7 @@ type WebhookDeps struct {
 	Registry      *channel.Registry
 	Runtime       *runtimeclient.Client
 	Sessions      *session.Router
-	Idempotency   *idempotency.Store
+	Idempotency   idempotency.Store
 	PendingSwitch *pendingswitch.Store
 	Reply         *reply.Dispatcher
 	TurnTimeout   time.Duration
@@ -108,7 +108,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Idempotency: same key must not open a second turn.
 	if ev.IdempotencyKey != "" {
-		if existing, ok := h.deps.Idempotency.Get(ev.IdempotencyKey); ok {
+		if existing, ok, _ := h.deps.Idempotency.Get(r.Context(), ev.IdempotencyKey); ok {
 			writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": existing.CorrelationID})
 			if existing.Status == idempotency.StatusDone && existing.Result != nil {
 				if payload, ok := existing.Result.(reply.FinalPayload); ok && ev.ReplyURL != "" {
@@ -125,9 +125,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	corr := newCorrelationID()
 	ev.CorrelationID = corr
-	if _, ok := h.deps.Idempotency.Begin(ev.IdempotencyKey, corr); !ok {
+	if _, reused, _ := h.deps.Idempotency.Begin(r.Context(), ev.IdempotencyKey, corr); reused {
 		// Race: another request won Begin between Get and Begin.
-		if existing, ok := h.deps.Idempotency.Get(ev.IdempotencyKey); ok {
+		if existing, ok, _ := h.deps.Idempotency.Get(r.Context(), ev.IdempotencyKey); ok {
 			writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": existing.CorrelationID})
 			return
 		}
@@ -187,7 +187,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Status:        "failed",
 			Error:         msg,
 		}
-		h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+		_ = h.deps.Idempotency.Complete(ctx, ev.IdempotencyKey, payload)
 		if ev.ReplyMode == "sync" {
 			writeJSON(w, http.StatusOK, payload)
 			return
@@ -214,7 +214,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) finishCommand(w http.ResponseWriter, ev InboundEvent, payload reply.FinalPayload) {
-	h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+	_ = h.deps.Idempotency.Complete(context.Background(), ev.IdempotencyKey, payload)
 	if ev.ReplyMode == "sync" {
 		if ev.ReplyURL != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -238,7 +238,7 @@ func (h *WebhookHandler) handleSync(w http.ResponseWriter, ev InboundEvent, sess
 	ctx, cancel := context.WithTimeout(context.Background(), h.deps.TurnTimeout)
 	defer cancel()
 	payload := h.runTurn(ctx, ev, sessionID, userID)
-	h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+	_ = h.deps.Idempotency.Complete(ctx, ev.IdempotencyKey, payload)
 	if ev.ReplyURL != "" {
 		_ = h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload)
 	}
@@ -254,7 +254,7 @@ func (h *WebhookHandler) runAsync(ev InboundEvent, sessionID, userID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.deps.TurnTimeout)
 	defer cancel()
 	payload := h.runTurn(ctx, ev, sessionID, userID)
-	h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+	_ = h.deps.Idempotency.Complete(ctx, ev.IdempotencyKey, payload)
 	if err := h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload); err != nil {
 		log.Printf("webhook reply_url: %v", err)
 	}

@@ -28,7 +28,7 @@ type WecomBotDeps struct {
 	Registry      *channel.Registry
 	Runtime       *runtimeclient.Client
 	Sessions      *session.Router
-	Idempotency   *idempotency.Store
+	Idempotency   idempotency.Store
 	PendingSwitch *pendingswitch.Store
 	TurnTimeout   time.Duration
 	// ProgressTick is the interval for progress card updates during TurnsStream.
@@ -203,7 +203,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		deps.Idempotency = idempotency.NewStore(0)
 	}
 	corr := newCorrelationID()
-	if _, ok := deps.Idempotency.Begin(n.MsgID, corr); !ok {
+	if _, reused, _ := deps.Idempotency.Begin(ctx, n.MsgID, corr); reused {
 		// Duplicate msgid: do not respond again.
 		return
 	}
@@ -218,7 +218,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	if cmdReply, isCmd := runSlashCommand(ctx, deps.Runtime, deps.Sessions, deps.PendingSwitch, ch.ID, n.PeerID, n.QuestionText); isCmd {
 		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, cmdReply)
 		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-		deps.Idempotency.Complete(n.MsgID, card)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, card)
 		return
 	}
 
@@ -251,7 +251,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		failMsg := mapRuntimeUserError(err)
 		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
 		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-		deps.Idempotency.Complete(n.MsgID, failMsg)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 		return
 	}
 
@@ -267,7 +267,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		failMsg := mapRuntimeUserError(err)
 		card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
 		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-		deps.Idempotency.Complete(n.MsgID, failMsg)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 		return
 	}
 	defer rc.Close()
@@ -291,7 +291,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 			log.Printf("wecom_bot %s respond final failure: %v", ch.ID, err)
 			return
 		}
-		deps.Idempotency.Complete(n.MsgID, failMsg)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 		return
 	}
 	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, res.Content)
@@ -299,7 +299,7 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		log.Printf("wecom_bot %s respond final: %v", ch.ID, err)
 		return
 	}
-	deps.Idempotency.Complete(n.MsgID, card)
+	_ = deps.Idempotency.Complete(ctx, n.MsgID, card)
 }
 
 func finishWecomReply(ctx context.Context, conn WecomConn, reqID, streamID, channelID, content string) {
@@ -330,7 +330,7 @@ func replyPendingSwitch(ctx context.Context, conn WecomConn, reqID, streamID str
 			reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
 			card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
 			finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-			deps.Idempotency.Complete(n.MsgID, card)
+			_ = deps.Idempotency.Complete(ctx, n.MsgID, card)
 			return true
 		}
 		agentID := ent.Agents[idx-1].ID
@@ -340,18 +340,18 @@ func replyPendingSwitch(ctx context.Context, conn WecomConn, reqID, streamID str
 			failMsg := mapRuntimeUserError(err)
 			card := wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg)
 			finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-			deps.Idempotency.Complete(n.MsgID, failMsg)
+			_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 			return true
 		}
 		card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, msg)
 		finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-		deps.Idempotency.Complete(n.MsgID, card)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, card)
 		return true
 	}
 	reply := formatPendingSwitchInvalidPrompt(len(ent.Agents))
 	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, reply)
 	finishWecomReply(ctx, conn, reqID, streamID, ch.ID, card)
-	deps.Idempotency.Complete(n.MsgID, card)
+	_ = deps.Idempotency.Complete(ctx, n.MsgID, card)
 	return true
 }
 
