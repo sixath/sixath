@@ -137,9 +137,9 @@ func registerReadFileTool(reg *Registry) error {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return map[string]any{
-						"error":    "file not found",
-						"path":     rel,
-						"similar":  suggestSimilarFiles(ws, rel),
+						"error":   "file not found",
+						"path":    rel,
+						"similar": suggestSimilarFiles(ws, rel),
 					}, nil
 				}
 				return map[string]any{"error": err.Error()}, nil
@@ -396,8 +396,17 @@ func confirmWorkspaceFile(ctx context.Context, c *WorkspaceFileConfig, expectedA
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
-	if pending == nil {
-		return ConfirmTokenError("not_found"), nil
+	policy := ApprovalPolicy{TTLSeconds: c.ConfirmTTLSeconds}
+	var createdAt time.Time
+	if pending != nil {
+		createdAt = pending.CreatedAt
+	}
+	if failure, bad := policy.Verify(ConfirmCheck{
+		Found:     pending != nil,
+		CreatedAt: createdAt,
+		OnExpire:  func() error { return c.PendingStore.DeletePending(ctx, sessionID, token) },
+	}); bad {
+		return failure.Map(), nil
 	}
 	if pending.Action != expectedAction {
 		return map[string]any{
@@ -405,14 +414,6 @@ func confirmWorkspaceFile(ctx context.Context, c *WorkspaceFileConfig, expectedA
 			"expected": expectedAction,
 			"got":      pending.Action,
 		}, nil
-	}
-	ttl := c.ConfirmTTLSeconds
-	if ttl <= 0 {
-		ttl = 300
-	}
-	if time.Since(pending.CreatedAt) > time.Duration(ttl)*time.Second {
-		_ = c.PendingStore.DeletePending(ctx, sessionID, token)
-		return ConfirmTokenError("expired"), nil
 	}
 	ws, err := workspaceRootFromCtx(ctx)
 	if err != nil {

@@ -27,6 +27,11 @@ func (r *rewindMsgRepo) ListBySession(_ context.Context, sessionID string, _ int
 	}
 	return out, nil
 }
+
+// 分页语义由 data 层用例覆盖；本桩只服务于 rewind 用例。
+func (r *rewindMsgRepo) ListBySessionBefore(context.Context, string, biz.MessageCursor, int) ([]*biz.ChatMessage, string, error) {
+	return nil, "", nil
+}
 func (r *rewindMsgRepo) LastUserOrAssistantBySessions(context.Context, []string) (map[string]string, error) {
 	return nil, nil
 }
@@ -59,7 +64,9 @@ type rewindSessRepo struct {
 func (r *rewindSessRepo) Create(context.Context, string, string, string, string) (*biz.ChatSession, error) {
 	return nil, nil
 }
-func (r *rewindSessRepo) GetByID(context.Context, string) (*biz.ChatSession, error) { return r.sess, nil }
+func (r *rewindSessRepo) GetByID(context.Context, string) (*biz.ChatSession, error) {
+	return r.sess, nil
+}
 func (r *rewindSessRepo) ListByAgent(context.Context, string, string, string, int32, int32, bool) ([]*biz.ChatSession, int, error) {
 	return nil, 0, nil
 }

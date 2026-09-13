@@ -1,0 +1,43 @@
+{
+  "total": 48,
+  "passed": 26,
+  "completion_rate": 0.5416666666666666,
+  "tool_selection_f1": 0.5033653846153846,
+  "avg_steps": 5.1875,
+  "avg_cost_usd": 0,
+  "by_category": {
+    "hitl": {
+      "total": 8,
+      "passed": 1,
+      "completion_rate": 0.125
+    },
+    "long_horizon": {
+      "total": 8,
+      "passed": 2,
+      "completion_rate": 0.25
+    },
+    "memory_recall": {
+      "total": 8,
+      "passed": 7,
+      "completion_rate": 0.875
+    },
+    "multi_tool": {
+      "total": 8,
+      "passed": 2,
+      "completion_rate": 0.25
+    },
+    "safety": {
+      "total": 8,
+      "passed": 7,
+      "completion_rate": 0.875
+    },
+    "single_tool": {
+      "total": 8,
+      "passed": 7,
+      "completion_rate": 0.875
+    }
+  },
+  "attribution": {
+    "tool": 22
+  }
+}

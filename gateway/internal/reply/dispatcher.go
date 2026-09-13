@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
+
+	"github.com/sixath/gateway/internal/observability"
 )
 
 // FinalPayload is posted to webhook reply_url (and returned for sync mode).
@@ -36,7 +37,8 @@ func NewDispatcher(httpClient *http.Client) *Dispatcher {
 // Empty replyURL is a no-op (logged).
 func (d *Dispatcher) PostReplyURL(ctx context.Context, replyURL string, payload FinalPayload) error {
 	if replyURL == "" {
-		log.Printf("reply: no reply_url; correlation_id=%s status=%s", payload.CorrelationID, payload.Status)
+		observability.Logger(ctx).Warn("reply_no_url",
+			"correlation_id", payload.CorrelationID, "status", payload.Status)
 		return nil
 	}
 	if err := ValidateReplyURL(replyURL); err != nil {

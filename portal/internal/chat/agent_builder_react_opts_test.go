@@ -15,14 +15,26 @@ func TestReActOptionsFromAgent_maxOutputTokens(t *testing.T) {
 	opts := ReActOptionsFromAgent(biz.AgentMeta{
 		ModelConfig: biz.ModelConfig{MaxOutputTokens: 4096},
 	})
-	if len(opts) != 1 {
-		t.Fatalf("opts len=%d", len(opts))
+	// token 计数器 + max_output_tokens
+	if len(opts) != 2 {
+		t.Fatalf("opts len=%d want 2", len(opts))
 	}
 }
 
-func TestReActOptionsFromAgent_zeroOmits(t *testing.T) {
-	if opts := ReActOptionsFromAgent(biz.AgentMeta{}); len(opts) != 0 {
-		t.Fatalf("expected no opts")
+// 契约变化（Task 4）：无论是否配置 max_output_tokens，都会注入 token 计数器，
+// 使真实 usage 能回填校准上下文压缩的估算口径。
+func TestReActOptionsFromAgent_zeroOmitsMaxTokens(t *testing.T) {
+	opts := ReActOptionsFromAgent(biz.AgentMeta{})
+	if len(opts) != 1 {
+		t.Fatalf("opts len=%d want 1 (token counter only)", len(opts))
+	}
+	cfg := agent.ReActConfig{}
+	opts[0](&cfg)
+	if cfg.TokenCounter == nil {
+		t.Fatal("expected token counter to be injected")
+	}
+	if cfg.MaxOutputTokens != 0 {
+		t.Fatalf("MaxOutputTokens=%d want 0 (BuildReActAgent applies its own default)", cfg.MaxOutputTokens)
 	}
 }
 

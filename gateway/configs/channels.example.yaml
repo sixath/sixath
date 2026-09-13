@@ -1,0 +1,32 @@
+# Example Gateway ChannelRegistry for local / private deployments.
+#
+# Copy to configs/channels.local.yaml (gitignored) and provide the credentials
+# through the environment — ${VAR} placeholders are expanded at load time and a
+# missing variable makes the Gateway fail fast with the variable name.
+#
+#   set -a; . ./.env; set +a            # or export the vars in your shell
+#   SATH_CHANNELS_FILE=channels.local.yaml docker compose up -d
+#
+channels:
+  - id: demo-webhook
+    type: webhook
+    default_agent: "1583f45b-d5c3-41ab-b1f7-1aa5539126d4"
+    webhook_secret: "dev-webhook-secret"
+    ip_whitelist: []
+    enabled: true
+    default_reply_mode: async
+
+  # WeCom smart-bot long connection.
+  # - Console: 智能机器人 AI+ → API →「使用长连接」→ copy BotID, fetch Secret.
+  # - A given bot_id must be subscribed by exactly ONE Gateway instance.
+  - id: sixath4
+    type: wecom_bot
+    default_agent: "e8107fb3-e40a-4207-9d9a-6768847aaf79"
+    enabled: true
+    bot_id: "${WECOM_BOT_ID}"
+    secret: "${WECOM_BOT_SECRET}"
+    bot_names: ["sixath"]
+    ws_url: "wss://openws.work.weixin.qq.com"
+    # Optional: resolve 发起人 to a contacts display name.
+    # corp_id: "${WECOM_CORP_ID}"
+    # corp_secret: "${WECOM_CORP_SECRET}"

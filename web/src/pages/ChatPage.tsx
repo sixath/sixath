@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { agentApi, chatApi, DEFAULT_SESSION_TITLE, type Agent, type ChatMessage } from '../api/client'
-import { buildConfirmSubmitBody, buildInputSubmitBody, inputProvidedLabel, type ChatConfirmationRequest, type ChatInputRequest, type ConfirmResultPayload, type WebSourceItem } from '../api/chatStream'
+import { buildConfirmSubmitBody, buildInputSubmitBody, inputProvidedLabel, type ChatConfirmationRequest, type ChatInputRequest, type ConfirmResultPayload, type WebSourceItem, type PlanStepPayload } from '../api/chatStream'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
 import { SourcesPanel } from '../components/SourcesPanel'
@@ -140,6 +140,32 @@ function confirmButtonLabel(status: ChatConfirmationItem['status']): string {
   }
 }
 
+type PlanState = { steps: PlanStepPayload[]; currentStepId?: string }
+
+function PlanPanel({ plan }: { plan: PlanState }) {
+  const currentIndex = plan.currentStepId ? plan.steps.findIndex((s) => s.id === plan.currentStepId) : -1
+  if (plan.steps.length === 0) return null
+  return (
+    <div className="plan-panel">
+      <div className="plan-panel-title">Plan</div>
+      <ol className="plan-steps">
+        {plan.steps.map((s, i) => {
+          const state = i < currentIndex ? 'done' : i === currentIndex ? 'active' : 'pending'
+          return (
+            <li key={s.id || `${i}`} className={`plan-step plan-step-${state}`}>
+              <span className="plan-step-marker">{i < currentIndex ? '✓' : i === currentIndex ? '▶' : '·'}</span>
+              <span className="plan-step-goal">{s.goal}</span>
+              {s.suggested_tools && s.suggested_tools.length > 0 && (
+                <span className="plan-step-tools">{s.suggested_tools.join(', ')}</span>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
 function TimelineView({ nodes }: { nodes: TimelineNode[] }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [tab, setTab] = useState<Record<string, 'args' | 'result' | 'meta'>>({})
@@ -214,6 +240,8 @@ export default function ChatPage(props?: ChatPageProps) {
   const [inputs, setInputs] = useState<ChatInputItem[]>([])
   const [messageSources, setMessageSources] = useState<Record<string, WebSourceItem[]>>({})
   const [messageTimelines, setMessageTimelines] = useState<Record<string, TimelineNode[]>>({})
+  /** plan 模式：messageKey → 规划 + 当前步骤（流式期间展示，刷新后丢弃） */
+  const [messagePlans, setMessagePlans] = useState<Record<string, PlanState>>({})
   /** compact boundary 消息 id → 是否折叠其上方历史（默认展开，不在 Set 中） */
   const [collapsedBoundaries, setCollapsedBoundaries] = useState<Set<string>>(() => new Set())
   /** 仅用于展示；实际缓冲在 ref 中合并刷新，避免每条 SSE 触发整页重绘 */
@@ -227,7 +255,13 @@ export default function ChatPage(props?: ChatPageProps) {
   const [error, setError] = useState('')
   const [rewinding, setRewinding] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
+  /** 向前翻页游标；空串表示已到会话开头（不显示「加载更早」）。 */
+  const [historyCursor, setHistoryCursor] = useState('')
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
+  /** 本轮被用户停止/取消（服务端已保存部分回复） */
+  const [cancelledNotice, setCancelledNotice] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   /** 当前流式请求所属会话；用于在切换路由会话时中止旧会话的流，且避免「无 session → 首条消息」误杀同一会话的流 */
   const streamSessionRef = useRef<string | null>(null)
@@ -366,6 +400,7 @@ export default function ChatPage(props?: ChatPageProps) {
         if (cancelled) return
         if (sessionIdRef.current !== targetSid) return
         setMessages(res.items)
+        setHistoryCursor(res.next_cursor ?? '')
         setMessageTimelines({})
         setMessageSources({})
         setCollapsedBoundaries(new Set())
@@ -392,12 +427,38 @@ export default function ChatPage(props?: ChatPageProps) {
   const reloadMessages = useCallback(async (sid: string) => {
     const res = await chatApi.listMessages(sid)
     setMessages(res.items)
+    setHistoryCursor(res.next_cursor ?? '')
     setMessageTimelines({})
     setMessageSources({})
     setCollapsedBoundaries(new Set())
     setConfirmations([])
     setInputs([])
   }, [])
+
+  /** 向上翻页：把更早的一页插到最前面，并保持滚动锚点（否则会跳动）。 */
+  const loadEarlier = useCallback(async () => {
+    const sid = sessionId
+    if (!sid || !historyCursor || loadingEarlier) return
+    setLoadingEarlier(true)
+    const container = messagesScrollRef.current
+    const prevHeight = container?.scrollHeight ?? 0
+    const prevTop = container?.scrollTop ?? 0
+    try {
+      const res = await chatApi.listMessages(sid, { before: historyCursor })
+      if (sessionIdRef.current !== sid) return
+      setMessages((prev) => [...res.items, ...prev])
+      setHistoryCursor(res.next_cursor ?? '')
+      requestAnimationFrame(() => {
+        const el = messagesScrollRef.current
+        if (!el) return
+        el.scrollTop = el.scrollHeight - prevHeight + prevTop
+      })
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setLoadingEarlier(false)
+    }
+  }, [historyCursor, loadingEarlier, sessionId])
 
   const handleRewind = useCallback(async (messageId: string) => {
     if (!sessionId || !messageId || streaming || rewinding) return
@@ -494,6 +555,7 @@ export default function ChatPage(props?: ChatPageProps) {
         : content
     setMessages((prev) => [...prev, { id: '', session_id: sid, role: 'user', content: userDisplay, created_at: new Date().toISOString() }])
     setStreaming(true)
+    setCancelledNotice(false)
 
     const assistantKey = `${sid}-assistant-${Date.now()}`
     const assistantPlaceholder: ChatMessage = {
@@ -675,6 +737,19 @@ export default function ChatPage(props?: ChatPageProps) {
             [assistantKey]: applyModelCall(prev[assistantKey] ?? [], p),
           }))
         },
+        onPlan: (plan) => {
+          setMessagePlans((prev) => ({ ...prev, [assistantKey]: { steps: plan.steps } }))
+        },
+        onPlanStep: (step) => {
+          setMessagePlans((prev) => {
+            const cur = prev[assistantKey]
+            if (!cur) return prev
+            return { ...prev, [assistantKey]: { ...cur, currentStepId: step.id } }
+          })
+        },
+        onCancelled: () => {
+          setCancelledNotice(true)
+        },
         onDebug: (text) => {
           debugTextRef.current += text
           if (debugTextRef.current.length > MAX_DEBUG_CHARS) {
@@ -730,6 +805,7 @@ export default function ChatPage(props?: ChatPageProps) {
       },
     ])
     setStreaming(true)
+    setCancelledNotice(false)
 
     const assistantKey = `${sid}-assistant-${Date.now()}`
     setMessages((prev) => [
@@ -861,7 +937,13 @@ export default function ChatPage(props?: ChatPageProps) {
             <button type="button" className="chat-error-dismiss" onClick={() => setError('')}>x</button>
           </div>
         )}
-        <div className="chat-messages">
+        {cancelledNotice && (
+          <div className="chat-cancelled-banner">
+            <span>Generation stopped. The partial reply was saved.</span>
+            <button type="button" className="chat-error-dismiss" onClick={() => setCancelledNotice(false)}>x</button>
+          </div>
+        )}
+        <div className="chat-messages" ref={messagesScrollRef}>
           <div className="chat-messages-inner">
             {!hasAgent ? (
               <div className="chat-welcome">
@@ -878,6 +960,13 @@ export default function ChatPage(props?: ChatPageProps) {
               </div>
             ) : (
               <>
+                {historyCursor && (
+                  <div className="chat-load-earlier">
+                    <button type="button" onClick={loadEarlier} disabled={loadingEarlier}>
+                      {loadingEarlier ? 'Loading earlier…' : 'Load earlier messages'}
+                    </button>
+                  </div>
+                )}
                 {messages.map((m, idx) => {
                   if (!isMessageVisibleAtIndex(idx, messages, collapsedBoundaries)) return null
                   const messageKey = m.id || m.created_at + m.role + idx
@@ -914,10 +1003,14 @@ export default function ChatPage(props?: ChatPageProps) {
                             {((messageTimelines[messageKey]?.length ?? 0) > 0 || (m.metadata?.timeline?.length ?? 0) > 0) && (
                               <TimelineView nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []} />
                             )}
+                            {messagePlans[messageKey] && <PlanPanel plan={messagePlans[messageKey]} />}
                             <SourcesPanel sources={sources} />
                             <MarkdownContent showCursor={streaming && idx === messages.length - 1}>
                               {m.content}
                             </MarkdownContent>
+                            {m.metadata?.interrupted && (
+                              <div className="chat-interrupted-marker">Interrupted — showing the partial reply</div>
+                            )}
                             {inputs.filter((c) => c.messageKey === messageKey).map((c) => (
                               <div key={`${c.messageKey}-${c.token}`} className={`chat-input-card chat-input-card-${c.severity || 'default'}`}>
                                 <div className="chat-input-title">{c.title}</div>

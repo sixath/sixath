@@ -25,9 +25,22 @@ tool.json
 .playwright-cli/
 **/.playwright-cli/
 scripts/deploy_remote.py
+# Real channel credentials live here (see gateway/configs/channels.example.yaml)
+gateway/configs/channels.local.yaml
 
 .worktrees/
 
 # Large / local-only data dumps under portal
 portal/internal/chat/data/
 portal/internal/service/data/
+
+# Scratch / debug artifacts (not part of deliverable)
+_neo4j_q/
+output/
+**/*.exe
+smoke.log*
+*.log
+
+# Eval run history (regenerable; baseline.json is the durable artifact)
+evals/reports/live_results.jsonl
+evals/reports/live_report.json

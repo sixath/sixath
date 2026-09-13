@@ -46,5 +46,10 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("SATH_RUNTIME_TOKEN"); v != "" {
 		cfg.RuntimeToken = v
 	}
+	// SATH_CHANNELS_FILE lets local deployments point at a gitignored channel
+	// file (e.g. channels.local.yaml) without editing this config.
+	if v := os.Getenv("SATH_CHANNELS_FILE"); v != "" {
+		cfg.ChannelsFile = v
+	}
 	return &cfg, nil
 }

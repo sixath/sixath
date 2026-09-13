@@ -343,10 +343,10 @@ func RegisterBrowserToolsWithConfig(reg *Registry, store *browser.SessionStore, 
 			},
 		},
 		{
-			Name: "browser_console",
+			Name:        "browser_console",
 			Description: "Read browser console logs/JS exceptions. When expression is set, evaluate JavaScript in page context.",
-			Toolset: ToolsetBrowser,
-			CheckFn: checkFn,
+			Toolset:     ToolsetBrowser,
+			CheckFn:     checkFn,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -631,21 +631,20 @@ func confirmBrowserAction(ctx context.Context, c *BrowserToolsConfig, backendFor
 	if err != nil {
 		return browserToolErr(err.Error(), ErrorTransient), nil
 	}
-	if pending == nil {
-		msg, code := confirmTokenParts("not_found")
-		return browserToolErr(msg, code), nil
+	policy := ApprovalPolicy{TTLSeconds: c.ConfirmTTLSeconds}
+	var createdAt time.Time
+	if pending != nil {
+		createdAt = pending.CreatedAt
+	}
+	if failure, bad := policy.Verify(ConfirmCheck{
+		Found:     pending != nil,
+		CreatedAt: createdAt,
+		OnExpire:  func() error { return c.PendingStore.DeletePending(ctx, chatSID, token) },
+	}); bad {
+		return browserToolErr(failure.Message(), failure.Code), nil
 	}
 	if pending.Action != expectedAction {
 		return browserToolErr(fmt.Sprintf("confirm_token action mismatch: expected %s got %s", expectedAction, pending.Action), ErrorPermanent), nil
-	}
-	ttl := c.ConfirmTTLSeconds
-	if ttl <= 0 {
-		ttl = 300
-	}
-	if time.Since(pending.CreatedAt) > time.Duration(ttl)*time.Second {
-		_ = c.PendingStore.DeletePending(ctx, chatSID, token)
-		msg, code := confirmTokenParts("expired")
-		return browserToolErr(msg, code), nil
 	}
 	var out any
 	switch pending.Action {

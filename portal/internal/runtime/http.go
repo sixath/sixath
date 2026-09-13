@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	chatv1 "backend/api/chat/v1"
+	"backend/api/common"
 	"backend/internal/biz"
 	"backend/internal/chatsse"
 
@@ -164,13 +166,27 @@ func (s *Service) handleDelete(ctx context.Context, hctx khttp.Context) error {
 	return hctx.JSON(200, out)
 }
 
+// messagePageResponse 在既有 reply 之上补一个游标字段。
+// 不直接改 pb：加一个字段就要重新生成 protobuf；而 items/ret 的 JSON 形状保持不变，
+// 因此旧客户端（只读 items）不受影响。
+type messagePageResponse struct {
+	Ret        *common.BaseResponse   `json:"ret,omitempty"`
+	Items      []*chatv1.MessageReply `json:"items"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+}
+
 func (s *Service) handleMessages(ctx context.Context, hctx khttp.Context) error {
 	id := strings.TrimSpace(hctx.Vars().Get("id"))
-	out, err := s.listMessages(ctx, id)
+	before, err := biz.DecodeMessageCursor(hctx.Query().Get("before"))
+	if err != nil {
+		return kratosErrors.BadRequest("INVALID_CURSOR", err.Error())
+	}
+	limit := int(queryInt32(hctx, "limit", int32(biz.DefaultMessagePageSize)))
+	reply, next, err := s.listMessagePage(ctx, id, before, limit)
 	if err != nil {
 		return err
 	}
-	return hctx.JSON(200, out)
+	return hctx.JSON(200, messagePageResponse{Ret: reply.Ret, Items: reply.Items, NextCursor: next})
 }
 
 func (s *Service) handleSearch(ctx context.Context, hctx khttp.Context) error {

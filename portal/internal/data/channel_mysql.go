@@ -90,6 +90,24 @@ func (r *channelRepo) GetWecomByDefaultAgent(ctx context.Context, agentID string
 	return channelModelToBiz(&m), nil
 }
 
+func (r *channelRepo) GetOutboundByDefaultAgent(ctx context.Context, agentID string) (*biz.ChannelMeta, error) {
+	if agentID == "" {
+		return nil, ErrNotFound
+	}
+	var m model.Channel
+	err := r.db.WithContext(ctx).
+		Where("type IN ? AND default_agent = ? AND enabled = ?", []string{"wecom", "wxpusher"}, agentID, true).
+		Order("updated_at DESC").
+		First(&m).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return channelModelToBiz(&m), nil
+}
+
 func (r *channelRepo) List(ctx context.Context, page, pageSize int32, typ string, enabled *bool) ([]*biz.ChannelMeta, int, error) {
 	q := r.db.WithContext(ctx).Model(&model.Channel{})
 	if typ != "" {

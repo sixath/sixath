@@ -162,8 +162,8 @@ func RegisterTerminalTool(reg *Registry, cfg *TerminalConfig) error {
 func proposeTerminal(ctx context.Context, c *TerminalConfig, command, pattern string, params map[string]any) (any, error) {
 	if c.PendingStore == nil || c.TokenGen == nil {
 		return map[string]any{
-			"error": "confirm_required_but_unconfigured",
-			"hint":  "command matched danger patterns but pending store is not configured",
+			"error":   "confirm_required_but_unconfigured",
+			"hint":    "command matched danger patterns but pending store is not configured",
 			"pattern": pattern,
 		}, nil
 	}
@@ -216,16 +216,17 @@ func confirmTerminal(ctx context.Context, c *TerminalConfig, token string, _ map
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
-	if pending == nil {
-		return ConfirmTokenError("not_found"), nil
+	policy := ApprovalPolicy{TTLSeconds: c.ConfirmTTLSeconds}
+	var createdAt time.Time
+	if pending != nil {
+		createdAt = pending.CreatedAt
 	}
-	ttl := c.ConfirmTTLSeconds
-	if ttl <= 0 {
-		ttl = 300
-	}
-	if time.Since(pending.CreatedAt) > time.Duration(ttl)*time.Second {
-		_ = c.PendingStore.DeletePending(ctx, sessionID, token)
-		return ConfirmTokenError("expired"), nil
+	if failure, bad := policy.Verify(ConfirmCheck{
+		Found:     pending != nil,
+		CreatedAt: createdAt,
+		OnExpire:  func() error { return c.PendingStore.DeletePending(ctx, sessionID, token) },
+	}); bad {
+		return failure.Map(), nil
 	}
 	// Trust pending payload only — ignore re-submitted command/workdir/timeout.
 	runParams := map[string]any{}

@@ -264,35 +264,33 @@ func (e *Executor) deliverChannel(ctx context.Context, task *biz.CronTaskMeta, o
 	} else {
 		content = "[定时任务 " + task.Name + "] " + content
 	}
-	switch ch.Type {
-	case "wxpusher":
-		if ch.AppToken == "" || len(ch.DefaultUids) == 0 {
-			e.log.Errorf("wxpusher channel %s missing app_token or default_uids", ch.ID)
-			return false
-		}
-		summary := task.Name
+	ob, err := channel.NewOutbound(channel.OutboundConfig{
+		Type:        ch.Type,
+		WebhookURL:  ch.WebhookURL,
+		AppToken:    ch.AppToken,
+		DefaultUids: ch.DefaultUids,
+	})
+	if err != nil {
+		e.log.Errorf("channel %s type %s does not support delivery: %v", ch.ID, ch.Type, err)
+		return false
+	}
+	summary := ""
+	if ch.Type == "wxpusher" {
+		summary = task.Name
 		if execErr != nil {
 			summary = task.Name + " 失败"
 		}
-		if err := channel.PushToWxPusher(ctx, ch.AppToken, ch.DefaultUids, content, summary); err != nil {
-			e.log.Errorf("wxpusher push failed: %v", err)
-			return false
-		}
-		return true
-	case "wecom":
-		if ch.WebhookURL == "" {
-			e.log.Errorf("wecom channel %s missing webhook_url", ch.ID)
-			return false
-		}
-		if err := channel.PushToWeCom(ctx, ch.WebhookURL, content, "text"); err != nil {
-			e.log.Errorf("wecom push failed: %v", err)
-			return false
-		}
-		return true
-	default:
-		e.log.Errorf("channel %s type %s does not support delivery (supported: wxpusher|wecom)", ch.ID, ch.Type)
+	}
+	receipt, err := ob.Send(ctx, channel.OutboundMessage{
+		Content: content,
+		MsgType: "text",
+		Summary: summary,
+	})
+	if err != nil {
+		e.log.Errorf("%s push failed: %v", ch.Type, err)
 		return false
 	}
+	return receipt.Status == "sent"
 }
 
 func (e *Executor) deliverSession(ctx context.Context, task *biz.CronTaskMeta, outputSummary string, execErr error) bool {

@@ -102,14 +102,21 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []Message, opts ...Opt
 	}
 
 	text := resp.Choices[0].Message.Content
-	gen := &Generation{Text: text, Raw: resp}
-	if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
-		gen.TokenUsage = &TokenUsage{
-			InputTokens:  resp.Usage.PromptTokens,
-			OutputTokens: resp.Usage.CompletionTokens,
-		}
-	}
+	gen := &Generation{Text: text, Raw: resp, TokenUsage: tokenUsageFromOpenAI(resp.Usage)}
+	// 用真实 usage 校准 token 计数器（若调用方注入了 *CalibratedCounter）。
+	ObserveTokenUsage(callCfg.TokenCounter, msgs, gen)
 	return gen, nil
+}
+
+// tokenUsageFromOpenAI 将 SDK Usage 映射为框架 TokenUsage；无有效计量时返回 nil。
+func tokenUsageFromOpenAI(u openai.Usage) *TokenUsage {
+	if u.PromptTokens <= 0 && u.CompletionTokens <= 0 {
+		return nil
+	}
+	return &TokenUsage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+	}
 }
 
 // buildChatRequest 构建 Chat 请求体，供 Chat 与 ChatStream 复用。

@@ -9,8 +9,8 @@ import (
 	chatv1 "backend/api/chat/v1"
 	"backend/api/common"
 	"backend/internal/biz"
-	"backend/internal/chatsse"
 	portalchat "backend/internal/chat"
+	"backend/internal/chatsse"
 	pkgErrors "backend/internal/pkg/errors"
 	"backend/internal/service"
 
@@ -27,6 +27,7 @@ type chatBackend interface {
 	UpdateSession(ctx context.Context, id string, title string) (*biz.ChatSession, error)
 	DeleteSession(ctx context.Context, id string) error
 	ListMessages(ctx context.Context, sessionID string, limit int) ([]*biz.ChatMessage, error)
+	ListMessagePage(ctx context.Context, sessionID string, before biz.MessageCursor, limit int) ([]*biz.ChatMessage, string, error)
 	SearchSessions(ctx context.Context, query, agentIDFilter string, limit int) ([]biz.SearchHit, string, error)
 }
 
@@ -241,6 +242,26 @@ func (s *Service) listMessages(ctx context.Context, sessionID string) (*chatv1.L
 		Ret:   &common.BaseResponse{Code: 0, Message: "ok"},
 		Items: replies,
 	}, nil
+}
+
+// listMessagePage 游标分页读取会话消息；返回 (reply, 继续向前翻页的游标)。
+// before 为空表示最新一页；游标为空表示已到会话开头。
+func (s *Service) listMessagePage(ctx context.Context, sessionID string, before biz.MessageCursor, limit int) (*chatv1.ListMessagesReply, string, error) {
+	if err := s.requireSessionOwner(ctx, sessionID); err != nil {
+		return nil, "", err
+	}
+	items, next, err := s.chat.ListMessagePage(ctx, sessionID, before, limit)
+	if err != nil {
+		return nil, "", err
+	}
+	replies := make([]*chatv1.MessageReply, len(items))
+	for i, m := range items {
+		replies[i] = messageToReply(m)
+	}
+	return &chatv1.ListMessagesReply{
+		Ret:   &common.BaseResponse{Code: 0, Message: "ok"},
+		Items: replies,
+	}, next, nil
 }
 
 func (s *Service) searchSessions(ctx context.Context, query, agentID string, limit int) (*chatv1.SearchSessionsReply, error) {

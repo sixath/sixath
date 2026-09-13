@@ -159,7 +159,10 @@ func RegisterSSHExecTool(reg *Registry, cfg *SSHExecConfig, opts ...*RegisterToo
 					"description": "Optional remote working directory. The tool will cd into it before running command.",
 				},
 			},
-			"required": []string{"host", "command"},
+			// host 不列入 required：既支持 default_host / 单条 allowed_hosts 隐式默认，
+			// 也支持 ip/hostname/server 等同义参数（见 hostFromParams）。缺失时由
+			// buildSSHExecExecute 报明确错误，静态 required 会误杀这两种合法用法。
+			"required": []string{"command"},
 		},
 		Execute: buildSSHExecExecute(cfg),
 	})

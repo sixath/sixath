@@ -1,174 +1,70 @@
-# sath AI Agent 框架（V0.1 MVP）
+# Sixath Agent Framework
 
-轻量级、可扩展的 Go 语言 AI Agent 开发框架原型，实现了最小可用的：
+Go 语言 AI Agent 运行时框架，为 Portal（管理面 + runtime）与 Gateway（入站）提供统一的多轮 ReAct 执行内核、工具生态、技能（Skill）、MCP、多层记忆、上下文工程与可观测性。
 
-- 统一模型接口与 OpenAI 文本对话适配器
-- 默认对话 Agent（短期记忆 BufferMemory）
-- 中间件链（日志 + panic 恢复）
-- 配置加载（环境变量）
-- 工具注册与简单 Function Calling 示例
+> 本 README 描述**实际代码能力**（不再是早期 "V0.1 MVP 骨架" 的自述）。历史演进与治理决策见 [docs/](../docs/)。
 
-> 当前为 V0.1 MVP 骨架，主要目标是“能跑起来、能集成、易扩展”，高级特性（多厂商、多模态、RAG、完整可观察性、插件系统等）将在后续版本迭代。
+## 核心能力
 
----
+- **多轮 ReAct 执行内核**（`agent/`）：工具循环、并行工具（信号量 + `RequiresSequential` 串行回退）、三条流式路径、`forceFinalSummary` 兜底、证据门（EvidenceGate）、后置模型策略（PostModelPolicy）、RunTrace / OTel span。
+- **工具生态**（`tool/`）：30+ 内置工具（文件/补丁/终端 PTY/进程/SSH/SCP/浏览器 chromedp/网页搜索/抽取/数据查询 list_tables+execute_read+write/rca_*/memory_*/cronjob/todo/ask_user/vision/jaeger/es_log），以及渐进披露的 `tool_search`/`tool_describe`/`tool_call` + BM25 目录检索。
+- **工具治理**：Registry 前置 JSON Schema 参数校验、统一超时、`ApprovalPolicy`（read/write/destructive/network 风险分级 + 会话级授权缓存）、SSRF / pathguard / SQL guard 防护。
+- **技能（Skill）**（`skills/`）：`SKILL.md` frontmatter 索引、关键词路由、校验、按需加载正文、fsnotify 热重载（`Watcher`）。
+- **MCP**（`tool/mcp.go`）：双后端（mark3labs / metoro）、stdio + Streamable HTTP、进程池 + 引用计数 + idle TTL、stdio 白名单、幂等注册；另可反向充当 MCP Server（`memory/mcp/server.go`）。
+- **多层记忆**（`memory/`）：多 scope（user/session/agent）、向量（SQLite/Qdrant）、图（Neo4j）、RRF 混合检索、语义冲突、procedural、embedding 缓存 + 熔断、跨会话 SQLite FTS5。
+- **上下文工程**（`model/context_pipeline.go`）：L1 清洗 → snip → L0 预算裁剪 → 清理孤儿 tool → L2 LLM 摘要（含失败冷却）；`TokenCounter` 抽象 + usage 回填自校准（`CalibratedCounter`）。
+- **模型接入**（`model/`）：OpenAI / DashScope / Ollama + `MultiModel`；出口统一包**重试/退避装饰器**（`WrapResilient`，流式仅首 token 前重试）。
+- **规划（Plan-Execute）**（`agent/plan_agent.go`）：结构化 `Plan` 解析/校验、逐步执行、失败 replan（上限 2 次）、规划失败回退 ReAct。
+- **可观测**（`obs/`）：Prometheus 指标 + OTel span；`turntrace/` 落 RunTrace。
 
-## 快速开始（对话 Demo）
-
-### 1. 前置条件
-
-- Go 1.20+
-- 有效的 OpenAI API Key
-
-### 2. 克隆与构建
-
-```bash
-git clone <your-repo-url> sath
-cd sath
-go build ./...
-```
-
-### 3. 运行对话 Demo（REPL）
-
-**方式一：使用 CLI（推荐）**
-
-```bash
-# 构建 CLI
-go build -o sath ./cmd/sath
-
-# Windows PowerShell
-$env:OPENAI_API_KEY="your-key"
-.\sath demo
-
-# 或 Linux/macOS
-export OPENAI_API_KEY="your-key"
-./sath demo
-```
-
-**方式二：直接运行 demo 包**
-
-```bash
-cd cmd/demo
-
-# Windows PowerShell
-$env:OPENAI_API_KEY="your-key"
-
-# 或 Linux/macOS
-export OPENAI_API_KEY="your-key"
-
-go run .
-```
-
-终端示例：
+## 包结构
 
 ```text
-AI Agent demo started. Type 'exit' to quit.
-> 你好，你是谁？
-...（模型回复）...
+agent/          ReActAgent / ChatAgent / PlanExecuteAgent、护栏、RunTrace
+model/          Model 接口、provider 适配器、重试装饰器、token 计数与上下文管线
+tool/           工具注册表、30+ 内置工具、参数校验、ApprovalPolicy、MCP client
+skills/         SKILL.md 索引与热重载
+memory/         记忆 Facade（向量/图/RRF）、embedding 缓存、MCP server
+turntrace/      RunTrace 持久化
+obs/            Prometheus 指标
+events/         事件总线
+growth/         Growth 复盘/策展运行模型
+sessionsearch/  会话检索
+memorysearch/   记忆索引（fsnotify 增量）
 ```
 
----
+## 快速开始
 
-## 工具调用 Demo（Function Calling + 本地工具）
+框架不自带独立服务，典型消费方是 Portal（`../portal`，module `backend`，通过 `replace ../framework` 引用）与 Gateway（`../gateway`）。
 
-V0.1 提供了一个最小示例：通过 OpenAI Function Calling 调用本地注册的 `calculator_add` 工具完成加法运算。
+最小模型调用：
 
-### 运行示例
-
-```bash
-cd cmd/tool_demo
-
-# 确保已经设置 OPENAI_API_KEY
-go run .
+```go
+m, err := model.NewFromIdentifier("openai/gpt-4o") // 返回已包重试装饰器的 Model
+gen, err := m.Generate(ctx, "你好")
 ```
 
-预期输出类似：
+构造 ReAct Agent：
 
-```text
-calculator_add result: 4
+```go
+reg := tool.NewRegistry()
+// ... 注册工具 ...
+a := agent.NewReActAgent(m, mem, reg, agent.WithMaxSteps(20))
+resp, err := a.Run(ctx, &agent.Request{Messages: []model.Message{{Role: "user", Content: "..."}}})
 ```
 
-> 实际输出取决于模型是否选择调用工具以及 JSON 解析结果。
+## 与 Portal / Gateway 的衔接
 
----
+- Portal `internal/chat/agent_builder.go` 用 `BuildReActAgent` + `RegisterAgentRuntimeTools` 组装 agent，并注入 `TokenCounter`、`L2Runtime`、ApprovalPolicy 等。
+- Portal 的 runtime 接口（`/runtime/v1`）SSE 流式下发模型/工具事件，消费 `RunTrace`。
+- Gateway 通过 Portal runtime 调用 agent；trace 经 W3C `traceparent` 透传贯通（Gateway → Portal → framework 同一 trace）。
 
-## 目录结构概览（V0.1）
+## 测试与评测
 
-```text
-agent/        默认对话 Agent 接口与实现（ChatAgent）
-model/        模型接口、OpenAI 适配器、Function Calling 桥接
-memory/       会话短期记忆接口与 BufferMemory 实现
-middleware/   中间件抽象与日志/恢复中间件
-tool/         工具定义、注册表与示例工具（calculator_add）
-config/       核心配置结构与环境变量加载
-cmd/demo/     文本对话 REPL 示例
-cmd/tool_demo/工具调用示例
-```
+- `framework/` 单测数百个，覆盖 ReAct 循环、工具、记忆、上下文管线、重试、token 校准、Skill 热重载、Plan-Execute 等核心路径。
+- 回归评测集与 runner 见 [`../evals/`](../evals/)。
 
----
+## 相关文档
 
-## 设计原则（简要）
-
-- **开箱即用**：仅配置 `OPENAI_API_KEY` 即可运行对话 Demo。
-- **接口优先**：`Model` / `Agent` / `Memory` / `Tool` / `Middleware` 统一抽象，便于后续扩展。
-- **可扩展性**：各组件通过接口与 Option 模式解耦，可替换实现（如自定义模型、记忆、工具、中间件）。
-- **可观察性雏形**：结构化日志 + panic 恢复，为后续接入 Prometheus / OpenTelemetry 预留空间。
-
----
-
-## CLI 工具（sath）
-
-| 命令 | 说明 |
-|------|------|
-| `sath init` | 在当前目录初始化新项目骨架（main.go + config.yaml） |
-| `sath demo` | 运行内置对话 Agent 示例（REPL） |
-| `sath serve` | 启动 HTTP 服务，提供 `POST /chat` 与 `GET /metrics` |
-
-示例：`sath init -d myapp` 在 `myapp/` 下生成骨架；`sath serve -a :8080` 监听 8080 端口。
-
----
-
-## Roadmap 与版本策略
-
-### Roadmap
-
-在当前骨架基础上，后续版本计划逐步引入：
-
-- 多模型与多厂商支持（OpenAI、Claude、通义、文心等）
-- 多模态能力（文本 + 图片等）
-- RAG 与长期向量记忆
-- 完整可观察性（指标、追踪、健康检查）
-- 插件系统与事件钩子
-
-### 版本策略
-
-本项目采用**语义化版本**（Semantic Versioning，如 `v0.1.0`、`v1.0.0`）：
-
-- **主版本号**：不兼容的 API 或行为变更
-- **次版本号**：向后兼容的功能新增
-- **修订号**：向后兼容的问题修复
-
-在达到 1.0 之前，0.x 版本可能仍有接口微调，但会尽量保持可迁移性。
-
----
-
-## 社区与贡献
-
-- [CONTRIBUTING.md](CONTRIBUTING.md)：贡献流程、分支与 PR 约定
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)：行为准则
-- 提交 Bug 或功能建议请使用 [Issue 模板](.github/ISSUE_TEMPLATE/)
-
-欢迎在此基础上继续演进，或根据你的业务场景扩展自定义组件。
-
----
-
-## 设计文档（Sixath framework）
-
-| 文档 | 说明 |
-|------|------|
-| [docs/design-agent-runtime-hermes-inspired.md](docs/design-agent-runtime-hermes-inspired.md) | Agent 编排、Provider、Prompt 分层、工具运行时、循环语义与可选会话存储（Hermes 理念在 Go 中的映射）。 |
-| [docs/product-spec-agent-runtime-hermes-inspired.md](docs/product-spec-agent-runtime-hermes-inspired.md) | 同上设计的产品规格：G-O 验收、史诗需求、里程碑与开放问题跟踪。 |
-| [docs/design-memory-tools-hermes-parity.md](docs/design-memory-tools-hermes-parity.md) | 记忆工程化、压缩、工具护栏与 Hermes 能力对齐的专项设计。 |
-| [docs/product-spec-memory-tools-hermes-parity.md](docs/product-spec-memory-tools-hermes-parity.md) | 同上主题的产品规格（G1–G5 验收、史诗需求、发布闸门）。 |
-| [docs/dev-plan-memory-tools-hermes-parity.md](docs/dev-plan-memory-tools-hermes-parity.md) | 同上规格的开发计划（WBS、里程碑、Sprint 0、using-superpowers 留痕）。 |
-| [docs/api-reference.md](docs/api-reference.md) | API 参考（若与实现同步维护）。 |
-| [docs/toolsets-hermes-mapping.md](docs/toolsets-hermes-mapping.md) | 工具集 `web` / `file` / `skills` / `memory` / `terminal`（及 `mcp`）与 Hermes 对照及 Sixath 工具映射。 |
+- 架构/设计：`docs/` 下 `design-*.md`、`product-spec-*.md` 等。
+- 成熟度补齐计划与 ADR：`../docs/`（`superpowers/plans/`、`adr/`）。

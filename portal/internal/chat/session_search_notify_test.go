@@ -45,6 +45,11 @@ func (stubMessageRepo) Create(context.Context, string, string, string, map[strin
 func (stubMessageRepo) ListBySession(context.Context, string, int) ([]*biz.ChatMessage, error) {
 	return nil, nil
 }
+
+// 分页语义由 data 层用例覆盖；本桩不涉及。
+func (stubMessageRepo) ListBySessionBefore(context.Context, string, biz.MessageCursor, int) ([]*biz.ChatMessage, string, error) {
+	return nil, "", nil
+}
 func (stubMessageRepo) LastUserOrAssistantBySessions(context.Context, []string) (map[string]string, error) {
 	return nil, nil
 }

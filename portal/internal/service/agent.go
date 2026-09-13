@@ -32,12 +32,12 @@ func baseFail(code int32, msg string) *common.BaseResponse {
 // AgentService implements agent.v1.AgentHTTPServer and agent.v1.AgentServer
 type AgentService struct {
 	agentv1.UnimplementedAgentServer
-	uc           *biz.AgentUsecase
-	toolUC       *biz.ToolUsecase
-	mcpServerUC  *biz.McpServerUsecase
-	skillUC      *biz.SkillResourceUsecase
-	channelUC    *biz.ChannelUsecase
-	log          *log.Helper
+	uc          *biz.AgentUsecase
+	toolUC      *biz.ToolUsecase
+	mcpServerUC *biz.McpServerUsecase
+	skillUC     *biz.SkillResourceUsecase
+	channelUC   *biz.ChannelUsecase
+	log         *log.Helper
 }
 
 // NewAgentService creates an AgentService
@@ -98,6 +98,7 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 		DebugRun:       m.DebugRun,
 		WecomChannelId: m.WecomChannelID,
 		RuntimeTools:   biz.RuntimeToolsToProto(m.RuntimeTools),
+		Mode:           m.Mode,
 		CreatedAt:      m.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      m.UpdatedAt.Format(time.RFC3339),
 	}
@@ -120,7 +121,7 @@ func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgent
 	if err := chat.ValidateAgentHub(rt); err != nil {
 		return nil, errors.BadRequest("INVALID_HUB", err.Error())
 	}
-	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), req.GetWorkspace(), modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds())
+	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), req.GetWorkspace(), modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds(), req.GetMode())
 	if err != nil {
 		s.log.Errorf("CreateAgent failed: name=%s workspace=%s err=%v", req.GetName(), req.GetWorkspace(), err)
 		return nil, err
@@ -218,6 +219,9 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 			return nil, err
 		}
 		updates["wecom_channel_id"] = *req.WecomChannelId
+	}
+	if req.Mode != nil {
+		updates["mode"] = *req.Mode
 	}
 	agent, err := s.uc.Update(ctx, req.GetId(), updates)
 	if err != nil {
@@ -333,7 +337,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat register append_learning failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
-	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
+	registerWeComToolForAgent(ctx, s.channelUC, nil, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -360,7 +364,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	}
 	effectivePrompt = chat.AppendDatasourcePrompt(effectivePrompt, regResult.DatasourcePrompt)
 	effectivePrompt = appendWecomBoundSystemPrompt(ctx, s.channelUC, effectivePrompt, agentMeta)
-	a := chat.BuildReActAgent(m, reg, effectivePrompt, 20, chat.ReActOptionsFromAgent(*agentMeta)...)
+	a := chat.BuildAgent(m, reg, effectivePrompt, 20, agentMeta.Mode, chat.ReActOptionsFromAgent(*agentMeta)...)
 
 	messages := make([]model.Message, 0, 3)
 	if effectivePrompt != "" {

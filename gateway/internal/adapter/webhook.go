@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -16,6 +15,8 @@ import (
 
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/metrics"
+	"github.com/sixath/gateway/internal/observability"
 	"github.com/sixath/gateway/internal/reply"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
@@ -38,7 +39,7 @@ type WebhookDeps struct {
 	Registry    *channel.Registry
 	Runtime     *runtimeclient.Client
 	Sessions    *session.Router
-	Idempotency *idempotency.Store
+	Idempotency idempotency.Store
 	Reply       *reply.Dispatcher
 	TurnTimeout time.Duration
 }
@@ -63,6 +64,9 @@ func NewWebhookHandler(deps WebhookDeps) http.Handler {
 }
 
 func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rec := observability.NewResponseRecorder(w)
+	w = rec
+
 	channelID := r.PathValue("channel_id")
 	if channelID == "" {
 		// Fallback for muxes that don't populate PathValue.
@@ -79,6 +83,10 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown channel", http.StatusNotFound)
 		return
 	}
+	channelType := string(ch.Type)
+	start := metrics.StartInbound(channelID, channelType)
+	defer func() { metrics.FinishInbound(channelID, channelType, rec.Status(), start) }()
+
 	if !ch.Enabled {
 		http.Error(w, "channel disabled", http.StatusGone)
 		return
@@ -105,14 +113,20 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Idempotency: same key must not open a second turn.
 	if ev.IdempotencyKey != "" {
-		if existing, ok := h.deps.Idempotency.Get(ev.IdempotencyKey); ok {
+		existing, ok, gerr := h.deps.Idempotency.Get(r.Context(), ev.IdempotencyKey)
+		if gerr != nil {
+			// 存储读取失败（如 Redis 抖动）：按未命中继续，去重降级为 best-effort。
+			observability.Logger(r.Context()).Error("idempotency_get_failed", "channel", channelID, "err", gerr)
+		}
+		if ok {
+			metrics.ObserveIdempotency(channelID, "duplicate")
 			writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": existing.CorrelationID})
 			if existing.Status == idempotency.StatusDone && existing.Result != nil {
 				if payload, ok := existing.Result.(reply.FinalPayload); ok && ev.ReplyURL != "" {
 					go func() {
-						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						ctx, cancel := context.WithTimeout(observability.Detach(r.Context()), 30*time.Second)
 						defer cancel()
-						_ = h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload)
+						metrics.ObserveReply(ev.ChannelID, "reply_url", h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload))
 					}()
 				}
 			}
@@ -127,7 +141,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		AgentID:   ev.AgentID,
 	})
 	if err != nil {
-		log.Printf("webhook resolve: %v", err)
+		observability.Logger(ctx).Error("webhook_resolve_failed", "channel", channelID, "err", err)
 		http.Error(w, "resolve failed", http.StatusBadGateway)
 		return
 	}
@@ -135,30 +149,37 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	corr := newCorrelationID()
 	ev.CorrelationID = corr
-	if _, ok := h.deps.Idempotency.Begin(ev.IdempotencyKey, corr); !ok {
+	_, reused, berr := h.deps.Idempotency.Begin(ctx, ev.IdempotencyKey, corr)
+	if berr != nil {
+		observability.Logger(ctx).Error("idempotency_begin_failed", "channel", channelID, "err", berr)
+	}
+	if reused {
 		// Race: another request won Begin between Get and Begin.
-		if existing, ok := h.deps.Idempotency.Get(ev.IdempotencyKey); ok {
+		metrics.ObserveIdempotency(channelID, "race")
+		if existing, ok, gerr := h.deps.Idempotency.Get(ctx, ev.IdempotencyKey); ok && gerr == nil {
 			writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": existing.CorrelationID})
 			return
 		}
+	} else if ev.IdempotencyKey != "" {
+		metrics.ObserveIdempotency(channelID, "new")
 	}
 
 	if ev.ReplyMode == "sync" {
-		h.handleSync(w, ev, resolved.SessionID, userID)
+		h.handleSync(r.Context(), w, ev, resolved.SessionID, userID)
 		return
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"correlation_id": corr})
-	go h.runAsync(ev, resolved.SessionID, userID)
+	go h.runAsync(observability.Detach(r.Context()), ev, resolved.SessionID, userID)
 }
 
-func (h *WebhookHandler) handleSync(w http.ResponseWriter, ev InboundEvent, sessionID, userID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), h.deps.TurnTimeout)
+func (h *WebhookHandler) handleSync(ctx context.Context, w http.ResponseWriter, ev InboundEvent, sessionID, userID string) {
+	ctx, cancel := context.WithTimeout(ctx, h.deps.TurnTimeout)
 	defer cancel()
 	payload := h.runTurn(ctx, ev, sessionID, userID)
-	h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
+	_ = h.deps.Idempotency.Complete(ctx, ev.IdempotencyKey, payload) // 内存实现不报错；best-effort
 	if ev.ReplyURL != "" {
-		_ = h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload)
+		metrics.ObserveReply(ev.ChannelID, "reply_url", h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload))
 	}
 	status := http.StatusOK
 	if payload.Status == "failed" {
@@ -168,17 +189,20 @@ func (h *WebhookHandler) handleSync(w http.ResponseWriter, ev InboundEvent, sess
 	writeJSON(w, status, payload)
 }
 
-func (h *WebhookHandler) runAsync(ev InboundEvent, sessionID, userID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), h.deps.TurnTimeout)
+func (h *WebhookHandler) runAsync(ctx context.Context, ev InboundEvent, sessionID, userID string) {
+	ctx, cancel := context.WithTimeout(ctx, h.deps.TurnTimeout)
 	defer cancel()
 	payload := h.runTurn(ctx, ev, sessionID, userID)
-	h.deps.Idempotency.Complete(ev.IdempotencyKey, payload)
-	if err := h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload); err != nil {
-		log.Printf("webhook reply_url: %v", err)
+	_ = h.deps.Idempotency.Complete(ctx, ev.IdempotencyKey, payload) // best-effort
+	err := h.deps.Reply.PostReplyURL(ctx, ev.ReplyURL, payload)
+	if err != nil {
+		observability.Logger(ctx).Error("webhook_reply_url_failed", "channel", ev.ChannelID, "err", err)
 	}
+	metrics.ObserveReply(ev.ChannelID, "reply_url", err)
 }
 
 func (h *WebhookHandler) runTurn(ctx context.Context, ev InboundEvent, sessionID, userID string) reply.FinalPayload {
+	start := time.Now()
 	out, err := h.deps.Runtime.TurnsFinal(ctx, userID, runtimeclient.TurnRequest{
 		SessionID:      sessionID,
 		Content:        ev.Content,
@@ -187,7 +211,9 @@ func (h *WebhookHandler) runTurn(ctx context.Context, ev InboundEvent, sessionID
 		CorrelationID:  ev.CorrelationID,
 		IdempotencyKey: ev.IdempotencyKey,
 	})
+	d := time.Since(start)
 	if err != nil {
+		metrics.ObserveTurn(ev.ChannelID, "failed", d)
 		return reply.FinalPayload{
 			CorrelationID: ev.CorrelationID,
 			Status:        "failed",
@@ -198,6 +224,7 @@ func (h *WebhookHandler) runTurn(ctx context.Context, ev InboundEvent, sessionID
 	if status == "" {
 		status = "ok"
 	}
+	metrics.ObserveTurn(ev.ChannelID, status, d)
 	// Gateway-issued correlation_id is authoritative for callers (202 / reply_url).
 	return reply.FinalPayload{
 		CorrelationID: ev.CorrelationID,

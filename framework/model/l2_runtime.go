@@ -18,6 +18,8 @@ type L2Runtime struct {
 	cooldownSec  int
 	alpha        float64
 	prePruneTool int
+	// counter 若非空，优先用于软阈值判定（通常为已被 usage 校准的 TokenCounter）。
+	counter TokenCounter
 
 	mu        sync.Mutex
 	failCnt   int
@@ -46,6 +48,29 @@ func NewL2Runtime(aux Model, softTokens, maxFailures, cooldownSec int, alpha flo
 		alpha:        alpha,
 		prePruneTool: prePruneToolRunes,
 	}
+}
+
+// WithCounter 注入 token 计数器（优先于构造时的固定 alpha）；返回自身便于链式调用。
+func (r *L2Runtime) WithCounter(c TokenCounter) *L2Runtime {
+	if r != nil && c != nil {
+		r.counter = c
+	}
+	return r
+}
+
+// Counter 返回当前生效的计数器（可能为 nil）。
+func (r *L2Runtime) Counter() TokenCounter {
+	if r == nil {
+		return nil
+	}
+	return r.counter
+}
+
+func (r *L2Runtime) tokenCount(msgs []Message) int {
+	if r.counter != nil {
+		return r.counter.Count(msgs)
+	}
+	return EstimateTokensConservative(msgs, r.alpha)
 }
 
 func lastRealUserIndex(msgs []Message) int {
@@ -84,7 +109,7 @@ func (r *L2Runtime) MaybeSummarize(ctx context.Context, msgs []Message, trace Co
 		}
 		return msgs
 	}
-	if EstimateTokensConservative(msgs, r.alpha) <= r.softTokens {
+	if r.tokenCount(msgs) <= r.softTokens {
 		return msgs
 	}
 	head := leadingSystemCount(msgs)

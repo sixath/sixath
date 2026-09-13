@@ -44,6 +44,7 @@ type ChannelRepo interface {
 	GetByID(ctx context.Context, id string) (*ChannelMeta, error)
 	GetByChannelID(ctx context.Context, channelID string) (*ChannelMeta, error)
 	GetWecomByDefaultAgent(ctx context.Context, agentID string) (*ChannelMeta, error)
+	GetOutboundByDefaultAgent(ctx context.Context, agentID string) (*ChannelMeta, error)
 	List(ctx context.Context, page, pageSize int32, typ string, enabled *bool) ([]*ChannelMeta, int, error)
 	Update(ctx context.Context, id string, updates map[string]any) (*ChannelMeta, error)
 	Delete(ctx context.Context, id string) error

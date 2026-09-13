@@ -11,7 +11,15 @@ Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→sessi
 | [企微智能机器人设计](../docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md) | 长连接 Adapter |
 | 官方 | [智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463) |
 
-进程配置：`configs/config.example.yaml`。渠道列表：`configs/channels.yaml`（**勿提交**真实 `bot_id` / `secret` / `corp_secret`）。
+进程配置：`configs/config.example.yaml`。渠道列表：`configs/channels.yaml`（仓库内为**无凭证的安全默认**：`wecom_bot` 渠道 `enabled: false`）。真实凭证放进 **gitignored** 的 `configs/channels.local.yaml`，用 `${VAR}` 占位符从环境变量注入（见 `configs/channels.example.yaml`）：
+
+```bash
+cp gateway/configs/channels.example.yaml gateway/configs/channels.local.yaml
+export WECOM_BOT_ID=... WECOM_BOT_SECRET=...
+SATH_CHANNELS_FILE=channels.local.yaml docker compose up -d gateway
+```
+
+`${VAR}` 占位符在加载时展开；**变量缺失会直接启动失败并列出变量名**（不会静默变成空串）。
 
 ---
 
@@ -94,7 +102,7 @@ go build -o ./bin/gateway.exe ./cmd/gateway
 | 监听 | `:8088` |
 | Portal | `http://127.0.0.1:8000` |
 | Runtime token | `dev-runtime-token`（须与 Portal `runtime.service_token` 一致） |
-| 渠道文件 | `./configs/channels.yaml` |
+| 渠道文件 | `./configs/channels.yaml`（可用 `SATH_CHANNELS_FILE` 覆盖为 `channels.local.yaml`） |
 | Turn 超时 | 120s |
 
 依赖：Portal 已启动且 `/runtime/v1` 可用；Web 对话还需 Vite / 鉴权对齐（见仓库根 README）。
@@ -111,7 +119,7 @@ go build -o ./bin/gateway.exe ./cmd/gateway
 
 1. 接入方式选 **「使用长连接」**（与「接收消息 URL 回调」互斥）。
 2. 复制 **BotID**，获取 **Secret**（长连接专用，通常只展示一次）。
-3. 写入本机 `channels.yaml`，**不要**提交到 Git。
+3. 写入本机 `configs/channels.local.yaml`（gitignored）或通过 `WECOM_BOT_ID` / `WECOM_BOT_SECRET` 环境变量注入，**不要**提交到 Git。
 
 ### 2. `channels.yaml` 字段
 
@@ -127,17 +135,18 @@ go build -o ./bin/gateway.exe ./cmd/gateway
 | `corp_id` / `corp_secret` | 可选。自建应用凭证（需成员读取）；用于把「发起人」从加密 userid 解析成 `别名(姓名)`。未配置则回退 userid。 |
 
 ```yaml
+# configs/channels.local.yaml（gitignored）
 channels:
   - id: xiaotiancai
     type: wecom_bot
     enabled: true
     default_agent: "<agent-uuid>"
-    bot_id: "<控制台 BotID>"
-    secret: "<长连接 Secret>"
+    bot_id: "${WECOM_BOT_ID}"
+    secret: "${WECOM_BOT_SECRET}"
     bot_names: ["小天才"]
     ws_url: "wss://openws.work.weixin.qq.com"
-    corp_id: "<企业 CorpID>"          # 可选
-    corp_secret: "<自建应用 Secret>"  # 可选，勿提交
+    corp_id: "${WECOM_CORP_ID}"          # 可选
+    corp_secret: "${WECOM_CORP_SECRET}"  # 可选
 ```
 
 显示名解析链：`gettoken` →（必要时）`openuserid_to_userid` → `user/get`；失败不阻塞回复。

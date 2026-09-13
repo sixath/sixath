@@ -1,4 +1,4 @@
-import { parseConfirmRequiredPayload, parseConfirmResultPayload, parseInputRequiredPayload, parseSourcesBrowsedPayload, parseToolCallPayload, parseModelCallPayload, shouldTreatStreamErrorAsWarning, type ChatConfirmationRequest, type ConfirmResultPayload, type ChatInputSubmitBody, type ChatInputRequest, type SourcesBrowsedPayload, type WebSourceItem, type ToolCallPayload, type ModelCallPayload } from './chatStream'
+import { parseConfirmRequiredPayload, parseConfirmResultPayload, parseInputRequiredPayload, parseSourcesBrowsedPayload, parseToolCallPayload, parseModelCallPayload, parsePlanPayload, parsePlanStepPayload, shouldTreatStreamErrorAsWarning, type ChatConfirmationRequest, type ConfirmResultPayload, type ChatInputSubmitBody, type ChatInputRequest, type SourcesBrowsedPayload, type WebSourceItem, type ToolCallPayload, type ModelCallPayload, type PlanPayload, type PlanStepPayload } from './chatStream'
 import { authHeaders, hasApiToken, handleUnauthorized } from './auth'
 import type { TimelineNode } from '../pages/timelineReducer'
 import { normalizeTimeline } from '../pages/timelineReducer'
@@ -815,6 +815,8 @@ export interface ChatMessage {
     compact_summary_hash?: string
     /** Finalize 后的执行时间线；刷新后从 listMessages 回放 */
     timeline?: TimelineNode[]
+    /** 该回复被用户中断（只保存了已生成的部分内容） */
+    interrupted?: boolean
   }
 }
 
@@ -990,15 +992,26 @@ export const chatApi = {
       items: (data.items ?? []).map((item) => normalizeSessionSearchHit(item)),
     }
   },
-  listMessages: async (sessionId: string, limit = 100) => {
+  /**
+   * 会话消息分页：`before` 为空取最新一页，否则取更早的一页。
+   * 返回 `next_cursor` 为空表示已到会话开头。
+   */
+  listMessages: async (
+    sessionId: string,
+    opts?: { limit?: number; before?: string }
+  ) => {
     const q = new URLSearchParams()
-    q.set('limit', String(limit))
-    const data = await request<{ ret?: BaseResponse; items?: Record<string, unknown>[] }>(
-      `/sessions/${sessionId}/messages?${q.toString()}`
-    )
+    q.set('limit', String(opts?.limit ?? 100))
+    if (opts?.before) q.set('before', opts.before)
+    const data = await request<{
+      ret?: BaseResponse
+      items?: Record<string, unknown>[]
+      next_cursor?: string
+    }>(`/sessions/${sessionId}/messages?${q.toString()}`)
     checkRet(data)
     return {
       ...data,
+      next_cursor: data.next_cursor ?? '',
       items: (data.items ?? []).map((item) => normalizeChatMessage(item)),
     }
   },
@@ -1033,7 +1046,11 @@ export const chatApi = {
       onSourcesBrowsed?: (payload: SourcesBrowsedPayload) => void
       onToolCall?: (payload: ToolCallPayload) => void
       onModelCall?: (payload: ModelCallPayload) => void
+      onPlan?: (payload: PlanPayload) => void
+      onPlanStep?: (payload: PlanStepPayload) => void
       onDebug?: (text: string) => void
+      /** 本轮被停止/取消（服务端已保存部分回复） */
+      onCancelled?: () => void
     },
     options?: {
       input_response?: ChatInputSubmitBody['input_response']
@@ -1108,6 +1125,13 @@ export const chatApi = {
                 await reader.cancel().catch(() => {})
                 return
               }
+              else if (curEvent === 'cancelled') {
+                // 用户停止/断连：已产生的正文已由服务端落库，这里只收尾（不当作错误）。
+                callbacks.onCancelled?.()
+                finish()
+                await reader.cancel().catch(() => {})
+                return
+              }
               else if (curEvent === 'error') {
                 const err = (d.error as string) || 'Unknown error'
                 if (shouldTreatStreamErrorAsWarning(err, hasAssistantContent)) {
@@ -1142,6 +1166,14 @@ export const chatApi = {
               else if (curEvent === 'model_call') {
                 const mc = parseModelCallPayload(d)
                 if (mc) callbacks.onModelCall?.(mc)
+              }
+              else if (curEvent === 'plan') {
+                const plan = parsePlanPayload(d)
+                if (plan) callbacks.onPlan?.(plan)
+              }
+              else if (curEvent === 'plan_step') {
+                const step = parsePlanStepPayload(d)
+                if (step) callbacks.onPlanStep?.(step)
               }
             } catch (_) {}
           }

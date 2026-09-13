@@ -3,9 +3,43 @@ package channel
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// envPlaceholderRe matches ${VAR_NAME} placeholders, letting operators keep
+// bot_id / secret / corp_secret out of the repository (see
+// docs/superpowers/plans/2026-09-12-maturity-hardening.md, Task 2).
+var envPlaceholderRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandEnvStrict replaces every ${VAR} placeholder with the matching
+// environment variable. Unlike os.ExpandEnv it fails loudly when a placeholder
+// has no variable set, so a missing credential can never silently become an
+// empty string. Text that is not a ${NAME} placeholder is left untouched.
+func expandEnvStrict(data []byte) ([]byte, error) {
+	missing := make(map[string]struct{})
+	out := envPlaceholderRe.ReplaceAllFunc(data, func(match []byte) []byte {
+		name := string(envPlaceholderRe.FindSubmatch(match)[1])
+		value, ok := os.LookupEnv(name)
+		if !ok {
+			missing[name] = struct{}{}
+			return match
+		}
+		return []byte(value)
+	})
+	if len(missing) > 0 {
+		names := make([]string, 0, len(missing))
+		for name := range missing {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return nil, fmt.Errorf("environment variable(s) not set: %s", strings.Join(names, ", "))
+	}
+	return out, nil
+}
 
 // Channel is a Gateway-managed inbound channel configuration.
 type Channel struct {
@@ -39,6 +73,10 @@ func Load(path string) (*Registry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read channels: %w", err)
+	}
+	data, err = expandEnvStrict(data)
+	if err != nil {
+		return nil, fmt.Errorf("expand %s: %w", path, err)
 	}
 	var file channelsFile
 	if err := yaml.Unmarshal(data, &file); err != nil {

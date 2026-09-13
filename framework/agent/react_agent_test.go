@@ -711,7 +711,8 @@ func TestReActAgent_RunEvents_MissingStreamGenerationEmitsError(t *testing.T) {
 	}
 }
 
-func TestReActAgent_RunEvents_CanceledWhileWaitingForStreamGenerationEmitsError(t *testing.T) {
+// 契约变化（Task 12）：取消不再伪装成 error，而是 StreamEventCancelled + trace.Canceled。
+func TestReActAgent_RunEvents_CanceledWhileWaitingForStreamGenerationEmitsCancelled(t *testing.T) {
 	mem := memory.NewBufferMemory(5)
 	fake := &fakeBlockedGenerationStreamClient{}
 	reg := tool.NewRegistry()
@@ -728,20 +729,27 @@ func TestReActAgent_RunEvents_CanceledWhileWaitingForStreamGenerationEmitsError(
 	cancel()
 
 	deadline := time.After(time.Second)
+	sawError := false
 	for {
 		select {
 		case event, ok := <-ch:
 			if !ok {
-				t.Fatalf("stream closed before error event")
+				t.Fatalf("stream closed before cancelled event")
 			}
-			if event.Type == StreamEventError {
-				if event.Error != context.Canceled.Error() {
-					t.Fatalf("unexpected error event: %#v", event)
+			switch event.Type {
+			case StreamEventError:
+				sawError = true
+			case StreamEventCancelled:
+				if sawError {
+					t.Fatal("cancel must not be reported as an error")
+				}
+				if event.Trace == nil || !event.Trace.Canceled {
+					t.Fatalf("cancelled event must carry a canceled trace: %#v", event.Trace)
 				}
 				return
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for context cancellation error event")
+			t.Fatalf("timed out waiting for cancelled event")
 		}
 	}
 }

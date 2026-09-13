@@ -38,9 +38,13 @@ services:
       - "18088:8088"
     environment:
       SATH_RUNTIME_TOKEN: dev-runtime-token
+      # Optional WeCom smart-bot credentials — see gateway/configs/channels.example.yaml
+      WECOM_BOT_ID: ${WECOM_BOT_ID:-}
+      WECOM_BOT_SECRET: ${WECOM_BOT_SECRET:-}
     volumes:
       - ./gateway/configs/config.docker.yaml:/app/configs/config.docker.yaml:ro
-      - ./gateway/configs/channels.yaml:/app/configs/channels.yaml:ro
+      # Override with SATH_CHANNELS_FILE=channels.local.yaml to use local credentials.
+      - ./gateway/configs/${SATH_CHANNELS_FILE:-channels.yaml}:/app/configs/channels.yaml:ro
     depends_on:
       - portal
 

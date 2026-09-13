@@ -3,6 +3,7 @@ package channel
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -144,6 +145,96 @@ channels:
 	}
 	if ch.CorpID != "wwCORP" || ch.CorpSecret != "APPSECRET" {
 		t.Fatalf("corp fields: id=%q secret=%q", ch.CorpID, ch.CorpSecret)
+	}
+}
+
+func TestLoad_ExpandsEnvPlaceholders(t *testing.T) {
+	const yaml = `
+channels:
+  - id: xiaotiancai
+    type: wecom_bot
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    enabled: true
+    bot_id: "${SATH_TEST_WECOM_BOT_ID}"
+    secret: "${SATH_TEST_WECOM_SECRET}"
+`
+	t.Setenv("SATH_TEST_WECOM_BOT_ID", "BOT-FROM-ENV")
+	t.Setenv("SATH_TEST_WECOM_SECRET", "SECRET-FROM-ENV")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "channels.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ch, err := reg.Get("xiaotiancai")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if ch.BotID != "BOT-FROM-ENV" {
+		t.Fatalf("BotID=%q want BOT-FROM-ENV", ch.BotID)
+	}
+	if ch.Secret != "SECRET-FROM-ENV" {
+		t.Fatalf("Secret=%q want SECRET-FROM-ENV", ch.Secret)
+	}
+}
+
+func TestLoad_ErrorsOnMissingEnvPlaceholder(t *testing.T) {
+	const yaml = `
+channels:
+  - id: xiaotiancai
+    type: wecom_bot
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    enabled: true
+    bot_id: "${SATH_TEST_DEFINITELY_MISSING_BOT_ID}"
+    secret: "${SATH_TEST_ALSO_MISSING_SECRET}"
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "channels.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error when placeholder variable is unset")
+	}
+	if !strings.Contains(err.Error(), "SATH_TEST_DEFINITELY_MISSING_BOT_ID") ||
+		!strings.Contains(err.Error(), "SATH_TEST_ALSO_MISSING_SECRET") {
+		t.Fatalf("error should name every missing variable, got: %v", err)
+	}
+}
+
+func TestLoad_LeavesNonPlaceholderTextUntouched(t *testing.T) {
+	const yaml = `
+channels:
+  - id: demo-webhook
+    type: webhook
+    default_agent: "agent-1"
+    webhook_secret: "cost$5 and ${1} stays"
+    enabled: true
+    default_reply_mode: async
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "channels.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ch, err := reg.Get("demo-webhook")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if ch.WebhookSecret != "cost$5 and ${1} stays" {
+		t.Fatalf("WebhookSecret=%q want literal preserved", ch.WebhookSecret)
 	}
 }
 

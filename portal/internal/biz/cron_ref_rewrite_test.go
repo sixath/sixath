@@ -55,7 +55,7 @@ type stubCronRefAgentRepo struct {
 	ids []string
 }
 
-func (s *stubCronRefAgentRepo) Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
+func (s *stubCronRefAgentRepo) Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string, mode string) (*AgentMeta, error) {
 	return nil, nil
 }
 func (s *stubCronRefAgentRepo) GetByID(ctx context.Context, id string) (*AgentMeta, error) {

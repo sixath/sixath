@@ -28,6 +28,41 @@ func (f *fakeTokenModel) Embed(_ context.Context, texts []string, _ ...model.Opt
 	return make([]model.Embedding, len(texts)), nil
 }
 
+func TestRun_AggregatesTokenUsageIntoRunTrace(t *testing.T) {
+	m := &fakeTokenModel{text: "hello", usage: &model.TokenUsage{InputTokens: 11, OutputTokens: 7}}
+	a := NewReActAgent(m, nil, nil, WithReActMaxSteps(2))
+
+	resp, err := a.Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	tr, ok := resp.Metadata["trace"].(*RunTrace)
+	if !ok || tr == nil {
+		t.Fatalf("trace missing: %#v", resp.Metadata)
+	}
+	if tr.ModelCalls != 1 {
+		t.Fatalf("ModelCalls=%d want 1", tr.ModelCalls)
+	}
+	if tr.InputTokens != 11 || tr.OutputTokens != 7 {
+		t.Fatalf("usage not aggregated: input=%d output=%d", tr.InputTokens, tr.OutputTokens)
+	}
+}
+
+func TestBuildTurnTrace_CarriesTokenUsage(t *testing.T) {
+	tt := BuildTurnTrace(TurnTraceMeta{SessionID: "s1", AgentID: "a1", RequestID: "r1"}, &RunTrace{
+		RequestID:    "r1",
+		ModelCalls:   3,
+		InputTokens:  120,
+		OutputTokens: 45,
+	})
+	if tt == nil {
+		t.Fatal("nil turn trace")
+	}
+	if tt.ModelCalls != 3 || tt.InputTokens != 120 || tt.OutputTokens != 45 {
+		t.Fatalf("usage not carried: %+v", tt)
+	}
+}
+
 func TestRunEvents_ModelRespondedIncludesTokenUsage(t *testing.T) {
 	bus := events.NewBus()
 	var gotInput, gotOutput int

@@ -11,6 +11,7 @@ import (
 	chatv1 "backend/api/chat/v1"
 	"backend/api/common"
 	"backend/internal/biz"
+	"backend/internal/channel"
 	"backend/internal/chat"
 	"backend/internal/data"
 
@@ -30,16 +31,17 @@ import (
 // 对话服务：会话管理、消息发送与历史（详见 architecture_design.md 5.4、5.5）
 type ChatService struct {
 	chatv1.UnimplementedChatServer
-	chatUC         *biz.ChatUsecase
-	agentUC        *biz.AgentUsecase
-	toolUC         *biz.ToolUsecase
-	mcpServerUC    *biz.McpServerUsecase
-	skillUC        *biz.SkillResourceUsecase
-	growthUC       *biz.GrowthUsecase
-	channelUC      *biz.ChannelUsecase
-	sessionHooks   *agent.ChatSessionHookRegistry
-	memoryStore    memory.MemoryStore
-	turnTraceStore turntrace.Store
+	chatUC           *biz.ChatUsecase
+	agentUC          *biz.AgentUsecase
+	toolUC           *biz.ToolUsecase
+	mcpServerUC      *biz.McpServerUsecase
+	skillUC          *biz.SkillResourceUsecase
+	growthUC         *biz.GrowthUsecase
+	channelUC        *biz.ChannelUsecase
+	deliveryRecorder channel.DeliveryRecorder
+	sessionHooks     *agent.ChatSessionHookRegistry
+	memoryStore      memory.MemoryStore
+	turnTraceStore   turntrace.Store
 	// bgReviewer is the C3 in-process fork (GrowthWorker); optional until newApp wires it.
 	bgReviewer BackgroundReviewer
 	// bgReviewSpawnHook overrides spawnBackgroundReviewOnce in tests (sync spy).
@@ -63,6 +65,7 @@ func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.Agent
 	WireMemoryHubFromData(d)
 	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, growthUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
+	s.SetDeliveryRecorder(data.NewDeliveryRecorder(d.DB()))
 	return s
 }
 
@@ -74,9 +77,21 @@ func (s *ChatService) SetTurnTraceStore(st turntrace.Store) {
 	s.turnTraceStore = st
 }
 
-func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
+// SetDeliveryRecorder sets the optional outbound delivery recorder (nil-safe).
+func (s *ChatService) SetDeliveryRecorder(r channel.DeliveryRecorder) {
+	if s == nil {
+		return
+	}
+	s.deliveryRecorder = r
+}
+
+func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID, modelName string, tr *agent.RunTrace) {
 	if s == nil || tr == nil {
 		return
+	}
+	// 成本估算：有真实 token 计量且未预先填充时，按计价表估算本 turn 成本并随 trace 持久化。
+	if tr.EstimatedCostUSD == 0 && modelName != "" {
+		tr.EstimatedCostUSD = chat.EstimateCost(modelName, tr.InputTokens, tr.OutputTokens)
 	}
 	chat.PersistTurnTraceIfEnabled(ctx, s.turnTraceStore, agent.TurnTraceMeta{
 		SessionID: sessionID,
@@ -407,7 +422,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage register ask_user failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
+	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -426,7 +441,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	toolFamily := chat.BuildToolFamilyIndex(reg)
 	// 构建 ReActAgent（含成长工具成功钩子，见 growth_chat.go）
 	maxHistory := 20
-	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
+	a := chat.BuildAgent(m, reg, agentMeta.SystemPrompt, maxHistory, agentMeta.Mode,
 		append(chat.ReActOptionsFromAgent(*agentMeta),
 			append(s.growthReActOptions(agentMeta.Workspace),
 				chat.TurnIntentGateOption(active, toolFamily),
@@ -519,7 +534,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 	tr := chat.RunTraceFromMetadata(resp.Metadata)
-	s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
+	s.persistTurnTrace(runCtx, sessionID, session.AgentID, agentMeta.ModelConfig.Model, tr)
 	s.persistCompactBoundary(runCtx, sessionID, tr)
 	s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, resp.Messages, tr)
 
@@ -694,7 +709,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream register ask_user failed: session_id=%s err=%v", sessionID, err)
 		return nil, "", err
 	}
-	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
+	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -714,7 +729,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	maxHistory := 20
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。
-	a := chat.BuildReActAgent(m, reg, agentMeta.SystemPrompt, maxHistory,
+	a := chat.BuildAgent(m, reg, agentMeta.SystemPrompt, maxHistory, agentMeta.Mode,
 		append(chat.ReActOptionsFromAgent(*agentMeta),
 			append(s.growthReActOptions(agentMeta.Workspace),
 				chat.TurnIntentGateOption(active, toolFamily),
@@ -845,7 +860,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 				return
 			}
 			tr := chat.RunTraceFromMetadata(resp.Metadata)
-			s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
+			s.persistTurnTrace(runCtx, sessionID, session.AgentID, agentMeta.ModelConfig.Model, tr)
 			s.persistCompactBoundary(runCtx, sessionID, tr)
 			s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, resp.Messages, tr)
 			for _, event := range streamEventsFromResponse(resp) {
@@ -865,6 +880,14 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 				if ev.Text != "" {
 					ch <- ChatStreamEvent{Type: ChatStreamEventChunk, Content: ev.Text}
 				}
+			case agent.StreamEventPlan:
+				if plan, ok := ev.Metadata["plan"].(*agent.Plan); ok {
+					ch <- ChatStreamEvent{Type: ChatStreamEventPlan, Plan: plan}
+				}
+			case agent.StreamEventPlanStep:
+				if step, ok := ev.Metadata["step"].(agent.PlanStep); ok {
+					ch <- ChatStreamEvent{Type: ChatStreamEventPlanStep, PlanStep: &step}
+				}
 			case agent.StreamEventToolStarted:
 				if ev.ToolCall != nil {
 					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "started")}
@@ -877,6 +900,16 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 				if ev.ToolCall != nil {
 					ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "failed")}
 				}
+			case agent.StreamEventCancelled:
+				// 取消是终止性的，但不是错误：落 trace/compact boundary 后下发 cancelled。
+				// 正文由 chunksse.WriteStream 在流结束时用已收到的增量落库（见 sse.go），
+				// 因此"停止"不会丢掉已经生成的内容。
+				if ev.Trace != nil {
+					s.persistTurnTrace(runCtx, sessionID, session.AgentID, agentMeta.ModelConfig.Model, ev.Trace)
+					s.persistCompactBoundary(runCtx, sessionID, ev.Trace)
+				}
+				ch <- ChatStreamEvent{Type: ChatStreamEventCancelled}
+				return
 			case agent.StreamEventError:
 				// 错误是终止性的：处理后退出 goroutine（触发 defer 清理），与旧 a.Run 行为一致。
 				s.handleStreamRunError(ctx, sessionID, session.AgentID, streamSessionProvider, ch, errors.New(ev.Error))
@@ -885,7 +918,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 				// RunEvents 的文本已通过 Delta 增量下发，这里仅从 trace 派生
 				// input_required / confirm_required 事件（ask_user / execute_write / skill_manage / terminal / workspace_file / browser）。
 				if ev.Trace != nil {
-					s.persistTurnTrace(runCtx, sessionID, session.AgentID, ev.Trace)
+					s.persistTurnTrace(runCtx, sessionID, session.AgentID, agentMeta.ModelConfig.Model, ev.Trace)
 					s.persistCompactBoundary(runCtx, sessionID, ev.Trace)
 					s.afterTurnBackgroundReview(runCtx, sessionID, session.AgentID, agentMeta.Workspace, ev.Messages, ev.Trace)
 					resp := &agent.Response{Metadata: map[string]any{"trace": ev.Trace}}

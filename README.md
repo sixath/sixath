@@ -93,7 +93,7 @@ docker build -t sixath-web ./web
 - **web**：`cd web && npm install && npm run dev`（Vite `:5173`；会话相关 → `localhost:8088`，其余 `/api` → `localhost:8000`）
 
 开发时请把 portal、gateway 与 web 的端口对齐（或改 `web/vite.config.ts` 代理目标）。  
-`gateway/configs/channels.yaml` 中的企微 `bot_id` / `secret` / `corp_secret` **不要提交**到 Git。
+`gateway/configs/channels.yaml` 是仓库内的**无凭证安全默认**（`wecom_bot` 为 `enabled: false`）；真实企微 `bot_id` / `secret` / `corp_secret` 请放入 gitignored 的 `gateway/configs/channels.local.yaml`（参考 `channels.example.yaml`），用 `${VAR}` 环境变量占位符注入，并**不要提交**到 Git。
 
 ### 企微智能机器人（长连接）速览
 

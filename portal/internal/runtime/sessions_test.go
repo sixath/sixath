@@ -123,6 +123,23 @@ func (f *fakeChat) ListMessages(ctx context.Context, sessionID string, _ int) ([
 	return f.messages[sessionID], nil
 }
 
+// 简化桩：忽略游标，按 limit 截取并返回固定游标，用于验证 runtime 的透传与归一化。
+func (f *fakeChat) ListMessagePage(ctx context.Context, sessionID string, _ biz.MessageCursor, limit int) ([]*biz.ChatMessage, string, error) {
+	if _, err := f.GetSession(ctx, sessionID); err != nil {
+		return nil, "", err
+	}
+	all := f.messages[sessionID]
+	limit = biz.NormalizeMessagePageSize(limit)
+	if limit > len(all) {
+		limit = len(all)
+	}
+	next := ""
+	if limit < len(all) {
+		next = "stub-cursor"
+	}
+	return all[:limit], next, nil
+}
+
 func (f *fakeChat) SearchSessions(ctx context.Context, _, _ string, _ int) ([]biz.SearchHit, string, error) {
 	if _, ok := biz.CallerUserID(ctx); !ok {
 		return nil, "", kratosErrors.Unauthorized("UNAUTHORIZED", "caller identity is required")

@@ -256,6 +256,59 @@ export function parseModelCallPayload(d: Record<string, unknown>): ModelCallPayl
   return mc as unknown as ModelCallPayload
 }
 
+export interface PlanStepPayload {
+  id: string
+  goal: string
+  suggested_tools?: string[]
+  success_criteria?: string
+  readonly?: boolean
+}
+
+export interface PlanPayload {
+  steps: PlanStepPayload[]
+}
+
+export function parsePlanPayload(d: Record<string, unknown>): PlanPayload | null {
+  const plan = d.plan as Record<string, unknown> | undefined
+  if (!plan || !Array.isArray(plan.steps)) return null
+  const steps: PlanStepPayload[] = []
+  for (const s of plan.steps) {
+    if (!s || typeof s !== 'object') continue
+    const row = s as Record<string, unknown>
+    const id = typeof row.id === 'string' ? row.id : ''
+    const goal = typeof row.goal === 'string' ? row.goal : ''
+    if (!id && !goal) continue
+    steps.push({
+      id,
+      goal,
+      ...(Array.isArray(row.suggested_tools)
+        ? { suggested_tools: row.suggested_tools.filter((x): x is string => typeof x === 'string') }
+        : {}),
+      ...(typeof row.success_criteria === 'string' ? { success_criteria: row.success_criteria } : {}),
+      ...(typeof row.readonly === 'boolean' ? { readonly: row.readonly } : {}),
+    })
+  }
+  if (steps.length === 0) return null
+  return { steps }
+}
+
+export function parsePlanStepPayload(d: Record<string, unknown>): PlanStepPayload | null {
+  const s = d.plan_step as Record<string, unknown> | undefined
+  if (!s) return null
+  const id = typeof s.id === 'string' ? s.id : ''
+  const goal = typeof s.goal === 'string' ? s.goal : ''
+  if (!id && !goal) return null
+  return {
+    id,
+    goal,
+    ...(Array.isArray(s.suggested_tools)
+      ? { suggested_tools: s.suggested_tools.filter((x): x is string => typeof x === 'string') }
+      : {}),
+    ...(typeof s.success_criteria === 'string' ? { success_criteria: s.success_criteria } : {}),
+    ...(typeof s.readonly === 'boolean' ? { readonly: s.readonly } : {}),
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

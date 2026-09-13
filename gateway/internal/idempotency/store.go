@@ -1,6 +1,7 @@
 package idempotency
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -21,34 +22,43 @@ type Entry struct {
 	ExpiresAt     time.Time
 }
 
-// Store is an in-process idempotency map with TTL.
-type Store struct {
+// Store 幂等存储接口。部署形态已确认为单副本（见 docs/adr/0002-gateway-single-replica-lease.md），
+// 因此 MemoryStore 即生产实现；若未来多副本，替换为 Redis 实现（SETNX + EXPIRE，drop-in 满足本接口即可）。
+type Store interface {
+	// Begin 预留 key；reused=true 表示 key 已存在并返回既有 entry（调用方应据此去重）。
+	Begin(ctx context.Context, key, correlationID string) (entry Entry, reused bool, err error)
+	// Complete 标记 key 完成并保存结果。
+	Complete(ctx context.Context, key string, result any) error
+	// Get 读取（不创建）一个未过期的 entry。
+	Get(ctx context.Context, key string) (Entry, bool, error)
+}
+
+// MemoryStore 进程内幂等存储（TTL 过期清理）。
+type MemoryStore struct {
 	mu  sync.Mutex
 	ttl time.Duration
 	m   map[string]Entry
 }
 
-// NewStore creates a store. ttl <= 0 defaults to 10 minutes.
-func NewStore(ttl time.Duration) *Store {
+// NewStore 创建内存幂等存储；ttl<=0 默认 10 分钟。
+func NewStore(ttl time.Duration) *MemoryStore {
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	return &Store{
-		ttl: ttl,
-		m:   make(map[string]Entry),
-	}
+	return &MemoryStore{ttl: ttl, m: make(map[string]Entry)}
 }
 
-// Begin reserves a key. ok=false means the key already exists (entry returned).
-func (s *Store) Begin(key, correlationID string) (entry Entry, ok bool) {
+var _ Store = (*MemoryStore)(nil)
+
+func (s *MemoryStore) Begin(_ context.Context, key, correlationID string) (Entry, bool, error) {
 	if key == "" {
-		return Entry{CorrelationID: correlationID, Status: StatusInProgress}, true
+		return Entry{CorrelationID: correlationID, Status: StatusInProgress}, false, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.purgeLocked(time.Now())
 	if e, exists := s.m[key]; exists {
-		return e, false
+		return e, true, nil
 	}
 	e := Entry{
 		CorrelationID: correlationID,
@@ -56,39 +66,38 @@ func (s *Store) Begin(key, correlationID string) (entry Entry, ok bool) {
 		ExpiresAt:     time.Now().Add(s.ttl),
 	}
 	s.m[key] = e
-	return e, true
+	return e, false, nil
 }
 
-// Complete marks a key done and stores the result payload.
-func (s *Store) Complete(key string, result any) {
+func (s *MemoryStore) Complete(_ context.Context, key string, result any) error {
 	if key == "" || s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, exists := s.m[key]
 	if !exists {
-		return
+		return nil
 	}
 	e.Status = StatusDone
 	e.Result = result
 	e.ExpiresAt = time.Now().Add(s.ttl)
 	s.m[key] = e
+	return nil
 }
 
-// Get returns a non-expired entry.
-func (s *Store) Get(key string) (Entry, bool) {
+func (s *MemoryStore) Get(_ context.Context, key string) (Entry, bool, error) {
 	if key == "" || s == nil {
-		return Entry{}, false
+		return Entry{}, false, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.purgeLocked(time.Now())
 	e, ok := s.m[key]
-	return e, ok
+	return e, ok, nil
 }
 
-func (s *Store) purgeLocked(now time.Time) {
+func (s *MemoryStore) purgeLocked(now time.Time) {
 	for k, e := range s.m {
 		if !e.ExpiresAt.IsZero() && now.After(e.ExpiresAt) {
 			delete(s.m, k)

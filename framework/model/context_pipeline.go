@@ -60,12 +60,15 @@ func PrepareChatContextCtx(ctx context.Context, messages []Message, callCfg *Cal
 		}
 	}
 	if callCfg != nil && callCfg.MaxContextTokensSoft > 0 {
-		alpha := callCfg.TokenEstimateAlpha
-		if alpha <= 0 {
-			alpha = DefaultTokenEstimateAlpha
+		// 优先用注入的 TokenCounter（可能已被真实 usage 校准）；
+		// 否则退回固定 alpha 的粗估，行为与既有实现一致。
+		counter := callCfg.TokenCounter
+		if counter == nil {
+			counter = NewConservativeCounter(callCfg.TokenEstimateAlpha)
 		}
-		est := EstimateTokensConservative(out, alpha)
-		if est > callCfg.MaxContextTokensSoft {
+		est := counter.Count(out)
+		alpha := counter.Alpha()
+		if est > callCfg.MaxContextTokensSoft && alpha > 0 {
 			// 将 token 阈值映射到近似 rune 预算，复用既有 L0 裁剪策略（按 user block + tool 原子链）。
 			budgetRunes := int(float64(callCfg.MaxContextTokensSoft) / alpha)
 			if budgetRunes <= 0 {

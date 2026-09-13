@@ -184,7 +184,12 @@ func (c *DashScopeClient) Chat(ctx context.Context, messages []Message, opts ...
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		detail := readDashScopeErrorBody(resp.Body)
-		return nil, fmt.Errorf("dashscope api: %s: %s", resp.Status, detail)
+		return nil, &APIStatusError{
+			Provider:   "dashscope",
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("%s: %s", resp.Status, detail),
+			RetryAfter: parseRetryAfterHeader(resp.Header.Get("Retry-After")),
+		}
 	}
 	var out dashScopeResp
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -197,6 +202,8 @@ func (c *DashScopeClient) Chat(ctx context.Context, messages []Message, opts ...
 			OutputTokens: out.Usage.OutputTokens,
 		}
 	}
+	// 用真实 usage 校准 token 计数器（若调用方注入了 *CalibratedCounter）。
+	ObserveTokenUsage(callCfg.TokenCounter, messages, gen)
 	return gen, nil
 }
 

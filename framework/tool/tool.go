@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/sixath/framework/events"
 	"go.opentelemetry.io/otel"
@@ -41,6 +45,50 @@ type Tool struct {
 	RequiresSequential bool
 	// Bindings 运行时绑定摘要，供 catalog / prompt 展示。
 	Bindings map[string]string
+	// Timeout 为该工具的独立超时上限：
+	//   - 0  ：使用全局默认（DefaultToolTimeout / SATH_TOOL_TIMEOUT_SEC）
+	//   - <0 ：不追加超时，由工具自行管理（如显式配置为「无限制」的数据源查询）
+	// 工具内部更短的超时依然生效（嵌套 context 取最短）。
+	Timeout time.Duration
+}
+
+// DefaultToolTimeout 为工具执行的全局超时上限。
+//
+// 取值刻意宽松（高于现有最长的单工具默认值 terminalDefaultTimeoutSec=300s /
+// hypertool 上限 300s），目的是让"卡死的工具"必然终止，而不是收窄既有正常耗时；
+// 需要突破该上限的工具用 Tool.Timeout<0 显式放弃，或调大 SATH_TOOL_TIMEOUT_SEC。
+const DefaultToolTimeout = 10 * time.Minute
+
+// EnvToolTimeoutSec 覆盖全局工具超时（秒）：>0 生效；0/off/false 关闭超时包装。
+const EnvToolTimeoutSec = "SATH_TOOL_TIMEOUT_SEC"
+
+// toolTimeout 返回当前生效的全局工具超时与是否启用。
+func toolTimeout() (time.Duration, bool) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(EnvToolTimeoutSec)))
+	if raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			if n <= 0 {
+				return 0, false // 显式关闭
+			}
+			return time.Duration(n) * time.Second, true
+		}
+		switch raw {
+		case "off", "false", "no", "disable", "disabled":
+			return 0, false
+		}
+	}
+	return DefaultToolTimeout, true
+}
+
+// effectiveToolTimeout 计算某工具最终生效的超时（<=0 表示不包装）。
+func effectiveToolTimeout(t Tool) (time.Duration, bool) {
+	if t.Timeout < 0 {
+		return 0, false
+	}
+	if t.Timeout > 0 {
+		return t.Timeout, true
+	}
+	return toolTimeout()
 }
 
 // ContextKeyRequestID 为从 context 中读取 request_id 的键，与 templates 中 WithValue("request_id", ...) 一致。
@@ -243,6 +291,49 @@ func (r *Registry) Register(t Tool) error {
 			return result, err
 		}
 	}
+
+	// 统一超时上限：把「不确定的挂起」变成「确定的失败」；工具自身的更短超时依然生效。
+	if timeout, ok := effectiveToolTimeout(t); ok {
+		inner := t.Execute
+		t.Execute = func(ctx context.Context, params map[string]any) (any, error) {
+			runCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			result, err := inner(runCtx, params)
+			// 仅在是「本层超时」时才改写消息；父 ctx 已取消/超时则原样透传。
+			if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				return result, fmt.Errorf("tool %q: timeout after %s", name, timeout)
+			}
+			return result, err
+		}
+	}
+
+	// 入参 schema 校验：fail-open（schema 超出支持子集则跳过），失败按可恢复的
+	// tool error 交回模型重试。
+	if toolArgValidationEnabled() {
+		inner := t.Execute
+		schema := t.Parameters
+		t.Execute = func(ctx context.Context, params map[string]any) (any, error) {
+			if err := ValidateArguments(name, schema, params); err != nil {
+				// 结果沿用仓库既有约定（如 vision.go 缺 path）：
+				// {"ok":false,"error":…,"error_code":permanent}，保证依赖结果结构的
+				// 调用方（RCA evidence 契约、UI 时间线）仍能拿到可解析的 payload；
+				// 同时仍返回 error，使 Agent 记为工具失败而非成功。
+				var iae *InvalidArgumentsError
+				result := map[string]any{
+					"ok":         false,
+					"tool":       name,
+					"error":      err.Error(),
+					"error_code": ErrorPermanent,
+				}
+				if errors.As(err, &iae) {
+					result["invalid_arguments"] = iae.Errors
+				}
+				return result, err
+			}
+			return inner(ctx, params)
+		}
+	}
+
 	r.tools[t.Name] = t
 	return nil
 }

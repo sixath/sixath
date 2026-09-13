@@ -121,13 +121,17 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 
 	msg := resp.Choices[0].Message
 	if len(msg.ToolCalls) == 0 {
-		return &Generation{
+		gen := &Generation{
 			Text: msg.Content,
 			Raw: ToolStep{
 				Used:             false,
 				ReasoningContent: msg.ReasoningContent,
 			},
-		}, nil
+			TokenUsage: tokenUsageFromOpenAI(resp.Usage),
+		}
+		// ReAct 主路径也计入用量：否则 turn_trace 与 SSE 的 token 恒为 0，校准无从收敛。
+		ObserveTokenUsage(callCfg.TokenCounter, msgs, gen)
+		return gen, nil
 	}
 
 	calls := make([]ToolCall, 0, len(msg.ToolCalls))
@@ -148,7 +152,7 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 	}
 	first := calls[0]
 
-	return &Generation{
+	gen := &Generation{
 		Text: msg.Content,
 		Raw: ToolStep{
 			Used:             true,
@@ -158,7 +162,10 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 			ToolCalls:        calls,
 			ReasoningContent: msg.ReasoningContent,
 		},
-	}, nil
+		TokenUsage: tokenUsageFromOpenAI(resp.Usage),
+	}
+	ObserveTokenUsage(callCfg.TokenCounter, msgs, gen)
+	return gen, nil
 }
 
 func openAIChatMessage(m Message) (openai.ChatCompletionMessage, error) {

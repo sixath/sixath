@@ -110,6 +110,9 @@ type CallConfig struct {
 	MaxContextTokensSoft int
 	// TokenEstimateAlpha 为 token 粗估系数（<=0 使用 DefaultTokenEstimateAlpha）。
 	TokenEstimateAlpha float64
+	// TokenCounter 若非空，则用它做 token 估算与压缩触发（优先于 TokenEstimateAlpha）；
+	// 通常为 *CalibratedCounter，由真实 usage 回填校准（见 token_counter.go）。
+	TokenCounter TokenCounter
 	// ContextTrace 若非空，在 PrepareChatContext（压缩、strip 孤儿 tool）时回调，供可观测聚合（即 TraceSink）。
 	ContextTrace ContextTraceFunc
 	// L2 可选摘要运行时；非空且启用时在 PrepareChatContextCtx 末尾尝试 MaybeSummarize（设计 §5）。
@@ -175,6 +178,16 @@ func WithTokenEstimateAlpha(alpha float64) Option {
 	return func(c *CallConfig) {
 		if alpha > 0 {
 			c.TokenEstimateAlpha = alpha
+		}
+	}
+}
+
+// WithTokenCounter 注入 token 计数器（优先于 WithTokenEstimateAlpha 的固定系数）。
+// 传入 *CalibratedCounter 时，provider 会在拿到 usage 后回填校准。
+func WithTokenCounter(c TokenCounter) Option {
+	return func(cfg *CallConfig) {
+		if c != nil {
+			cfg.TokenCounter = c
 		}
 	}
 }

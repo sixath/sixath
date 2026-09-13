@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/leadership"
+	"github.com/sixath/gateway/internal/metrics"
+	"github.com/sixath/gateway/internal/observability"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
 	"github.com/sixath/gateway/internal/wecom"
@@ -25,7 +27,9 @@ type WecomBotDeps struct {
 	Registry    *channel.Registry
 	Runtime     *runtimeclient.Client
 	Sessions    *session.Router
-	Idempotency *idempotency.Store
+	Idempotency idempotency.Store
+	// Leader 可选：多副本时判定本实例是否持有订阅领导权；nil 默认 AlwaysLeader（单副本）。
+	Leader      leadership.Leader
 	TurnTimeout time.Duration
 }
 
@@ -33,6 +37,7 @@ const (
 	wecomProcessingContent = "处理中…"
 	wecomReconnectMin      = time.Second
 	wecomReconnectMax      = 60 * time.Second
+	leadershipPollInterval = 5 * time.Second
 )
 
 // StartWecomBots starts one reconnecting runner per enabled wecom_bot channel.
@@ -57,10 +62,25 @@ func StartWecomBots(ctx context.Context, deps WecomBotDeps) {
 }
 
 func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps) {
+	leader := deps.Leader
+	if leader == nil {
+		leader = leadership.AlwaysLeader{}
+	}
 	backoff := wecomReconnectMin
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+		// 多副本预留：未持领导权时不订阅 WSS，轮询等待（单副本 AlwaysLeader 恒为 true）。
+		if !leader.IsLeader(ctx) {
+			observability.Logger(ctx).Warn("wecom_bot_not_leader",
+				"channel", ch.ID, "retry_in", leadershipPollInterval.String())
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(leadershipPollInterval):
+			}
+			continue
 		}
 		started := time.Now()
 		err := runWecomBotOnce(ctx, ch, deps)
@@ -70,7 +90,9 @@ func runWecomBotLoop(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 		if time.Since(started) > 30*time.Second {
 			backoff = wecomReconnectMin
 		}
-		log.Printf("wecom_bot %s disconnected: %v; reconnect in %s", ch.ID, err, backoff)
+		metrics.IncWecomReconnect(ch.ID)
+		observability.Logger(ctx).Warn("wecom_bot_disconnected",
+			"channel", ch.ID, "err", err, "reconnect_in", backoff.String())
 		select {
 		case <-ctx.Done():
 			return
@@ -98,6 +120,8 @@ func runWecomBotOnce(ctx context.Context, ch channel.Channel, deps WecomBotDeps)
 			go handleWecomRawMessage(context.Background(), client, reqID, ch, body, deps, dir)
 		},
 	})
+	metrics.SetWecomConnections(ch.ID, 1)
+	defer metrics.SetWecomConnections(ch.ID, 0)
 	return client.Run(ctx)
 }
 
@@ -107,7 +131,7 @@ func handleWecomRawMessage(parent context.Context, conn WecomConn, reqID string,
 		BotID:    ch.BotID,
 	})
 	if err != nil {
-		log.Printf("wecom_bot %s normalize: %v", ch.ID, err)
+		observability.Logger(parent).Warn("wecom_bot_normalize_failed", "channel", ch.ID, "err", err)
 		return
 	}
 	timeout := deps.TurnTimeout
@@ -130,14 +154,18 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		deps.Idempotency = idempotency.NewStore(0)
 	}
 	corr := newCorrelationID()
-	if _, ok := deps.Idempotency.Begin(n.MsgID, corr); !ok {
+	if _, reused, berr := deps.Idempotency.Begin(ctx, n.MsgID, corr); berr != nil {
+		observability.Logger(ctx).Error("idempotency_begin_failed", "channel", ch.ID, "err", berr)
+	} else if reused {
 		// Duplicate msgid: do not respond again.
+		metrics.ObserveIdempotency(ch.ID, "duplicate")
 		return
 	}
+	metrics.ObserveIdempotency(ch.ID, "new")
 
 	streamID := streamIDFromMsgID(n.MsgID)
 	if err := conn.RespondStream(ctx, reqID, streamID, wecomProcessingContent, false); err != nil {
-		log.Printf("wecom_bot %s respond processing: %v", ch.ID, err)
+		observability.Logger(ctx).Warn("wecom_respond_processing_failed", "channel", ch.ID, "err", err)
 	}
 
 	agentID := ch.DefaultAgent
@@ -148,11 +176,14 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	})
 	if err != nil {
 		failMsg := err.Error()
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
-		deps.Idempotency.Complete(n.MsgID, failMsg)
+		respondErr := conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		metrics.ObserveTurn(ch.ID, "failed", 0)
+		metrics.ObserveReply(ch.ID, "wecom_card", respondErr)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 		return
 	}
 
+	start := time.Now()
 	out, err := deps.Runtime.TurnsFinal(ctx, resolved.UserID, runtimeclient.TurnRequest{
 		SessionID:      resolved.SessionID,
 		Content:        n.RuntimeContent,
@@ -163,8 +194,10 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 	})
 	if err != nil {
 		failMsg := err.Error()
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
-		deps.Idempotency.Complete(n.MsgID, failMsg)
+		respondErr := conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		metrics.ObserveTurn(ch.ID, "failed", time.Since(start))
+		metrics.ObserveReply(ch.ID, "wecom_card", respondErr)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 		return
 	}
 
@@ -180,16 +213,21 @@ func HandleWecomMsgCallback(ctx context.Context, conn WecomConn, reqID string, c
 		if failMsg == "" {
 			failMsg = "turn failed"
 		}
-		_ = conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
-		deps.Idempotency.Complete(n.MsgID, failMsg)
+		respondErr := conn.RespondStream(ctx, reqID, streamID, wecom.FormatFailureCard(n.AskerName, n.QuestionText, failMsg), true)
+		metrics.ObserveTurn(ch.ID, "failed", time.Since(start))
+		metrics.ObserveReply(ch.ID, "wecom_card", respondErr)
+		_ = deps.Idempotency.Complete(ctx, n.MsgID, failMsg)
 		return
 	}
 
 	card := wecom.FormatReplyCard(n.AskerName, n.QuestionText, out.Content)
-	if err := conn.RespondStream(ctx, reqID, streamID, card, true); err != nil {
-		log.Printf("wecom_bot %s respond final: %v", ch.ID, err)
+	err = conn.RespondStream(ctx, reqID, streamID, card, true)
+	if err != nil {
+		observability.Logger(ctx).Warn("wecom_respond_final_failed", "channel", ch.ID, "err", err)
 	}
-	deps.Idempotency.Complete(n.MsgID, card)
+	metrics.ObserveTurn(ch.ID, "ok", time.Since(start))
+	metrics.ObserveReply(ch.ID, "wecom_card", err)
+	_ = deps.Idempotency.Complete(ctx, n.MsgID, card)
 }
 
 func streamIDFromMsgID(msgID string) string {

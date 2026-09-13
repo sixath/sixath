@@ -1,0 +1,173 @@
+name: ci
+
+# Maturity plan: docs/superpowers/plans/2026-09-12-maturity-hardening.md (Task 1)
+# Four independent module jobs + a hygiene job. All jobs are required checks on main.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  framework:
+    name: framework
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: framework
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: framework/go.mod
+          cache-dependency-path: framework/go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race)
+        run: go test ./... -race -count=1
+
+  portal:
+    name: portal
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: portal
+    steps:
+      - uses: actions/checkout@v4
+      # portal/go.mod has `replace github.com/sixath/framework => ../framework`,
+      # so the whole monorepo must be checked out (default) and framework must be present.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: portal/go.mod
+          cache-dependency-path: |
+            portal/go.sum
+            framework/go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      # DB-backed cases live behind the `integration` build tag and skip without
+      # SATH_IT_MYSQL_DSN, so the default suite needs no MySQL service.
+      - name: Test (race)
+        run: go test ./... -race -count=1
+
+  gateway:
+    name: gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race)
+        run: go test ./... -race -count=1
+
+  evals:
+    name: evals
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: evals/runner
+    steps:
+      - uses: actions/checkout@v4
+      # runner import framework（replace ../framework），go 1.26。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: evals/runner/go.mod
+          cache: false
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -count=1
+      - name: Mock eval (regression gate)
+        # 脚本化模型确定性回放 48 条任务，验证工具执行管线与完成率（无 baseline 时不设门禁）。
+        run: go run . -mode=mock -tasks ../tasks -out -
+      - name: Smoke report
+        # 验证报告模式 + 指标口径不破坏。
+        run: go run . -mode=report -results testdata/sample_results.jsonl -tasks ../tasks -out -
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      # Node >= 22.6 is required: `npm run test` uses `node --test --experimental-strip-types`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Unit tests
+        run: npm run test
+      - name: Typecheck + build
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: E2E (mock, no backend required)
+        run: npm run test:e2e
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compose config is valid
+        run: docker compose config -q
+      - name: Secret scan (working tree)
+        # NOTE: history scanning is intentionally NOT enabled yet — the real
+        # wecom bot_id/secret still exist in past commits. Enable `--no-git`
+        # removal only after the history rewrite in Task 2 Step 6 (needs owner sign-off).
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --no-git --redact --verbose --exit-code=1
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [framework, portal, gateway]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      # only-new-issues keeps legacy debt from blocking the gate on day one,
+      # while still failing any PR that adds new findings.
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: ${{ matrix.module }}
+          args: --timeout=5m
+          only-new-issues: true

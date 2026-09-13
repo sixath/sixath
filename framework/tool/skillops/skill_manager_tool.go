@@ -226,19 +226,24 @@ func confirmSkillManage(ctx context.Context, cfg *SkillManageConfig, lease *grow
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
-	if pending == nil {
-		reason, ok := cfg.PendingStore.TombstoneReason(ctx, sessionID, token)
-		if !ok {
-			reason = "not_found"
+	var createdAt time.Time
+	if pending != nil {
+		createdAt = pending.CreatedAt
+	}
+	policy := tool.ApprovalPolicy{TTLSeconds: ttl}
+	if failure, bad := policy.Verify(tool.ConfirmCheck{
+		Found:     pending != nil,
+		CreatedAt: createdAt,
+		OnExpire:  func() error { return cfg.PendingStore.DeletePending(ctx, sessionID, token) },
+	}); bad {
+		code := failure.Code
+		// 不存在时可能存在 tombstone（已被替换 / 已使用过），优先向用户说明真实原因。
+		if code == tool.ConfirmNotFound {
+			if reason, ok := cfg.PendingStore.TombstoneReason(ctx, sessionID, token); ok {
+				code = reason
+			}
 		}
-		return skillManageConfirmError(reason), nil
-	}
-	if ttl <= 0 {
-		ttl = 300
-	}
-	if time.Since(pending.CreatedAt) > time.Duration(ttl)*time.Second {
-		_ = cfg.PendingStore.DeletePending(ctx, sessionID, token)
-		return skillManageConfirmError("expired"), nil
+		return skillManageConfirmError(code), nil
 	}
 
 	params := pendingParamsFromSkillManage(*pending)

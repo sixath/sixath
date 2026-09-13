@@ -136,6 +136,7 @@ message CreateAgentRequest {
   bool debug_run = 7;   // 是否启用调试运行（详细日志、request_id 等）
   RuntimeToolsConfig runtime_tools = 8;
   string wecom_channel_id = 12;  // optional; bound WeCom channel (channels.id, type=wecom)
+  string mode = 13;  // 执行模式：空/"react" → ReAct；"plan"/"plan_execute" → Plan-Execute
 }
 
 message GetAgentRequest {
@@ -163,6 +164,7 @@ message UpdateAgentRequest {
   optional bool debug_run = 7;
   optional RuntimeToolsConfig runtime_tools = 8;
   optional string wecom_channel_id = 12;
+  optional string mode = 13;
 }
 
 message DeleteAgentRequest {
@@ -278,4 +280,5 @@ message AgentReply {
   string wecom_channel_id = 12;
   RuntimeToolsConfig runtime_tools = 13;
   repeated string mcp_server_ids = 14;
+  string mode = 15;
 }

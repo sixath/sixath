@@ -16,7 +16,7 @@ type hybridAgentRepo struct {
 	agent *biz.AgentMeta
 }
 
-func (r *hybridAgentRepo) Create(context.Context, string, string, string, string, string, biz.ModelConfig, bool, string, biz.RuntimeToolsConfig, []string) (*biz.AgentMeta, error) {
+func (r *hybridAgentRepo) Create(context.Context, string, string, string, string, string, biz.ModelConfig, bool, string, biz.RuntimeToolsConfig, []string, string) (*biz.AgentMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
 func (r *hybridAgentRepo) CountByWecomChannelID(context.Context, string) (int, error) {
@@ -90,7 +90,7 @@ func (r *hybridResourceRepo) CreateResource(context.Context, *biz.Resource) (*bi
 	return nil, nil
 }
 func (r *hybridResourceRepo) UpdateResource(context.Context, *biz.Resource) error { return nil }
-func (r *hybridResourceRepo) DeleteResource(context.Context, string) error         { return nil }
+func (r *hybridResourceRepo) DeleteResource(context.Context, string) error        { return nil }
 func (r *hybridResourceRepo) GetByPayload(_ context.Context, resourceType biz.ResourceType, payloadRef string) (*biz.Resource, error) {
 	if r.res == nil || r.res.Type != resourceType || r.res.PayloadRef != payloadRef {
 		return nil, pkgErrors.ErrNotFound

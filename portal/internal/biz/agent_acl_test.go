@@ -15,7 +15,7 @@ type fakeAgentACLRepo struct {
 	created   *AgentMeta
 }
 
-func (f *fakeAgentACLRepo) Create(_ context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
+func (f *fakeAgentACLRepo) Create(_ context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string, mode string) (*AgentMeta, error) {
 	f.created = &AgentMeta{ID: id, Name: name, Workspace: workspace}
 	f.agents[f.created.ID] = f.created
 	return f.created, nil
@@ -179,7 +179,7 @@ func TestAgentCreateCreatesPrivateResourceForCaller(t *testing.T) {
 	uc, agents, resources := newAgentACLUsecase()
 	ctx := WithOrgID(WithCallerUserID(context.Background(), "user-1"), "org-1")
 
-	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", RuntimeToolsConfig{}, nil)
+	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", RuntimeToolsConfig{}, nil, "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

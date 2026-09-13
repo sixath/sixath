@@ -165,12 +165,13 @@ func agentRowToMeta(m *model.Agent, toolIDs, mcpServerIDs []string) *biz.AgentMe
 		RuntimeTools:   modelRuntimeToolsToBiz(m.RuntimeTools),
 		ToolIDs:        append([]string{}, toolIDs...),
 		McpServerIDs:   append([]string{}, mcpServerIDs...),
+		Mode:           m.Mode,
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,
 	}
 }
 
-func (r *agentRepo) Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig biz.ModelConfig, debugRun bool, wecomChannelID string, runtimeTools biz.RuntimeToolsConfig, toolIDs []string) (*biz.AgentMeta, error) {
+func (r *agentRepo) Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig biz.ModelConfig, debugRun bool, wecomChannelID string, runtimeTools biz.RuntimeToolsConfig, toolIDs []string, mode string) (*biz.AgentMeta, error) {
 	if id == "" {
 		id = uuid.New().String()
 	}
@@ -187,6 +188,7 @@ func (r *agentRepo) Create(ctx context.Context, id, name, description, systemPro
 		DebugRun:       debugRun,
 		WecomChannelID: wecomChannelID,
 		RuntimeTools:   bizRuntimeToolsToModel(runtimeTools),
+		Mode:           mode,
 	}
 	if err := r.db.WithContext(ctx).Create(agent).Error; err != nil {
 		if isDuplicateKey(err) {
@@ -376,6 +378,8 @@ func (r *agentRepo) Update(ctx context.Context, id string, updates map[string]an
 			upd["debug_run"] = v.(bool)
 		case "wecom_channel_id":
 			upd["wecom_channel_id"] = v.(string)
+		case "mode":
+			upd["mode"] = v.(string)
 		case "runtime_tools":
 			upd["runtime_tools"] = bizRuntimeToolsToModel(v.(biz.RuntimeToolsConfig))
 		}

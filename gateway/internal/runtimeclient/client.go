@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sixath/gateway/internal/metrics"
+	"github.com/sixath/gateway/internal/observability"
 )
 
 const headerUserID = "X-Sath-User-Id"
@@ -300,9 +303,50 @@ func (c *Client) doRequest(ctx context.Context, method, path, userID string, que
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// 贯通 trace：入站 traceparent 继续透传给 Portal（其 tracing.Server 会续同一条 trace），
+	// request_id 便于在两端日志里对齐同一次会话。
+	if tp := observability.TraceparentFrom(ctx); tp != "" {
+		req.Header.Set(observability.HeaderTraceparent, tp)
+	} else {
+		req.Header.Set(observability.HeaderTraceparent, observability.OutgoingTraceparent(""))
+	}
+	if rid := observability.RequestIDFrom(ctx); rid != "" {
+		req.Header.Set(observability.HeaderRequestID, rid)
+	}
+
+	op := opFromPath(path)
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	d := time.Since(start)
+	code := 0
+	if resp != nil {
+		code = resp.StatusCode
+	}
+	metrics.ObservePortalRequest(op, code, err, d)
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
+}
+
+// opFromPath 把 runtime 路径归并为有限枚举，避免用原始路径做指标标签。
+func opFromPath(path string) string {
+	switch {
+	case strings.HasSuffix(path, "/sessions/resolve"):
+		return "resolve"
+	case strings.HasSuffix(path, "/sessions/search"):
+		return "search"
+	case strings.HasSuffix(path, "/messages"):
+		return "messages"
+	case strings.HasSuffix(path, "/rewind"):
+		return "rewind"
+	case strings.HasSuffix(path, "/turns"):
+		return "turns"
+	case strings.Contains(path, "/agents/"):
+		return "sessions"
+	case strings.HasPrefix(path, "/runtime/v1/sessions"):
+		return "sessions"
+	default:
+		return "other"
+	}
 }

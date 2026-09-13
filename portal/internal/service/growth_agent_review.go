@@ -102,8 +102,8 @@ func skillNameSetsDiffer(before, after []string) bool {
 }
 
 // buildReviewRegistry 组装复盘 agent 的瘦身工具集：
-// 默认（full_tools=false）仅暴露 skillops 只读浏览 + skill_manage 写工具，
-// 不含 shell/terminal 等通用执行类工具，最小化后台复盘的破坏面。
+// 仅暴露 skillops 只读浏览 + skill_manage 写工具，不含 shell/terminal 等通用执行类工具，
+// 最小化后台复盘的破坏面（决策见 docs/growth-phase2-status.md）。
 func (w *GrowthWorker) buildReviewRegistry(workspace string) (*tool.Registry, error) {
 	skillsDir := workspace + "/skills"
 	idx, err := skills.NewIndex([]string{skillsDir}, nil, nil)
@@ -119,8 +119,11 @@ func (w *GrowthWorker) buildReviewRegistry(workspace string) (*tool.Registry, er
 	if err := chat.RegisterSkillRuntimeToolsWithManage(reg, idx, nil, chat.SkillManageToolConfigForGrowthReview(idx)); err != nil {
 		return nil, err
 	}
-	// full-tools 追加通用工具集：portal 当前没有单一 "注册通用 agent 工具" 入口，
-	// 默认路径不依赖它；此分支留待 phase-2 接入，避免在此发明新逻辑。
-	// TODO(phase-2): full-tools 通用工具集入口待接入。
+	// full-tools 决策（phase-2 收口）：复盘 agent 是后台策展员，工具面有意保持瘦身，
+	// 不接入通用执行工具（shell/terminal/data-write）。理由：
+	//  1. portal 没有单一「注册通用 agent 工具」入口，各调用点自建 registry；
+	//  2. 后台复盘不应具备 destructive 能力（由 TestSpawnReviewAgent_... 黑名单断言约束）。
+	// 若未来确有需要，应先引入统一工具注册入口，并让 ApprovalPolicy 对复盘 agent
+	// 禁用 destructive 级工具后再扩展，而不是在此临时拼装。
 	return reg, nil
 }

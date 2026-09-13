@@ -14,11 +14,25 @@ type ModelConfig struct {
 	APIKey   string
 	BaseURL  string
 	Timeout  time.Duration // 请求超时，0 表示默认 120 秒
+	// Retry 控制重试/退避；零值 = 默认（3 次尝试、指数退避、full jitter）。
+	// 可用 SATH_MODEL_RETRY_* 环境变量覆盖，SATH_MODEL_RETRY_MAX_ATTEMPTS=1 即关闭。
+	Retry RetryConfig
 }
 
 // NewModelFromConfig 根据配置创建模型实例，支持 openai、dashscope、ollama。
 // ollama 暂不支持 APIKey/BaseURL 覆盖，仍使用默认端点。
+//
+// 返回的模型统一包了重试装饰器（见 WrapResilient）；如需拿到原始 provider
+// 实例，可用 UnwrapModel 穿透。
 func NewModelFromConfig(cfg ModelConfig) (Model, error) {
+	m, err := newModelFromConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return WrapResilient(m, cfg.Retry), nil
+}
+
+func newModelFromConfig(cfg ModelConfig) (Model, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if provider == "" {
 		provider = "openai"
@@ -75,7 +89,18 @@ func RegisterProvider(provider string, f ModelProvider) {
 // NewFromIdentifier 根据配置标识创建模型实例。
 // 约定格式类似： "openai/gpt-4o"、"openai/gpt-3.5-turbo"。
 // 先查找插件注册的 Provider，再回退到内置的 openai/ollama。
+//
+// 与 NewModelFromConfig 一样，返回值统一包了重试装饰器（默认配置，
+// 可用 SATH_MODEL_RETRY_* 环境变量调整）。
 func NewFromIdentifier(id string) (Model, error) {
+	m, err := newFromIdentifier(id)
+	if err != nil {
+		return nil, err
+	}
+	return WrapResilient(m, RetryConfig{}), nil
+}
+
+func newFromIdentifier(id string) (Model, error) {
 	provider, modelName := parseModelIdentifier(id)
 
 	providerMu.RLock()

@@ -27,13 +27,16 @@ type AgentMeta struct {
 	RuntimeTools   RuntimeToolsConfig
 	ToolIDs        []string
 	McpServerIDs   []string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Mode 执行模式：空/"react" → ReAct；"plan"/"plan_execute" → Plan-Execute。
+	// 当前为占位字段（默认 react），持久化来源（DB 列 + config）留待后续接入。
+	Mode      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // AgentRepo interface for agent storage
 type AgentRepo interface {
-	Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error)
+	Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string, mode string) (*AgentMeta, error)
 	CountByWecomChannelID(ctx context.Context, channelID string) (int, error)
 	GetByID(ctx context.Context, id string) (*AgentMeta, error)
 	GetByName(ctx context.Context, name string) (*AgentMeta, error)

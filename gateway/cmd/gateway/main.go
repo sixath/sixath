@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +13,8 @@ import (
 	"github.com/sixath/gateway/internal/channel"
 	"github.com/sixath/gateway/internal/config"
 	"github.com/sixath/gateway/internal/idempotency"
+	"github.com/sixath/gateway/internal/metrics"
+	"github.com/sixath/gateway/internal/observability"
 	"github.com/sixath/gateway/internal/reply"
 	"github.com/sixath/gateway/internal/runtimeclient"
 	"github.com/sixath/gateway/internal/session"
@@ -24,17 +24,21 @@ import (
 var Version = "dev"
 
 func main() {
+	logger := observability.SetupLogger()
+
 	configPath := flag.String("config", "./configs/config.example.yaml", "path to gateway config YAML")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		logger.Error("load_config_failed", "err", err)
+		os.Exit(1)
 	}
 
 	reg, err := channel.Load(cfg.ChannelsFile)
 	if err != nil {
-		log.Fatalf("load channels: %v", err)
+		logger.Error("load_channels_failed", "err", err)
+		os.Exit(1)
 	}
 
 	rt := runtimeclient.New(cfg.PortalBaseURL, cfg.RuntimeToken)
@@ -61,6 +65,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.Handle("GET /metrics", metrics.Handler())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -72,11 +77,15 @@ func main() {
 		TurnTimeout: turnTimeout,
 	})
 
-	fmt.Printf("sixath-gateway version=%s listen=%s\n", Version, cfg.Listen)
-	fmt.Printf("portal_base_url=%s turn_timeout_sec=%d channels_file=%s\n",
-		cfg.PortalBaseURL, cfg.TurnTimeoutSec, cfg.ChannelsFile)
+	logger.Info("gateway_starting",
+		"version", Version,
+		"listen", cfg.Listen,
+		"portal_base_url", cfg.PortalBaseURL,
+		"turn_timeout_sec", cfg.TurnTimeoutSec,
+		"channels_file", cfg.ChannelsFile,
+	)
 
-	srv := &http.Server{Addr: cfg.Listen, Handler: mux}
+	srv := &http.Server{Addr: cfg.Listen, Handler: observability.Middleware(mux)}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -84,6 +93,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+		logger.Error("listen_failed", "err", err)
+		os.Exit(1)
 	}
 }

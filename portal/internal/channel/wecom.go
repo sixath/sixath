@@ -13,7 +13,54 @@ import (
 
 const wecomMaxContentBytes = 4096
 
-// PushToWeCom 通过企微群机器人 Webhook 推送消息。
+// WeComError 结构化出站错误，便于投递层做重试判定与持久化记录。
+type WeComError struct {
+	HTTPStatus int // 非 0 表示 HTTP 层错误
+	ErrCode    int // 企微业务错误码，非 0 表示业务失败
+	ErrMsg     string
+	Cause      error // 底层传输错误（连接重置 / 超时 / EOF），可能为 nil
+}
+
+func (e *WeComError) Error() string {
+	if e == nil {
+		return "wecom webhook: <nil>"
+	}
+	switch {
+	case e.Cause != nil:
+		return "wecom webhook: " + e.Cause.Error()
+	case e.ErrCode != 0:
+		return fmt.Sprintf("wecom webhook: errcode=%d errmsg=%s", e.ErrCode, e.ErrMsg)
+	case e.HTTPStatus != 0:
+		return fmt.Sprintf("wecom webhook: HTTP %d: %s", e.HTTPStatus, e.ErrMsg)
+	default:
+		if e.ErrMsg != "" {
+			return "wecom webhook: " + e.ErrMsg
+		}
+		return "wecom webhook: unknown error"
+	}
+}
+
+// Unwrap 暴露底层错误，供 errors.Is/As 与日志归因。
+func (e *WeComError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// Retryable 判断该错误是否值得重试：仅传输层错误与 5xx 可重试；
+// 4xx（URL 非法/鉴权失败）与业务 errcode（如 93000 invalid url）不可重试。
+func (e *WeComError) Retryable() bool {
+	if e == nil {
+		return false
+	}
+	if e.Cause != nil {
+		return true
+	}
+	return e.HTTPStatus >= 500
+}
+
+// PushToWeCom 通过企微群机器人 Webhook 推送消息（单次发送，不做重试）。
 // webhookURL: 机器人 Webhook 地址
 // content: 消息正文（超过 4096 字节时按 UTF-8 安全截断）
 // msgType: "text" 或 "markdown"，空或无效值时按 text 处理
@@ -26,36 +73,36 @@ func PushToWeCom(ctx context.Context, webhookURL, content, msgType string) error
 
 	body, err := marshalWeComPayload(content, msgType)
 	if err != nil {
-		return err
+		return fmt.Errorf("wecom webhook: marshal payload: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return &WeComError{Cause: err}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return &WeComError{Cause: err}
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return &WeComError{Cause: err}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("wecom webhook: HTTP %d: %s", resp.StatusCode, string(respBody))
+		return &WeComError{HTTPStatus: resp.StatusCode, ErrMsg: string(respBody)}
 	}
 
 	var result wecomResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("wecom webhook: parse response: %w", err)
+		return &WeComError{ErrMsg: "parse response: " + err.Error()}
 	}
 	if result.ErrCode != 0 {
-		return fmt.Errorf("wecom webhook: errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
+		return &WeComError{ErrCode: result.ErrCode, ErrMsg: result.ErrMsg}
 	}
 	return nil
 }
