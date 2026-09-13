@@ -75,7 +75,10 @@ func RegisterAskUserTool(r *Registry, cfg *AskUserConfig) error {
 					"description": "Session ID; if omitted, read from context.",
 				},
 			},
-			"required": []string{"prompt"},
+			// 注意：不声明 required=["prompt"]。本工具是双模式：
+			// 1) 提议（propose）：prompt + kind/field/options；缺 prompt 由 proposeAskUser 报明确错误；
+			// 2) 履行（fulfill）：response_token + value，此时本就没有 prompt。
+			// 因此统一的 required 校议会误杀 fulfill 调用（见 ask_user_test 的 PendingThenFulfill）。
 		},
 		Execute: buildAskUserExecute(cfg),
 	})

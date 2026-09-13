@@ -109,7 +109,6 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			"properties": map[string]any{
 				"cluster": map[string]any{
 					"type":        "string",
-					"enum":        clusterIDs,
 					"description": "ES cluster / datasource id to query. Required; do not omit or invent names.",
 				},
 				"trace_id": map[string]any{"type": "string", "description": "Correlate logs by trace id (matched on the configured trace id field)."},
@@ -118,7 +117,9 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				"limit":    map[string]any{"type": "integer", "description": "Max hits per page (default 50, max 500)."},
 				"from":     map[string]any{"type": "integer", "description": "Offset for pagination (default 0). Use next_from from the previous page when truncated."},
 			},
-			"required": []string{"cluster"},
+			// 不声明 required=["cluster"]：缺 cluster / 未知 cluster 由 execute 内的
+			// clusterParamError 统一报错（含已知集群列表，对模型更友好），静态 required+enum
+			// 会抢在前面拦截并丢失该上下文。
 		},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			const toolName = "es_log_query"

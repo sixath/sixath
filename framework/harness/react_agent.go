@@ -26,6 +26,61 @@ type ReActAgent struct {
 	mem    memory.Memory
 	tools  *tool.Registry
 	config ReActConfig
+
+	cancelMu sync.Mutex
+	canceler *runCanceler
+}
+
+// runCanceler 惰性创建在途 Run 的取消句柄表（可被结构体字面量构造的实例使用）。
+func (a *ReActAgent) runCanceler() *runCanceler {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	if a.canceler == nil {
+		a.canceler = newRunCanceler()
+	}
+	return a.canceler
+}
+
+// Cancel 主动中断指定 request_id 的在途 Run；未找到返回 ErrRunNotFound。
+// 取消以 StreamEventCancelled 上报（而非 error），已产生的增量与工具结果保留。
+func (a *ReActAgent) Cancel(runID string) error {
+	if !a.runCanceler().cancel(runID) {
+		return fmt.Errorf("%w: %s", ErrRunNotFound, runID)
+	}
+	return nil
+}
+
+// InflightRuns 返回当前在途 Run 数（诊断/测试用）。
+func (a *ReActAgent) InflightRuns() int { return a.runCanceler().inflight() }
+
+// canceled 报告本次 Run 是否已取消（Cancel API 或父 ctx 取消/断连）。
+func canceled(ctx context.Context) bool { return ctx != nil && ctx.Err() != nil }
+
+// beginCancelable 为本次 Run 建立可取消子 ctx 并注册句柄。
+// runID 为空（或注册失败）时不建立，返回的 state 为 nil。
+func (a *ReActAgent) beginCancelable(ctx context.Context, runID string) (context.Context, *runCancelState) {
+	if a == nil || runID == "" {
+		return ctx, nil
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	state := a.runCanceler().register(runID, cancel)
+	if state == nil {
+		cancel()
+		return ctx, nil
+	}
+	return runCtx, state
+}
+
+// endCancelable 记录取消事实并注销句柄，保证 Run 结束后不留句柄。
+func (a *ReActAgent) endCancelable(ctx context.Context, trace *RunTrace, runID string, state *runCancelState) {
+	if a == nil {
+		return
+	}
+	if canceled(ctx) && trace != nil {
+		trace.Canceled = true
+		trace.CanceledByRequest = state.requestedByUser()
+	}
+	a.runCanceler().unregister(runID, state)
 }
 
 type ReActConfig struct {
@@ -46,6 +101,8 @@ type ReActConfig struct {
 	// GuardrailEvaluator 非空时优先于由 ToolGuardrails 构造的默认评估器（设计 §6.2）；WithReActToolGuardrails 会将其置 nil。
 	GuardrailEvaluator GuardrailEvaluator
 	L2Runtime          *fwctx.L2Runtime // 可选；L2 摘要 + 冷却（设计 §5）
+	// TokenCounter 可选；非空时优先用于 token 估算与压缩触发（可由真实 usage 自校准）。
+	TokenCounter fwctx.TokenCounter
 	// ToolSuccessHook 在工具执行成功且已发出 ToolCompleted 之后调用（可选）；用于成长计数等，须快速返回。
 	ToolSuccessHook func(ctx context.Context, req *Request, rec ToolCallRecord)
 	// ToolHooks 工具生命周期钩子（Before 可 block；After 与 Before 同序）。空切片与未设置行为一致。
@@ -157,6 +214,8 @@ type ContextCompressionConfig struct {
 	EstimateAlpha            float64
 	ToolContentPrePruneRunes int
 	SnipCompactEnabled       bool
+	// TokenCounter 可选；非空时 L0（MaxContextTokensSoft）与 L2 软阈值都用它判定。
+	TokenCounter fwctx.TokenCounter
 }
 
 // WithReActContextCompression 启用 L2 摘要（须 AuxiliaryModel）；nil 或 L2Enabled=false 时关闭。
@@ -186,6 +245,20 @@ func WithReActContextCompression(cc *ContextCompressionConfig) ReActOption {
 		c.MaxContextTokensSoft = soft
 		c.TokenEstimateAlpha = alpha
 		c.SnipCompactEnabled = cc.SnipCompactEnabled
+		if cc.TokenCounter != nil {
+			c.L2Runtime = c.L2Runtime.WithCounter(cc.TokenCounter)
+			c.TokenCounter = cc.TokenCounter
+		}
+	}
+}
+
+// WithReActTokenCounter 注入 token 计数器（通常为 *context.CalibratedCounter）：
+// 上下文 token 压缩触发与 L2 软阈值都会优先使用它，并随真实 usage 自校准。
+func WithReActTokenCounter(counter fwctx.TokenCounter) ReActOption {
+	return func(c *ReActConfig) {
+		if counter != nil {
+			c.TokenCounter = counter
+		}
 	}
 }
 
@@ -282,8 +355,10 @@ func (a *ReActAgent) modelOpts() []model.Option {
 	return nil
 }
 
-// modelRespondedPayload 构造 ModelResponded 事件 payload，附带 token 用量（若有）。
-func modelRespondedPayload(gen model.Generation, step int) map[string]any {
+// modelRespondedPayload 记录本次模型调用用量并构造 ModelResponded 事件 payload。
+// 挂在 RunTrace 上，使「聚合用量」与「事件 payload」必然同源，不会漏记。
+func (t *RunTrace) modelRespondedPayload(gen model.Generation, step int) map[string]any {
+	t.recordModelUsage(&gen)
 	p := map[string]any{"text_length": len(gen.Text), "step": step}
 	if gen.TokenUsage != nil {
 		p["input_tokens"] = gen.TokenUsage.InputTokens
@@ -300,6 +375,9 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 	rid := requestID(req)
 	ctx = context.WithValue(ctx, tool.ContextKeyRequestID, rid)
 	trace := &RunTrace{RequestID: rid}
+	// 可取消：Cancel(rid) 或在途断连都会走同一条取消路径；trace 记录取消事实。
+	ctx, cancelState := a.beginCancelable(ctx, rid)
+	defer a.endCancelable(ctx, trace, rid, cancelState)
 	bus := a.eventBus()
 	emit := func(kind events.Kind, payload map[string]any) {
 		if bus == nil {
@@ -336,7 +414,7 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 			emit(events.RunError, map[string]any{"error": err.Error(), "step": step})
 			return nil, runError(err, trace)
 		}
-		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
@@ -421,6 +499,7 @@ func (a *ReActAgent) RunEvents(ctx context.Context, req *Request) (<-chan Stream
 	rid := requestID(req)
 	ctx = context.WithValue(ctx, tool.ContextKeyRequestID, rid)
 	trace := &RunTrace{RequestID: rid}
+	ctx, cancelState := a.beginCancelable(ctx, rid)
 	bus := a.eventBus()
 	emit := func(kind events.Kind, payload map[string]any) {
 		if bus == nil {
@@ -435,7 +514,34 @@ func (a *ReActAgent) RunEvents(ctx context.Context, req *Request) (<-chan Stream
 	out := make(chan StreamEvent, 16)
 	go func() {
 		defer close(out)
+		// 取消/正常结束都在此收尾：注销句柄、把取消事实写入 trace，并在取消时补发 cancelled 事件。
+		// defer 为 LIFO，故本函数先于 close(out) 执行 → 事件必定入队。
+		defer func() {
+			a.endCancelable(ctx, trace, rid, cancelState)
+			if !canceled(ctx) {
+				return
+			}
+			emit(events.RunCompleted, map[string]any{
+				"canceled":   true,
+				"by_request": trace.CanceledByRequest,
+			})
+			// 非阻塞投递：此时不能再走 send（send 在取消后一律拒绝）。
+			select {
+			case out <- StreamEvent{
+				Type:  StreamEventCancelled,
+				Trace: trace,
+				Metadata: map[string]any{
+					"by_request": trace.CanceledByRequest,
+				},
+			}:
+			default:
+			}
+		}()
 		send := func(event StreamEvent) bool {
+			// 取消后不再投递任何事件，避免取消之后又出现 done/error 之类的终态。
+			if canceled(ctx) {
+				return false
+			}
 			select {
 			case out <- event:
 				return true
@@ -450,6 +556,10 @@ func (a *ReActAgent) RunEvents(ctx context.Context, req *Request) (<-chan Stream
 		}
 		sendError := func(err error, step int) {
 			if err == nil {
+				return
+			}
+			if canceled(ctx) {
+				// 取消不是错误：交给上面的 defer 统一上报 cancelled。
 				return
 			}
 			trace.Errors = append(trace.Errors, err.Error())
@@ -589,7 +699,7 @@ func (a *ReActAgent) runPlainEvents(
 			return
 		}
 		_ = a.storeAssistant(ctx, gen.Text)
-		emit(events.ModelResponded, modelRespondedPayload(*gen, -1))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1))
 		if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
 			return
 		}
@@ -639,7 +749,7 @@ func (a *ReActAgent) runToolEventsSync(
 			sendError(err, step)
 			return
 		}
-		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
@@ -738,7 +848,7 @@ func (a *ReActAgent) runToolEvents(
 			sendError(err, step)
 			return
 		}
-		emit(events.ModelResponded, modelRespondedPayload(*gen, step))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
@@ -1028,7 +1138,7 @@ func (a *ReActAgent) runPlain(ctx context.Context, messages []model.Message, emi
 		return nil, runError(err, trace)
 	}
 	_ = a.storeAssistant(ctx, gen.Text)
-	emit(events.ModelResponded, modelRespondedPayload(*gen, -1))
+	emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1))
 	emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text)})
 	return responseWithTrace(gen.Text, gen.TokenUsage, trace, messages), nil
 }
