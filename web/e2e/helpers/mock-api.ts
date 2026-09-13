@@ -291,7 +291,7 @@ export async function mockDeleteChatSession(
       /^\/api\/v1\/sessions\/[^/]+$/.test(u.pathname) && u.pathname !== '/api/v1/sessions/search',
     async (route: Route) => {
       if (route.request().method() !== 'DELETE') {
-        await route.continue()
+        await route.fallback()
         return
       }
       const pathname = new URL(route.request().url()).pathname

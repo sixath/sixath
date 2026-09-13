@@ -31,6 +31,8 @@ test.describe('SessionSidebar', () => {
   test('选择 Agent 后展示会话列表', async ({ page }) => {
     await chatDeps(page)
     await mockChatSessions(page, 'agent-1', [sessionA, sessionB])
+    await mockGetChatSession(page, 'sess-a', sessionA)
+    await mockListMessages(page, 'sess-a', [])
 
     await page.goto('/')
     await page.locator('select.chat-home-agent-select').selectOption('agent-1')
@@ -40,11 +42,71 @@ test.describe('SessionSidebar', () => {
     await expect(page.getByText('阿尔法')).toBeVisible()
   })
 
+  test('选择 Agent 且 URL 无 session 时打开最近一条', async ({ page }) => {
+    await chatDeps(page)
+    const latest = { ...sessionA, id: 'sess-latest', title: '最近一条' }
+    const older = { ...sessionB, id: 'sess-older', title: '更早的' }
+    await mockChatSessions(page, 'agent-1', [latest, older])
+    await mockGetChatSession(page, 'sess-latest', latest)
+    await mockListMessages(page, 'sess-latest', [
+      {
+        id: 'm1',
+        session_id: 'sess-latest',
+        role: 'user',
+        content: '续写这条历史',
+        created_at: '2026-09-13T16:00:00Z',
+      },
+    ])
+
+    await page.goto('/')
+    await page.locator('select.chat-home-agent-select').selectOption('agent-1')
+
+    await expect(page).toHaveURL(/[?&]session=sess-latest(?:&|$)/)
+    await expect(page.getByTestId('session-item-sess-latest')).toHaveClass(
+      /session-sidebar-item--active/,
+    )
+    await expect(page.getByText('续写这条历史')).toBeVisible()
+  })
+
+  test('Agent 没有任何会话时不自动写入 session', async ({ page }) => {
+    await chatDeps(page)
+    await mockChatSessions(page, 'agent-1', [])
+
+    await page.goto('/')
+    await page.locator('select.chat-home-agent-select').selectOption('agent-1')
+
+    await expect(page.getByTestId('session-sidebar-new')).toBeVisible()
+    await expect(page).toHaveURL(/agent=agent-1/)
+    await expect(page).not.toHaveURL(/[?&]session=/)
+  })
+
+  test('切换 Agent 打开该 Agent 最近一条', async ({ page }) => {
+    await chatDeps(page)
+    await mockChatSessions(page, 'agent-1', [sessionA])
+    await mockGetChatSession(page, 'sess-a', sessionA)
+    await mockListMessages(page, 'sess-a', [])
+    const bLatest = { ...sessionB, id: 'sess-b-latest', agent_id: 'agent-2', title: 'AgentB最近' }
+    await mockChatSessions(page, 'agent-2', [bLatest])
+    await mockGetChatSession(page, 'sess-b-latest', bLatest)
+    await mockListMessages(page, 'sess-b-latest', [])
+
+    await page.goto('/')
+    await page.locator('select.chat-home-agent-select').selectOption('agent-1')
+    await expect(page).toHaveURL(/[?&]session=sess-a(?:&|$)/)
+
+    await page.locator('select.chat-home-agent-select').selectOption('agent-2')
+    await expect(page).toHaveURL(/agent=agent-2/)
+    await expect(page).toHaveURL(/[?&]session=sess-b-latest(?:&|$)/)
+  })
+
   test('搜索会话：带 q 时返回精简列表', async ({ page }) => {
     await chatDeps(page)
     await mockChatSessions(page, 'agent-1', [sessionA, sessionB], {
       searchItems: [sessionB],
     })
+
+    await mockGetChatSession(page, 'sess-a', sessionA)
+    await mockListMessages(page, 'sess-a', [])
 
     await page.goto('/')
     await page.locator('select.chat-home-agent-select').selectOption('agent-1')
@@ -65,6 +127,8 @@ test.describe('SessionSidebar', () => {
       agent_id: 'agent-1',
     }
     await mockCreateChatSession(page, 'agent-1', newSession)
+    await mockGetChatSession(page, 'sess-a', sessionA)
+    await mockListMessages(page, 'sess-a', [])
     await mockGetChatSession(page, 'sess-new', newSession)
     await mockListMessages(page, 'sess-new', [])
 

@@ -1,5 +1,6 @@
 import { parseConfirmRequiredPayload, parseConfirmResultPayload, parseInputRequiredPayload, parseSourcesBrowsedPayload, parseToolCallPayload, parseModelCallPayload, shouldTreatStreamErrorAsWarning, type ChatConfirmationRequest, type ConfirmResultPayload, type ChatInputSubmitBody, type ChatInputRequest, type SourcesBrowsedPayload, type WebSourceItem, type ToolCallPayload, type ModelCallPayload } from './chatStream'
 import { authHeaders, hasApiToken, handleUnauthorized } from './auth'
+import { isFailedRet } from './ret'
 import type { TimelineNode } from '../pages/timelineReducer'
 import { normalizeTimeline } from '../pages/timelineReducer'
 
@@ -75,15 +76,13 @@ export { hasApiToken }
 
 /** 检查 ret.code，非 0 时抛出。proto3 JSON 省略 code 时视为 0（成功）。 */
 function checkRet<T extends { ret?: BaseResponse }>(data: T): T {
-  if (data?.ret) {
-    const code = data.ret.code ?? 0
-    if (code !== 0) {
-      const body = JSON.stringify({ ret: data.ret })
-      if (maybeUnauthorized(code, body)) {
-        handleUnauthorized()
-      }
-      throw new Error(httpErrorMessage(code, body))
+  if (isFailedRet(data?.ret)) {
+    const body = JSON.stringify({ ret: data.ret })
+    const code = data.ret?.code ?? 0
+    if (maybeUnauthorized(code, body)) {
+      handleUnauthorized()
     }
+    throw new Error(httpErrorMessage(code, body))
   }
   return data
 }
