@@ -79,6 +79,29 @@
   line-height: 1;
 }
 
+/* 用户停止生成：已生成的部分已保存 */
+.chat-cancelled-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--warning-subtle, rgba(234, 179, 8, 0.12));
+  color: var(--warning, #b45309);
+  font-size: 0.875rem;
+}
+
+.chat-cancelled-banner span {
+  flex: 1;
+}
+
+.chat-interrupted-marker {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .chat-welcome {
   flex: 1;
   display: flex;
@@ -123,6 +146,31 @@
 .chat-messages .chat-welcome {
   flex: 1;
   min-height: 200px;
+}
+
+/* 向上翻页（更早的历史消息） */
+.chat-load-earlier {
+  display: flex;
+  justify-content: center;
+}
+
+.chat-load-earlier button {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.9rem;
+}
+
+.chat-load-earlier button:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.8);
+}
+
+.chat-load-earlier button:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .chat-msg {
@@ -502,3 +550,14 @@
 .tl-tab.on { background: #eef2ff; color: #4338ca; font-weight: 600; }
 .tl-pre { margin: 0; font-size: 12px; color: #4b5563; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; }
 .tl-trunc { color: #9ca3af; font-size: 11px; margin-top: 4px; }
+
+/* Plan-Execute 规划面板 */
+.plan-panel { margin: 8px 0; padding: 10px 12px; border: 1px solid #e3e6ea; border-radius: 8px; background: #f8fafc; font-size: 13px; }
+.plan-panel-title { font-weight: 600; color: #5b6472; margin-bottom: 6px; }
+.plan-steps { list-style: none; margin: 0; padding: 0; }
+.plan-step { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; color: #8a94a6; }
+.plan-step-marker { flex: 0 0 auto; width: 14px; text-align: center; }
+.plan-step-active { color: #1f6feb; font-weight: 600; }
+.plan-step-done { color: #4caf7d; }
+.plan-step-goal { flex: 1 1 auto; }
+.plan-step-tools { flex: 0 0 auto; font-size: 11px; color: #aab2c0; }

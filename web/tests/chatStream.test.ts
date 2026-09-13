@@ -6,6 +6,8 @@ import {
   parseConfirmRequiredPayload,
   parseConfirmResultPayload,
   parseInputRequiredPayload,
+  parsePlanPayload,
+  parsePlanStepPayload,
   restoreConfirmationsFromMessages,
   restoreInputsFromMessages,
   shouldTreatStreamErrorAsWarning,
@@ -609,4 +611,39 @@ test('restoreInputsFromMessages marks submitted after input provided history', (
   )
 
   assert.equal(items[0]?.status, 'submitted')
+})
+
+test('parsePlanPayload accepts a valid plan event', () => {
+  const parsed = parsePlanPayload({
+    plan: {
+      steps: [
+        { id: 'a', goal: 'do A', suggested_tools: ['list_tables'], success_criteria: 'A done', readonly: true },
+        { id: 'b', goal: 'do B' },
+      ],
+    },
+  })
+  assert.equal(parsed?.steps.length, 2)
+  assert.equal(parsed?.steps[0].goal, 'do A')
+  assert.equal(parsed?.steps[0].suggested_tools?.[0], 'list_tables')
+  assert.equal(parsed?.steps[0].readonly, true)
+})
+
+test('parsePlanPayload rejects malformed events', () => {
+  assert.equal(parsePlanPayload({ plan: { steps: [] } }), null)
+  assert.equal(parsePlanPayload({ plan: {} }), null)
+  assert.equal(parsePlanPayload({}), null)
+})
+
+test('parsePlanStepPayload accepts a valid plan_step event', () => {
+  const parsed = parsePlanStepPayload({
+    plan_step: { id: 'a', goal: 'do A', readonly: false },
+  })
+  assert.equal(parsed?.id, 'a')
+  assert.equal(parsed?.goal, 'do A')
+  assert.equal(parsed?.readonly, false)
+})
+
+test('parsePlanStepPayload rejects malformed events', () => {
+  assert.equal(parsePlanStepPayload({}), null)
+  assert.equal(parsePlanStepPayload({ plan_step: {} }), null)
 })
