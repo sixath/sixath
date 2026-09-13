@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { agentApi, chatApi, DEFAULT_SESSION_TITLE, type Agent, type ChatMessage } from '../api/client'
+import { findLatestSessionId, prepareSessionForSend } from '../api/resolveSession'
 import { buildConfirmSubmitBody, buildInputSubmitBody, inputProvidedLabel, type ChatConfirmationRequest, type ChatInputRequest, type ConfirmResultPayload, type WebSourceItem, type PlanStepPayload } from '../api/chatStream'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
@@ -331,6 +332,23 @@ export default function ChatPage(props?: ChatPageProps) {
   }, [isHome, onNavigate, navigate])
 
   useEffect(() => {
+    if (!agentId || sessionId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const latest = await findLatestSessionId(agentId, chatApi)
+        if (cancelled || !latest) return
+        goTo(agentId, latest)
+      } catch {
+        /* keep empty composer; send path will create if needed */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [agentId, sessionId, goTo])
+
+  useEffect(() => {
     if (sessionId && agentId) {
       chatApi.getSession(sessionId)
         .then((s) => {
@@ -531,21 +549,29 @@ export default function ChatPage(props?: ChatPageProps) {
     const content = (overrideContent ?? input).trim()
     if ((!content && !submit) || !agentId || streaming) return
 
-    const userMsgCountBefore = messages.filter((m) => m.role === 'user').length
-    const shouldAutoTitleAfterStream =
-      !submit && content.length > 0 && userMsgCountBefore === 0
-
     let sid = sessionId
+    let userMsgCountBefore = messages.filter((m) => m.role === 'user').length
     if (!sid) {
       try {
-        const res = await chatApi.createSession(agentId)
-        sid = res.id
+        const prepared = await prepareSessionForSend(agentId, sessionId, chatApi)
+        sid = prepared.id
+        if (prepared.history !== null) {
+          const history = prepared.history as ChatMessage[]
+          setMessages(history)
+          setHistoryCursor(prepared.nextCursor)
+          userMsgCountBefore = history.filter((m) => m.role === 'user').length
+        }
+        streamSessionRef.current = sid
+        setStreaming(true)
         goTo(agentId, sid)
       } catch (e) {
         alert((e as Error).message)
         return
       }
     }
+
+    const shouldAutoTitleAfterStream =
+      !submit && content.length > 0 && userMsgCountBefore === 0
 
     if (!overrideContent && !submit) setInput('')
     const userDisplay = submit?.input_response
@@ -783,8 +809,14 @@ export default function ChatPage(props?: ChatPageProps) {
     let sid = sessionId
     if (!sid) {
       try {
-        const res = await chatApi.createSession(agentId)
-        sid = res.id
+        const prepared = await prepareSessionForSend(agentId, sessionId, chatApi)
+        sid = prepared.id
+        if (prepared.history !== null) {
+          setMessages(prepared.history as ChatMessage[])
+          setHistoryCursor(prepared.nextCursor)
+        }
+        streamSessionRef.current = sid
+        setStreaming(true)
         goTo(agentId, sid)
       } catch (e) {
         confirmInFlightRef.current.delete(inflightKey)

@@ -119,6 +119,14 @@ func TestRuntimeSessions_MessagesShapeStaysBackwardCompatible(t *testing.T) {
 	if _, ok := body["ret"].(map[string]any); !ok {
 		t.Fatalf("ret must stay a JSON object: %#v", body["ret"])
 	}
+	ret := body["ret"].(map[string]any)
+	code, ok := ret["code"]
+	if !ok {
+		t.Fatal("ret.code must be present: proto omitempty drops 0 and the web client treats missing code as failure (banner shows ret.message \"ok\")")
+	}
+	if n, ok := code.(float64); !ok || n != 0 {
+		t.Fatalf("ret.code=%v want 0", code)
+	}
 	if _, ok := body["next_cursor"]; ok {
 		t.Fatal("next_cursor should be omitted when there is nothing earlier (omitempty)")
 	}

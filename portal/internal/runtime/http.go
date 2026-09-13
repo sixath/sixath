@@ -169,10 +169,26 @@ func (s *Service) handleDelete(ctx context.Context, hctx khttp.Context) error {
 // messagePageResponse 在既有 reply 之上补一个游标字段。
 // 不直接改 pb：加一个字段就要重新生成 protobuf；而 items/ret 的 JSON 形状保持不变，
 // 因此旧客户端（只读 items）不受影响。
+//
+// ret 不用 protobuf BaseResponse 直接 Marshal：json omitempty 会丢掉 code:0，
+// 前端 checkRet 曾把「没有 code」当成失败，横幅显示 ret.message "ok"。
+type retJSON struct {
+	Code    int32  `json:"code"`
+	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 type messagePageResponse struct {
-	Ret        *common.BaseResponse   `json:"ret,omitempty"`
+	Ret        *retJSON               `json:"ret,omitempty"`
 	Items      []*chatv1.MessageReply `json:"items"`
 	NextCursor string                 `json:"next_cursor,omitempty"`
+}
+
+func retJSONFrom(r *common.BaseResponse) *retJSON {
+	if r == nil {
+		return &retJSON{Code: 0, Message: "ok"}
+	}
+	return &retJSON{Code: r.GetCode(), Message: r.GetMessage(), Reason: r.GetReason()}
 }
 
 func (s *Service) handleMessages(ctx context.Context, hctx khttp.Context) error {
@@ -186,7 +202,7 @@ func (s *Service) handleMessages(ctx context.Context, hctx khttp.Context) error 
 	if err != nil {
 		return err
 	}
-	return hctx.JSON(200, messagePageResponse{Ret: reply.Ret, Items: reply.Items, NextCursor: next})
+	return hctx.JSON(200, messagePageResponse{Ret: retJSONFrom(reply.Ret), Items: reply.Items, NextCursor: next})
 }
 
 func (s *Service) handleSearch(ctx context.Context, hctx khttp.Context) error {

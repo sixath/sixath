@@ -183,6 +183,38 @@ channels:
 	}
 }
 
+func TestLoad_IgnoresEnvPlaceholdersInComments(t *testing.T) {
+	const yaml = `
+channels:
+  - id: sixath4
+    type: wecom_bot
+    default_agent: "00000000-0000-0000-0000-000000000001"
+    enabled: false
+    bot_id: ""
+    secret: ""
+    # Optional contacts API — must not require these vars while commented out.
+    # corp_id: "${WECOM_CORP_ID}"
+    # corp_secret: "${WECOM_CORP_SECRET}"
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "channels.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should ignore ${VAR} in comments, got: %v", err)
+	}
+	ch, err := reg.Get("sixath4")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if ch.CorpID != "" || ch.CorpSecret != "" {
+		t.Fatalf("commented corp fields leaked: id=%q secret=%q", ch.CorpID, ch.CorpSecret)
+	}
+}
+
 func TestLoad_ErrorsOnMissingEnvPlaceholder(t *testing.T) {
 	const yaml = `
 channels:

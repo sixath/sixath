@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -19,17 +20,32 @@ var envPlaceholderRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 // environment variable. Unlike os.ExpandEnv it fails loudly when a placeholder
 // has no variable set, so a missing credential can never silently become an
 // empty string. Text that is not a ${NAME} placeholder is left untouched.
+// Full-line YAML comments (trimmed line starts with '#') are not expanded,
+// so documented optional placeholders do not become required env vars.
 func expandEnvStrict(data []byte) ([]byte, error) {
 	missing := make(map[string]struct{})
-	out := envPlaceholderRe.ReplaceAllFunc(data, func(match []byte) []byte {
-		name := string(envPlaceholderRe.FindSubmatch(match)[1])
-		value, ok := os.LookupEnv(name)
-		if !ok {
-			missing[name] = struct{}{}
-			return match
+	expandLine := func(line []byte) []byte {
+		return envPlaceholderRe.ReplaceAllFunc(line, func(match []byte) []byte {
+			name := string(envPlaceholderRe.FindSubmatch(match)[1])
+			value, ok := os.LookupEnv(name)
+			if !ok {
+				missing[name] = struct{}{}
+				return match
+			}
+			return []byte(value)
+		})
+	}
+
+	lines := bytes.Split(data, []byte("\n"))
+	outLines := make([][]byte, len(lines))
+	for i, line := range lines {
+		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 && trimmed[0] == '#' {
+			outLines[i] = line
+			continue
 		}
-		return []byte(value)
-	})
+		outLines[i] = expandLine(line)
+	}
+	out := bytes.Join(outLines, []byte("\n"))
 	if len(missing) > 0 {
 		names := make([]string, 0, len(missing))
 		for name := range missing {
