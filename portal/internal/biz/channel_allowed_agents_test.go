@@ -88,6 +88,9 @@ func (f *fakeChannelRepo) GetByChannelID(_ context.Context, channelID string) (*
 func (f *fakeChannelRepo) GetWecomByDefaultAgent(context.Context, string) (*ChannelMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
+func (f *fakeChannelRepo) GetOutboundByDefaultAgent(context.Context, string) (*ChannelMeta, error) {
+	return nil, pkgErrors.ErrNotFound
+}
 
 func (f *fakeChannelRepo) List(context.Context, int32, int32, string, *bool) ([]*ChannelMeta, int, error) {
 	return nil, 0, nil

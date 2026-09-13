@@ -44,7 +44,7 @@ func NewAgentUsecase(repo AgentRepo, resources ResourceRepo, access *AccessCheck
 }
 
 // Create creates an agent
-func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
+func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string, mode string) (*AgentMeta, error) {
 	caller, err := requireCaller(ctx)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPro
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		return nil, err
 	}
-	agent, err := uc.repo.Create(ctx, id, name, description, systemPrompt, workspace, modelConfig, debugRun, wecomChannelID, runtimeTools, toolIDs)
+	agent, err := uc.repo.Create(ctx, id, name, description, systemPrompt, workspace, modelConfig, debugRun, wecomChannelID, runtimeTools, toolIDs, mode)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
 		return nil, ErrAgentDuplicateName
 	}

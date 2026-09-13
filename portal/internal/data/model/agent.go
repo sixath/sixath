@@ -40,8 +40,10 @@ type Agent struct {
 	DebugRun       bool               `gorm:"column:debug_run;not null;default:false"`
 	WecomChannelID string             `gorm:"column:wecom_channel_id;size:36"`
 	RuntimeTools   RuntimeToolsConfig `gorm:"column:runtime_tools;type:json"`
-	CreatedAt      time.Time          `gorm:"column:created_at;not null"`
-	UpdatedAt      time.Time          `gorm:"column:updated_at;not null"`
+	// Mode 执行模式：空/"react" → ReAct；"plan"/"plan_execute" → Plan-Execute。
+	Mode      string    `gorm:"column:mode;size:16;not null;default:react"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (Agent) TableName() string {

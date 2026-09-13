@@ -64,6 +64,14 @@ func (s *ChatService) streamAgentEvents(
 				summaryBuilder.WriteString(ev.Text)
 				ch <- ChatStreamEvent{Type: ChatStreamEventChunk, Content: ev.Text}
 			}
+		case agent.StreamEventPlan:
+			if plan, ok := ev.Metadata["plan"].(*agent.Plan); ok {
+				ch <- ChatStreamEvent{Type: ChatStreamEventPlan, Plan: plan}
+			}
+		case agent.StreamEventPlanStep:
+			if step, ok := ev.Metadata["step"].(agent.PlanStep); ok {
+				ch <- ChatStreamEvent{Type: ChatStreamEventPlanStep, PlanStep: &step}
+			}
 		case agent.StreamEventToolStarted:
 			if ev.ToolCall != nil {
 				ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "started")}
@@ -80,6 +88,18 @@ func (s *ChatService) streamAgentEvents(
 			if ev.ToolCall != nil {
 				ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "failed")}
 			}
+		case agent.StreamEventCancelled:
+			// 取消是终止性的，但不是错误：落 trace/compact boundary 后下发 cancelled。
+			// 正文由 chunksse.WriteStream 在流结束时用已收到的增量落库（见 sse.go），
+			// 因此"停止"不会丢掉已经生成的内容。
+			ep.Summary = summaryBuilder.String()
+			if ev.Trace != nil {
+				ep.Trace = ev.Trace
+				s.persistTurnTrace(runCtx, sessionID, agentID, ev.Trace)
+				s.persistCompactBoundary(runCtx, sessionID, ev.Trace)
+			}
+			ch <- ChatStreamEvent{Type: ChatStreamEventCancelled}
+			return ep, nil
 		case agent.StreamEventError:
 			s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, errors.New(ev.Error))
 			ep.Summary = summaryBuilder.String()

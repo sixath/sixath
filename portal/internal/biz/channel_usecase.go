@@ -235,6 +235,15 @@ func (uc *ChannelUsecase) GetWecomByDefaultAgent(ctx context.Context, agentID st
 	return ch, err
 }
 
+// GetOutboundByDefaultAgent 查找 default_agent 指向该 Agent 的已启用出站渠道（wecom / wxpusher）。
+func (uc *ChannelUsecase) GetOutboundByDefaultAgent(ctx context.Context, agentID string) (*ChannelMeta, error) {
+	ch, err := uc.repo.GetOutboundByDefaultAgent(ctx, agentID)
+	if err != nil && errors.Is(err, pkgErrors.ErrNotFound) {
+		return nil, ErrChannelNotFound
+	}
+	return ch, err
+}
+
 // List 列表
 func (uc *ChannelUsecase) List(ctx context.Context, page, pageSize int32, typ string, enabled *bool) ([]*ChannelMeta, int, error) {
 	return uc.repo.List(ctx, page, pageSize, typ, enabled)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"backend/internal/biz"
+	"backend/internal/channel"
 	"backend/internal/chat"
 
 	"github.com/sixath/framework/tool"
@@ -29,24 +30,48 @@ func agentHasWecomOutbound(ctx context.Context, channelUC *biz.ChannelUsecase, a
 	return resolveAgentWecomChannelID(ctx, channelUC, agentMeta) != ""
 }
 
-func registerWeComToolForAgent(ctx context.Context, channelUC *biz.ChannelUsecase, reg *tool.Registry, agentMeta *biz.AgentMeta) {
-	channelID := resolveAgentWecomChannelID(ctx, channelUC, agentMeta)
-	if channelID == "" {
+// resolveAgentOutboundChannel 返回 Agent 绑定的出站渠道：显式 wecom 绑定优先，
+// 否则回退到 default_agent 绑定的任意出站渠道（wecom / wxpusher）。
+func resolveAgentOutboundChannel(ctx context.Context, channelUC *biz.ChannelUsecase, agentMeta *biz.AgentMeta) *biz.ChannelMeta {
+	if agentMeta == nil {
+		return nil
+	}
+	if agentMeta.WecomChannelID != "" {
+		if ch, err := channelUC.Get(ctx, agentMeta.WecomChannelID); err == nil && ch != nil && ch.Enabled {
+			return ch
+		}
+	}
+	ch, err := channelUC.GetOutboundByDefaultAgent(ctx, agentMeta.ID)
+	if err != nil || ch == nil {
+		return nil
+	}
+	return ch
+}
+
+func registerWeComToolForAgent(ctx context.Context, channelUC *biz.ChannelUsecase, recorder channel.DeliveryRecorder, reg *tool.Registry, agentMeta *biz.AgentMeta) {
+	ch := resolveAgentOutboundChannel(ctx, channelUC, agentMeta)
+	if ch == nil {
 		return
 	}
+	channelID := ch.ID
 	_ = chat.RegisterSendToWeComTool(reg, chat.SendToWeComOptions{
-		ResolveWebhook: func(ctx context.Context) (string, error) {
-			ch, err := channelUC.Get(ctx, channelID)
+		ChannelID: channelID,
+		Recorder:  recorder,
+		ResolveOutbound: func(ctx context.Context) (channel.OutboundChannel, error) {
+			// 每次调用重新 Get，避免持有过期配置。
+			meta, err := channelUC.Get(ctx, channelID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			if ch.Type != "wecom" || !ch.Enabled {
-				return "", fmt.Errorf("wecom channel not available")
+			if !meta.Enabled {
+				return nil, fmt.Errorf("channel not available")
 			}
-			if ch.WebhookURL == "" {
-				return "", fmt.Errorf("wecom channel missing webhook_url")
-			}
-			return ch.WebhookURL, nil
+			return channel.NewOutbound(channel.OutboundConfig{
+				Type:        meta.Type,
+				WebhookURL:  meta.WebhookURL,
+				AppToken:    meta.AppToken,
+				DefaultUids: meta.DefaultUids,
+			})
 		},
 	})
 }

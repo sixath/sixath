@@ -308,6 +308,37 @@ func (r *chatMessageRepo) ListBySession(ctx context.Context, sessionID string, l
 	return items, nil
 }
 
+// ListBySessionBefore 返回 before 游标之前（更早）的一页消息，按时间升序返回。
+//
+// 游标为 (created_at, id) 复合键：仅按 created_at 会在同秒消息上出现丢失/重复。
+// 为了同时判断"是否还有更早的消息"，这里多取一条（limit+1）后再裁掉。
+func (r *chatMessageRepo) ListBySessionBefore(ctx context.Context, sessionID string, before biz.MessageCursor, limit int) ([]*biz.ChatMessage, string, error) {
+	limit = biz.NormalizeMessagePageSize(limit)
+
+	q := r.db.WithContext(ctx).
+		Where("session_id = ? AND active = ?", sessionID, true)
+	if before.ID != "" {
+		q = q.Where("(created_at < ? OR (created_at = ? AND id < ?))", before.CreatedAt, before.CreatedAt, before.ID)
+	}
+	var rows []model.ChatMessage
+	// 先按"从新到旧"取 limit+1 条，确定是否还有更早的一页。
+	if err := q.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return nil, "", err
+	}
+	nextCursor := ""
+	if len(rows) > limit {
+		rows = rows[:limit]
+		oldest := rows[len(rows)-1]
+		nextCursor = biz.MessageCursor{CreatedAt: oldest.CreatedAt, ID: oldest.ID}.Encode()
+	}
+	// 反转为升序，与 ListBySession 的输出顺序保持一致。
+	items := make([]*biz.ChatMessage, len(rows))
+	for i := range rows {
+		items[len(rows)-1-i] = toBizChatMessage(&rows[i])
+	}
+	return items, nextCursor, nil
+}
+
 func (r *chatMessageRepo) GetByID(ctx context.Context, messageID string) (*biz.ChatMessage, error) {
 	var m model.ChatMessage
 	if err := r.db.WithContext(ctx).Where("id = ?", messageID).First(&m).Error; err != nil {

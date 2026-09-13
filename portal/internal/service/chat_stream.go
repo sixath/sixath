@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
-	agent "github.com/sixath/framework/harness"
+	"backend/internal/chat"
+
 	"github.com/sixath/framework/events"
+	agent "github.com/sixath/framework/harness"
 	toolskill "github.com/sixath/framework/tool/skillops"
 )
 
@@ -22,7 +24,13 @@ const (
 	ChatStreamEventDebug           ChatStreamEventType = "debug"
 	ChatStreamEventToolCall        ChatStreamEventType = "tool_call"
 	ChatStreamEventModelCall       ChatStreamEventType = "model_call"
-	ChatStreamEventMEA             ChatStreamEventType = "mea"
+	// ChatStreamEventPlan / PlanStep 表示 Plan-Execute 模式产出的规划与其步骤进度。
+	ChatStreamEventPlan     ChatStreamEventType = "plan"
+	ChatStreamEventPlanStep ChatStreamEventType = "plan_step"
+	// ChatStreamEventCancelled 表示本轮因用户停止/断连被取消；
+	// 已产生的正文**照常落库**（不置 Failed），前端据此展示"已中断"。
+	ChatStreamEventCancelled ChatStreamEventType = "cancelled"
+	ChatStreamEventMEA       ChatStreamEventType = "mea"
 )
 
 const toolPayloadFieldLimit = 8 * 1024 // 单字段截断上限（字节）
@@ -37,16 +45,18 @@ type ChatStreamEvent struct {
 	ToolCall      *ToolCallPayload
 	ModelCall     *ModelCallPayload
 	MEA           *MEAStreamPayload
+	Plan          *agent.Plan     `json:"plan,omitempty"`
+	PlanStep      *agent.PlanStep `json:"plan_step,omitempty"`
 }
 
 // MEAStreamPayload is emitted after a Manage-Execute-Audit round or final result (M0.5).
 type MEAStreamPayload struct {
-	Phase    string `json:"phase"` // started | round | finished
-	Reason   string `json:"reason,omitempty"`
-	Round    int    `json:"round,omitempty"`
-	Pending  int    `json:"pending,omitempty"`
-	Completed int   `json:"completed,omitempty"`
-	Goal     string `json:"goal,omitempty"`
+	Phase     string `json:"phase"` // started | round | finished
+	Reason    string `json:"reason,omitempty"`
+	Round     int    `json:"round,omitempty"`
+	Pending   int    `json:"pending,omitempty"`
+	Completed int    `json:"completed,omitempty"`
+	Goal      string `json:"goal,omitempty"`
 }
 
 type ConfirmResultPayload struct {
@@ -79,6 +89,8 @@ type ModelCallPayload struct {
 	InputTokens  int    `json:"input_tokens,omitempty"`
 	OutputTokens int    `json:"output_tokens,omitempty"`
 	MessageCount int    `json:"message_count,omitempty"`
+	// EstimatedCostUSD 为本次模型调用估算成本（美元），按 chat.EstimateCost 计价表计算。
+	EstimatedCostUSD float64 `json:"estimated_cost_usd,omitempty"`
 }
 
 // truncateField 将任意值转为 JSON，超过上限时截断并返回 truncated=true。
@@ -137,22 +149,23 @@ func modelCallEventFromBus(e events.Event, modelName string) *ModelCallPayload {
 	p.MessageCount = intFromAny(e.Payload["message_count"])
 	p.InputTokens = intFromAny(e.Payload["input_tokens"])
 	p.OutputTokens = intFromAny(e.Payload["output_tokens"])
+	p.EstimatedCostUSD = chat.EstimateCost(modelName, p.InputTokens, p.OutputTokens)
 	return p
 }
 
 type ChatInputRequest struct {
-	ID          string   `json:"id,omitempty"`
-	ToolCallID  string   `json:"tool_call_id,omitempty"`
-	RequestID   string   `json:"request_id"`
-	Token       string   `json:"token"`
-	Kind        string   `json:"kind"`
-	Field       string   `json:"field"`
-	Title       string   `json:"title"`
-	Prompt      string   `json:"prompt"`
-	Options     []string `json:"options,omitempty"`
-	Required    bool     `json:"required"`
-	ExpiresIn   int      `json:"expires_in,omitempty"`
-	Severity    string   `json:"severity"`
+	ID         string   `json:"id,omitempty"`
+	ToolCallID string   `json:"tool_call_id,omitempty"`
+	RequestID  string   `json:"request_id"`
+	Token      string   `json:"token"`
+	Kind       string   `json:"kind"`
+	Field      string   `json:"field"`
+	Title      string   `json:"title"`
+	Prompt     string   `json:"prompt"`
+	Options    []string `json:"options,omitempty"`
+	Required   bool     `json:"required"`
+	ExpiresIn  int      `json:"expires_in,omitempty"`
+	Severity   string   `json:"severity"`
 }
 
 type ChatConfirmationRequest struct {

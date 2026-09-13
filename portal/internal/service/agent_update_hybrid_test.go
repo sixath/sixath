@@ -16,7 +16,7 @@ type hybridAgentRepo struct {
 	agent *biz.AgentMeta
 }
 
-func (r *hybridAgentRepo) Create(context.Context, string, string, string, string, string, biz.ModelConfig, bool, string, biz.RuntimeToolsConfig, []string) (*biz.AgentMeta, error) {
+func (r *hybridAgentRepo) Create(context.Context, string, string, string, string, string, biz.ModelConfig, bool, string, biz.RuntimeToolsConfig, []string, string) (*biz.AgentMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
 func (r *hybridAgentRepo) CountByWecomChannelID(context.Context, string) (int, error) {

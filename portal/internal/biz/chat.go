@@ -2,7 +2,9 @@ package biz
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"strings"
 	"time"
 
 	pkgErrors "backend/internal/pkg/errors"
@@ -66,10 +68,67 @@ type ChatSessionRepo interface {
 var ErrSessionNotFound = kratosErrors.NotFound("SESSION_NOT_FOUND", "session not found")
 var ErrInvalidParentSession = kratosErrors.BadRequest("INVALID_PARENT_SESSION", "parent session must belong to the same agent")
 
+// 消息分页尺寸。默认 50：兼顾首屏渲染与长会话翻页次数；上限 200 防止单次拉爆。
+const (
+	DefaultMessagePageSize = 50
+	MaxMessagePageSize     = 200
+)
+
+// NormalizeMessagePageSize 归一化页大小：<=0 → 默认值；>上限 → 上限。
+func NormalizeMessagePageSize(limit int) int {
+	if limit <= 0 {
+		return DefaultMessagePageSize
+	}
+	if limit > MaxMessagePageSize {
+		return MaxMessagePageSize
+	}
+	return limit
+}
+
+// MessageCursor 为消息分页游标：(created_at, id) 复合键。
+// 仅用 created_at 会在同一时间戳（批量写入 / 同秒）时分页丢消息或重复。
+type MessageCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// Encode 把游标编码为可直接放进 URL 的不透明字符串；空游标（取最新一页）返回空串。
+func (c MessageCursor) Encode() string {
+	if c.ID == "" {
+		return ""
+	}
+	raw := c.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// DecodeMessageCursor 解析 Encode 产出的游标；空串表示"最新一页"。
+func DecodeMessageCursor(raw string) (MessageCursor, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return MessageCursor{}, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(trimmed)
+	if err != nil {
+		return MessageCursor{}, errors.New("invalid message cursor")
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return MessageCursor{}, errors.New("invalid message cursor")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return MessageCursor{}, errors.New("invalid message cursor")
+	}
+	return MessageCursor{CreatedAt: createdAt, ID: parts[1]}, nil
+}
+
 // ChatMessageRepo 消息存储接口
 type ChatMessageRepo interface {
 	Create(ctx context.Context, sessionID, role, content string, metadata map[string]any) (*ChatMessage, error)
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]*ChatMessage, error)
+	// ListBySessionBefore 返回 before 游标之前（更早）的一页消息，按时间升序返回。
+	// before 为零值表示取最新一页；第二个返回值是继续向前翻页的游标（空串表示没有更早的消息）。
+	ListBySessionBefore(ctx context.Context, sessionID string, before MessageCursor, limit int) ([]*ChatMessage, string, error)
 	LastUserOrAssistantBySessions(ctx context.Context, sessionIDs []string) (map[string]string, error)
 	DeleteBySession(ctx context.Context, sessionID string) error
 	// GetByID returns a message by primary key (including inactive).
@@ -199,6 +258,15 @@ func (uc *ChatUsecase) ListMessages(ctx context.Context, sessionID string, limit
 		return nil, err
 	}
 	return uc.messageRepo.ListBySession(ctx, sessionID, limit)
+}
+
+// ListMessagePage 游标分页获取会话消息：before 为空取最新一页，否则取更早的一页。
+// 返回 (消息, 继续向前翻页的游标)；游标为空表示已到会话开头。
+func (uc *ChatUsecase) ListMessagePage(ctx context.Context, sessionID string, before MessageCursor, limit int) ([]*ChatMessage, string, error) {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return nil, "", err
+	}
+	return uc.messageRepo.ListBySessionBefore(ctx, sessionID, before, NormalizeMessagePageSize(limit))
 }
 
 // CreateMessage 创建消息（无 metadata）

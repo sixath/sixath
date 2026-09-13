@@ -401,13 +401,17 @@ func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReAc
 // 8192 会把「完整映射表（468 条）」这类长表截在约 350 行；RCA 明细需要更高上限。
 const DefaultMaxOutputTokens = 32768
 
-// ReActOptionsFromAgent 按 Agent 模型配置追加 ReAct 选项（如 max_output_tokens）。
+// ReActOptionsFromAgent 按 Agent 模型配置追加 ReAct 选项：
+//   - token 计数器（按 provider/model 复用，随真实 usage 自校准，见 token_counter.go）；
+//   - max_output_tokens（<=0 时用 BuildReActAgent 的默认值）。
 func ReActOptionsFromAgent(meta biz.AgentMeta) []agent.ReActOption {
-	n := meta.ModelConfig.MaxOutputTokens
-	if n <= 0 {
-		return nil
+	opts := []agent.ReActOption{
+		agent.WithReActTokenCounter(TokenCounterFor(meta.ModelConfig.Provider, meta.ModelConfig.Model)),
 	}
-	return []agent.ReActOption{agent.WithReActMaxOutputTokens(n)}
+	if n := meta.ModelConfig.MaxOutputTokens; n > 0 {
+		opts = append(opts, agent.WithReActMaxOutputTokens(n))
+	}
+	return opts
 }
 
 // BuildReActAgent 构建 ReActAgent。extra 在默认选项之后应用，可覆盖例如 MaxSteps、EventBus，或注入 WithReActToolSuccessHook。
@@ -432,6 +436,29 @@ func BuildReActAgent(m model.Model, reg *tool.Registry, systemPrompt string, max
 	}
 	opts = append(opts, extra...)
 	return agent.NewReActAgent(m, mem, reg, opts...)
+}
+
+// IsPlanMode 判断 Agent 是否启用 Plan-Execute 模式。
+func IsPlanMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "plan", "plan_execute", "plan-execute":
+		return true
+	default:
+		return false
+	}
+}
+
+// BuildAgent 按 mode 构建 Agent：
+//   - react（默认）→ ReActAgent；
+//   - plan / plan_execute → PlanExecuteAgent（planner 复用同一模型，worker 为 ReActAgent）。
+//
+// 规划失败 / 步骤失败重规划耗尽时，PlanExecuteAgent 内部自动回退 ReAct，保证可用性。
+func BuildAgent(m model.Model, reg *tool.Registry, systemPrompt string, maxHistory int, mode string, extra ...agent.ReActOption) agent.Agent {
+	worker := BuildReActAgent(m, reg, systemPrompt, maxHistory, extra...)
+	if IsPlanMode(mode) {
+		return agent.NewPlanExecuteAgent(m, worker)
+	}
+	return worker
 }
 
 // ShouldEnableParallelTools is true when the registry has code-root tools that

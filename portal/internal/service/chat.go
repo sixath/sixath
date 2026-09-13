@@ -10,6 +10,7 @@ import (
 	chatv1 "backend/api/chat/v1"
 	"backend/api/common"
 	"backend/internal/biz"
+	"backend/internal/channel"
 	"backend/internal/chat"
 	"backend/internal/data"
 
@@ -29,17 +30,18 @@ import (
 // 对话服务：会话管理、消息发送与历史（详见 architecture_design.md 5.4、5.5）
 type ChatService struct {
 	chatv1.UnimplementedChatServer
-	chatUC         *biz.ChatUsecase
-	agentUC        *biz.AgentUsecase
-	toolUC         *biz.ToolUsecase
-	mcpServerUC    *biz.McpServerUsecase
-	skillUC        *biz.SkillResourceUsecase
-	channelUC      *biz.ChannelUsecase
-	sessionHooks   *agent.ChatSessionHookRegistry
-	memoryStore    memory.MemoryStore
-	turnTraceStore turntrace.Store
-	codeRoots      []string
-	log            *log.Helper
+	chatUC           *biz.ChatUsecase
+	agentUC          *biz.AgentUsecase
+	toolUC           *biz.ToolUsecase
+	mcpServerUC      *biz.McpServerUsecase
+	skillUC          *biz.SkillResourceUsecase
+	channelUC        *biz.ChannelUsecase
+	deliveryRecorder channel.DeliveryRecorder
+	sessionHooks     *agent.ChatSessionHookRegistry
+	memoryStore      memory.MemoryStore
+	turnTraceStore   turntrace.Store
+	codeRoots        []string
+	log              *log.Helper
 }
 
 // NewChatService creates a ChatService
@@ -54,10 +56,11 @@ func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUs
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, _ *data.Data, logger log.Logger) *ChatService {
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, d *data.Data, logger log.Logger) *ChatService {
 	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
 	s.SetCodeRoots(codeRoots)
+	s.SetDeliveryRecorder(data.NewDeliveryRecorder(d.DB()))
 	return s
 }
 
@@ -75,6 +78,14 @@ func (s *ChatService) SetCodeRoots(roots []string) {
 		return
 	}
 	s.codeRoots = roots
+}
+
+// SetDeliveryRecorder sets the optional outbound delivery recorder (nil-safe).
+func (s *ChatService) SetDeliveryRecorder(r channel.DeliveryRecorder) {
+	if s == nil {
+		return
+	}
+	s.deliveryRecorder = r
 }
 
 func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
@@ -394,7 +405,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage register ask_user failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
+	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -421,7 +432,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
-	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
+	a := chat.BuildAgent(m, reg, agentText, maxHistory, agentMeta.Mode, opts...)
 
 	// 加载历史消息（已包含刚保存的 user 消息）
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
@@ -658,7 +669,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream register ask_user failed: session_id=%s err=%v", sessionID, err)
 		return nil, "", err
 	}
-	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
+	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -687,7 +698,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	opts = append(opts, agent.WithReActEventBus(turnBus))
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。
-	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
+	a := chat.BuildAgent(m, reg, agentText, maxHistory, agentMeta.Mode, opts...)
 
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
 	if err != nil {

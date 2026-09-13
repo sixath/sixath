@@ -470,7 +470,7 @@ func TestToolDiscoveryIntegration_MysqlStatusGroupByThenWecomPush(t *testing.T) 
 	if trace.ToolCalls[1].ToolName != "send_to_wecom" || trace.ToolCalls[1].Error != "" {
 		t.Fatalf("send_to_wecom failed: %#v", trace.ToolCalls[1])
 	}
-	if toString(trace.ToolCalls[1].Result) != "已发送到企业微信群" {
+	if !strings.Contains(toString(trace.ToolCalls[1].Result), "已投递到企业微信群") {
 		t.Fatalf("unexpected wecom result: %v", trace.ToolCalls[1].Result)
 	}
 	if !strings.Contains(fix.LastPost, "active=42") {

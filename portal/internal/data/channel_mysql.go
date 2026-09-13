@@ -38,9 +38,9 @@ func (r *channelRepo) Create(ctx context.Context, ch *biz.ChannelCreate) (*biz.C
 		AutoRouteEnabled:    ch.AutoRouteEnabled,
 		AutoRouteMention:    ch.AutoRouteMention,
 		AutoRouteClassifier: ch.AutoRouteClassifier,
-		WebhookPath:        ch.WebhookPath,
-		WebhookSecret:      ch.WebhookSecret,
-		IPWhitelist:        model.StringSlice(ch.IPWhitelist),
+		WebhookPath:         ch.WebhookPath,
+		WebhookSecret:       ch.WebhookSecret,
+		IPWhitelist:         model.StringSlice(ch.IPWhitelist),
 		AppToken:            ch.AppToken,
 		DefaultUids:         model.StringSlice(ch.DefaultUids),
 		WebhookURL:          ch.WebhookURL,
@@ -50,7 +50,7 @@ func (r *channelRepo) Create(ctx context.Context, ch *biz.ChannelCreate) (*biz.C
 		WSURL:               ch.WSURL,
 		CorpID:              ch.CorpID,
 		CorpSecret:          ch.CorpSecret,
-		DefaultReplyMode:   ch.DefaultReplyMode,
+		DefaultReplyMode:    ch.DefaultReplyMode,
 	}
 	// GORM skips zero-value fields with DB defaults on Create; wrap Create+enabled
 	// correction in one transaction so a failed second step cannot leave enabled=true.
@@ -104,6 +104,24 @@ func (r *channelRepo) GetWecomByDefaultAgent(ctx context.Context, agentID string
 	var m model.Channel
 	err := r.db.WithContext(ctx).
 		Where("type = ? AND default_agent = ? AND enabled = ?", "wecom", agentID, true).
+		Order("updated_at DESC").
+		First(&m).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return channelModelToBiz(&m), nil
+}
+
+func (r *channelRepo) GetOutboundByDefaultAgent(ctx context.Context, agentID string) (*biz.ChannelMeta, error) {
+	if agentID == "" {
+		return nil, ErrNotFound
+	}
+	var m model.Channel
+	err := r.db.WithContext(ctx).
+		Where("type IN ? AND default_agent = ? AND enabled = ?", []string{"wecom", "wxpusher"}, agentID, true).
 		Order("updated_at DESC").
 		First(&m).Error
 	if err != nil {
@@ -172,11 +190,11 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 	allowed := map[string]bool{
 		"channel_id": true, "type": true, "default_agent": true, "allowed_agents": true,
 		"auto_route_enabled": true, "auto_route_mention": true, "auto_route_classifier": true,
-		"enabled": true,
+		"enabled":      true,
 		"webhook_path": true, "webhook_secret": true, "ip_whitelist": true,
 		"app_token": true, "default_uids": true,
 		"webhook_url": true,
-		"bot_id": true, "bot_secret": true, "bot_names": true, "ws_url": true,
+		"bot_id":      true, "bot_secret": true, "bot_names": true, "ws_url": true,
 		"corp_id": true, "corp_secret": true, "default_reply_mode": true,
 	}
 	upd := make(map[string]interface{})
@@ -263,8 +281,8 @@ func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {
 		AutoRouteMention:    m.AutoRouteMention,
 		AutoRouteClassifier: m.AutoRouteClassifier,
 		Enabled:             m.Enabled,
-		WebhookPath:        m.WebhookPath,
-		WebhookSecret:      m.WebhookSecret,
+		WebhookPath:         m.WebhookPath,
+		WebhookSecret:       m.WebhookSecret,
 		IPWhitelist:         ipList,
 		AppToken:            m.AppToken,
 		DefaultUids:         uids,
@@ -275,7 +293,7 @@ func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {
 		WSURL:               m.WSURL,
 		CorpID:              m.CorpID,
 		CorpSecret:          m.CorpSecret,
-		DefaultReplyMode:   m.DefaultReplyMode,
+		DefaultReplyMode:    m.DefaultReplyMode,
 		CreatedAt:           m.CreatedAt,
 		UpdatedAt:           m.UpdatedAt,
 	}
