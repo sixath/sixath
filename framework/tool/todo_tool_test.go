@@ -151,3 +151,29 @@ func TestFormatTodosForInjection(t *testing.T) {
 		t.Fatalf("completed item should not inject: %q", text)
 	}
 }
+
+func TestInMemoryTodoStore_Copy(t *testing.T) {
+	store := NewInMemoryTodoStore()
+	parent := []TodoItem{
+		{ID: "1", Content: "a", Status: TodoStatusPending},
+		{ID: "2", Content: "b", Status: TodoStatusInProgress},
+	}
+	store.Replace("sess-parent", parent)
+	got := store.Copy("sess-parent", "sess-child")
+	if len(got) != 2 || got[1].ID != "2" {
+		t.Fatalf("copy=%#v", got)
+	}
+	store.Replace("sess-child", []TodoItem{{ID: "2", Content: "b", Status: TodoStatusCompleted}})
+	parentList := store.List("sess-parent")
+	if parentList[1].Status != TodoStatusInProgress {
+		t.Fatalf("parent mutated: %#v", parentList)
+	}
+}
+
+func TestInMemoryTodoStore_CopyEmpty(t *testing.T) {
+	store := NewInMemoryTodoStore()
+	got := store.Copy("missing", "sess-child")
+	if len(got) != 0 {
+		t.Fatalf("expected empty, got %#v", got)
+	}
+}

@@ -100,6 +100,15 @@ func (s *InMemoryTodoStore) Merge(sessionID string, items []TodoItem) []TodoItem
 	return orderedTodoItems(st)
 }
 
+func (s *InMemoryTodoStore) Copy(fromSessionID, toSessionID string) []TodoItem {
+	items := s.List(fromSessionID)
+	cloned := append([]TodoItem(nil), items...)
+	if toSessionID == "" {
+		return cloned
+	}
+	return s.Replace(toSessionID, cloned)
+}
+
 // FormatTodosForInjection returns pending/in_progress items for context injection (H-P0-C2).
 func FormatTodosForInjection(items []TodoItem) string {
 	var lines []string
