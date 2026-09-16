@@ -1152,6 +1152,31 @@ export const chatApi = {
       deactivated_traces: data.deactivated_traces ?? [],
     }
   },
+  forkSession: async (sessionId: string, messageId: string) => {
+    const data = await request<{
+      ret?: BaseResponse
+      session_id?: string
+      parent_session_id?: string
+      title?: string
+      copied_messages?: number
+      copied_traces?: number
+      copied_memory_units?: number
+      copied_todos?: number
+    }>(`/sessions/${sessionId}/fork`, {
+      method: 'POST',
+      body: JSON.stringify({ message_id: messageId }),
+    })
+    checkRet(data)
+    return {
+      session_id: data.session_id ?? '',
+      parent_session_id: data.parent_session_id ?? sessionId,
+      title: data.title ?? '',
+      copied_messages: data.copied_messages ?? 0,
+      copied_traces: data.copied_traces ?? 0,
+      copied_memory_units: data.copied_memory_units ?? 0,
+      copied_todos: data.copied_todos ?? 0,
+    }
+  },
 }
 
 // Channel API

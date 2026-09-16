@@ -264,6 +264,7 @@ export default function ChatPage(props?: ChatPageProps) {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [error, setError] = useState('')
   const [rewinding, setRewinding] = useState(false)
+  const [forking, setForking] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -455,7 +456,7 @@ export default function ChatPage(props?: ChatPageProps) {
   }, [])
 
   const handleRewind = useCallback(async (messageId: string) => {
-    if (!sessionId || !messageId || streaming || rewinding) return
+    if (!sessionId || !messageId || streaming || rewinding || forking) return
     if (!window.confirm('Rewind to before this message? Later messages will be hidden from the chat and search.')) {
       return
     }
@@ -470,7 +471,22 @@ export default function ChatPage(props?: ChatPageProps) {
     } finally {
       setRewinding(false)
     }
-  }, [sessionId, streaming, rewinding, reloadMessages])
+  }, [sessionId, streaming, rewinding, forking, reloadMessages])
+
+  const handleFork = useCallback(async (messageId: string) => {
+    if (!sessionId || !messageId || streaming || rewinding || forking) return
+    setForking(true)
+    setError('')
+    try {
+      abortRef.current?.abort()
+      const out = await chatApi.forkSession(sessionId, messageId)
+      if (agentId && out.session_id) goTo(agentId, out.session_id)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setForking(false)
+    }
+  }, [sessionId, agentId, streaming, rewinding, forking, goTo])
 
   useEffect(() => () => {
     if (debugDebounceTimerRef.current) {
@@ -1116,10 +1132,19 @@ export default function ChatPage(props?: ChatPageProps) {
                               type="button"
                               className="btn btn-secondary btn-sm chat-rewind-btn"
                               title="Hide this message and everything after; continue from earlier context"
-                              disabled={rewinding}
+                              disabled={rewinding || forking}
                               onClick={() => handleRewind(m.id)}
                             >
                               {rewinding ? 'Rewinding…' : 'Rewind here'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm chat-rewind-btn"
+                              title="Start a new session with history up to this message; the original chat is unchanged"
+                              disabled={rewinding || forking}
+                              onClick={() => handleFork(m.id)}
+                            >
+                              {forking ? 'Forking…' : 'Fork from here'}
                             </button>
                           </div>
                         ) : null}
