@@ -23,6 +23,7 @@ import (
 	toolskill "github.com/sixath/framework/tool/skillops"
 	"github.com/sixath/framework/turntrace"
 	"google.golang.org/protobuf/types/known/structpb"
+	"gorm.io/gorm"
 )
 
 // ChatService implements chat.v1.ChatHTTPServer
@@ -39,6 +40,7 @@ type ChatService struct {
 	memoryStore    memory.MemoryStore
 	turnTraceStore turntrace.Store
 	codeRoots      []string
+	db             *gorm.DB
 	log            *log.Helper
 }
 
@@ -54,10 +56,13 @@ func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUs
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, _ *data.Data, logger log.Logger) *ChatService {
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, d *data.Data, logger log.Logger) *ChatService {
 	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
 	s.SetTurnTraceStore(turnTraceStore)
 	s.SetCodeRoots(codeRoots)
+	if d != nil {
+		s.db = d.DB()
+	}
 	return s
 }
 
