@@ -30,7 +30,7 @@
 
 1. 用户可在任意 active 的 user/assistant 消息上 Fork，得到独立可写的子会话。
 2. 子会话 `parent_session_id` 指向原会话；侧栏已有「分支」标签无需改结构。
-3. 子会话在锚点处的对话、工具轨迹、session 记忆、todo 与分叉瞬间一致（见 §4 精度）。
+3. 子会话在锚点处的对话、工具轨迹、session 记忆、todo 与分叉瞬间一致（见 §5）。
 4. 原会话一条消息都不 inactive、不 readonly。
 
 ### 非目标（一期不做）
@@ -78,7 +78,7 @@ ForkHandler  →  ChatService.ForkToMessage
     │     TodoStore 按 session_id 复制
     │     session search 索引新消息
     ▼
-SessionReply + 拷贝计数  →  前端切换 sessionId
+ForkResult（自定义 JSON，非 proto SessionReply）→ 前端切换 sessionId
 ```
 
 **边界**
@@ -99,7 +99,7 @@ SessionReply + 拷贝计数  →  前端切换 sessionId
 { "message_id": "<锚点 chat_messages.id>" }
 ```
 
-**成功 200**
+**成功 200**（`ForkResult`，形态对齐 `RewindResult`，**不要**扩展 proto `SessionReply`）
 
 ```json
 {
@@ -190,7 +190,7 @@ SessionReply + 拷贝计数  →  前端切换 sessionId
 ## 7. 事务与失败
 
 1. **校验阶段不写库。**
-2. **消息 + traces + memory_units + 新 session 行** 同一 MySQL 事务。任一步失败则回滚：不得留下无消息的子会话。
+2. **消息 + traces + memory_units + 新 session 行** 同一 MySQL 事务。任一步失败则回滚：不得留下无消息的子会话。现有 `TurnTraceStore` / `SessionUnitsBackend` 绑的是进程级 `*gorm.DB`、没有 `WithTx`；实现须用 `db.Transaction` 构造**事务内** store/repo，禁止沿用 Rewind「traces 失败只打日志」的路径。消息前缀与 traces 都必须**全量**读取，不得套用 `ListBySession` / `ListMessages` 的默认 limit（如 100）。
 3. **提交后**：todo、FTS 索引尽最大努力。失败只打日志，HTTP 仍 200，计数字段反映实际成功量。
 4. 不引入分布式事务。
 
