@@ -55,6 +55,12 @@ func (stubMessageRepo) GetByID(context.Context, string) (*biz.ChatMessage, error
 func (stubMessageRepo) SoftDeactivateAfter(context.Context, string, time.Time, string) ([]string, error) {
 	return nil, nil
 }
+func (stubMessageRepo) ListActiveOrdered(context.Context, string) ([]*biz.ChatMessage, error) {
+	return nil, nil
+}
+func (stubMessageRepo) InsertClone(context.Context, string, *biz.ChatMessage) (*biz.ChatMessage, error) {
+	return nil, nil
+}
 
 func TestNotifySessionMessageIndexed_WithDetachedCaller(t *testing.T) {
 	dir := t.TempDir()

@@ -308,6 +308,43 @@ func (r *chatMessageRepo) ListBySession(ctx context.Context, sessionID string, l
 	return items, nil
 }
 
+func (r *chatMessageRepo) ListActiveOrdered(ctx context.Context, sessionID string) ([]*biz.ChatMessage, error) {
+	var rows []model.ChatMessage
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ? AND active = ?", sessionID, true).
+		Order("created_at ASC, id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]*biz.ChatMessage, len(rows))
+	for i := range rows {
+		items[i] = toBizChatMessage(&rows[i])
+	}
+	return items, nil
+}
+
+func (r *chatMessageRepo) InsertClone(ctx context.Context, destSessionID string, src *biz.ChatMessage) (*biz.ChatMessage, error) {
+	id := uuid.New().String()
+	meta := make(map[string]any, len(src.Metadata)+1)
+	for k, v := range src.Metadata {
+		meta[k] = v
+	}
+	meta["forked_from_message_id"] = src.ID
+	m := &model.ChatMessage{
+		ID:        id,
+		SessionID: destSessionID,
+		Role:      src.Role,
+		Content:   src.Content,
+		Metadata:  model.JSONMap(meta),
+		Active:    src.Active,
+		CreatedAt: src.CreatedAt,
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		return nil, err
+	}
+	return toBizChatMessage(m), nil
+}
+
 func (r *chatMessageRepo) GetByID(ctx context.Context, messageID string) (*biz.ChatMessage, error) {
 	var m model.ChatMessage
 	if err := r.db.WithContext(ctx).Where("id = ?", messageID).First(&m).Error; err != nil {

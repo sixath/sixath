@@ -78,6 +78,12 @@ type ChatMessageRepo interface {
 	// messages in the session (created_at > afterCreatedAt, or id == includeMessageID).
 	// Remaining transcript ends at the message before the anchor.
 	SoftDeactivateAfter(ctx context.Context, sessionID string, afterCreatedAt time.Time, includeMessageID string) (deactivatedIDs []string, err error)
+	// ListActiveOrdered returns all active messages for a session, ordered by
+	// created_at ASC, id ASC, with no row limit.
+	ListActiveOrdered(ctx context.Context, sessionID string) ([]*ChatMessage, error)
+	// InsertClone copies src into destSessionID with a new ID, preserving CreatedAt
+	// and stamping metadata.forked_from_message_id.
+	InsertClone(ctx context.Context, destSessionID string, src *ChatMessage) (*ChatMessage, error)
 }
 
 // ChatUsecase 对话用例

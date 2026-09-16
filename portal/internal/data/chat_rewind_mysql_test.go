@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/biz"
 	"backend/internal/data/model"
 
 	"gorm.io/driver/sqlite"
@@ -97,5 +98,68 @@ func TestBumpRewindCount(t *testing.T) {
 	}
 	if got.RewindCount != 2 {
 		t.Fatalf("RewindCount=%d want 2", got.RewindCount)
+	}
+}
+
+func TestListActiveOrdered_NoLimitAndIdTiebreak(t *testing.T) {
+	db := openChatRewindTestDB(t)
+	sessRepo := &chatSessionRepo{db: db}
+	msgRepo := &chatMessageRepo{db: db}
+	ctx := context.Background()
+	sess, _ := sessRepo.Create(ctx, "u1", "a1", "t", "")
+	base := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
+	for i, id := range []string{"m-b", "m-a"} {
+		_ = db.Create(&model.ChatMessage{
+			ID: id, SessionID: sess.ID, Role: "user", Content: id, Active: true,
+			CreatedAt: base,
+		}).Error
+		_ = i
+	}
+	_ = db.Create(&model.ChatMessage{
+		ID: "m-late", SessionID: sess.ID, Role: "assistant", Content: "late", Active: true,
+		CreatedAt: base.Add(time.Second),
+	}).Error
+	_ = db.Create(&model.ChatMessage{
+		ID: "m-dead", SessionID: sess.ID, Role: "user", Content: "x", Active: false,
+		CreatedAt: base.Add(2 * time.Second),
+	}).Error
+	// GORM Create skips bool zero values when the column has default:1, so force inactive.
+	_ = db.Model(&model.ChatMessage{}).Where("id = ?", "m-dead").Update("active", false).Error
+	list, err := msgRepo.ListActiveOrdered(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("len=%d want 3 (inactive excluded)", len(list))
+	}
+	if list[0].ID != "m-a" || list[1].ID != "m-b" || list[2].ID != "m-late" {
+		t.Fatalf("order %+v", []string{list[0].ID, list[1].ID, list[2].ID})
+	}
+}
+
+func TestInsertClone_PreservesCreatedAt(t *testing.T) {
+	db := openChatRewindTestDB(t)
+	sessRepo := &chatSessionRepo{db: db}
+	msgRepo := &chatMessageRepo{db: db}
+	ctx := context.Background()
+	parent, _ := sessRepo.Create(ctx, "u1", "a1", "p", "")
+	child, _ := sessRepo.Create(ctx, "u1", "a1", "c", parent.ID)
+	srcAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	src := &biz.ChatMessage{
+		ID: "old", SessionID: parent.ID, Role: "user", Content: "hi",
+		Active: true, CreatedAt: srcAt, Metadata: map[string]any{"k": "v"},
+	}
+	got, err := msgRepo.InsertClone(ctx, child.ID, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID == "old" || got.SessionID != child.ID {
+		t.Fatalf("clone ids %+v", got)
+	}
+	if !got.CreatedAt.Equal(srcAt) {
+		t.Fatalf("created_at %v want %v", got.CreatedAt, srcAt)
+	}
+	if got.Metadata["forked_from_message_id"] != "old" || got.Metadata["k"] != "v" {
+		t.Fatalf("metadata %+v", got.Metadata)
 	}
 }

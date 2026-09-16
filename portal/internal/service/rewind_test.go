@@ -51,6 +51,12 @@ func (r *rewindMsgRepo) SoftDeactivateAfter(_ context.Context, sessionID string,
 	}
 	return ids, nil
 }
+func (r *rewindMsgRepo) ListActiveOrdered(context.Context, string) ([]*biz.ChatMessage, error) {
+	return nil, nil
+}
+func (r *rewindMsgRepo) InsertClone(context.Context, string, *biz.ChatMessage) (*biz.ChatMessage, error) {
+	return nil, nil
+}
 
 type rewindSessRepo struct {
 	sess *biz.ChatSession
