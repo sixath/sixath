@@ -96,6 +96,7 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkGetHandler(agentUC))
 	r.POST("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkHandler(agentUC, codeRoots))
 	r.POST("/api/v1/sessions/{session_id}/rewind", RewindHandler(chat))
+	r.POST("/api/v1/sessions/{session_id}/fork", ForkHandler(chat))
 	r.POST("/api/v1/mcp-servers", CreateMcpServerHandler(mcpServer))
 	r.GET("/api/v1/mcp-servers", ListMcpServersHandler(mcpServer))
 	r.GET("/api/v1/mcp-servers/{id}", GetMcpServerHandler(mcpServer))
