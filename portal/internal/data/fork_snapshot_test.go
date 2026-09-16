@@ -119,6 +119,51 @@ func TestForkSnapshot_CopiesPrefixTracesAndMemory(t *testing.T) {
 	if len(parentMsgs) != 3 {
 		t.Fatal("parent must keep all messages")
 	}
+	childTraces, err := NewTurnTraceStore(db).ListBySession(ctx, out.Child.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range childTraces {
+		if tr.SessionID != out.Child.ID {
+			t.Fatalf("child trace session_id=%s want %s", tr.SessionID, out.Child.ID)
+		}
+	}
+}
+
+func TestForkSnapshot_TraceTurnSeqChronological(t *testing.T) {
+	db := openForkDB(t)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	parent := seedParent(t, db, base)
+
+	var out ForkSnapshotResult
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var e error
+		out, e = ForkSnapshot(ctx, tx, ForkSnapshotInput{
+			Parent: parent.sess,
+			Anchor: parent.msgs[2],
+		})
+		return e
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := NewTurnTraceStore(db).ListBySession(ctx, out.Child.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("child traces len=%d want 2", len(list))
+	}
+	earlier, later := list[0], list[1]
+	if later.CreatedAt.Before(earlier.CreatedAt) {
+		earlier, later = later, earlier
+	}
+	if earlier.TurnSeq >= later.TurnSeq {
+		t.Fatalf("earlier CreatedAt=%s seq=%d; later CreatedAt=%s seq=%d; want earlier seq < later seq",
+			earlier.CreatedAt, earlier.TurnSeq, later.CreatedAt, later.TurnSeq)
+	}
 }
 
 func TestForkSnapshot_RollsBackOnTraceError(t *testing.T) {

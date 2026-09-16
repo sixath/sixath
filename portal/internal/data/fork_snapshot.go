@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -85,6 +86,12 @@ func ForkSnapshotWithDeps(ctx context.Context, tx *gorm.DB, in ForkSnapshotInput
 	if err != nil {
 		return ForkSnapshotResult{}, err
 	}
+	sort.Slice(traces, func(i, j int) bool {
+		if traces[i].CreatedAt.Equal(traces[j].CreatedAt) {
+			return traces[i].TurnSeq < traces[j].TurnSeq
+		}
+		return traces[i].CreatedAt.Before(traces[j].CreatedAt)
+	})
 	copiedTraces := 0
 	for i := range traces {
 		tr := traces[i]
