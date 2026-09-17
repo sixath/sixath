@@ -244,20 +244,20 @@ func (r *chatSessionRepo) MarkReadonly(ctx context.Context, sessionID string) er
 }
 
 func (r *chatSessionRepo) SetModelOverride(ctx context.Context, sessionID, providerID, modelName string) error {
-	res := r.db.WithContext(ctx).Model(&model.ChatSession{}).
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&model.ChatSession{}).Where("id = ?", sessionID).Count(&n).Error; err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return r.db.WithContext(ctx).Model(&model.ChatSession{}).
 		Where("id = ?", sessionID).
 		Select("model_provider_id", "model").
 		Updates(map[string]any{
 			"model_provider_id": providerID,
 			"model":             modelName,
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+		}).Error
 }
 
 func (r *chatSessionRepo) Delete(ctx context.Context, id string) error {

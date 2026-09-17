@@ -40,7 +40,6 @@ type ProviderView struct {
 	Name      string    `json:"name"`
 	Kind      string    `json:"kind"`
 	BaseURL   string    `json:"base_url"`
-	APIKey    string    `json:"-"`
 	HasAPIKey bool      `json:"has_api_key"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
@@ -80,7 +79,21 @@ func (s *ModelCatalogStore) CreateProvider(ctx context.Context, in ProviderInput
 		APIKey:  in.APIKey,
 		Enabled: in.Enabled,
 	}
-	if err := s.db.WithContext(ctx).Create(row).Error; err != nil {
+	// GORM skips zero-value fields with DB defaults on Create; wrap Create+enabled
+	// correction in one transaction so a failed second step cannot leave enabled=true.
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+		if !in.Enabled {
+			if err := tx.Model(&model.ModelProvider{}).Where("id = ?", row.ID).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			row.Enabled = false
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return providerToView(row), nil
@@ -109,18 +122,36 @@ func (s *ModelCatalogStore) MustAPIKey(ctx context.Context, id string) (string, 
 }
 
 func (s *ModelCatalogStore) CreateEntry(ctx context.Context, in CatalogInput) (*CatalogView, error) {
+	providerID := strings.TrimSpace(in.ProviderID)
+	modelName := strings.TrimSpace(in.Model)
+	if providerID == "" || modelName == "" {
+		return nil, errors.New("provider_id and model are required")
+	}
+	if in.Source != SourceSync && in.Source != SourceManual {
+		return nil, errors.New("invalid catalog source")
+	}
+	var prov model.ModelProvider
+	if err := s.db.WithContext(ctx).Where("id = ?", providerID).First(&prov).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
 	display := in.DisplayName
 	if display == "" {
-		display = in.Model
+		display = modelName
 	}
 	row := &model.ModelCatalogEntry{
 		ID:          uuid.New().String(),
-		ProviderID:  in.ProviderID,
-		Model:       in.Model,
+		ProviderID:  providerID,
+		Model:       modelName,
 		DisplayName: display,
 		Source:      in.Source,
 	}
 	if err := s.db.WithContext(ctx).Create(row).Error; err != nil {
+		if isDuplicateKey(err) {
+			return nil, ErrDuplicateName
+		}
 		return nil, err
 	}
 	return catalogToView(row), nil
@@ -132,7 +163,6 @@ func providerToView(row *model.ModelProvider) *ProviderView {
 		Name:      row.Name,
 		Kind:      row.Kind,
 		BaseURL:   row.BaseURL,
-		APIKey:    "",
 		HasAPIKey: row.APIKey != "",
 		Enabled:   row.Enabled,
 		CreatedAt: row.CreatedAt,
