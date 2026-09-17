@@ -154,11 +154,21 @@ OpenAI 兼容 HTTP 或 DashScope 客户端
 
 ### 5.2 聊天
 
-- `GET /api/v1/agents/{agent_id}/model-choices`（或 `GET /api/v1/model-catalog?usable=1&agent_id=`）  
-  需对该 Agent 有会话读权限（与 `ListSessions` / 进 ChatPage 相同）。  
-  返回：
-  - `{ "id": "agent_default", "label": "Agent 默认（{provider}/{model}）" }`
-  - 其余：`enabled && !hidden` 的目录项，带 `provider_id`、`provider_name`、`model`、`display_name`、`kind`
+聊天只读列表固定为：
+
+`GET /api/v1/agents/{agent_id}/model-choices`
+
+需对该 Agent 有会话读权限（与 `ListSessions` / 进 ChatPage 相同）。**不要**复用管理端 `GET /api/v1/model-catalog`（管理列表含隐藏项与密钥标记，ACL 是 Agent 写权限）。
+
+返回：
+
+- `{ "id": "agent_default", "label": "Agent 默认（{provider}/{model}）" }`
+- 其余 usable 目录项：供应商 `enabled`、**有 api_key**、条目 `!hidden`。字段：`provider_id`、`provider_name`、`model`、`display_name`、`kind`
+
+无 key 的供应商不进下拉（与发消息 400 对齐，避免可选却一发就失败）。
+
+当前会话覆盖：现有 `GET /api/v1/sessions/{id}`（或 Web 已用的 getSession）增加 `model_provider_id`、`model`（空表示默认）。ChatPage 在 `sessionId` 变化时用该读接口还原下拉，不依赖 PATCH 后的本地 state，也不改 `SendMessage` proto。
+
 - `PATCH /api/v1/sessions/{id}/model`  
   ACL 与发消息相同（会话所属用户）。  
   Body：
