@@ -130,6 +130,42 @@ func (s *ModelCatalogStore) MustAPIKey(ctx context.Context, id string) (string, 
 	return row.APIKey, nil
 }
 
+func (s *ModelCatalogStore) GetProviderSecret(ctx context.Context, id string) (kind, baseURL, apiKey string, enabled bool, err error) {
+	var row model.ModelProvider
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&row).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", "", "", false, ErrNotFound
+		}
+		return "", "", "", false, err
+	}
+	return row.Kind, row.BaseURL, row.APIKey, row.Enabled, nil
+}
+
+func (s *ModelCatalogStore) HasUsableEntry(ctx context.Context, providerID, modelName string) (bool, error) {
+	var prov model.ModelProvider
+	if err := s.db.WithContext(ctx).Where("id = ?", providerID).First(&prov).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	if !prov.Enabled || strings.TrimSpace(prov.APIKey) == "" {
+		return false, nil
+	}
+	var entry model.ModelCatalogEntry
+	err := s.db.WithContext(ctx).Where("provider_id = ? AND model = ?", providerID, modelName).First(&entry).Error
+	if err == gorm.ErrRecordNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if entry.Hidden {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (s *ModelCatalogStore) CreateEntry(ctx context.Context, in CatalogInput) (*CatalogView, error) {
 	providerID := strings.TrimSpace(in.ProviderID)
 	modelName := strings.TrimSpace(in.Model)

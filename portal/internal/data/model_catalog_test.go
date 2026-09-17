@@ -257,3 +257,116 @@ func TestModelCatalog_SyncDashScopeRejected(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestModelCatalog_GetProviderSecret(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	p, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "relay", Kind: KindOpenAICompat, BaseURL: "https://relay.example/v1", APIKey: "sk-secret", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, baseURL, apiKey, enabled, err := st.GetProviderSecret(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != KindOpenAICompat || baseURL != "https://relay.example/v1" || apiKey != "sk-secret" || !enabled {
+		t.Fatalf("kind=%q baseURL=%q apiKey=%q enabled=%v", kind, baseURL, apiKey, enabled)
+	}
+}
+
+func TestModelCatalog_GetProviderSecret_NotFound(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	_, _, _, _, err := st.GetProviderSecret(ctx, "missing-provider")
+	if err != ErrNotFound {
+		t.Fatalf("err=%v want ErrNotFound", err)
+	}
+	if strings.Contains(err.Error(), "sk-") || strings.Contains(err.Error(), "api_key") {
+		t.Fatalf("error must not contain key: %v", err)
+	}
+}
+
+func TestModelCatalog_HasUsableEntry(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	p, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "relay", Kind: KindOpenAICompat, BaseURL: "https://relay.example/v1", APIKey: "sk-1", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: p.ID, Model: "deepseek-v3", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := st.HasUsableEntry(ctx, p.ID, "deepseek-v3")
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v want true", ok, err)
+	}
+	ok, err = st.HasUsableEntry(ctx, p.ID, "other-model")
+	if err != nil || ok {
+		t.Fatalf("exact mismatch ok=%v err=%v want false", ok, err)
+	}
+}
+
+func TestModelCatalog_HasUsableEntry_FalseCases(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+
+	ok, err := st.HasUsableEntry(ctx, "missing", "m1")
+	if err != nil || ok {
+		t.Fatalf("missing provider ok=%v err=%v", ok, err)
+	}
+
+	disabled, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "off", Kind: KindDashScope, APIKey: "sk-off", Enabled: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: disabled.ID, Model: "qwen-max", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = st.HasUsableEntry(ctx, disabled.ID, "qwen-max")
+	if err != nil || ok {
+		t.Fatalf("disabled ok=%v err=%v", ok, err)
+	}
+
+	noKey, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "empty", Kind: KindDashScope, APIKey: "", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: noKey.ID, Model: "qwen-max", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = st.HasUsableEntry(ctx, noKey.ID, "qwen-max")
+	if err != nil || ok {
+		t.Fatalf("empty key ok=%v err=%v", ok, err)
+	}
+
+	hiddenProv, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "hid", Kind: KindOpenAICompat, BaseURL: "https://relay.example/v1", APIKey: "sk-h", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := st.CreateEntry(ctx, CatalogInput{ProviderID: hiddenProv.ID, Model: "hidden-model", Source: SourceManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := true
+	if err := st.PatchEntry(ctx, EntryPatch{ID: e.ID, Hidden: &hidden}); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = st.HasUsableEntry(ctx, hiddenProv.ID, "hidden-model")
+	if err != nil || ok {
+		t.Fatalf("hidden ok=%v err=%v", ok, err)
+	}
+}

@@ -41,6 +41,7 @@ type ChatService struct {
 	turnTraceStore turntrace.Store
 	codeRoots      []string
 	db             *gorm.DB
+	catalog        chat.TurnModelLoader
 	log            *log.Helper
 }
 
@@ -62,6 +63,7 @@ func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.Agent
 	s.SetCodeRoots(codeRoots)
 	if d != nil {
 		s.db = d.DB()
+		s.catalog = data.NewModelCatalogStore(d.DB())
 	}
 	return s
 }
@@ -352,15 +354,14 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	// 构建模型
-	m, err := chat.BuildModel(
-		agentMeta.ModelConfig.Provider,
-		agentMeta.ModelConfig.Model,
-		agentMeta.ModelConfig.APIKey,
-		agentMeta.ModelConfig.BaseURL,
-	)
+	// 构建模型（会话覆盖走 Resolve；无覆盖仍用 Agent model_config）
+	cfg, err := chat.ResolveTurnModelConfig(ctx, s.catalog, agentMeta, session)
 	if err != nil {
-		s.log.Errorf("SendMessage build model failed: session_id=%s agent_id=%s provider=%s model=%s err=%v", sessionID, session.AgentID, agentMeta.ModelConfig.Provider, agentMeta.ModelConfig.Model, err)
+		return nil, err
+	}
+	m, err := chat.BuildModel(cfg.Provider, cfg.Model, cfg.APIKey, cfg.BaseURL)
+	if err != nil {
+		s.log.Errorf("SendMessage build model failed: session_id=%s agent_id=%s provider=%s model=%s err=%v", sessionID, session.AgentID, cfg.Provider, cfg.Model, err)
 		return nil, err
 	}
 
@@ -565,14 +566,13 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 
-	m, err := chat.BuildModel(
-		agentMeta.ModelConfig.Provider,
-		agentMeta.ModelConfig.Model,
-		agentMeta.ModelConfig.APIKey,
-		agentMeta.ModelConfig.BaseURL,
-	)
+	cfg, err := chat.ResolveTurnModelConfig(ctx, s.catalog, agentMeta, session)
 	if err != nil {
-		s.log.Errorf("SendMessageStream build model failed: session_id=%s agent_id=%s provider=%s model=%s err=%v", sessionID, session.AgentID, agentMeta.ModelConfig.Provider, agentMeta.ModelConfig.Model, err)
+		return nil, "", err
+	}
+	m, err := chat.BuildModel(cfg.Provider, cfg.Model, cfg.APIKey, cfg.BaseURL)
+	if err != nil {
+		s.log.Errorf("SendMessageStream build model failed: session_id=%s agent_id=%s provider=%s model=%s err=%v", sessionID, session.AgentID, cfg.Provider, cfg.Model, err)
 		return nil, "", err
 	}
 
@@ -592,7 +592,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		memory.EpisodeLocalFailureSink{Buffer: epBuf},
 	})
 	debugRun := agentMeta.DebugRun
-	modelName := agentMeta.ModelConfig.Model
+	modelName := cfg.Model
 	// 可靠投递语义：使用同步订阅（Subscribe(false, ...)）。框架在发送 StreamEventDone
 	// 之前先 emit(ModelResponded)（见 react_agent.go），而 Bus.Publish 会先把所有同步
 	// 监听器执行完再继续。因此 ModelResponded 一定在 StreamEventDone 之前落入 relay。
