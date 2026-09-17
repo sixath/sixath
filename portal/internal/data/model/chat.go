@@ -9,17 +9,19 @@ import (
 
 // ChatSession 会话表
 type ChatSession struct {
-	ID              string    `gorm:"column:id;primaryKey;size:36"`
-	AgentID         string    `gorm:"column:agent_id;size:36;not null;index"`
-	UserID          string    `gorm:"column:user_id;size:36;not null;default:'';index"`
-	ParentSessionID string    `gorm:"column:parent_session_id;size:36;index"`
-	Title           string    `gorm:"column:title;size:256;not null"`
+	ID              string `gorm:"column:id;primaryKey;size:36"`
+	AgentID         string `gorm:"column:agent_id;size:36;not null;index"`
+	UserID          string `gorm:"column:user_id;size:36;not null;default:'';index"`
+	ParentSessionID string `gorm:"column:parent_session_id;size:36;index"`
+	Title           string `gorm:"column:title;size:256;not null"`
 	// RewindCount increments on each successful Rewind (Phase 2).
 	RewindCount int `gorm:"column:rewind_count;not null;default:0"`
 	// Readonly sessions reject new user messages (archive after L2 fork).
-	Readonly  bool      `gorm:"column:readonly;not null;default:0"`
-	CreatedAt time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+	Readonly        bool      `gorm:"column:readonly;not null;default:0"`
+	ModelProviderID string    `gorm:"column:model_provider_id;size:36"`
+	Model           string    `gorm:"column:model;size:256"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (ChatSession) TableName() string {

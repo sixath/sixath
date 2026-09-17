@@ -36,6 +36,9 @@ func (stubSessionRepoSucceedDelete) BumpRewindCount(context.Context, string) err
 	return nil
 }
 func (stubSessionRepoSucceedDelete) MarkReadonly(context.Context, string) error { return nil }
+func (stubSessionRepoSucceedDelete) SetModelOverride(context.Context, string, string, string) error {
+	return nil
+}
 
 func TestDeleteSession_InvokesChatSessionEndHooks(t *testing.T) {
 	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil)

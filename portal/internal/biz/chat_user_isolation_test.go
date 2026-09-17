@@ -75,6 +75,10 @@ func (f *fakeChatSessionRepo) MarkReadonly(_ context.Context, sessionID string) 
 	return nil
 }
 
+func (f *fakeChatSessionRepo) SetModelOverride(context.Context, string, string, string) error {
+	return nil
+}
+
 func TestChatSessionUserIsolation(t *testing.T) {
 	repo := &fakeChatSessionRepo{
 		sessions: map[string]*ChatSession{

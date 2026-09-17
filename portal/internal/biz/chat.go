@@ -21,6 +21,8 @@ type ChatSession struct {
 	AgentName       string
 	RewindCount     int
 	Readonly        bool
+	ModelProviderID string
+	Model           string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -61,6 +63,8 @@ type ChatSessionRepo interface {
 	BumpRewindCount(ctx context.Context, sessionID string) error
 	// MarkReadonly sets readonly=true (archive after L2 fork).
 	MarkReadonly(ctx context.Context, sessionID string) error
+	// SetModelOverride writes session model overlay. Both empty clears to Agent default.
+	SetModelOverride(ctx context.Context, sessionID, providerID, model string) error
 }
 
 var ErrSessionNotFound = kratosErrors.NotFound("SESSION_NOT_FOUND", "session not found")

@@ -36,6 +36,9 @@ func (s *stubSessionRepo) BumpRewindCount(context.Context, string) error {
 	return nil
 }
 func (s *stubSessionRepo) MarkReadonly(context.Context, string) error { return nil }
+func (s *stubSessionRepo) SetModelOverride(context.Context, string, string, string) error {
+	return nil
+}
 
 type stubMessageRepo struct{}
 

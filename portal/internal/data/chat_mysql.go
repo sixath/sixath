@@ -76,6 +76,8 @@ func sessionModelToBiz(s *model.ChatSession, agentName, preview string) *biz.Cha
 		Preview:         preview,
 		RewindCount:     s.RewindCount,
 		Readonly:        s.Readonly,
+		ModelProviderID: s.ModelProviderID,
+		Model:           s.Model,
 		CreatedAt:       s.CreatedAt,
 		UpdatedAt:       s.UpdatedAt,
 	}
@@ -231,6 +233,23 @@ func (r *chatSessionRepo) MarkReadonly(ctx context.Context, sessionID string) er
 		Updates(map[string]any{
 			"readonly":   true,
 			"updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *chatSessionRepo) SetModelOverride(ctx context.Context, sessionID, providerID, modelName string) error {
+	res := r.db.WithContext(ctx).Model(&model.ChatSession{}).
+		Where("id = ?", sessionID).
+		Select("model_provider_id", "model").
+		Updates(map[string]any{
+			"model_provider_id": providerID,
+			"model":             modelName,
 		})
 	if res.Error != nil {
 		return res.Error

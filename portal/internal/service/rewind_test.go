@@ -65,7 +65,9 @@ type rewindSessRepo struct {
 func (r *rewindSessRepo) Create(context.Context, string, string, string, string) (*biz.ChatSession, error) {
 	return nil, nil
 }
-func (r *rewindSessRepo) GetByID(context.Context, string) (*biz.ChatSession, error) { return r.sess, nil }
+func (r *rewindSessRepo) GetByID(context.Context, string) (*biz.ChatSession, error) {
+	return r.sess, nil
+}
 func (r *rewindSessRepo) ListByAgent(context.Context, string, string, string, int32, int32, bool) ([]*biz.ChatSession, int, error) {
 	return nil, 0, nil
 }
@@ -83,6 +85,9 @@ func (r *rewindSessRepo) BumpRewindCount(context.Context, string) error {
 }
 func (r *rewindSessRepo) MarkReadonly(context.Context, string) error {
 	r.sess.Readonly = true
+	return nil
+}
+func (r *rewindSessRepo) SetModelOverride(context.Context, string, string, string) error {
 	return nil
 }
 

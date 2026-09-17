@@ -113,9 +113,12 @@ func (f *fakeChatSessionRepoForPeer) Delete(_ context.Context, id string) error 
 	delete(f.sessions, id)
 	return nil
 }
-func (f *fakeChatSessionRepoForPeer) Touch(context.Context, string) error          { return nil }
+func (f *fakeChatSessionRepoForPeer) Touch(context.Context, string) error           { return nil }
 func (f *fakeChatSessionRepoForPeer) BumpRewindCount(context.Context, string) error { return nil }
-func (f *fakeChatSessionRepoForPeer) MarkReadonly(context.Context, string) error   { return nil }
+func (f *fakeChatSessionRepoForPeer) MarkReadonly(context.Context, string) error    { return nil }
+func (f *fakeChatSessionRepoForPeer) SetModelOverride(context.Context, string, string, string) error {
+	return nil
+}
 
 func seedPeerChannel(t *testing.T, channelRepo *fakeChannelRepo, channelID, defaultAgent string, allowed []string) {
 	t.Helper()
