@@ -300,14 +300,16 @@ func (s *Service) handleTurns(ctx context.Context, hctx khttp.Context) error {
 		}
 		return hctx.JSON(200, out)
 	case "stream":
-		// Prefer request context for cancel-on-disconnect; Auth already attached caller to ctx.
-		runCtx := ctx
-		if reqCtx := hctx.Request().Context(); reqCtx != nil {
-			if caller, ok := biz.CallerUserID(ctx); ok {
-				runCtx = biz.WithCallerUserID(reqCtx, caller)
-			} else {
-				runCtx = reqCtx
-			}
+		// Cancel-on-disconnect, but drop Kratos HTTP deadline so ReAct MaxSteps
+		// (not server.http.timeout) bounds the turn. Caller id lives on ctx from Auth.
+		reqCtx := ctx
+		if c := hctx.Request().Context(); c != nil {
+			reqCtx = c
+		}
+		runCtx, stop := streamRunContext(reqCtx)
+		defer stop()
+		if caller, ok := biz.CallerUserID(ctx); ok {
+			runCtx = biz.WithCallerUserID(runCtx, caller)
 		}
 		ch, sessionID, err := s.startStreamTurn(runCtx, req)
 		w := hctx.Response()

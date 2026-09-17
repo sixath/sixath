@@ -1,7 +1,8 @@
 server:
   http:
     addr: 0.0.0.0:8000
-    # 流式对话需较长时间，1s 会导致 context deadline exceeded
+    # JSON API 超时（Kratos 默认 1s）。流式 /runtime/v1/turns 忽略该 deadline，
+    # 由 ReAct MaxSteps 与客户端断开收束。
     timeout: 120s
   grpc:
     addr: 0.0.0.0:9000

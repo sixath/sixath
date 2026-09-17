@@ -45,6 +45,7 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	}
 	// Kratos defaults HTTP timeout to 1s; without this, ACL-heavy list APIs hit
 	// context deadline exceeded even when config.yaml sets server.http.timeout.
+	// Stream turns (/runtime/v1/turns reply_mode=stream) ignore this deadline.
 	if c != nil && c.Http != nil && c.Http.Timeout != nil {
 		opts = append(opts, httptransport.Timeout(c.Http.Timeout.AsDuration()))
 	}

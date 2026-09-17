@@ -13,6 +13,8 @@ import (
 	chatv1 "backend/api/chat/v1"
 	"backend/internal/biz"
 	"backend/internal/service"
+
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 type fakeTurns struct {
@@ -262,6 +264,57 @@ func TestTurns_CancelContext(t *testing.T) {
 	}
 	if !turns.canceled() {
 		t.Fatal("expected turn runner to observe ctx.Done")
+	}
+}
+
+func TestTurns_StreamSurvivesServerHTTPTimeout(t *testing.T) {
+	chat := newFakeChat()
+	sess, err := chat.CreateSession(biz.WithCallerUserID(context.Background(), "user-1"), "agent-t", "t", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	released := make(chan struct{})
+	turns := &fakeTurns{
+		started:      started,
+		blockUntil:   released,
+		streamEvents: []service.ChatStreamEvent{{Type: service.ChatStreamEventChunk, Content: "after-deadline"}},
+	}
+	Configure(testRuntimeToken)
+	srv := khttp.NewServer(khttp.Timeout(40 * time.Millisecond))
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+	RegisterRoutes(srv, turnTestService(chat, turns))
+
+	body := `{"session_id":"` + sess.ID + `","content":"hi","reply_mode":"stream"}`
+	req := runtimeReq(http.MethodPost, "/runtime/v1/turns", body, "user-1", true)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.ServeHTTP(rec, req)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn runner did not start")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if turns.canceled() {
+		t.Fatal("HTTP server deadline must not cancel the stream runner")
+	}
+	close(released)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after stream finished")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "after-deadline") {
+		t.Fatalf("body missing post-deadline chunk: %s", rec.Body.String())
 	}
 }
 

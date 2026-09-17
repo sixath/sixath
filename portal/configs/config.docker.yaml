@@ -1,7 +1,8 @@
 server:
   http:
     addr: 0.0.0.0:8000
-    # 流式对话需较长时间；经 nginx 反代时一并拉长 proxy_read_timeout
+    # JSON API 超时（Kratos 默认 1s）。流式 turn 忽略该 deadline（ReAct MaxSteps + 断开）。
+    # nginx 反代流式时仍需拉长 proxy_read_timeout，避免代理层先掐连接。
     timeout: 600s
   grpc:
     addr: 0.0.0.0:9000

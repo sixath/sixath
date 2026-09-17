@@ -206,7 +206,7 @@ type bindingReply struct {
 }
 
 // turnFinalTimeout caps reply_mode=final; overridable in tests.
-// Keep aligned with Gateway turn_timeout_sec / Portal HTTP timeout (long tool loops).
+// Stream turns ignore server.http.timeout and use ReAct MaxSteps + disconnect instead.
 var turnFinalTimeout = 600 * time.Second
 
 func (s *Service) resolve(ctx context.Context, req resolveRequest) (*resolveReply, error) {
@@ -680,7 +680,8 @@ func (s *Service) runFinalTurn(ctx context.Context, req turnRequest) (*turnFinal
 	return out, nil
 }
 
-// startStreamTurn ACL-checks and starts SendMessageStream bound to ctx (disconnect cancels).
+// startStreamTurn ACL-checks and starts SendMessageStream bound to ctx
+// (disconnect cancels; HTTP server deadline is stripped by streamRunContext).
 func (s *Service) startStreamTurn(ctx context.Context, req turnRequest) (<-chan service.ChatStreamEvent, string, error) {
 	if s.turns == nil {
 		return nil, "", errors.InternalServer("UNAVAILABLE", "turn runner unavailable")
