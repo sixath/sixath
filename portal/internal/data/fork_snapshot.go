@@ -57,6 +57,13 @@ func ForkSnapshotWithDeps(ctx context.Context, tx *gorm.DB, in ForkSnapshotInput
 	if err != nil {
 		return ForkSnapshotResult{}, err
 	}
+	if in.Parent.ModelProviderID != "" || in.Parent.Model != "" {
+		if err := deps.Sessions.SetModelOverride(ctx, child.ID, in.Parent.ModelProviderID, in.Parent.Model); err != nil {
+			return ForkSnapshotResult{}, err
+		}
+		child.ModelProviderID = in.Parent.ModelProviderID
+		child.Model = in.Parent.Model
+	}
 
 	all, err := deps.Messages.ListActiveOrdered(ctx, in.Parent.ID)
 	if err != nil {

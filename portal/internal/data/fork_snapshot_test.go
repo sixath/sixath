@@ -130,6 +130,41 @@ func TestForkSnapshot_CopiesPrefixTracesAndMemory(t *testing.T) {
 	}
 }
 
+func TestForkSnapshot_CopiesModelOverlay(t *testing.T) {
+	db := openForkDB(t)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	parent := seedParent(t, db, base)
+	sessRepo := &chatSessionRepo{db: db}
+	if err := sessRepo.SetModelOverride(ctx, parent.sess.ID, "prov-1", "gpt-4o"); err != nil {
+		t.Fatal(err)
+	}
+	gotParent, err := sessRepo.GetByID(ctx, parent.sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.sess = gotParent
+	var out ForkSnapshotResult
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var e error
+		out, e = ForkSnapshot(ctx, tx, ForkSnapshotInput{
+			Parent: parent.sess,
+			Anchor: parent.msgs[1],
+		})
+		return e
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := sessRepo.GetByID(ctx, out.Child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ModelProviderID != "prov-1" || child.Model != "gpt-4o" {
+		t.Fatalf("child overlay %+v", child)
+	}
+}
+
 func TestForkSnapshot_TraceTurnSeqChronological(t *testing.T) {
 	db := openForkDB(t)
 	ctx := context.Background()

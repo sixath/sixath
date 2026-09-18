@@ -253,7 +253,6 @@ func (r *chatSessionRepo) SetModelOverride(ctx context.Context, sessionID, provi
 	}
 	return r.db.WithContext(ctx).Model(&model.ChatSession{}).
 		Where("id = ?", sessionID).
-		Select("model_provider_id", "model").
 		Updates(map[string]any{
 			"model_provider_id": providerID,
 			"model":             modelName,
