@@ -87,7 +87,12 @@ func (r *rewindSessRepo) MarkReadonly(context.Context, string) error {
 	r.sess.Readonly = true
 	return nil
 }
-func (r *rewindSessRepo) SetModelOverride(context.Context, string, string, string) error {
+func (r *rewindSessRepo) SetModelOverride(_ context.Context, _, providerID, model string) error {
+	if r.sess == nil {
+		return biz.ErrSessionNotFound
+	}
+	r.sess.ModelProviderID = providerID
+	r.sess.Model = model
 	return nil
 }
 

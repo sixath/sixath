@@ -41,7 +41,7 @@ type ChatService struct {
 	turnTraceStore turntrace.Store
 	codeRoots      []string
 	db             *gorm.DB
-	catalog        chat.TurnModelLoader
+	catalog        *data.ModelCatalogStore
 	log            *log.Helper
 }
 
@@ -82,6 +82,13 @@ func (s *ChatService) SetCodeRoots(roots []string) {
 		return
 	}
 	s.codeRoots = roots
+}
+
+func (s *ChatService) turnModelLoader() chat.TurnModelLoader {
+	if s == nil || s.catalog == nil {
+		return nil
+	}
+	return s.catalog
 }
 
 func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
@@ -355,7 +362,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	}
 
 	// 构建模型（会话覆盖走 Resolve；无覆盖仍用 Agent model_config）
-	cfg, err := chat.ResolveTurnModelConfig(ctx, s.catalog, agentMeta, session)
+	cfg, err := chat.ResolveTurnModelConfig(ctx, s.turnModelLoader(), agentMeta, session)
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +573,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 
-	cfg, err := chat.ResolveTurnModelConfig(ctx, s.catalog, agentMeta, session)
+	cfg, err := chat.ResolveTurnModelConfig(ctx, s.turnModelLoader(), agentMeta, session)
 	if err != nil {
 		return nil, "", err
 	}

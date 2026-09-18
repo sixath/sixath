@@ -370,3 +370,249 @@ func TestModelCatalog_HasUsableEntry_FalseCases(t *testing.T) {
 		t.Fatalf("hidden ok=%v err=%v", ok, err)
 	}
 }
+
+func TestModelCatalog_ListProviders(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	a, err := st.CreateProvider(ctx, ProviderInput{Name: "a", Kind: KindDashScope, APIKey: "sk-a", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.CreateProvider(ctx, ProviderInput{Name: "b", Kind: KindOpenAICompat, BaseURL: "https://b.example/v1", APIKey: "sk-b", Enabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListProviders(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("len=%d", len(list))
+	}
+	ids := map[string]ProviderView{}
+	for _, p := range list {
+		ids[p.ID] = p
+	}
+	if _, ok := ids[a.ID]; !ok {
+		t.Fatal("missing a")
+	}
+	if got := ids[b.ID]; got.Enabled {
+		t.Fatalf("b should stay disabled %+v", got)
+	}
+}
+
+func TestModelCatalog_PatchProvider(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	p, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "relay", Kind: KindOpenAICompat, BaseURL: "https://relay.example/v1", APIKey: "sk-1", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "relay-2"
+	got, err := st.PatchProvider(ctx, p.ID, ProviderPatch{Name: &name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "relay-2" {
+		t.Fatalf("name=%q", got.Name)
+	}
+	key, err := st.MustAPIKey(ctx, p.ID)
+	if err != nil || key != "sk-1" {
+		t.Fatalf("key must be unchanged: %q err=%v", key, err)
+	}
+	empty := ""
+	got, err = st.PatchProvider(ctx, p.ID, ProviderPatch{APIKey: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HasAPIKey {
+		t.Fatal("empty api_key must clear")
+	}
+	enabled := false
+	got, err = st.PatchProvider(ctx, p.ID, ProviderPatch{Enabled: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled {
+		t.Fatalf("Enabled=true after patch false: %+v", got)
+	}
+}
+
+func TestModelCatalog_DeleteProviderCascadesEntries(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	sessRepo := &chatSessionRepo{db: db}
+	ctx := context.Background()
+	p, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "relay", Kind: KindOpenAICompat, BaseURL: "https://relay.example/v1", APIKey: "sk-1", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: p.ID, Model: "m1", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := sessRepo.Create(ctx, "u1", "a1", "t", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sessRepo.SetModelOverride(ctx, sess.ID, p.ID, "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteProvider(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetProvider(ctx, p.ID); err != ErrNotFound {
+		t.Fatalf("provider err=%v", err)
+	}
+	entries, err := st.ListEntries(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries leftover %+v", entries)
+	}
+	got, err := sessRepo.GetByID(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ModelProviderID != p.ID || got.Model != "m1" {
+		t.Fatalf("session overlay must stay %+v", got)
+	}
+}
+
+func TestModelCatalog_ListUsable(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	okProv, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "ok", Kind: KindOpenAICompat, BaseURL: "https://ok.example/v1", APIKey: "sk-ok", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: okProv.ID, Model: "usable", DisplayName: "Usable", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	off, err := st.CreateProvider(ctx, ProviderInput{Name: "off", Kind: KindDashScope, APIKey: "sk-off", Enabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: off.ID, Model: "qwen", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	emptyKey, err := st.CreateProvider(ctx, ProviderInput{Name: "empty", Kind: KindDashScope, APIKey: "", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: emptyKey.ID, Model: "qwen2", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenProv, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "hid", Kind: KindOpenAICompat, BaseURL: "https://h.example/v1", APIKey: "sk-h", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	he, err := st.CreateEntry(ctx, CatalogInput{ProviderID: hiddenProv.ID, Model: "hidden", Source: SourceManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := true
+	if err := st.PatchEntry(ctx, EntryPatch{ID: he.ID, Hidden: &hidden}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListUsable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Model != "usable" || list[0].ProviderID != okProv.ID || list[0].ProviderName != "ok" || list[0].Kind != KindOpenAICompat {
+		t.Fatalf("%+v", list)
+	}
+}
+
+func TestModelCatalog_DeleteEntry(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	p, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "relay", Kind: KindOpenAICompat, BaseURL: "https://relay.example/v1", APIKey: "sk-1", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := st.CreateEntry(ctx, CatalogInput{ProviderID: p.ID, Model: "m1", Source: SourceManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteEntry(ctx, e.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListEntries(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("leftover %+v", list)
+	}
+}
+
+func TestModelCatalog_CreateEntryCustomDisplayNameOverridden(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v3"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	p, err := st.CreateProvider(ctx, ProviderInput{
+		Name: "relay", Kind: KindOpenAICompat, BaseURL: srv.URL, APIKey: "sk-1", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: p.ID, Model: "deepseek-v3", DisplayName: "DS V3", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Sync(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListEntries(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].DisplayName != "DS V3" {
+		t.Fatalf("custom display name overwritten %+v", list)
+	}
+}
+
+func TestModelCatalog_ListEntriesAll(t *testing.T) {
+	db := openModelCatalogDB(t)
+	st := NewModelCatalogStore(db)
+	ctx := context.Background()
+	a, err := st.CreateProvider(ctx, ProviderInput{Name: "a", Kind: KindDashScope, APIKey: "sk-a", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.CreateProvider(ctx, ProviderInput{Name: "b", Kind: KindDashScope, APIKey: "sk-b", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: a.ID, Model: "m-a", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateEntry(ctx, CatalogInput{ProviderID: b.ID, Model: "m-b", Source: SourceManual}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListEntries(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("len=%d %+v", len(list), list)
+	}
+}

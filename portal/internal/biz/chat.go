@@ -169,6 +169,14 @@ func (uc *ChatUsecase) GetSession(ctx context.Context, id string) (*ChatSession,
 	return s, err
 }
 
+// SetModelOverride writes or clears the session model overlay after GetSession ACL.
+func (uc *ChatUsecase) SetModelOverride(ctx context.Context, sessionID, providerID, model string) error {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return err
+	}
+	return uc.sessionRepo.SetModelOverride(ctx, sessionID, providerID, model)
+}
+
 // ListSessions 获取 Agent 的会话列表
 func (uc *ChatUsecase) ListSessions(ctx context.Context, agentID string, q string, page, pageSize int32, includePreview bool) ([]*ChatSession, int, error) {
 	caller, err := requireCaller(ctx)

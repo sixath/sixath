@@ -57,20 +57,36 @@ type CatalogInput struct {
 }
 
 type CatalogView struct {
-	ID          string
-	ProviderID  string
-	Model       string
-	DisplayName string
-	Hidden      bool
-	Source      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          string    `json:"id"`
+	ProviderID  string    `json:"provider_id"`
+	Model       string    `json:"model"`
+	DisplayName string    `json:"display_name"`
+	Hidden      bool      `json:"hidden"`
+	Source      string    `json:"source"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type EntryPatch struct {
 	ID          string
 	DisplayName *string
 	Hidden      *bool
+}
+
+type ProviderPatch struct {
+	Name    *string
+	Kind    *string
+	BaseURL *string
+	APIKey  *string
+	Enabled *bool
+}
+
+type UsableModel struct {
+	ProviderID   string `json:"provider_id"`
+	ProviderName string `json:"provider_name"`
+	Kind         string `json:"kind"`
+	Model        string `json:"model"`
+	DisplayName  string `json:"display_name"`
 }
 
 func (s *ModelCatalogStore) CreateProvider(ctx context.Context, in ProviderInput) (*ProviderView, error) {
@@ -106,6 +122,81 @@ func (s *ModelCatalogStore) CreateProvider(ctx context.Context, in ProviderInput
 		return nil, err
 	}
 	return providerToView(row), nil
+}
+
+func (s *ModelCatalogStore) ListProviders(ctx context.Context) ([]ProviderView, error) {
+	var rows []model.ModelProvider
+	if err := s.db.WithContext(ctx).Order("created_at, id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ProviderView, 0, len(rows))
+	for i := range rows {
+		out = append(out, *providerToView(&rows[i]))
+	}
+	return out, nil
+}
+
+func (s *ModelCatalogStore) PatchProvider(ctx context.Context, id string, patch ProviderPatch) (*ProviderView, error) {
+	id = strings.TrimSpace(id)
+	var row model.ModelProvider
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&row).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if patch.Kind != nil {
+		kind := strings.TrimSpace(*patch.Kind)
+		if kind != KindOpenAICompat && kind != KindDashScope {
+			return nil, errors.New("invalid provider kind")
+		}
+		row.Kind = kind
+	}
+	if patch.BaseURL != nil {
+		row.BaseURL = *patch.BaseURL
+	}
+	if row.Kind == KindOpenAICompat && strings.TrimSpace(row.BaseURL) == "" {
+		return nil, errors.New("openai_compat requires base_url")
+	}
+	updates := map[string]any{}
+	if patch.Name != nil {
+		updates["name"] = *patch.Name
+	}
+	if patch.Kind != nil {
+		updates["kind"] = row.Kind
+	}
+	if patch.BaseURL != nil {
+		updates["base_url"] = row.BaseURL
+	}
+	if patch.APIKey != nil {
+		updates["api_key"] = *patch.APIKey
+	}
+	if patch.Enabled != nil {
+		updates["enabled"] = *patch.Enabled
+	}
+	if len(updates) > 0 {
+		if err := s.db.WithContext(ctx).Model(&model.ModelProvider{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return nil, err
+		}
+	}
+	return s.GetProvider(ctx, id)
+}
+
+func (s *ModelCatalogStore) DeleteProvider(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("provider_id = ?", id).Delete(&model.ModelCatalogEntry{}).Error; err != nil {
+			return err
+		}
+		res := tx.Where("id = ?", id).Delete(&model.ModelProvider{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (s *ModelCatalogStore) GetProvider(ctx context.Context, id string) (*ProviderView, error) {
@@ -186,12 +277,14 @@ func (s *ModelCatalogStore) CreateEntry(ctx context.Context, in CatalogInput) (*
 	if display == "" {
 		display = modelName
 	}
+	overridden := strings.TrimSpace(in.DisplayName) != "" && in.DisplayName != modelName
 	row := &model.ModelCatalogEntry{
-		ID:          uuid.New().String(),
-		ProviderID:  providerID,
-		Model:       modelName,
-		DisplayName: display,
-		Source:      in.Source,
+		ID:                    uuid.New().String(),
+		ProviderID:            providerID,
+		Model:                 modelName,
+		DisplayName:           display,
+		Source:                in.Source,
+		DisplayNameOverridden: overridden,
 	}
 	if err := s.db.WithContext(ctx).Create(row).Error; err != nil {
 		if isDuplicateKey(err) {
@@ -230,8 +323,12 @@ func (s *ModelCatalogStore) PatchEntry(ctx context.Context, patch EntryPatch) er
 }
 
 func (s *ModelCatalogStore) ListEntries(ctx context.Context, providerID string) ([]CatalogView, error) {
+	q := s.db.WithContext(ctx).Order("model")
+	if pid := strings.TrimSpace(providerID); pid != "" {
+		q = q.Where("provider_id = ?", pid)
+	}
 	var rows []model.ModelCatalogEntry
-	if err := s.db.WithContext(ctx).Where("provider_id = ?", providerID).Order("model").Find(&rows).Error; err != nil {
+	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]CatalogView, 0, len(rows))
@@ -239,6 +336,49 @@ func (s *ModelCatalogStore) ListEntries(ctx context.Context, providerID string) 
 		out = append(out, *catalogToView(&rows[i]))
 	}
 	return out, nil
+}
+
+func (s *ModelCatalogStore) ListUsable(ctx context.Context) ([]UsableModel, error) {
+	type row struct {
+		ProviderID   string
+		ProviderName string
+		Kind         string
+		Model        string
+		DisplayName  string
+	}
+	var rows []row
+	err := s.db.WithContext(ctx).Table("model_catalog AS e").
+		Select("e.provider_id AS provider_id, p.name AS provider_name, p.kind AS kind, e.model AS model, e.display_name AS display_name").
+		Joins("JOIN model_providers AS p ON p.id = e.provider_id").
+		Where("p.enabled = ? AND TRIM(p.api_key) != '' AND e.hidden = ?", true, false).
+		Order("p.name, e.model").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UsableModel, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, UsableModel{
+			ProviderID:   r.ProviderID,
+			ProviderName: r.ProviderName,
+			Kind:         r.Kind,
+			Model:        r.Model,
+			DisplayName:  r.DisplayName,
+		})
+	}
+	return out, nil
+}
+
+func (s *ModelCatalogStore) DeleteEntry(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	res := s.db.WithContext(ctx).Where("id = ?", id).Delete(&model.ModelCatalogEntry{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *ModelCatalogStore) Sync(ctx context.Context, providerID string) (int, error) {
