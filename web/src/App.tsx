@@ -4,6 +4,8 @@ import ToolList from './pages/ToolList'
 import ToolForm from './pages/ToolForm'
 import McpServerList from './pages/McpServerList'
 import McpServerForm from './pages/McpServerForm'
+import ModelProviderList from './pages/ModelProviderList'
+import ModelProviderForm from './pages/ModelProviderForm'
 import AgentList from './pages/AgentList'
 import AgentForm from './pages/AgentForm'
 import AgentDetail from './pages/AgentDetail'
@@ -45,6 +47,10 @@ function Breadcrumb() {
     else if (segments[2] === 'edit') { current = '编辑 MCP 服务'; icon = '✏️' }
     else if (segments[1]) { current = 'MCP 服务详情'; icon = '🔌' }
     else { current = 'MCP 服务'; icon = '🔌' }
+  } else if (segments[0] === 'model-providers') {
+    if (segments[1] === 'new') { current = '新建模型供应商'; icon = '➕' }
+    else if (segments[1]) { current = '编辑模型供应商'; icon = '✏️' }
+    else { current = '模型供应商'; icon = '🧠' }
   } else if (segments[0] === 'agents') {
     if (segments[1] === 'new') { current = '新建 Agent'; icon = '➕' }
     else if (segments[2] === 'edit') { current = '编辑 Agent'; icon = '✏️' }
@@ -138,6 +144,10 @@ function AppShell() {
               <span className="nav-item__icon">🔌</span>
               MCP 服务
             </NavLink>
+            <NavLink to="/model-providers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <span className="nav-item__icon">🧠</span>
+              模型供应商
+            </NavLink>
             <NavLink to="/agents" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">🤖</span>
               Agent 管理
@@ -202,6 +212,9 @@ function AppShell() {
             <Route path="/mcp-servers" element={<McpServerList />} />
             <Route path="/mcp-servers/new" element={<McpServerForm />} />
             <Route path="/mcp-servers/:id/edit" element={<McpServerForm />} />
+            <Route path="/model-providers" element={<ModelProviderList />} />
+            <Route path="/model-providers/new" element={<ModelProviderForm />} />
+            <Route path="/model-providers/:id" element={<ModelProviderForm />} />
             <Route path="/agents" element={<AgentList />} />
             <Route path="/agents/new" element={<AgentForm />} />
             <Route path="/agents/:id/edit" element={<AgentForm />} />

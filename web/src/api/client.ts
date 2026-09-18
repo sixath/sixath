@@ -398,6 +398,144 @@ export const mcpServerApi = {
   },
 }
 
+export type ModelProviderKind = 'openai_compat' | 'dashscope'
+
+export interface ModelProvider {
+  id: string
+  name: string
+  kind: ModelProviderKind
+  base_url: string
+  has_api_key: boolean
+  enabled: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ModelCatalogEntry {
+  id: string
+  provider_id: string
+  model: string
+  display_name: string
+  hidden: boolean
+  source: string
+}
+
+export interface ModelChoiceItem {
+  id: string
+  label: string
+  provider_id?: string
+  provider_name?: string
+  model?: string
+  display_name?: string
+  kind?: string
+}
+
+export interface ModelChoiceSelected {
+  provider_id: string
+  model: string
+}
+
+export const modelCatalogApi = {
+  listProviders: async () => {
+    const data = await request<{ ret?: BaseResponse; providers?: ModelProvider[] }>('/model-providers')
+    checkRet(data)
+    return data.providers || []
+  },
+  getProvider: async (id: string) => {
+    const data = await request<{ ret?: BaseResponse; provider: ModelProvider }>(`/model-providers/${id}`)
+    checkRet(data)
+    return data.provider
+  },
+  createProvider: async (body: {
+    name: string
+    kind: ModelProviderKind
+    base_url?: string
+    api_key?: string
+    enabled?: boolean
+  }) => {
+    const res = await request<{ ret?: BaseResponse; provider: ModelProvider }>('/model-providers', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    checkRet(res)
+    return res.provider
+  },
+  updateProvider: async (
+    id: string,
+    body: {
+      name?: string
+      kind?: ModelProviderKind
+      base_url?: string
+      api_key?: string
+      enabled?: boolean
+    },
+  ) => {
+    const res = await request<{ ret?: BaseResponse; provider: ModelProvider }>(`/model-providers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+    checkRet(res)
+    return res.provider
+  },
+  removeProvider: async (id: string) => {
+    const res = await request<{ ret?: BaseResponse }>(`/model-providers/${id}`, { method: 'DELETE' })
+    checkRet(res)
+  },
+  syncProvider: async (id: string) => {
+    const res = await request<{ ret?: BaseResponse; synced?: number }>(`/model-providers/${id}/sync`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    checkRet(res)
+    return res.synced ?? 0
+  },
+  listCatalog: async (providerId?: string) => {
+    const q = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : ''
+    const data = await request<{ ret?: BaseResponse; items?: ModelCatalogEntry[] }>(`/model-catalog${q}`)
+    checkRet(data)
+    return data.items || []
+  },
+  createCatalog: async (body: { provider_id: string; model: string; display_name?: string }) => {
+    const res = await request<{ ret?: BaseResponse; item: ModelCatalogEntry }>('/model-catalog', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    checkRet(res)
+    return res.item
+  },
+  patchCatalog: async (id: string, body: { display_name?: string; hidden?: boolean }) => {
+    const res = await request<{ ret?: BaseResponse }>(`/model-catalog/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+    checkRet(res)
+  },
+  removeCatalog: async (id: string) => {
+    const res = await request<{ ret?: BaseResponse }>(`/model-catalog/${id}`, { method: 'DELETE' })
+    checkRet(res)
+  },
+  listModelChoices: async (agentId: string, sessionId?: string) => {
+    const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+    const data = await request<{
+      ret?: BaseResponse
+      items?: ModelChoiceItem[]
+      selected?: ModelChoiceSelected | null
+    }>(`/agents/${agentId}/model-choices${q}`)
+    checkRet(data)
+    return { items: data.items || [], selected: data.selected ?? null }
+  },
+  patchSessionModel: async (
+    sessionId: string,
+    body: { choice: 'agent_default' } | { model_provider_id: string; model: string },
+  ) => {
+    const res = await request<{ ret?: BaseResponse }>(`/sessions/${sessionId}/model`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+    checkRet(res)
+  },
+}
+
 // Agent API
 export interface ModelConfig {
   provider: string
