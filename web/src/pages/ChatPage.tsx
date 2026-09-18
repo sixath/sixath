@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { agentApi, chatApi, DEFAULT_SESSION_TITLE, type Agent, type ChatMessage } from '../api/client'
+import { agentApi, chatApi, DEFAULT_SESSION_TITLE, modelCatalogApi, type Agent, type ChatMessage, type ModelChoiceItem, type ModelChoiceSelected } from '../api/client'
 import { findLatestSessionId, prepareSessionForSend } from '../api/resolveSession'
 import {
   buildConfirmSubmitBody,
@@ -239,6 +239,11 @@ function TimelineView({ nodes }: { nodes: TimelineNode[] }) {
   )
 }
 
+function choiceValue(selected: ModelChoiceSelected | null | undefined): string {
+  if (!selected?.provider_id || !selected.model) return 'agent_default'
+  return `${selected.provider_id}::${selected.model}`
+}
+
 export default function ChatPage(props?: ChatPageProps) {
   const params = useParams()
   const navigate = useNavigate()
@@ -265,6 +270,8 @@ export default function ChatPage(props?: ChatPageProps) {
   const [error, setError] = useState('')
   const [rewinding, setRewinding] = useState(false)
   const [forking, setForking] = useState(false)
+  const [modelChoices, setModelChoices] = useState<ModelChoiceItem[]>([])
+  const [modelChoice, setModelChoice] = useState('agent_default')
   const [nowMs, setNowMs] = useState(() => Date.now())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -391,6 +398,28 @@ export default function ChatPage(props?: ChatPageProps) {
       }
     }
   }, [sessionId, agentId, goTo])
+
+  useEffect(() => {
+    if (!agentId) {
+      setModelChoices([])
+      setModelChoice('agent_default')
+      return
+    }
+    let cancelled = false
+    modelCatalogApi
+      .listModelChoices(agentId, sessionId)
+      .then((res) => {
+        if (cancelled) return
+        setModelChoices(res.items)
+        setModelChoice(choiceValue(res.selected))
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agentId, sessionId])
 
   useEffect(() => {
     const streamSid = streamSessionRef.current
@@ -1189,6 +1218,67 @@ export default function ChatPage(props?: ChatPageProps) {
         </div>
         <div className="chat-input-wrap">
           <div className="chat-input-wrap-inner">
+            {hasAgent ? (
+              <select
+                className="chat-input"
+                style={{ maxWidth: 280, flex: '0 0 auto' }}
+                value={modelChoice}
+                disabled={streaming || !sessionId}
+                onChange={async (e) => {
+                  const next = e.target.value
+                  const prev = modelChoice
+                  if (!sessionId || next === prev) return
+                  try {
+                    if (next === 'agent_default') {
+                      await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
+                    } else {
+                      const sep = next.indexOf('::')
+                      await modelCatalogApi.patchSessionModel(sessionId, {
+                        model_provider_id: next.slice(0, sep),
+                        model: next.slice(sep + 2),
+                      })
+                    }
+                    setModelChoice(next)
+                  } catch (err) {
+                    setError((err as Error).message)
+                    setModelChoice(prev)
+                  }
+                }}
+              >
+                {(() => {
+                  const groups = new Map<string, ModelChoiceItem[]>()
+                  const defaults: ModelChoiceItem[] = []
+                  for (const item of modelChoices) {
+                    if (item.id === 'agent_default') {
+                      defaults.push(item)
+                      continue
+                    }
+                    const key = item.provider_name || '其他'
+                    const list = groups.get(key) || []
+                    list.push(item)
+                    groups.set(key, list)
+                  }
+                  return (
+                    <>
+                      {defaults.map((item) => (
+                        <option key={item.id} value="agent_default">
+                          {item.label}
+                        </option>
+                      ))}
+                      {Array.from(groups.entries()).map(([name, items]) => (
+                        <optgroup key={name} label={name}>
+                          {items.map((item) => (
+                            <option key={item.id} value={`${item.provider_id}::${item.model}`}>
+                              {item.display_name || item.model}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </>
+                  )
+                })()}
+              </select>
+            ) : null}
             <textarea
               className="chat-input"
               placeholder={hasAgent ? 'Type a message. Enter to send, Shift+Enter for newline.' : 'Select an Agent first'}
