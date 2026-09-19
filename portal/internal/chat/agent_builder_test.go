@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -694,6 +697,70 @@ func TestBuildRegistry_MCPToolRowClientWins(t *testing.T) {
 
 func netxSpecHTTP(id string) netx.Spec {
 	return netx.Spec{ID: id, Type: netx.TypeHTTP, Host: "127.0.0.1", Port: 8080, Password: "secret"}
+}
+
+func TestBuildRegistry_VMRunCmdClientForHostUsesSOCKS5(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	socksPort := ln.Addr().(*net.TCPAddr).Port
+	var dials atomic.Int64
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			dials.Add(1)
+			_ = c.Close()
+		}
+	}()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destPort, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vm, err := structpb.NewStruct(map[string]any{"rca": map[string]any{"func_path": "vm_run_cmd"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	spec := netx.Spec{ID: "lab", Type: netx.TypeSOCKS5, Host: "127.0.0.1", Port: socksPort}
+	if spec.NoProxy != nil {
+		t.Fatal("NoProxy must be empty so 127.0.0.1 is not bypassed")
+	}
+	if _, err := BuildRegistry([]*biz.ToolMeta{{Name: "rca-vm", Type: biz.ToolTypeRCA, Config: vm}}, nil, reg, RegistryBuildOptions{
+		AgentProxyID: "lab",
+		Proxies:      map[string]netx.Spec{"lab": spec},
+	}); err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	tl, ok := reg.Get("vm_run_cmd")
+	if !ok {
+		t.Fatal("vm_run_cmd not registered")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _ = tl.Execute(ctx, map[string]any{
+		"cmd":         "Get-Process",
+		"host":        u.Hostname(),
+		"port":        destPort,
+		"timeout_sec": 2,
+	})
+	if n := dials.Load(); n == 0 {
+		t.Fatal("ClientForHost must dial via netx SOCKS5 (Dial count=0)")
+	}
 }
 
 func netxSpecSOCKS5(id string) netx.Spec {

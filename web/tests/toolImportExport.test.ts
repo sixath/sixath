@@ -53,6 +53,17 @@ describe('toolExportFormat', () => {
     assert.equal(parsed[0].config.proxy_id, 'office')
   })
 
+  it('keeps rca vm_run_cmd and optional datasource_id', () => {
+    const parsed = parseToolsImportJson(JSON.stringify({
+      name: 'vm-runcmd',
+      type: 'rca',
+      description: '',
+      config: { rca: { func_path: 'vm_run_cmd', datasource_id: 'cmdb_mysql' } },
+    }))
+    assert.equal(parsed[0].config.rca?.func_path, 'vm_run_cmd')
+    assert.equal(parsed[0].config.rca?.datasource_id, 'cmdb_mysql')
+  })
+
   it('keeps elasticsearch purpose and default_index from camelCase', () => {
     const parsed = parseToolsImportJson(JSON.stringify({
       name: 'zj-elk',

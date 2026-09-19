@@ -10,6 +10,7 @@ const VERB_MAP: Record<string, string> = {
   tool_search: '工具检索',
   session_search: '会话检索',
   append_learning: '记录经验',
+  vm_run_cmd: '实例命令',
 }
 
 export function toolVerb(name: string): string {

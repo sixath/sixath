@@ -196,6 +196,10 @@ func confirmationRequestsFromResponse(resp *agent.Response) []ChatConfirmationRe
 			items = append(items, *req)
 			continue
 		}
+		if req := vmRunCmdConfirmationFromCall(call); req != nil {
+			items = append(items, *req)
+			continue
+		}
 		if req := workspaceFileConfirmationFromCall(call); req != nil {
 			items = append(items, *req)
 			continue
@@ -372,6 +376,32 @@ func terminalConfirmationFromCall(call agent.ToolCallRecord) *ChatConfirmationRe
 		Kind:        "terminal",
 		Title:       "Confirm terminal command",
 		Description: "Review the shell command before it is executed.",
+		Token:       token,
+		DSL:         command,
+		ExpiresIn:   intFromAny(result["expires_in"]),
+		Severity:    "danger",
+	}
+}
+
+func vmRunCmdConfirmationFromCall(call agent.ToolCallRecord) *ChatConfirmationRequest {
+	if call.ToolName != "vm_run_cmd" {
+		return nil
+	}
+	result, ok := call.Result.(map[string]any)
+	if !ok {
+		return nil
+	}
+	status, _ := result["status"].(string)
+	token, _ := result["token"].(string)
+	command, _ := result["command"].(string)
+	if status != "pending" || token == "" || command == "" {
+		return nil
+	}
+	return &ChatConfirmationRequest{
+		ID:          fmt.Sprintf("%s:%s", call.ToolCallID, token),
+		Kind:        "vm_run_cmd",
+		Title:       "Confirm instance command",
+		Description: "Review the instance command before it is executed.",
 		Token:       token,
 		DSL:         command,
 		ExpiresIn:   intFromAny(result["expires_in"]),

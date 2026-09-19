@@ -345,7 +345,7 @@ func TestRCARead_TrailingNewlineLineCount(t *testing.T) {
 }
 
 func TestRCAToolsetDefaults(t *testing.T) {
-	for _, name := range []string{"rca_grep", "rca_glob", "rca_read", "jaeger_trace", "es_log_query"} {
+	for _, name := range []string{"rca_grep", "rca_glob", "rca_read", "jaeger_trace", "es_log_query", "vm_run_cmd"} {
 		if got := builtinDefaultToolset[name]; got != ToolsetRCA {
 			t.Fatalf("toolset[%s] = %q, want %q", name, got, ToolsetRCA)
 		}

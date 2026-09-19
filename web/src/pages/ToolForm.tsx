@@ -435,11 +435,12 @@ export default function ToolForm() {
               <label>RCA 子工具</label>
               <select
                 value={config.rca?.func_path || 'rca_code'}
-                onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), func_path: e.target.value as 'rca_code' | 'rca_symbol' | 'jaeger_trace' | 'es_log_query' } }))}
+                onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), func_path: e.target.value as 'rca_code' | 'rca_symbol' | 'jaeger_trace' | 'es_log_query' | 'vm_run_cmd' } }))}
               >
                 <option value="rca_code">代码检索 (grep/glob/read)</option>
                 <option value="rca_symbol">符号导航 (definition/references)</option>
                 <option value="jaeger_trace">Jaeger 链路</option>
+                <option value="vm_run_cmd">实例 runCmd</option>
                 {isEdit && config.rca?.func_path === 'es_log_query' ? (
                   <option value="es_log_query">ELK 日志</option>
                 ) : null}
@@ -506,6 +507,17 @@ export default function ToolForm() {
                   value={config.rca?.query_url || ''}
                   onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), query_url: e.target.value } }))}
                   placeholder="http://jaeger-host:16686"
+                />
+              </div>
+            )}
+
+            {config.rca?.func_path === 'vm_run_cmd' && (
+              <div className="form-group">
+                <label>MySQL 工具名（可选，用于按 vmid 查 VM IP）</label>
+                <input
+                  value={config.rca?.datasource_id || ''}
+                  onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), datasource_id: e.target.value } }))}
+                  placeholder="多 MySQL 时指定；空则运行时按绑定推断"
                 />
               </div>
             )}

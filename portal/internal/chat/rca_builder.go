@@ -1,11 +1,20 @@
 package chat
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/tool"
 )
+
+var vmRunCmdPending = tool.NewInMemoryVMRunCmdPendingStore()
 
 // registerRCATool 按 cfg["func_path"] 构造并注册 RCA 工具。
 // es_log_query 由 registerESLogFromAgentTools 一次性注册，此处不再处理。
@@ -61,8 +70,110 @@ func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace s
 		_ = tool.RegisterJaegerTool(reg, queryURL, client)
 	case "es_log_query":
 		return // registered once via registerESLogFromAgentTools
+	case "vm_run_cmd":
+		return // deferred to BuildRegistry after MySQL executor is ready
 	default:
 		slog.Warn("rca: unknown func_path, skip", "func_path", funcPath)
+	}
+}
+
+func registerVMRunCmdFromPortal(reg *tool.Registry, cfg map[string]interface{}, o RegistryBuildOptions, mysqlExec executor.Executor, mysqlIDs []string) {
+	if reg == nil {
+		return
+	}
+	rcaMap, _ := cfg["rca"].(map[string]interface{})
+	preferred, _ := rcaMap["datasource_id"].(string)
+
+	var lookup tool.VMIPLookup
+	if mysqlExec != nil {
+		lookup = vmIPLookup(mysqlExec)
+	}
+
+	_ = tool.RegisterVMRunCmd(reg, tool.VMRunCmdConfig{
+		PreferredDatasourceID: preferred,
+		MySQLIDs:              mysqlIDs,
+		Lookup:                lookup,
+		PendingStore:          vmRunCmdPending,
+		TokenGen:              tool.RandomTokenGenerator{},
+		ClientForHost: func(host string, port int) (*http.Client, error) {
+			dest := "http://" + host + ":" + strconv.Itoa(port)
+			c, err := resolveJaegerClient(dest, toolEgressBinding(cfg), o)
+			if err != nil {
+				return nil, err
+			}
+			if c == nil {
+				return &http.Client{Timeout: outboundClientTimeout}, nil
+			}
+			return c, nil
+		},
+	})
+}
+
+func vmIPLookup(exec executor.Executor) tool.VMIPLookup {
+	return func(ctx context.Context, dsID string, vmid int64) (string, bool, error) {
+		if exec == nil {
+			return "", false, errors.New("mysql executor missing")
+		}
+		res, err := exec.Execute(ctx, dsID, tool.VMIPLookupSQL, executor.ExecuteOptions{
+			Timeout:          10,
+			MaxRows:          8,
+			PositionalParams: []any{vmid},
+		})
+		if err != nil {
+			return "", false, err
+		}
+		addrs := collectVMIPAddresses(res)
+		switch len(addrs) {
+		case 0:
+			return "", false, errors.New("no IP found for vmid")
+		case 1:
+			return addrs[0], false, nil
+		default:
+			return addrs[0], true, nil
+		}
+	}
+}
+
+func collectVMIPAddresses(res *executor.Result) []string {
+	if res == nil {
+		return nil
+	}
+	col := 0
+	for i, name := range res.Columns {
+		if strings.EqualFold(strings.TrimSpace(name), "mgr_ipv4_address") {
+			col = i
+			break
+		}
+	}
+	var addrs []string
+	for _, row := range res.Rows {
+		if col >= len(row) {
+			continue
+		}
+		if s := vmIPCellString(row[col]); s != "" {
+			addrs = append(addrs, s)
+		}
+	}
+	return addrs
+}
+
+func vmIPCellString(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case []byte:
+		return strings.TrimSpace(string(t))
+	case fmt.Stringer:
+		return strings.TrimSpace(t.String())
+	default:
+		s := strings.TrimSpace(fmt.Sprint(t))
+		if s == "<nil>" {
+			return ""
+		}
+		return s
 	}
 }
 

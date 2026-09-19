@@ -43,7 +43,8 @@ func BuildSkillsAwarePrompt(skillsIdx *Index) string {
 	b.WriteString("当你判断与某个 Skill 相关时：若 system 中已有【已自动匹配 Skill】正文，不要再 load_skill；手册与用户问题冲突时以用户问题为准。需要细节时再调用一次 `load_skill(name)`。同一 Skill 每轮最多加载一次。\n")
 	b.WriteString("执行策略：不要仅凭推断就拒绝执行。未加载且未自动匹配时先 load_skill 一次，再根据技能说明决定下一步。若 load_skill / skill_view 返回 already loaded，立即改用其它工具，禁止反复加载同一技能。若技能支持可选参数或默认值，应尝试执行；仅当技能明确要求必填参数且你确实无法获取时，再向用户说明需要提供哪些信息。不要在一开始就罗列所有可能参数并等待用户填写。\n")
 	b.WriteString("重要：当你缺少必要信息、无法访问外部系统或脚本执行被禁用时，不要凭空编造具体结果（例如版本号、数量、精确日志内容等）。此时应如实说明受限原因，可以给出一般性的排查建议，但必须明确这不是基于真实执行结果的结论。\n")
-	b.WriteString("关于脚本执行：不要事先假定「脚本执行已禁用」。仅当你实际调用了 `execute_skill_script` 且工具明确返回了脚本被禁用的错误信息时，才向用户说明需要开启 skills.allow_script_execution；未调用工具前不得提前给出此类结论。\n\n")
+	b.WriteString("关于脚本执行：不要事先假定「脚本执行已禁用」。仅当你实际调用了 `execute_skill_script` 且工具明确返回了脚本被禁用的错误信息时，才向用户说明需要开启 skills.allow_script_execution；未调用工具前不得提前给出此类结论。\n")
+	b.WriteString("用户粘贴了报错原文，或在问上线/下线/操作不合法/调度拦截时：先 `rca_grep` 用户原文，读翻译点后再查 ES 或 `vm_run_cmd`。禁止用工作区 `search_files` 搜业务源码。仅有 vmid 不是进 VM 的理由。上下文被压缩后仍须回答原问题，禁止要求用户重述。\n\n")
 
 	if skillsIdx != nil {
 		summary := BuildSkillsSummary(skillsIdx.All(), 8)

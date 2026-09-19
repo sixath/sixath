@@ -1,11 +1,13 @@
 package chat
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"backend/internal/biz"
+	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/tool"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -136,8 +138,30 @@ func TestRegisterRCATool_ESNotFoundSkips(t *testing.T) {
 func TestRegisterRCATool_UnknownFuncPath(t *testing.T) {
 	reg := tool.NewRegistry()
 	registerRCATool(reg, map[string]any{"rca": map[string]any{"func_path": "nope"}}, "")
-	if rcaHas(reg, "rca_grep") || rcaHas(reg, "jaeger_trace") || rcaHas(reg, "es_log_query") {
+	if rcaHas(reg, "rca_grep") || rcaHas(reg, "jaeger_trace") || rcaHas(reg, "es_log_query") || rcaHas(reg, "vm_run_cmd") {
 		t.Fatal("unknown func_path must register nothing")
+	}
+}
+
+func TestRegisterRCATool_VMRunCmdDeferred(t *testing.T) {
+	reg := tool.NewRegistry()
+	registerRCATool(reg, map[string]any{"rca": map[string]any{"func_path": "vm_run_cmd"}}, "")
+	if rcaHas(reg, "vm_run_cmd") {
+		t.Fatal("registerRCATool must defer vm_run_cmd to BuildRegistry")
+	}
+}
+
+func TestBuildRegistry_VMRunCmdWithoutMySQL(t *testing.T) {
+	vm, err := structpb.NewStruct(map[string]any{"rca": map[string]any{"func_path": "vm_run_cmd"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	if _, err := BuildRegistry([]*biz.ToolMeta{{Name: "rca-vm", Type: biz.ToolTypeRCA, Config: vm}}, nil, reg); err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	if !rcaHas(reg, "vm_run_cmd") {
+		t.Fatal("vm_run_cmd must register without a MySQL datasource")
 	}
 }
 
@@ -266,4 +290,77 @@ func TestBuildRegistry_WorkspaceCodeRegistersRCA(t *testing.T) {
 	if !rcaHas(reg, "rca_grep") {
 		t.Fatal("BuildRegistry should register rca_code from workspace/code")
 	}
+}
+
+type fakeVMIPExec struct {
+	res  *executor.Result
+	err  error
+	dsID string
+	sql  string
+	opts executor.ExecuteOptions
+}
+
+func (f *fakeVMIPExec) Execute(_ context.Context, datasourceID string, dsl string, opts executor.ExecuteOptions) (*executor.Result, error) {
+	f.dsID = datasourceID
+	f.sql = dsl
+	f.opts = opts
+	return f.res, f.err
+}
+
+func TestVMIPLookup_ScansRows(t *testing.T) {
+	t.Run("nil_executor", func(t *testing.T) {
+		lookup := vmIPLookup(nil)
+		if _, _, err := lookup(context.Background(), "ds", 1); err == nil {
+			t.Fatal("nil executor must error")
+		}
+	})
+	t.Run("zero_addresses", func(t *testing.T) {
+		fake := &fakeVMIPExec{res: &executor.Result{Columns: []string{"mgr_ipv4_address"}, Rows: [][]any{{""}, {nil}}}}
+		_, _, err := vmIPLookup(fake)(context.Background(), "game-mysql", 42)
+		if err == nil {
+			t.Fatal("0 non-empty addresses must error")
+		}
+		if fake.sql != tool.VMIPLookupSQL {
+			t.Fatalf("sql=%q", fake.sql)
+		}
+		if fake.dsID != "game-mysql" || fake.opts.Timeout != 10 || fake.opts.MaxRows != 8 {
+			t.Fatalf("opts ds=%s timeout=%d maxRows=%d", fake.dsID, fake.opts.Timeout, fake.opts.MaxRows)
+		}
+		if len(fake.opts.PositionalParams) != 1 || fake.opts.PositionalParams[0] != int64(42) {
+			t.Fatalf("params=%v", fake.opts.PositionalParams)
+		}
+	})
+	t.Run("one_address", func(t *testing.T) {
+		fake := &fakeVMIPExec{res: &executor.Result{Columns: []string{"mgr_ipv4_address"}, Rows: [][]any{{"10.1.2.3"}}}}
+		host, amb, err := vmIPLookup(fake)(context.Background(), "ds", 7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if host != "10.1.2.3" || amb {
+			t.Fatalf("host=%q ambiguous=%v", host, amb)
+		}
+	})
+	t.Run("ambiguous", func(t *testing.T) {
+		fake := &fakeVMIPExec{res: &executor.Result{Columns: []string{"other", "mgr_ipv4_address"}, Rows: [][]any{
+			{"x", "10.0.0.1"},
+			{"y", "10.0.0.2"},
+		}}}
+		host, amb, err := vmIPLookup(fake)(context.Background(), "ds", 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if host != "10.0.0.1" || !amb {
+			t.Fatalf("host=%q ambiguous=%v", host, amb)
+		}
+	})
+	t.Run("column_zero_fallback", func(t *testing.T) {
+		fake := &fakeVMIPExec{res: &executor.Result{Columns: []string{"ip"}, Rows: [][]any{{"192.168.1.9"}}}}
+		host, amb, err := vmIPLookup(fake)(context.Background(), "ds", 9)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if host != "192.168.1.9" || amb {
+			t.Fatalf("host=%q ambiguous=%v", host, amb)
+		}
+	})
 }

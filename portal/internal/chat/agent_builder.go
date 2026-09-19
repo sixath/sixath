@@ -87,6 +87,7 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	var mcpServers []toolskill.McpServerEntry
 	var datasourceConfigs []datasource.Config
 	var dsBindings []DatasourceBinding
+	var pendingVM []map[string]interface{}
 
 	for _, t := range tools {
 		cfg := toolConfigToMap(t.Config)
@@ -125,6 +126,12 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 			datasourceConfigs = append(datasourceConfigs, dsCfg)
 			dsBindings = append(dsBindings, b)
 		case biz.ToolTypeRCA:
+			rcaMap, _ := cfg["rca"].(map[string]interface{})
+			funcPath, _ := rcaMap["func_path"].(string)
+			if funcPath == "vm_run_cmd" {
+				pendingVM = append(pendingVM, cfg)
+				break
+			}
 			registerRCATool(reg, cfg, o.Workspace, o)
 		}
 	}
@@ -136,13 +143,20 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	mcpServers = append(mcpServers, bound...)
 
 	var dsPrompt string
+	var mysqlExec executor.Executor
+	var mysqlIDs []string
 	if len(datasourceConfigs) > 0 {
-		registered, prompt, err := registerDatasourceTools(reg, datasourceConfigs, dsBindings)
+		registered, prompt, exec, ids, err := registerDatasourceTools(reg, datasourceConfigs, dsBindings)
 		if err != nil {
 			return nil, err
 		}
 		dsBindings = registered
 		dsPrompt = prompt
+		mysqlExec = exec
+		mysqlIDs = ids
+	}
+	for _, cfg := range pendingVM {
+		registerVMRunCmdFromPortal(reg, cfg, o, mysqlExec, mysqlIDs)
 	}
 
 	registerESLogFromAgentTools(reg, tools, o)
@@ -213,7 +227,8 @@ func canonicalDatasourceConfig(toolName string, cfg datasource.Config) datasourc
 // registerDatasourceTools 注册 list_tables、describe_table、execute_read。
 // Elasticsearch 绑定不进入 data 三件套（仍可作为 RCA es_log_query 的连接配置存在于工具列表）。
 // 单个非 ES 数据源注册失败时降级为不可用（其余仍可用）；全部非 ES 均失败才返回错误。
-func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bindings []DatasourceBinding) ([]DatasourceBinding, string, error) {
+// 至少成功注册一个 mysql 时返回 NewMultiExecutor 与其 cfg.ID；否则 mysqlExec/mysqlIDs 为 nil。
+func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bindings []DatasourceBinding) ([]DatasourceBinding, string, executor.Executor, []string, error) {
 	dsReg := datasource.NewRegistry()
 	datasource.RegisterMySQL(dsReg)
 	datasource.RegisterHive(dsReg)
@@ -266,7 +281,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 				parts = append(parts, name+": unknown error")
 			}
 		}
-		return outBindings, FormatDatasourcePrompt(outBindings, ""), fmt.Errorf("所有数据源均注册失败（请检查连接与账号）: %s", strings.Join(parts, "; "))
+		return outBindings, FormatDatasourcePrompt(outBindings, ""), nil, nil, fmt.Errorf("所有数据源均注册失败（请检查连接与账号）: %s", strings.Join(parts, "; "))
 	}
 
 	defaultDSID := ""
@@ -277,7 +292,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 	prompt := FormatDatasourcePrompt(outBindings, defaultDSID)
 	if len(registered) == 0 {
 		// ES-only（或无可注册 data 源）：不注册三件套，仍返回路由提示。
-		return outBindings, prompt, nil
+		return outBindings, prompt, nil, nil, nil
 	}
 
 	store := metadata.NewInMemoryStore(nil)
@@ -323,7 +338,16 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 			}, opts)
 		}
 	}
-	return outBindings, prompt, nil
+	var mysqlIDs []string
+	for _, cfg := range registered {
+		if strings.EqualFold(strings.TrimSpace(cfg.Type), "mysql") {
+			mysqlIDs = append(mysqlIDs, cfg.ID)
+		}
+	}
+	if len(mysqlIDs) == 0 {
+		return outBindings, prompt, nil, nil, nil
+	}
+	return outBindings, prompt, exec, mysqlIDs, nil
 }
 
 func toolConfigToMap(s interface{}) map[string]interface{} {

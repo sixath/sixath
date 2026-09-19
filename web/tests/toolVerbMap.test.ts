@@ -6,6 +6,7 @@ test('toolVerb maps known tools to Chinese verbs', () => {
   assert.equal(toolVerb('read_file'), '读取文件')
   assert.equal(toolVerb('execute_query'), '数据库查询')
   assert.equal(toolVerb('web_search'), '网页搜索')
+  assert.equal(toolVerb('vm_run_cmd'), '实例命令')
 })
 
 test('toolVerb falls back to raw name for unknown tools', () => {

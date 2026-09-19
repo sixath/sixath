@@ -37,7 +37,7 @@ func TestE5_RCABindingAcceptance(t *testing.T) {
 	})
 
 	t.Run("2_ValidRCAFuncPath_allowlist", func(t *testing.T) {
-		for _, fp := range []string{"rca_code", "rca_symbol", "jaeger_trace", "es_log_query"} {
+		for _, fp := range []string{"rca_code", "rca_symbol", "jaeger_trace", "es_log_query", "vm_run_cmd"} {
 			if !biz.ValidRCAFuncPath(fp) {
 				t.Fatalf("%q must be accepted", fp)
 			}
@@ -131,6 +131,43 @@ func TestE5_RCABindingAcceptance(t *testing.T) {
 			}
 			if !apiNames[n] {
 				t.Fatalf("ListForAPI missing %q", n)
+			}
+		}
+	})
+
+	t.Run("5_BuildRegistry_registers_vm_run_cmd", func(t *testing.T) {
+		vm, err := structpb.NewStruct(map[string]any{"rca": map[string]any{"func_path": "vm_run_cmd"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		jaeger, _ := structpb.NewStruct(map[string]any{
+			"rca": map[string]any{"func_path": "jaeger_trace", "query_url": "http://j:16686"},
+		})
+		esDS, _ := structpb.NewStruct(map[string]any{
+			"datasource": map[string]any{"id": "es-logs", "type": "elasticsearch", "dsn": "http://localhost:9200"},
+		})
+		esLog, _ := structpb.NewStruct(map[string]any{
+			"rca": map[string]any{
+				"func_path":      "es_log_query",
+				"datasource_id":  "es-logs",
+				"default_index":  "app-*",
+				"trace_id_field": "trace_id",
+			},
+		})
+		tools := []*biz.ToolMeta{
+			{Name: "rca-vm", Type: biz.ToolTypeRCA, Config: vm},
+			{Name: "rca-jaeger", Type: biz.ToolTypeRCA, Config: jaeger},
+			{Name: "es-logs", Type: biz.ToolTypeDatasource, Config: esDS},
+			{Name: "rca-es", Type: biz.ToolTypeRCA, Config: esLog},
+		}
+		reg := tool.NewRegistry()
+		if _, err := BuildRegistry(tools, nil, reg); err != nil {
+			t.Fatalf("BuildRegistry: %v", err)
+		}
+		want := []string{"vm_run_cmd", "jaeger_trace", "es_log_query"}
+		for _, n := range want {
+			if !rcaHas(reg, n) {
+				t.Fatalf("expected %s registered after BuildRegistry", n)
 			}
 		}
 	})

@@ -128,7 +128,7 @@ export interface ToolConfig {
   mcp?: McpConfig
   datasource?: DatasourceConfig
   rca?: {
-    func_path?: 'rca_code' | 'rca_symbol' | 'jaeger_trace' | 'es_log_query'
+    func_path?: 'rca_code' | 'rca_symbol' | 'jaeger_trace' | 'es_log_query' | 'vm_run_cmd'
     roots?: string[]
     query_url?: string
     datasource_id?: string

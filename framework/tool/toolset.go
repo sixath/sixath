@@ -82,6 +82,7 @@ var builtinDefaultToolset = map[string]string{
 	"rca_symbol":   ToolsetRCA,
 	"jaeger_trace": ToolsetRCA,
 	"es_log_query": ToolsetRCA,
+	"vm_run_cmd":   ToolsetRCA,
 
 	"browser_navigate":   ToolsetBrowser,
 	"browser_snapshot":   ToolsetBrowser,

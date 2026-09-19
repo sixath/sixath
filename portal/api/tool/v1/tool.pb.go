@@ -231,16 +231,16 @@ func (x *DatasourceConfig) GetBodyField() string {
 	return ""
 }
 
-// RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
+// RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query | vm_run_cmd。
 type RCAConfig struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	FuncPath     string   `protobuf:"bytes,1,opt,name=func_path,json=funcPath,proto3" json:"func_path,omitempty"`               // rca_code | jaeger_trace | es_log_query
+	FuncPath     string   `protobuf:"bytes,1,opt,name=func_path,json=funcPath,proto3" json:"func_path,omitempty"`               // rca_code | jaeger_trace | es_log_query | vm_run_cmd
 	Roots        []string `protobuf:"bytes,2,rep,name=roots,proto3" json:"roots,omitempty"`                                     // rca_code: 仓库根路径白名单
 	QueryUrl     string   `protobuf:"bytes,3,opt,name=query_url,json=queryUrl,proto3" json:"query_url,omitempty"`               // jaeger_trace: Jaeger Query URL
-	DatasourceId string   `protobuf:"bytes,4,opt,name=datasource_id,json=datasourceId,proto3" json:"datasource_id,omitempty"`   // es_log_query: 依赖的 datasource 工具 id（与 endpoint 互斥）
+	DatasourceId string   `protobuf:"bytes,4,opt,name=datasource_id,json=datasourceId,proto3" json:"datasource_id,omitempty"`   // es_log_query: 依赖的 datasource 工具 id（与 endpoint 互斥）；vm_run_cmd: 可选 MySQL 工具名，用于查 VM IP
 	DefaultIndex string   `protobuf:"bytes,5,opt,name=default_index,json=defaultIndex,proto3" json:"default_index,omitempty"`   // es_log_query: 默认索引
 	TraceIdField string   `protobuf:"bytes,6,opt,name=trace_id_field,json=traceIdField,proto3" json:"trace_id_field,omitempty"` // es_log_query: trace 关联字段名
 	Endpoint     string   `protobuf:"bytes,7,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                               // es_log_query: 内联 ES URL（DSN）

@@ -36,7 +36,7 @@ func IsValidToolType(t string) bool {
 // ValidRCAFuncPath 返回 fp 是否为受支持的 RCA 子工具。
 func ValidRCAFuncPath(fp string) bool {
 	switch fp {
-	case "rca_code", "rca_symbol", "jaeger_trace", "es_log_query":
+	case "rca_code", "rca_symbol", "jaeger_trace", "es_log_query", "vm_run_cmd":
 		return true
 	default:
 		return false

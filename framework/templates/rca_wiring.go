@@ -1,6 +1,8 @@
 package templates
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -15,8 +17,9 @@ import (
 	fwws "github.com/sixath/framework/workspace"
 )
 
-// registerRCATools 按配置条件注册 RCA 工具链的三组工具。
+// registerRCATools 按配置条件注册 RCA 工具链。
 // 各子节缺省时对应工具跳过(记 log),不返回错误——缺配置不应阻断整个 handler。
+// vm_run_cmd 仅在 rca.vm_run_cmd.enabled 时注册。
 func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 	if reg == nil {
 		return nil
@@ -89,7 +92,99 @@ func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 		}
 	}
 
+	// 4) vm_run_cmd: 默认关闭，enabled 才注册。
+	if cfg.RCA.VMRunCmd.Enabled {
+		lookup, mysqlIDs := buildRCAVMRunCmdLookup(cfg)
+		if err := tool.RegisterVMRunCmd(reg, tool.VMRunCmdConfig{
+			PreferredDatasourceID: cfg.RCA.VMRunCmd.DatasourceID,
+			MySQLIDs:              mysqlIDs,
+			Lookup:                lookup,
+			PendingStore:          tool.NewInMemoryVMRunCmdPendingStore(),
+			TokenGen:              tool.RandomTokenGenerator{},
+			ClientForHost: func(host string, _ int) (*http.Client, error) {
+				return yamlVMRunCmdClient(cfg, host)
+			},
+		}); err != nil {
+			return err
+		}
+	} else {
+		slog.Info("rca: vm_run_cmd disabled, skip")
+	}
+
 	return nil
+}
+
+// buildRCAVMRunCmdLookup 从 cfg.DataSources 中 type=mysql 的项建临时 registry + MySQLExecutor。
+// 找不到或注册失败则 Lookup 为 nil，工具仍可仅凭 host 直连。
+func buildRCAVMRunCmdLookup(cfg config.Config) (tool.VMIPLookup, []string) {
+	dsReg := datasource.NewRegistry()
+	datasource.RegisterMySQL(dsReg)
+	var mysqlIDs []string
+	for i := range cfg.DataSources {
+		ds := cfg.DataSources[i]
+		if ds.Type != datasource.TypeMySQL {
+			continue
+		}
+		if _, err := dsReg.Register(ds); err != nil {
+			slog.Warn("rca: register mysql datasource failed", "id", ds.ID, "err", err)
+			continue
+		}
+		mysqlIDs = append(mysqlIDs, ds.ID)
+	}
+	if len(mysqlIDs) == 0 {
+		return nil, mysqlIDs
+	}
+	return rcaVMIPLookup(executor.NewMySQLExecutor(dsReg)), mysqlIDs
+}
+
+func rcaVMIPLookup(exec *executor.MySQLExecutor) tool.VMIPLookup {
+	return func(ctx context.Context, dsID string, vmid int64) (string, bool, error) {
+		if exec == nil {
+			return "", false, fmt.Errorf("mysql executor missing")
+		}
+		res, err := exec.Execute(ctx, dsID, tool.VMIPLookupSQL, executor.ExecuteOptions{
+			Timeout:          10,
+			MaxRows:          8,
+			PositionalParams: []any{vmid},
+		})
+		if err != nil {
+			return "", false, err
+		}
+		addrs := collectRCAVMIPAddresses(res)
+		switch len(addrs) {
+		case 0:
+			return "", false, fmt.Errorf("no IP found for vmid")
+		case 1:
+			return addrs[0], false, nil
+		default:
+			return addrs[0], true, nil
+		}
+	}
+}
+
+func collectRCAVMIPAddresses(res *executor.Result) []string {
+	if res == nil {
+		return nil
+	}
+	col := 0
+	for i, name := range res.Columns {
+		if strings.EqualFold(strings.TrimSpace(name), "mgr_ipv4_address") {
+			col = i
+			break
+		}
+	}
+	var addrs []string
+	for _, row := range res.Rows {
+		if col >= len(row) {
+			continue
+		}
+		s := strings.TrimSpace(fmt.Sprint(row[col]))
+		if s == "" || s == "<nil>" {
+			continue
+		}
+		addrs = append(addrs, s)
+	}
+	return addrs
 }
 
 // buildRCAESReader 依据 cfg.RCA.ES.DatasourceID 从 cfg.DataSources 找到对应 ES 数据源,
@@ -144,6 +239,40 @@ func yamlEgressClient(cfg config.Config, destHost string) *http.Client {
 	}
 	// ModeInherit never sets Force; HTTPClient is enough.
 	return netx.HTTPClient(eff.Spec, rcaEgressClientTimeout)
+}
+
+// yamlVMRunCmdClient distinguishes Resolve failure from direct/no_proxy.
+// nil Effective → default timeout client; Resolve error (or unknown proxy_id) fail-closed.
+func yamlVMRunCmdClient(cfg config.Config, destHost string) (*http.Client, error) {
+	cat := make(map[string]netx.Spec, len(cfg.Proxies))
+	for _, s := range cfg.Proxies {
+		id := strings.TrimSpace(s.ID)
+		if id == "" {
+			continue
+		}
+		cat[id] = s
+	}
+	var agent *netx.Spec
+	if id := strings.TrimSpace(cfg.ProxyID); id != "" {
+		s, ok := cat[id]
+		if !ok {
+			return nil, fmt.Errorf("proxy %q not found", id)
+		}
+		cp := s
+		agent = &cp
+	}
+	eff, err := netx.Resolve(netx.Binding{Mode: netx.ModeInherit}, agent, cat, destHost)
+	if err != nil {
+		return nil, err
+	}
+	if eff == nil {
+		return &http.Client{Timeout: rcaEgressClientTimeout}, nil
+	}
+	c := netx.HTTPClient(eff.Spec, rcaEgressClientTimeout)
+	if c == nil {
+		return &http.Client{Timeout: rcaEgressClientTimeout}, nil
+	}
+	return c, nil
 }
 
 func destHostFromURL(raw string) string {

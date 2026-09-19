@@ -88,9 +88,16 @@ type Config struct {
 
 // RCAConfig 配置线上问题排查(RCA)工具链。各子节缺省时对应工具不注册。
 type RCAConfig struct {
-	Jaeger RCAJaegerConfig `json:"jaeger" yaml:"jaeger"`
-	ES     RCAESConfig     `json:"es" yaml:"es"`
-	Repos  RCAReposConfig  `json:"repos" yaml:"repos"`
+	Jaeger   RCAJaegerConfig   `json:"jaeger" yaml:"jaeger"`
+	ES       RCAESConfig       `json:"es" yaml:"es"`
+	Repos    RCAReposConfig    `json:"repos" yaml:"repos"`
+	VMRunCmd RCAVMRunCmdConfig `json:"vm_run_cmd" yaml:"vm_run_cmd"`
+}
+
+// RCAVMRunCmdConfig 可选；未 enabled 时 YAML / sath serve 不注册 vm_run_cmd。
+type RCAVMRunCmdConfig struct {
+	Enabled      bool   `json:"enabled" yaml:"enabled"`
+	DatasourceID string `json:"datasource_id" yaml:"datasource_id"`
 }
 
 // RCAJaegerConfig Jaeger Query 无鉴权访问配置。

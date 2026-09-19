@@ -17,6 +17,7 @@ allowed_tools:
   - rca_grep
   - rca_glob
   - rca_read
+  - vm_run_cmd
 ---
 
 # RCA Investigation
@@ -29,6 +30,7 @@ Thin workflow skill for Sixath RCA tools. **Do not invent traces, logs, or file 
 1. **Trace** — `jaeger_trace` with `trace_id` (or service/operation search if id unknown).
 2. **Logs** — `es_log_query(cluster="<elasticsearch tool name>", trace_id=...)` with the same `trace_id` (and time window / service filters if available). `cluster` is required (bound elasticsearch datasource name). A call without `cluster` does not succeed. The same task may call a second `cluster` for another bound ES. Prefer the English RPC / error code from step 0 over UI copy. `hit_status=empty` means the index and fields were valid but no documents matched. `index_error=unresolved` means the index pattern does not exist — pick a name from `suggested_index_patterns` and retry; do not treat it as missing logs.
 3. **Code follow-up** — from error messages / stack frames / class names found above, use `rca_grep` → `rca_glob` → `rca_read` to pin files and lines.
+4. **Instance (when logs are not in ES)** — use `vm_run_cmd` for on-VM logs, local files, and processes. Having only `vmid` is not a reason to enter the instance. Do not use `http_request` against `:53000`. Empty stdout with `output_empty: true` is not missing logs.
 
 Do **not** jump to speculative code failure lists. Grepping the user's quoted error is evidence gathering, not speculation. Never ask the user to restate the original question after context compression.
 
@@ -39,6 +41,7 @@ Do **not** jump to speculative code failure lists. Grepping the user's quoted er
 | 1 | `jaeger_trace` | `ok: true` and `evidence_refs` include kind `jaeger_trace` |
 | 2 | `es_log_query` | `ok: true` and refs include kind `es_log_query` |
 | 3 | `rca_grep` / `rca_glob` / `rca_read` | `ok: true` with `repo:path:line` style refs |
+| 4 | `vm_run_cmd` | `ok: true` and refs include kind `vm_run_cmd` |
 
 On `ok: false`:
 
