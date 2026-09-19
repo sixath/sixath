@@ -11,7 +11,7 @@
 |----|------|
 | 形态 | RCA 原生工具 `vm_run_cmd`，不是 Skill 包一层 `http_request`，也不并进 `ssh_exec` |
 | 协议 | `POST http://<host>:<port>/runCmd`，`Content-Type: application/json`，body `{"cmd":"<原样字符串>"}`，无鉴权头 |
-| 响应 | HTTP 200 + `text/plain`（可空）为成功；非 2xx 为失败。不解析 PowerShell 表格 |
+| 响应 | HTTP **200** 为成功（现场合同）；其它 2xx 也当成功以免中间层改写状态。body 当 `text/plain`（可空）。非 2xx 为失败。不解析 PowerShell 表格 |
 | 寻址 | `host` 与 `vmid` 至少一个；有 host 直连；只有 vmid 则查 MySQL |
 | 查 IP | 固定 SQL：`SELECT mgr_ipv4_address FROM t_game_virtual_machine_info WHERE vmid = ?` |
 | 命令 | 开放 `cmd`；硬拒绝灾难命令；其余危险命令走现有 `confirm_token` |
@@ -76,17 +76,19 @@ BuildRegistry
 
 vm_run_cmd.Execute
   校验 host/vmid/cmd
-  命令策略 → 拒绝 | confirm_required | 继续
+  命令策略 → 拒绝 | pending 确认 | 继续
   无 host → SQL 查 IP
   POST /runCmd
   截断 text/plain → 结构化 map
 ```
 
-工具实现放 `framework/tool/`（建议 `vm_run_cmd.go`，单文件 + 测试），注册函数对齐 `RegisterJaegerTool`。Portal 只在 `rca_builder` 增加 `func_path` 分支，并把 **已经建好的** datasource registry（或窄接口 `LookupVMIP(ctx, vmid) (host string, ambiguous bool, err error)`）传进去。
+工具实现放 `framework/tool/`（建议 `vm_run_cmd.go`，单文件 + 测试）。Portal 在 `rca_builder` 增加 `func_path` 分支；**查 IP 的 Lookup 在 Execute 时解析**，不要求 `RegisterVMRunCmd` 发生在 MySQL `Register` 之前。
 
-**装配顺序：** MySQL `dsReg.Register` 必须发生在 `RegisterVMRunCmd` 之前。不得在工具内部自己 `sql.Open`。
+现网 `BuildRegistry`（`portal/internal/chat/agent_builder.go`）先扫 RCA、后 `registerDatasourceTools` 才 `datasource.NewRegistry()`。一期**必须**改 `agent_builder.go`：循环里只记下 `vm_run_cmd` 配置，等 `registerDatasourceTools` 返回后再 `RegisterVMRunCmd`，并把同一个 `dsReg`/executor 以窄接口注入：`LookupVMIP(ctx, vmid) (host string, ambiguous bool, err error)`。
 
-YAML / `sath serve`：`registerRCATools` 同样注册；查库用配置里已有的 MySQL 数据源。
+不得在工具内部自己 `sql.Open`。无 MySQL 时工具仍注册：只传 `host` 可用；只传 `vmid` 才 `permanent`。
+
+YAML / `sath serve`：配置了 `rca`/`func_path=vm_run_cmd` 则注册（不要偷偷无条件给所有进程加工具）。查库用 YAML 里已有的 MySQL 数据源；没有 MySQL 时同样允许 `host` 直连。
 
 ## 4. 调用契约
 
@@ -137,7 +139,7 @@ Content-Type: application/json
 {"cmd":"<cmd 原样>"}
 ```
 
-成功：HTTP 2xx，body 当 UTF-8 文本（现场 `Content-Type: text/plain`）。空 body 合法。
+成功：HTTP **200**（现场）；**201–299 也当成功**。body 当 UTF-8 文本（现场 `Content-Type: text/plain`）。空 body 合法。
 
 失败：非 2xx；`ok: false`，附 `http_status` 与截断正文。
 
@@ -166,7 +168,23 @@ Content-Type: application/json
 - **不要**复用 ES 的 `hit_status=empty`。
 - 模型断言「目录不存在 / 没有日志」必须引用 `stdout` 中的原句。
 
-失败：`ok: false`，`error`，`error_code`=`transient`|`permanent`。确认中：可另给 `error=confirm_required`（或现网 confirm 事件形状，实现时与 `terminal` 对齐，二选一但必须能走同一套 UI）。
+失败：`ok: false`，`error`，`error_code`=`transient`|`permanent`。
+
+危险命令待确认（**钉死，禁止 `error=confirm_required` 充数**）：工具返回必须与 `terminal` 同形，前端才会出卡片：
+
+```json
+{
+  "status": "pending",
+  "token": "<opaque>",
+  "command": "<cmd 原文>",
+  "expires_in": 300,
+  "hint": "user must confirm; re-call vm_run_cmd with confirm_token to execute"
+}
+```
+
+`portal/internal/service/chat_stream.go` 增加 `vmRunCmdConfirmationFromCall`：`ToolName=="vm_run_cmd"` 且 `status=="pending"` 且 `token`、`command` 非空 → `ChatConfirmationRequest{Kind:"vm_run_cmd", Title:"Confirm instance command", DSL: command, Token, ExpiresIn, Severity:"danger"}`，并接入现有 `collectConfirmations` 循环。Web 的 `parseConfirmRequiredPayload` 不白名单 kind，卡片能出。用户确认后走与 `terminal` 相同路径：下轮带 `confirm_token` 再调工具（**不必**做 `skill_manage` 那种跳过 LLM 的 `Apply*Confirm`）。
+
+仓库里没有共享 `ConfirmStore` 类型。`vm_run_cmd` **自建** pending store（接口对齐 `TerminalPendingStore`：Save/Get/Delete by sessionID+token），**不要**复用 `TerminalPendingStore` 实例以免 token 串台。Portal 装配时 `NewInMemory…` 注入，与 terminal 一样从 `ContextKeySessionID` 取会话。未注入 store 时危险命令返回 `confirm_required_but_unconfigured`，不静默执行。
 
 ## 5. 命令策略
 
@@ -182,8 +200,8 @@ Content-Type: application/json
 
 至少包括：`taskkill`、`Stop-Process`、`Stop-Service`、`net stop`、`sc stop`、`sc delete`、`Restart-Computer`、`shutdown /r`、`Remove-Item`、`del `、`rmdir`、`rd `。
 
-无 token：不发 HTTP，走现网确认事件（`confirm_token` 存储与 `terminal` / `execute_write` 相同）。  
-有合法 token：执行 POST，用后失效（与现网一次性 token 一致）。
+无 token：不发 HTTP，返回 §4.4 的 `status=pending` 对象。  
+有合法 token：从本工具 pending store 取出原 `cmd`（以 store 为准，防模型改命令），POST 后删除 token（一次性）。
 
 ### 5.3 直接执行
 
@@ -191,7 +209,7 @@ Content-Type: application/json
 
 ### 5.4 确认存储
 
-`RegisterVMRunCmd` 注入与 `RegisterTerminalTool` 相同的 confirm store（从 chat runCtx / 现有 ConfirmStore 取）。未配置 store 时，危险命令返回 `confirm_required_but_unconfigured`（对齐 terminal），不静默执行。
+见 §4.4：自建 pending store，session 级一次性 token，TTL 默认 300s（对齐 terminal）。
 
 ## 6. 错误处理
 
@@ -212,7 +230,7 @@ Content-Type: application/json
 - `portal/api/tool/v1/tool.proto`：`RCAConfig.func_path` 增加 `vm_run_cmd`；复用已有 `datasource_id` 表示查 IP 的 MySQL。
 - `biz` 允许的 RCA func_path 列表加上 `vm_run_cmd`。
 - `registerRCATool` 增加分支；未知 path 仍 skip。
-- ToolForm：RCA 子类型下拉增加「实例 runCmd」。
+- ToolForm：RCA 子类型下拉增加「实例 runCmd」；可选填查 IP 用的 MySQL `datasource_id`（与 Agent 上将绑定的 MySQL 工具名对齐）。多 MySQL 未填则运行时 `permanent`，不在保存时猜。
 - `framework/skills_examples/skills/rca-investigation/SKILL.md`：标准顺序增加第 4 步（实例未采集日志 / 本机文件与进程）。`allowed_tools` 加上 `vm_run_cmd`。写明：仅有 vmid 不是进机理由；禁止 `http_request` 打 `:53000`；空 `stdout` 不是没日志。
 - 全局 skills prompt 若仍写「进实例」，改为点名 `vm_run_cmd`（若该文件在本期会误导模型则改；不顺带改压缩/重述文案）。
 
@@ -225,7 +243,7 @@ Content-Type: application/json
 1. 带 `host`：观察到 POST `/runCmd`、JSON `{"cmd":...}`、200 正文进入 `stdout`。
 2. 只有 `vmid`：先查询再 POST；0 行时 HTTP 次数为 0。
 3. 入参含 `url` 或 `host` 带 `://` → `permanent`。
-4. `taskkill` 无 token → 确认路径，HTTP 次数 0；带 token → POST。
+4. `taskkill` 无 token → 返回 `status=pending` + `token` + `command`，HTTP 次数 0；带合法 `confirm_token` → POST。`chat_stream` 单测：`ToolName=vm_run_cmd` 的 pending 结果能抽出确认卡片。
 5. `format` → `blocked_by_policy`，HTTP 次数 0。
 6. HTTP 200 空 body → `ok` 且 `output_empty`，error 为空。
 7. Client 超时 / 代理不可用 → `transient`。
@@ -240,8 +258,11 @@ Content-Type: application/json
 |------|------|
 | `framework/tool/vm_run_cmd.go` | 策略、寻址、POST、截断、结果 map |
 | `framework/tool/vm_run_cmd_test.go` | §8 工具级单测 |
-| `portal/internal/chat/rca_builder.go` | 注册分支 + 注入 Client 与 Lookup |
-| `portal/internal/chat/rca_builder_test.go` | 能注册 / 缺依赖时的行为 |
-| proto + ToolForm + Skill | 产品面 |
+| `portal/internal/chat/agent_builder.go` | 在 MySQL 注册之后（或共享 dsReg）再挂 `vm_run_cmd` |
+| `portal/internal/chat/rca_builder.go` | `func_path` 分支 + 注入 Client 与 Lookup |
+| `portal/internal/chat/rca_builder_test.go` | 能注册；无 MySQL 仍注册；只 host 可跑 |
+| `portal/internal/service/chat_stream.go` | pending → 确认卡片（`Kind=vm_run_cmd`） |
+| `portal/internal/service/chat_stream_test.go` | 抽取确认请求 |
+| proto + ToolForm + Skill | 产品面；ToolForm 可选 `datasource_id` |
 
 Lookup 不要做成第二个「模型可调 SQL 工具」；它是 `vm_run_cmd` 的内部依赖。
