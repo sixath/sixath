@@ -65,9 +65,11 @@ Portal
   Agent.proxy_id
   ToolConfig.egress_mode + proxy_id
 
+绑定写入 (Create/Update Agent、保存工具 egress)
+  编辑者必须对所选 proxy_id 有 use
+
 会话装配 (agent_builder)
-  校验 ACL use
-  解析 → ProxySpec{ID, Type, Addr, User, Password, NoProxy}
+  按已绑定 id 加载明文 Spec（不按聊天用户重验 use）
   每个出站工具带 Egress{Mode, Spec}
 
 framework/netx（名称可在实现时微调，必须单模块）
@@ -94,7 +96,7 @@ http_request / web / ES / MCP HTTP / Jaeger / MySQL
 | `type` | `http` \| `socks5` |
 | `host` | 必填；禁止空、禁止嵌入凭证 |
 | `port` | 必填 1–65535 |
-| `user` / `password` | 可选；GET/List 返回 `has_password`，不返回 `password`；更新时密码空字符串 = 保持原值 |
+| `user` / `password` | 可选；GET/List 返回 `has_password`，不返回 `password`；更新时省略或空字符串 = 保持原值。一期不支持单独清空密码（删重建） |
 | `no_proxy` | 字符串列表（库内 JSON）；可空 |
 | `created_at` / `updated_at` | 与 MCP 相同 |
 
@@ -106,15 +108,19 @@ http_request / web / ES / MCP HTTP / Jaeger / MySQL
 
 **Agent**（`CreateAgent` / `UpdateAgent` / `AgentReply`）：
 
-- `proxy_id`：可选。空 = 该 Agent 默认直连。非空必须存在且调用方 `use`。
+- `proxy_id`：可选。空 = 该 Agent 默认直连。非空必须存在且**编辑者**对该 id 有 `use`。
 
-**工具配置** `ToolConfig`（builtin 带出站、datasource、MCP HTTP、RCA ES/Jaeger）：
+**工具配置** `ToolConfig` 的 `egress_mode` / `proxy_id` **只存在于 Portal 工具行**：`type=datasource`、`type=mcp`（HTTP MCP 工具行）、RCA（`es_log_query` / `jaeger_trace`）。
 
 - `egress_mode`：`inherit` \| `off` \| `proxy`；缺省 `inherit`。
-- `proxy_id`：仅 `egress_mode=proxy` 时必填；必须存在且调用方 `use`。
-- `egress_mode=proxy` 且数据源为 MySQL 且代理 `type=http` → 校验失败，不保存。
+- `proxy_id`：仅 `egress_mode=proxy` 时必填；保存时编辑者必须对该 id 有 `use`。
+- 解析后的 Spec 为 `http` 且目标为 MySQL → 校验失败，不保存（含 `inherit` 到 Agent 的 HTTP 代理）。
 
 无 Portal 行的内置工具（`http_request`、默认 web_*）：**只能继承 Agent**，没有单独绑定 UI。
+
+Agent 绑定的 **MCP 服务目录**（`mcp_server_ids`，非工具行）一期只继承 Agent 默认代理，**不在 `mcp_servers` 表上增加 `egress_mode`**。若某 HTTP MCP 需要覆盖，做成 Portal `type=mcp` 工具行再绑 `egress`。
+
+Hive / Mongo 等未列入 §0 客户端名单的数据源一期保持直连；保存时若 `egress_mode=proxy` → **拒绝**（不要静默直连）。
 
 ### 4.3 解析顺序
 
@@ -163,8 +169,9 @@ http_request / web / ES / MCP HTTP / Jaeger / MySQL
 | `RegisterHTTPTool` | 增加可选 `HTTPClient` 或 `Spec`；默认直连以保持单测 |
 | web_* / Tavily / Bocha | 装配时传入同一 Agent 解析结果（继承 Agent；无工具级覆盖） |
 | ES `ESHTTP` / Jaeger | 按该工具 egress 解析后的 Client |
-| MCP HTTP transport | 装配时注入；stdio 忽略 egress |
-| MySQL 数据源 | `egress=proxy` 且 socks5：connector Dialer；http 类型在 builder 直接错误 |
+| MCP HTTP transport | **工具行**按 egress 注入；仅 `mcp_server_ids` 绑定的服务继承 Agent 默认；stdio 忽略 egress |
+| MySQL 数据源 | 解析后的 Spec 为 socks5 时注入 Dialer（含 Agent inherit）；解析结果为 http → builder/保存错误；无 Spec → 直连 |
+| Hive / Mongo | 一期直连，不读 egress |
 
 模型客户端（OpenAI/DashScope/Ollama）**不**读 Agent `proxy_id`。
 
@@ -173,7 +180,8 @@ http_request / web / ES / MCP HTTP / Jaeger / MySQL
 `portal/internal/chat/agent_builder.go`（及 YAML `registerRCATools` 同类路径）：
 
 - 收集本会话用到的 `proxy_id`（Agent + 各工具），一次加载 Spec。
-- 缺 id / 无 use 权限 / MySQL+http → 该工具注册失败并记日志，**不**把错误当 empty hit。
+- **不**按聊天用户（企微/频道 peer）重验 `resources` `use`。门禁是：绑定写入时编辑者已有 `use`；会话路径与现网 MCP/工具一样走 Agent 已绑定配置（`ListByAgentForSession` 同类）。
+- 缺 id / 记录已删 / MySQL 解析为 http → 该工具注册失败并记日志，**不**把错误当 empty hit。
 - 不把 Spec 写入工具 Description。
 
 YAML 单机入口：`config` 可加可选 `proxies:` 列表 + `proxy_id`，与 Portal 字段同形，便于无 Portal 的 framework 测试；Portal 路径以库为准。
@@ -184,7 +192,8 @@ YAML 单机入口：`config` 可加可选 `proxies:` 列表 + `proxy_id`，与 P
 |------|------|
 | 代理 TCP/握手失败、超时 | 工具 `ok: false`，`error_code=transient`；文案含代理 **id/name**，不含密码 |
 | 目标经代理返回 4xx/5xx | 与现网 HTTP 工具相同（那是目标 HTTP 状态，不是代理配置错误） |
-| 未知 `proxy_id`、无 use、MySQL+http | 装配或保存 **permanent**；不注册该出站工具 |
+| 未知 `proxy_id`、MySQL 解析为 http | 装配或保存 **permanent**；不注册该出站工具 |
+| 编辑者对 `proxy_id` 无 `use` | **仅绑定写入**（Create/Update Agent、保存工具 egress）permanent；会话装配不再用聊天身份验 use |
 | `MatchNoProxy` 后直连仍失败 | 普通网络错误，不提代理 |
 
 日志：`proxy_id`、`type`、目标 host（已有 SSRF/URL 规则）、错误类；禁止 password。
@@ -214,8 +223,9 @@ YAML 单机入口：`config` 可加可选 `proxies:` 列表 + `proxy_id`，与 P
 4. MySQL + http 代理：保存或 Register 失败。
 5. 删除有引用 → 409。
 6. GET 代理不含 password；空密码更新保持原值。
-7. `http_request` 在 Agent `proxy_id` 下走注入 Client（现有 SSRF 单测仍过）。
-8. ACL：无 use 不能把代理绑到 Agent。
+7. `http_request` 在 Agent `proxy_id` 下走注入 Client。
+8. ACL：无 `use` 的编辑者不能把代理绑到 Agent/工具；会话装配单测证明聊天用户无需 `use` 也能加载已绑定 Spec。
+9. SSRF：`ValidateOutboundURL` / `web_extract` 现有用例仍过（不要去找不存在的 `http_request` SSRF 测试）。最终 URL 仍校验；代理 host 允许内网。
 
 不做一期 e2e 真代理集群。
 
