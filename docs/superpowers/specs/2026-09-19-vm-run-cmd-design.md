@@ -1,6 +1,6 @@
 # RCA 进实例：`vm_run_cmd`（`:53000/runCmd`）
 
-> 状态：待评审  
+> 状态：已评审  
 > 日期：2026-09-19  
 > 关联：`framework/tool/jaeger_tool.go`、`framework/tool/ssh_exec.go`、`framework/tool/terminal_tool.go`、`portal/internal/chat/rca_builder.go`、`docs/superpowers/specs/2026-09-19-tool-egress-proxy-design.md`  
 > 触发：根因分析需要看虚拟机本机日志/进程，这些日志不进 ES；现网 Agent 用 `http_request` 打 `:53000` 会截断 URL、把空 200 当成「没日志」。
@@ -88,7 +88,7 @@ vm_run_cmd.Execute
 
 不得在工具内部自己 `sql.Open`。无 MySQL 时工具仍注册：只传 `host` 可用；只传 `vmid` 才 `permanent`。
 
-YAML / `sath serve`：配置了 `rca`/`func_path=vm_run_cmd` 则注册（不要偷偷无条件给所有进程加工具）。查库用 YAML 里已有的 MySQL 数据源；没有 MySQL 时同样允许 `host` 直连。
+YAML / `sath serve`：现有结构是 `rca.jaeger` / `rca.es` 小节，没有 Portal 的 `func_path`。一期加可选 `rca.vm_run_cmd`（例如 `enabled: true`）；**未配置则不注册**，不要给所有 CLI 进程默认开进实例。查库用 YAML 里已有的 MySQL 数据源；没有 MySQL 时允许 `host` 直连。
 
 ## 4. 调用契约
 
@@ -182,7 +182,7 @@ Content-Type: application/json
 }
 ```
 
-`portal/internal/service/chat_stream.go` 增加 `vmRunCmdConfirmationFromCall`：`ToolName=="vm_run_cmd"` 且 `status=="pending"` 且 `token`、`command` 非空 → `ChatConfirmationRequest{Kind:"vm_run_cmd", Title:"Confirm instance command", DSL: command, Token, ExpiresIn, Severity:"danger"}`，并接入现有 `collectConfirmations` 循环。Web 的 `parseConfirmRequiredPayload` 不白名单 kind，卡片能出。用户确认后走与 `terminal` 相同路径：下轮带 `confirm_token` 再调工具（**不必**做 `skill_manage` 那种跳过 LLM 的 `Apply*Confirm`）。
+`portal/internal/service/chat_stream.go` 的 `confirmationRequestsFromResponse` 增加抽取：`ToolName=="vm_run_cmd"` 且 `status=="pending"` 且 `token`、`command` 非空 → `ChatConfirmationRequest{Kind:"vm_run_cmd", Title:"Confirm instance command", Description:"Review the instance command before it is executed.", DSL: command, Token, ExpiresIn, Severity:"danger"}`。`Description` 必填：Web `parseConfirmRequiredPayload` 缺 description 会静默不出卡片。用户确认后走与 `terminal` 相同路径：下轮带 `confirm_token` 再调工具（**不必**做 `skill_manage` 那种跳过 LLM 的 `Apply*Confirm`）。非法/过期 token 复用 terminal 的 `ConfirmTokenError`（`not_found` / TTL），不另开合同。
 
 仓库里没有共享 `ConfirmStore` 类型。`vm_run_cmd` **自建** pending store（接口对齐 `TerminalPendingStore`：Save/Get/Delete by sessionID+token），**不要**复用 `TerminalPendingStore` 实例以免 token 串台。Portal 装配时 `NewInMemory…` 注入，与 terminal 一样从 `ContextKeySessionID` 取会话。未注入 store 时危险命令返回 `confirm_required_but_unconfigured`，不静默执行。
 
