@@ -34,22 +34,26 @@ type AgentUsecase struct {
 	repo      AgentRepo
 	resources ResourceRepo
 	access    *AccessChecker
+	proxies   ProxyRepo
 	dataRoot  string
 	log       *log.Helper
 }
 
 // NewAgentUsecase creates an AgentUsecase
-func NewAgentUsecase(repo AgentRepo, resources ResourceRepo, access *AccessChecker, dataRoot string, logger log.Logger) *AgentUsecase {
-	return &AgentUsecase{repo: repo, resources: resources, access: access, dataRoot: dataRoot, log: log.NewHelper(logger)}
+func NewAgentUsecase(repo AgentRepo, resources ResourceRepo, access *AccessChecker, proxies ProxyRepo, dataRoot string, logger log.Logger) *AgentUsecase {
+	return &AgentUsecase{repo: repo, resources: resources, access: access, proxies: proxies, dataRoot: dataRoot, log: log.NewHelper(logger)}
 }
 
 // Create creates an agent
-func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
+func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID, proxyID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
 	caller, err := requireCaller(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if err := uc.requireToolsUse(ctx, caller, toolIDs); err != nil {
+		return nil, err
+	}
+	if err := uc.requireProxyUse(ctx, caller, proxyID); err != nil {
 		return nil, err
 	}
 	id := uuid.NewString()
@@ -59,7 +63,7 @@ func (uc *AgentUsecase) Create(ctx context.Context, name, description, systemPro
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		return nil, err
 	}
-	agent, err := uc.repo.Create(ctx, id, name, description, systemPrompt, workspace, modelConfig, debugRun, wecomChannelID, runtimeTools, toolIDs)
+	agent, err := uc.repo.Create(ctx, id, name, description, systemPrompt, workspace, modelConfig, debugRun, wecomChannelID, proxyID, runtimeTools, toolIDs)
 	if err != nil && errors.Is(err, pkgErrors.ErrDuplicateName) {
 		return nil, ErrAgentDuplicateName
 	}
@@ -166,6 +170,15 @@ func (uc *AgentUsecase) Update(ctx context.Context, id string, updates map[strin
 		}
 		updates["workspace"] = ws
 	}
+	if v, ok := updates["proxy_id"].(string); ok {
+		caller, cerr := requireCaller(ctx)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if err := uc.requireProxyUse(ctx, caller, v); err != nil {
+			return nil, err
+		}
+	}
 	agent, err := uc.repo.Update(ctx, id, updates)
 	if err != nil && errors.Is(err, pkgErrors.ErrNotFound) {
 		return nil, ErrAgentNotFound
@@ -256,6 +269,10 @@ func (uc *AgentUsecase) requireAgentPerm(ctx context.Context, agentID string, ne
 		return nil, ErrForbiddenPerm
 	}
 	return resource, nil
+}
+
+func (uc *AgentUsecase) requireProxyUse(ctx context.Context, caller, proxyID string) error {
+	return requireProxyUse(ctx, caller, proxyID, uc.proxies, uc.resources, uc.access)
 }
 
 func (uc *AgentUsecase) requireToolsUse(ctx context.Context, caller string, toolIDs []string) error {

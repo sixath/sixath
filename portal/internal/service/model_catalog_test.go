@@ -71,7 +71,7 @@ func TestListModelChoices_IncludesAgentDefault(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: "a1",
 		OwnerUserID: "user-1", Visibility: biz.VisibilityPrivate,
 	}}
-	agentUC := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), t.TempDir(), log.NewStdLogger(nil))
+	agentUC := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, t.TempDir(), log.NewStdLogger(nil))
 	s := &ChatService{
 		chatUC:  biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil),
 		agentUC: agentUC,

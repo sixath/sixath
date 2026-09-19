@@ -88,12 +88,13 @@ type ToolUsecase struct {
 	repo      ToolRepo
 	resources ResourceRepo
 	access    *AccessChecker
+	proxies   ProxyRepo
 	log       *log.Helper
 }
 
 // NewToolUsecase creates a ToolUsecase
-func NewToolUsecase(repo ToolRepo, resources ResourceRepo, access *AccessChecker, logger log.Logger) *ToolUsecase {
-	return &ToolUsecase{repo: repo, resources: resources, access: access, log: log.NewHelper(logger)}
+func NewToolUsecase(repo ToolRepo, resources ResourceRepo, access *AccessChecker, proxies ProxyRepo, logger log.Logger) *ToolUsecase {
+	return &ToolUsecase{repo: repo, resources: resources, access: access, proxies: proxies, log: log.NewHelper(logger)}
 }
 
 // Create creates a tool
@@ -110,6 +111,9 @@ func (uc *ToolUsecase) Create(ctx context.Context, name, description, toolType s
 		return nil, err
 	}
 	if err := ValidateElasticsearchDatasource(tt, config); err != nil {
+		return nil, err
+	}
+	if err := ValidateToolEgress(ctx, caller, config, uc.proxies, uc.resources, uc.access); err != nil {
 		return nil, err
 	}
 	tool, err := uc.repo.Create(ctx, name, description, tt, config)
@@ -228,6 +232,13 @@ func (uc *ToolUsecase) Update(ctx context.Context, id string, toolType, name, de
 			return nil, err
 		}
 		if err := ValidateElasticsearchDatasource(effective, config); err != nil {
+			return nil, err
+		}
+		caller, cerr := requireCaller(ctx)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if err := ValidateToolEgress(ctx, caller, config, uc.proxies, uc.resources, uc.access); err != nil {
 			return nil, err
 		}
 	}

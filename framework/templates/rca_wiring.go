@@ -2,11 +2,15 @@ package templates
 
 import (
 	"log/slog"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/executor"
+	"github.com/sixath/framework/netx"
 	"github.com/sixath/framework/tool"
 	fwws "github.com/sixath/framework/workspace"
 )
@@ -29,7 +33,7 @@ func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 
 	// 2) Jaeger:有 query_url 才注册。
 	if cfg.RCA.Jaeger.QueryURL != "" {
-		if err := tool.RegisterJaegerTool(reg, cfg.RCA.Jaeger.QueryURL); err != nil {
+		if err := tool.RegisterJaegerTool(reg, cfg.RCA.Jaeger.QueryURL, yamlEgressClient(cfg, destHostFromURL(cfg.RCA.Jaeger.QueryURL))); err != nil {
 			return err
 		}
 	} else {
@@ -47,11 +51,12 @@ func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 	case ep != "":
 		const inlineID = "rca-es"
 		dsCfg := datasource.Config{
-			ID:       inlineID,
-			Type:     datasource.TypeElasticsearch,
-			DSN:      ep,
-			User:     cfg.RCA.ES.User,
-			Password: cfg.RCA.ES.Password,
+			ID:         inlineID,
+			Type:       datasource.TypeElasticsearch,
+			DSN:        ep,
+			User:       cfg.RCA.ES.User,
+			Password:   cfg.RCA.ES.Password,
+			HTTPClient: yamlEgressClient(cfg, destHostFromURL(ep)),
 		}
 		dsReg := datasource.NewRegistry()
 		datasource.RegisterElasticsearch(dsReg)
@@ -100,11 +105,58 @@ func buildRCAESReader(cfg config.Config) (executor.Reader, bool) {
 	if dsCfg == nil {
 		return nil, false
 	}
+	injected := *dsCfg
+	injected.HTTPClient = yamlEgressClient(cfg, destHostFromURL(injected.DSN))
+	if injected.HTTPClient == nil && injected.Host != "" {
+		injected.HTTPClient = yamlEgressClient(cfg, injected.Host)
+	}
 	dsReg := datasource.NewRegistry()
 	datasource.RegisterElasticsearch(dsReg)
-	if _, err := dsReg.Register(*dsCfg); err != nil {
+	if _, err := dsReg.Register(injected); err != nil {
 		slog.Warn("rca: register es datasource failed", "err", err)
 		return nil, false
 	}
 	return executor.NewESExecutor(dsReg), true
+}
+
+// rcaEgressClientTimeout matches framework/tool/http_tool.go http_request overlay.
+const rcaEgressClientTimeout = 20 * time.Second
+
+func yamlEgressClient(cfg config.Config, destHost string) *http.Client {
+	cat := make(map[string]netx.Spec, len(cfg.Proxies))
+	for _, s := range cfg.Proxies {
+		id := strings.TrimSpace(s.ID)
+		if id == "" {
+			continue
+		}
+		cat[id] = s
+	}
+	var agent *netx.Spec
+	if id := strings.TrimSpace(cfg.ProxyID); id != "" {
+		if s, ok := cat[id]; ok {
+			cp := s
+			agent = &cp
+		}
+	}
+	eff, err := netx.Resolve(netx.Binding{Mode: netx.ModeInherit}, agent, cat, destHost)
+	if err != nil || eff == nil {
+		return nil
+	}
+	// ModeInherit never sets Force; HTTPClient is enough.
+	return netx.HTTPClient(eff.Spec, rcaEgressClientTimeout)
+}
+
+func destHostFromURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }

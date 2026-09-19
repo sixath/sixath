@@ -4,6 +4,8 @@ import ToolList from './pages/ToolList'
 import ToolForm from './pages/ToolForm'
 import McpServerList from './pages/McpServerList'
 import McpServerForm from './pages/McpServerForm'
+import ProxyList from './pages/ProxyList'
+import ProxyForm from './pages/ProxyForm'
 import ModelProviderList from './pages/ModelProviderList'
 import ModelProviderForm from './pages/ModelProviderForm'
 import AgentList from './pages/AgentList'
@@ -47,6 +49,11 @@ function Breadcrumb() {
     else if (segments[2] === 'edit') { current = '编辑 MCP 服务'; icon = '✏️' }
     else if (segments[1]) { current = 'MCP 服务详情'; icon = '🔌' }
     else { current = 'MCP 服务'; icon = '🔌' }
+  } else if (segments[0] === 'proxies') {
+    if (segments[1] === 'new') { current = '新建代理'; icon = '➕' }
+    else if (segments[2] === 'edit') { current = '编辑代理'; icon = '✏️' }
+    else if (segments[1]) { current = '代理详情'; icon = '🌐' }
+    else { current = '代理'; icon = '🌐' }
   } else if (segments[0] === 'model-providers') {
     if (segments[1] === 'new') { current = '新建模型供应商'; icon = '➕' }
     else if (segments[1]) { current = '编辑模型供应商'; icon = '✏️' }
@@ -144,6 +151,10 @@ function AppShell() {
               <span className="nav-item__icon">🔌</span>
               MCP 服务
             </NavLink>
+            <NavLink to="/proxies" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <span className="nav-item__icon">🌐</span>
+              代理
+            </NavLink>
             <NavLink to="/model-providers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">🧠</span>
               模型供应商
@@ -212,6 +223,9 @@ function AppShell() {
             <Route path="/mcp-servers" element={<McpServerList />} />
             <Route path="/mcp-servers/new" element={<McpServerForm />} />
             <Route path="/mcp-servers/:id/edit" element={<McpServerForm />} />
+            <Route path="/proxies" element={<ProxyList />} />
+            <Route path="/proxies/new" element={<ProxyForm />} />
+            <Route path="/proxies/:id/edit" element={<ProxyForm />} />
             <Route path="/model-providers" element={<ModelProviderList />} />
             <Route path="/model-providers/new" element={<ModelProviderForm />} />
             <Route path="/model-providers/:id" element={<ModelProviderForm />} />

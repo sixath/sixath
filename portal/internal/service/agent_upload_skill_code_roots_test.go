@@ -27,8 +27,8 @@ func TestUploadSkillPackage_RejectsWorkspaceUnderCodeRoots(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
-	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), "/tmp", log.NewStdLogger(nil))
-	svc := NewAgentService(uc, nil, nil, nil, nil, []string{root}, log.NewStdLogger(nil))
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, "/tmp", log.NewStdLogger(nil))
+	svc := NewAgentService(uc, nil, nil, nil, nil, nil, []string{root}, log.NewStdLogger(nil))
 
 	ctx := biz.WithCallerUserID(context.Background(), "owner")
 	reply, err := svc.UploadSkillPackage(ctx, &agentv1.UploadSkillPackageRequest{

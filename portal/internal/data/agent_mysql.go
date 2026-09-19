@@ -138,6 +138,7 @@ func agentRowToMeta(m *model.Agent, toolIDs, mcpServerIDs []string) *biz.AgentMe
 		Workspace:      m.Workspace,
 		DebugRun:       m.DebugRun,
 		WecomChannelID: m.WecomChannelID,
+		ProxyID:        m.ProxyID,
 		RuntimeTools:   modelRuntimeToolsToBiz(m.RuntimeTools),
 		ToolIDs:        append([]string{}, toolIDs...),
 		McpServerIDs:   append([]string{}, mcpServerIDs...),
@@ -146,7 +147,7 @@ func agentRowToMeta(m *model.Agent, toolIDs, mcpServerIDs []string) *biz.AgentMe
 	}
 }
 
-func (r *agentRepo) Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig biz.ModelConfig, debugRun bool, wecomChannelID string, runtimeTools biz.RuntimeToolsConfig, toolIDs []string) (*biz.AgentMeta, error) {
+func (r *agentRepo) Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig biz.ModelConfig, debugRun bool, wecomChannelID, proxyID string, runtimeTools biz.RuntimeToolsConfig, toolIDs []string) (*biz.AgentMeta, error) {
 	if id == "" {
 		id = uuid.New().String()
 	}
@@ -162,6 +163,7 @@ func (r *agentRepo) Create(ctx context.Context, id, name, description, systemPro
 		Workspace:      workspace,
 		DebugRun:       debugRun,
 		WecomChannelID: wecomChannelID,
+		ProxyID:        proxyID,
 		RuntimeTools:   bizRuntimeToolsToModel(runtimeTools),
 	}
 	if err := r.db.WithContext(ctx).Create(agent).Error; err != nil {
@@ -352,6 +354,8 @@ func (r *agentRepo) Update(ctx context.Context, id string, updates map[string]an
 			upd["debug_run"] = v.(bool)
 		case "wecom_channel_id":
 			upd["wecom_channel_id"] = v.(string)
+		case "proxy_id":
+			upd["proxy_id"] = v.(string)
 		case "runtime_tools":
 			upd["runtime_tools"] = bizRuntimeToolsToModel(v.(biz.RuntimeToolsConfig))
 		}

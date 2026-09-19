@@ -42,23 +42,24 @@ type ChatService struct {
 	codeRoots      []string
 	db             *gorm.DB
 	catalog        *data.ModelCatalogStore
+	proxyRepo      biz.ProxyRepo
 	log            *log.Helper
 }
 
 // NewChatService creates a ChatService
 func NewChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, logger log.Logger) *ChatService {
-	return newChatService(chatUC, agentUC, toolUC, nil, skillUC, channelUC, memory.NewSessionMemory(), logger)
+	return newChatService(chatUC, agentUC, toolUC, nil, skillUC, channelUC, memory.NewSessionMemory(), nil, logger)
 }
 
 // NewChatServiceWithMemoryStore creates a ChatService with the durable session
 // memory backend supplied by the data layer.
-func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
-	return newChatService(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
+func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, proxyRepo biz.ProxyRepo, logger log.Logger) *ChatService {
+	return newChatService(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, proxyRepo, logger)
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, d *data.Data, logger log.Logger) *ChatService {
-	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, logger)
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, d *data.Data, proxyRepo biz.ProxyRepo, logger log.Logger) *ChatService {
+	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, proxyRepo, logger)
 	s.SetTurnTraceStore(turnTraceStore)
 	s.SetCodeRoots(codeRoots)
 	if d != nil {
@@ -120,7 +121,7 @@ func (s *ChatService) persistCompactBoundary(ctx context.Context, sessionID stri
 	}
 }
 
-func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, logger log.Logger) *ChatService {
+func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, proxyRepo biz.ProxyRepo, logger log.Logger) *ChatService {
 	transcriptProvider := chat.NewChatTranscriptProvider(chatUC)
 	chat.SetMemoryAgentGetter(agentUC)
 	memoryStore := chat.BuildMemoryStore(sessionUnits, nil, transcriptProvider, chat.DefaultMemoryStoreOptions())
@@ -135,6 +136,7 @@ func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *
 		channelUC:    channelUC,
 		sessionHooks: agent.NewChatSessionHookRegistry(),
 		memoryStore:  memoryStore,
+		proxyRepo:    proxyRepo,
 		log:          log.NewHelper(logger),
 	}
 	s.registerBrowserSessionHooks()
@@ -374,7 +376,12 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 
 	reg := tool.NewRegistry()
 	var mcpServers []toolskill.McpServerEntry
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
+	cat := chat.LoadProxyCatalog(ctx, s.proxyRepo, agentMeta.ProxyID, tools)
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{
+		Workspace:    agentMeta.Workspace,
+		AgentProxyID: agentMeta.ProxyID,
+		Proxies:      cat,
+	})
 	if err != nil {
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
@@ -428,6 +435,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		BoundServers: mcpServerMetas,
 		Wiring:       catalogInput,
 		Catalog:      catalog,
+		HTTPClient:   reg.HTTPClient(),
 	})
 	// 构建 ReActAgent
 	maxHistory := 20
@@ -638,7 +646,12 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			}
 		}
 	}()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
+	cat := chat.LoadProxyCatalog(ctx, s.proxyRepo, agentMeta.ProxyID, tools)
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{
+		Workspace:    agentMeta.Workspace,
+		AgentProxyID: agentMeta.ProxyID,
+		Proxies:      cat,
+	})
 	if err != nil {
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
@@ -691,6 +704,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		BoundServers: mcpServerMetas,
 		Wiring:       catalogInput,
 		Catalog:      catalog,
+		HTTPClient:   reg.HTTPClient(),
 	})
 	maxHistory := 20
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)

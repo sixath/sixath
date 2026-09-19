@@ -14,7 +14,11 @@ import (
 // collectESLogClusters builds the ES cluster table from bound elasticsearch
 // datasources, then merges transitional RCA es_log_query rows. Connections
 // live on a dedicated datasource.Registry, not the data-trio registry.
-func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, esReg *datasource.Registry) {
+func collectESLogClusters(tools []*biz.ToolMeta, opts ...RegistryBuildOptions) (clusters []tool.ESLogCluster, esReg *datasource.Registry) {
+	var o RegistryBuildOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	esReg = datasource.NewRegistry()
 	datasource.RegisterElasticsearch(esReg)
 
@@ -40,6 +44,10 @@ func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, 
 			continue
 		}
 		dsCfg.Type = datasource.TypeElasticsearch
+		if err := applyDatasourceEgress(&dsCfg, toolEgressBinding(toolConfigToMap(t.Config)), o); err != nil {
+			slog.Error("es_log: skip elasticsearch, proxy not in catalog", "id", dsCfg.ID, "err", err)
+			continue
+		}
 		if _, err := esReg.Register(dsCfg); err != nil {
 			slog.Warn("es_log: register elasticsearch datasource failed", "id", dsCfg.ID, "err", err)
 			continue
@@ -120,6 +128,10 @@ func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, 
 				dsCfg.Password = p
 			}
 		}
+		if err := applyDatasourceEgress(&dsCfg, toolEgressBinding(cfg), o); err != nil {
+			slog.Error("rca: skip inline es, proxy not in catalog", "id", clusterID, "err", err)
+			continue
+		}
 		if _, err := esReg.Register(dsCfg); err != nil {
 			slog.Warn("rca: inline es register failed", "err", err)
 			continue
@@ -135,11 +147,11 @@ func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, 
 }
 
 // registerESLogFromAgentTools registers es_log_query once when the cluster table is nonempty.
-func registerESLogFromAgentTools(reg *tool.Registry, tools []*biz.ToolMeta) {
+func registerESLogFromAgentTools(reg *tool.Registry, tools []*biz.ToolMeta, opts ...RegistryBuildOptions) {
 	if reg == nil {
 		return
 	}
-	clusters, esReg := collectESLogClusters(tools)
+	clusters, esReg := collectESLogClusters(tools, opts...)
 	if len(clusters) == 0 {
 		return
 	}

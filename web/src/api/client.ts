@@ -3,6 +3,11 @@ import { authHeaders, hasApiToken, handleUnauthorized } from './auth'
 import { isFailedRet } from './ret'
 import type { TimelineNode } from '../pages/timelineReducer'
 import { normalizeTimeline } from '../pages/timelineReducer'
+import {
+  formatProxyInUseMessage,
+  parseProxyDeleteConflict,
+  type ProxyReference,
+} from '../utils/proxyEgress'
 
 const API_BASE = '/api/v1'
 
@@ -137,6 +142,8 @@ export interface ToolConfig {
     ready_timeout_sec?: number
     request_timeout_sec?: number
   }
+  egress_mode?: string
+  proxy_id?: string
 }
 
 export interface Tool {
@@ -189,6 +196,8 @@ export function normalizeToolConfig(raw?: ToolConfig & Record<string, unknown>):
     mcp: cfg.mcp as McpConfig | undefined,
     datasource: normalizeDatasourceConfig(cfg.datasource),
     rca: normalizeRCAConfig(cfg.rca),
+    egress_mode: (cfg.egress_mode as string | undefined) ?? (cfg.egressMode as string | undefined),
+    proxy_id: (cfg.proxy_id as string | undefined) ?? (cfg.proxyId as string | undefined),
   }
 }
 
@@ -402,6 +411,164 @@ export const mcpServerApi = {
   },
 }
 
+export type ProxyType = 'http' | 'socks5'
+
+export interface Proxy {
+  id: string
+  name: string
+  description: string
+  type: ProxyType
+  host: string
+  port: number
+  user: string
+  has_password: boolean
+  no_proxy: string[]
+  created_at?: string
+  updated_at?: string
+}
+
+export type CreateProxyRequest = {
+  id: string
+  name: string
+  description?: string
+  type: ProxyType
+  host: string
+  port: number
+  user?: string
+  password?: string
+  no_proxy?: string[]
+}
+
+export interface ProxyListResponse {
+  ret?: BaseResponse
+  items: Proxy[]
+  total: number
+}
+
+export interface ProxyResponse {
+  ret?: BaseResponse
+  proxy: Proxy
+}
+
+export interface ProxyTestResponse {
+  ret?: BaseResponse
+  ok?: boolean
+}
+
+export class ProxyInUseError extends Error {
+  readonly reason = 'PROXY_IN_USE'
+  references: ProxyReference[]
+  truncated: boolean
+  constructor(message: string, references: ProxyReference[] = [], truncated = false) {
+    super(message)
+    this.name = 'ProxyInUseError'
+    this.references = references
+    this.truncated = truncated
+  }
+}
+
+export function isProxyInUseError(e: unknown): e is ProxyInUseError {
+  return e instanceof ProxyInUseError
+}
+
+export function normalizeProxy(raw: Proxy & Record<string, unknown>): Proxy {
+  const item = raw as Record<string, unknown>
+  const typeRaw = String(item.type ?? 'http').toLowerCase()
+  const type: ProxyType = typeRaw === 'socks5' ? 'socks5' : 'http'
+  const noProxy = item.no_proxy ?? item.noProxy
+  return {
+    id: (item.id as string | undefined) ?? '',
+    name: (item.name as string | undefined) ?? '',
+    description: (item.description as string | undefined) ?? '',
+    type,
+    host: (item.host as string | undefined) ?? '',
+    port: Number(item.port) || 0,
+    user: (item.user as string | undefined) ?? '',
+    has_password: Boolean(item.has_password ?? item.hasPassword),
+    no_proxy: Array.isArray(noProxy) ? noProxy.map((v) => String(v)) : [],
+    created_at: (item.created_at as string | undefined) ?? (item.createdAt as string | undefined) ?? '',
+    updated_at: (item.updated_at as string | undefined) ?? (item.updatedAt as string | undefined) ?? '',
+  }
+}
+
+export const proxyApi = {
+  list: async (params?: { page?: number; page_size?: number; name?: string; bindable?: boolean }) => {
+    const q = new URLSearchParams()
+    if (params?.page) q.set('page', String(params.page))
+    if (params?.page_size) q.set('page_size', String(params.page_size))
+    if (params?.name) q.set('name', params.name)
+    if (params?.bindable) q.set('bindable', '1')
+    const query = q.toString()
+    const data = await request<ProxyListResponse>(`/proxies${query ? '?' + query : ''}`)
+    checkRet(data)
+    return {
+      ...data,
+      items: (data.items || []).map((item) => normalizeProxy(item as Proxy & Record<string, unknown>)),
+    }
+  },
+  get: async (id: string) => {
+    const data = await request<ProxyResponse & Record<string, unknown>>(`/proxies/${id}`)
+    checkRet(data)
+    const proxy = (data.proxy ?? data) as Proxy & Record<string, unknown>
+    return normalizeProxy(proxy)
+  },
+  create: async (body: CreateProxyRequest) => {
+    const res = await request<ProxyResponse>('/proxies', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    checkRet(res)
+    return normalizeProxy((res.proxy ?? res) as Proxy & Record<string, unknown>)
+  },
+  update: async (id: string, body: Partial<CreateProxyRequest>) => {
+    const res = await request<ProxyResponse>(`/proxies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...body, id }),
+    })
+    checkRet(res)
+    return normalizeProxy((res.proxy ?? res) as Proxy & Record<string, unknown>)
+  },
+  remove: async (id: string) => {
+    const url = `${API_BASE}/proxies/${id}`
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
+    })
+    const text = await res.text()
+    if (!res.ok) {
+      if (maybeUnauthorized(res.status, text)) {
+        handleUnauthorized()
+      }
+      if (res.status === 409) {
+        const conflict = parseProxyDeleteConflict(text)
+        const refs = conflict?.references ?? []
+        const truncated = conflict?.truncated ?? false
+        throw new ProxyInUseError(
+          formatProxyInUseMessage(refs, truncated),
+          refs,
+          truncated,
+        )
+      }
+      throw new Error(httpErrorMessage(res.status, text))
+    }
+    if (text.trim()) {
+      const data = JSON.parse(text) as { ret?: BaseResponse }
+      checkRet(data)
+    }
+  },
+  test: async (id: string) => {
+    const res = await request<ProxyTestResponse>(`/proxies/${id}/test`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    checkRet(res)
+    return { ok: !!res.ok }
+  },
+}
+
 export type ModelProviderKind = 'openai_compat' | 'dashscope'
 
 export interface ModelProvider {
@@ -604,6 +771,7 @@ export interface Agent {
   mcp_server_ids?: string[]
   mcpServerIds?: string[]
   wecom_channel_id?: string
+  proxy_id?: string
   created_at: string
   updated_at: string
 }
@@ -631,6 +799,7 @@ export interface AgentResponse {
   mcp_server_ids?: string[]
   mcpServerIds?: string[]
   wecom_channel_id?: string
+  proxy_id?: string
   created_at: string
   updated_at: string
 }
@@ -671,6 +840,7 @@ export interface CreateAgentRequest {
   runtime_tools?: RuntimeToolsConfig
   tool_ids?: string[]
   wecom_channel_id?: string
+  proxy_id?: string
 }
 
 function normalizeModelConfig(raw?: ModelConfig & Record<string, unknown>): ModelConfig {
@@ -734,6 +904,7 @@ function normalizeAgent(raw: Agent & Record<string, unknown>): Agent {
       [],
     wecom_channel_id:
       (item.wecom_channel_id as string | undefined) ?? (item.wecomChannelId as string | undefined) ?? '',
+    proxy_id: (item.proxy_id as string | undefined) ?? (item.proxyId as string | undefined) ?? '',
     created_at: (item.created_at as string | undefined) ?? (item.createdAt as string | undefined) ?? '',
     updated_at: (item.updated_at as string | undefined) ?? (item.updatedAt as string | undefined) ?? '',
   }

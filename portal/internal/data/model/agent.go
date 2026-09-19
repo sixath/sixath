@@ -39,6 +39,7 @@ type Agent struct {
 	Workspace      string             `gorm:"column:workspace;size:512;not null"`
 	DebugRun       bool               `gorm:"column:debug_run;not null;default:false"`
 	WecomChannelID string             `gorm:"column:wecom_channel_id;size:36"`
+	ProxyID        string             `gorm:"column:proxy_id;size:36"`
 	RuntimeTools   RuntimeToolsConfig `gorm:"column:runtime_tools;type:json"`
 	CreatedAt      time.Time          `gorm:"column:created_at;not null"`
 	UpdatedAt      time.Time          `gorm:"column:updated_at;not null"`

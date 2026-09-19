@@ -989,6 +989,8 @@ components:
                     type: array
                     items:
                         type: string
+                proxyId:
+                    type: string
         agent.v1.BindToolsReply:
             type: object
             properties:
@@ -1042,6 +1044,8 @@ components:
                 runtimeTools:
                     $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
                 wecomChannelId:
+                    type: string
+                proxyId:
                     type: string
         agent.v1.DeleteAgentReply:
             type: object
@@ -1103,7 +1107,7 @@ components:
                     type: string
                 maxOutputTokens:
                     type: integer
-                    description: max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（8192）。
+                    description: max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（32768）。
                     format: int32
             description: 模型配置
         agent.v1.RuntimeToolsConfig:
@@ -1125,20 +1129,9 @@ components:
                     type: boolean
                 browserEnabled:
                     type: boolean
-                meaEnabled:
-                    type: boolean
-                    description: MEA（Manage-Execute-Audit）；与 SATH_MEA / SATH_MEA_PILOT_AGENTS OR 合并
                 hybridRecall:
                     type: boolean
                     description: unset = on（默认开启混合召回）；presence 全链路保留
-                hubGovernance:
-                    type: string
-                    description: Memory Hub provider overrides（空/unset = 用进程 defaults；非空 = Catalog name）
-                hubKnowledge:
-                    type: string
-                hubFallbackToDefaultOnReadError:
-                    type: boolean
-                    description: §3.5.1 读路径运输错误时是否回落到 defaults 治理面
             description: Hermes P0 运行时工具开关（与全局 env OR 合并）
         agent.v1.SkillMeta:
             type: object
@@ -1175,6 +1168,8 @@ components:
                 runtimeTools:
                     $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
                 wecomChannelId:
+                    type: string
+                proxyId:
                     type: string
         agent.v1.UploadSkillPackageReply:
             type: object
@@ -1278,6 +1273,12 @@ components:
                     type: string
                 runtimeStatus:
                     $ref: '#/components/schemas/channel.v1.RuntimeStatus'
+                autoRouteEnabled:
+                    type: boolean
+                autoRouteMention:
+                    type: boolean
+                autoRouteClassifier:
+                    type: boolean
         channel.v1.CreateChannelRequest:
             type: object
             properties:
@@ -1326,6 +1327,12 @@ components:
                     type: string
                 defaultReplyMode:
                     type: string
+                autoRouteEnabled:
+                    type: boolean
+                autoRouteMention:
+                    type: boolean
+                autoRouteClassifier:
+                    type: boolean
         channel.v1.DeleteChannelReply:
             type: object
             properties:
@@ -1728,6 +1735,14 @@ components:
                     type: string
                 readOnly:
                     type: boolean
+                defaultIndex:
+                    type: string
+                traceIdField:
+                    type: string
+                purpose:
+                    type: string
+                bodyField:
+                    type: string
             description: DatasourceConfig 数据源配置，与 framework/datasource.Config 对齐
         tool.v1.DeleteToolReply:
             type: object
@@ -1775,10 +1790,11 @@ components:
                     type: string
                 endpoint:
                     type: string
-                    description: es_log_query inline ES URL (DSN); mutually exclusive with datasourceId
                 user:
                     type: string
                 password:
+                    type: string
+                bodyField:
                     type: string
             description: RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
         tool.v1.ToolConfig:
@@ -1806,6 +1822,10 @@ components:
                     $ref: '#/components/schemas/tool.v1.DatasourceConfig'
                 rca:
                     $ref: '#/components/schemas/tool.v1.RCAConfig'
+                egressMode:
+                    type: string
+                proxyId:
+                    type: string
             description: 工具配置：内置用 func_path/parameters，MCP 用 mcp 或 mcp_* 字段，数据源用 datasource
         tool.v1.ToolReply:
             type: object

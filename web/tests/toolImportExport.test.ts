@@ -42,6 +42,17 @@ describe('toolExportFormat', () => {
     )
   })
 
+  it('keeps top-level egress_mode and proxy_id', () => {
+    const parsed = parseToolsImportJson(JSON.stringify({
+      name: 'http-via-office',
+      type: 'builtin',
+      description: '',
+      config: { func_path: 'http_request', egress_mode: 'proxy', proxy_id: 'office' },
+    }))
+    assert.equal(parsed[0].config.egress_mode, 'proxy')
+    assert.equal(parsed[0].config.proxy_id, 'office')
+  })
+
   it('keeps elasticsearch purpose and default_index from camelCase', () => {
     const parsed = parseToolsImportJson(JSON.stringify({
       name: 'zj-elk',

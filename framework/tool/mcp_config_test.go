@@ -1,11 +1,23 @@
 package tool_test
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/sixath/framework/tool"
 )
+
+type recordingRoundTripper struct {
+	called bool
+}
+
+func (r *recordingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	r.called = true
+	return nil, errors.New("injected http client")
+}
 
 func TestMcpConfigFromMap_Stdio(t *testing.T) {
 	c := tool.McpConfigFromMap(map[string]any{
@@ -63,6 +75,55 @@ func TestNewMcpTool_StdioEmptyBackendUsesPoolAdapter(t *testing.T) {
 		Transport: "stdio",
 		Command:   "npx",
 		Args:      []string{"-y", "@scope/pkg"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mt == nil {
+		t.Fatal("expected mcpTool")
+	}
+}
+
+func TestNewMcpTool_HTTPUsesInjectedClient(t *testing.T) {
+	rt := &recordingRoundTripper{}
+	client := &http.Client{Transport: rt}
+	mt, err := tool.NewMcpTool(&tool.McpConfig{
+		Endpoint:   "http://127.0.0.1:1/mcp",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mt.Initialize(context.Background())
+	if !rt.called {
+		t.Fatal("HTTPClient was not used by default metoro backend")
+	}
+}
+
+func TestNewMcpTool_Mark3labsUsesInjectedClient(t *testing.T) {
+	rt := &recordingRoundTripper{}
+	client := &http.Client{Transport: rt}
+	mt, err := tool.NewMcpTool(&tool.McpConfig{
+		Endpoint:   "http://127.0.0.1:1/mcp",
+		Backend:    "mark3labs",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mt.Initialize(context.Background())
+	if !rt.called {
+		t.Fatal("HTTPClient was not used by mark3labs backend")
+	}
+}
+
+func TestNewMcpTool_StdioIgnoresHTTPClient(t *testing.T) {
+	mt, err := tool.NewMcpTool(&tool.McpConfig{
+		Id:         "stdio-ignore-http",
+		Transport:  "stdio",
+		Command:    "npx",
+		Args:       []string{"-y", "@scope/pkg"},
+		HTTPClient: &http.Client{Transport: &recordingRoundTripper{}},
 	})
 	if err != nil {
 		t.Fatal(err)

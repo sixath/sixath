@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { agentApi, toolApi, mcpServerApi, RUNTIME_TOOL_FIELDS, type Agent, type Tool, type McpServer, type SkillMeta } from '../api/client'
+import { agentApi, toolApi, mcpServerApi, proxyApi, RUNTIME_TOOL_FIELDS, type Agent, type Tool, type McpServer, type Proxy, type SkillMeta } from '../api/client'
 import { SearchableToolSelect } from '../components/SearchableToolSelect'
 
 /** 绑定下拉预拉上限；本地模糊过滤，一般足够覆盖常用环境。 */
@@ -37,6 +37,10 @@ export default function AgentDetail() {
   const [selectedMcpIds, setSelectedMcpIds] = useState<string[]>([])
   const [mcpBindSaving, setMcpBindSaving] = useState(false)
   const [mcpBindMsg, setMcpBindMsg] = useState('')
+  const [proxies, setProxies] = useState<Proxy[]>([])
+  const [selectedProxyId, setSelectedProxyId] = useState('')
+  const [proxySaving, setProxySaving] = useState(false)
+  const [proxyMsg, setProxyMsg] = useState('')
 
   const loadSkills = useCallback(async () => {
     if (!id) return
@@ -71,6 +75,15 @@ export default function AgentDetail() {
     }
   }, [])
 
+  const loadProxyCatalog = useCallback(async () => {
+    try {
+      const res = await proxyApi.list({ page: 1, page_size: 100, bindable: true })
+      setProxies(res.items)
+    } catch {
+      setProxies([])
+    }
+  }, [])
+
   useEffect(() => {
     if (!id) return
     setLoading(true)
@@ -78,6 +91,7 @@ export default function AgentDetail() {
       .get(id)
       .then(async (a) => {
         setAgent(a)
+        setSelectedProxyId(a.proxy_id || '')
         const mcpIds = a.mcp_server_ids ?? a.mcpServerIds ?? []
         setSelectedMcpIds(mcpIds)
         const ids = a.tool_ids ?? a.toolIds ?? []
@@ -102,8 +116,9 @@ export default function AgentDetail() {
     if (agent) {
       loadToolCatalog()
       loadMcpCatalog()
+      loadProxyCatalog()
     }
-  }, [agent, loadToolCatalog, loadMcpCatalog])
+  }, [agent, loadToolCatalog, loadMcpCatalog, loadProxyCatalog])
 
   const toolIds = agent?.tool_ids ?? agent?.toolIds ?? []
 
@@ -143,6 +158,22 @@ export default function AgentDetail() {
       prev.includes(serverId) ? prev.filter((x) => x !== serverId) : [...prev, serverId],
     )
     setMcpBindMsg('')
+  }
+
+  const handleSaveDefaultProxy = async () => {
+    if (!id) return
+    setProxySaving(true)
+    setProxyMsg('')
+    try {
+      const updated = await agentApi.update(id, { proxy_id: selectedProxyId || '' })
+      setAgent((prev) => (prev ? { ...prev, proxy_id: updated.proxy_id || '' } : null))
+      setSelectedProxyId(updated.proxy_id || '')
+      setProxyMsg('默认出网代理已保存')
+    } catch (e) {
+      setProxyMsg((e as Error).message)
+    } finally {
+      setProxySaving(false)
+    }
   }
 
   const handleSaveMcpBindings = async () => {
@@ -233,6 +264,49 @@ export default function AgentDetail() {
                 <span style={{ marginLeft: '0.25rem' }}>未启用（仍可能由全局 env 开启）</span>
               )}
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="section" data-testid="default-proxy-section">
+        <h2 className="section-title">默认出网代理</h2>
+        <div className="section-card">
+          <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginBottom: '0.75rem' }}>
+            空为直连。工具可在表单里继承、直连或指定代理。可先到{' '}
+            <Link to="/proxies">代理</Link> 创建 HTTP/SOCKS5。
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <select
+              value={selectedProxyId}
+              onChange={(e) => {
+                setSelectedProxyId(e.target.value)
+                setProxyMsg('')
+              }}
+              style={{ minWidth: 240 }}
+            >
+              <option value="">直连</option>
+              {proxies.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}（{p.type} {p.host}:{p.port}）
+                </option>
+              ))}
+              {selectedProxyId && !proxies.some((p) => p.id === selectedProxyId) ? (
+                <option value={selectedProxyId}>{selectedProxyId}（当前）</option>
+              ) : null}
+            </select>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={handleSaveDefaultProxy}
+              disabled={proxySaving}
+            >
+              {proxySaving ? '保存中...' : '保存'}
+            </button>
+            {proxyMsg ? (
+              <span className={proxyMsg.includes('已保存') ? 'success' : 'error'} style={{ fontSize: '0.875rem' }}>
+                {proxyMsg}
+              </span>
+            ) : null}
           </div>
         </div>
       </section>

@@ -95,6 +95,8 @@ message ToolConfig {
   McpConfig mcp = 8;          // MCP 结构化配置（endpoint/id/backend）
   DatasourceConfig datasource = 9;  // 数据源配置
   RCAConfig rca = 10;  // RCA 工具配置
+  string egress_mode = 11; // inherit | off | proxy; empty = inherit
+  string proxy_id = 12;    // required when egress_mode=proxy
 }
 
 message CreateToolRequest {

@@ -10,9 +10,13 @@ import (
 // registerRCATool 按 cfg["func_path"] 构造并注册 RCA 工具。
 // es_log_query 由 registerESLogFromAgentTools 一次性注册，此处不再处理。
 // 缺配置/依赖缺失时跳过并记 warn,绝不 panic 或阻断整体构建。
-func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace string) {
+func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace string, opts ...RegistryBuildOptions) {
 	if reg == nil {
 		return
+	}
+	var o RegistryBuildOptions
+	if len(opts) > 0 {
+		o = opts[0]
 	}
 	rcaMap, _ := cfg["rca"].(map[string]interface{})
 	if rcaMap == nil {
@@ -49,7 +53,12 @@ func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace s
 			slog.Warn("rca: jaeger_trace has no query_url, skip")
 			return
 		}
-		_ = tool.RegisterJaegerTool(reg, queryURL)
+		client, err := resolveJaegerClient(queryURL, toolEgressBinding(cfg), o)
+		if err != nil {
+			slog.Error("rca: skip jaeger_trace, proxy not in catalog", "err", err)
+			return
+		}
+		_ = tool.RegisterJaegerTool(reg, queryURL, client)
 	case "es_log_query":
 		return // registered once via registerESLogFromAgentTools
 	default:

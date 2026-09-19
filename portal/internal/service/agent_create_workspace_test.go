@@ -48,8 +48,8 @@ func TestChat_RejectsEmptyWorkspace(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
-	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), t.TempDir(), log.NewStdLogger(nil))
-	svc := NewAgentService(uc, nil, nil, nil, nil, nil, log.NewStdLogger(nil))
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, t.TempDir(), log.NewStdLogger(nil))
+	svc := NewAgentService(uc, nil, nil, nil, nil, nil, nil, log.NewStdLogger(nil))
 	ctx := biz.WithCallerUserID(context.Background(), "owner")
 	_, err := svc.Chat(ctx, &agentv1.ChatRequest{Id: agentID, Content: "hi"})
 	if err == nil {
@@ -75,8 +75,8 @@ func TestChat_RejectsWholeRepoWorkspace(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
-	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), t.TempDir(), log.NewStdLogger(nil))
-	svc := NewAgentService(uc, nil, nil, nil, nil, []string{root}, log.NewStdLogger(nil))
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, t.TempDir(), log.NewStdLogger(nil))
+	svc := NewAgentService(uc, nil, nil, nil, nil, nil, []string{root}, log.NewStdLogger(nil))
 	ctx := biz.WithCallerUserID(context.Background(), "owner")
 	_, err := svc.Chat(ctx, &agentv1.ChatRequest{Id: agentID, Content: "hi"})
 	if err == nil {
@@ -101,8 +101,8 @@ func TestExecuteSkill_RejectsWholeRepoWorkspace(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
-	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), t.TempDir(), log.NewStdLogger(nil))
-	svc := NewAgentService(uc, nil, nil, nil, nil, []string{root}, log.NewStdLogger(nil))
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, t.TempDir(), log.NewStdLogger(nil))
+	svc := NewAgentService(uc, nil, nil, nil, nil, nil, []string{root}, log.NewStdLogger(nil))
 	ctx := biz.WithCallerUserID(context.Background(), "owner")
 	_, err := svc.ExecuteSkill(ctx, &agentv1.ExecuteSkillRequest{
 		Id:   agentID,
@@ -148,8 +148,8 @@ func TestUpdateAgent_EmptyWorkspaceUsesDefault(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
-	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), dataRoot, log.NewStdLogger(nil))
-	svc := NewAgentService(uc, nil, nil, nil, nil, nil, log.NewStdLogger(nil))
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, dataRoot, log.NewStdLogger(nil))
+	svc := NewAgentService(uc, nil, nil, nil, nil, nil, nil, log.NewStdLogger(nil))
 	ctx := biz.WithCallerUserID(context.Background(), "owner")
 	empty := ""
 	_, err := svc.UpdateAgent(ctx, &agentv1.UpdateAgentRequest{Id: agentID, Workspace: &empty})

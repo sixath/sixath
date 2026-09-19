@@ -151,7 +151,7 @@ func newToolACLUsecase() (*ToolUsecase, *fakeToolACLRepo, *fakeToolResourceRepo)
 		},
 		byPayload: map[string]*Resource{},
 	}
-	return NewToolUsecase(tools, resources, NewAccessChecker(resources), log.NewStdLogger(nil)), tools, resources
+	return NewToolUsecase(tools, resources, NewAccessChecker(resources), nil, log.NewStdLogger(nil)), tools, resources
 }
 
 func TestToolCreateCreatesPrivateResourceForCaller(t *testing.T) {

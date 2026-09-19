@@ -44,6 +44,16 @@ func TestRegisterRCATool_CodeConfiguredRootsWithoutMountSkips(t *testing.T) {
 	}
 }
 
+func TestRegisterRCATool_ExistingConfiguredRootsWithoutMountRegisters(t *testing.T) {
+	root := t.TempDir()
+	reg := tool.NewRegistry()
+	cfg := map[string]any{"rca": map[string]any{"func_path": "rca_code", "roots": []any{root}}}
+	registerRCATool(reg, cfg, t.TempDir())
+	if !rcaHas(reg, "rca_grep") {
+		t.Fatal("existing configured roots should register rca_code when workspace/code is missing")
+	}
+}
+
 func TestRegisterRCATool_CodeNoRootsSkips(t *testing.T) {
 	reg := tool.NewRegistry()
 	registerRCATool(reg, map[string]any{"rca": map[string]any{"func_path": "rca_code"}}, "")

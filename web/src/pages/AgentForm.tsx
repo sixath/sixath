@@ -4,6 +4,7 @@ import {
   agentApi,
   channelApi,
   codeRootsApi,
+  proxyApi,
   CODING_ASSISTANT_RUNTIME_TOOLS,
   RUNTIME_TOOL_FIELDS,
   serializeRuntimeTools,
@@ -11,6 +12,7 @@ import {
   type CodeRootBrowseEntry,
   type CreateAgentRequest,
   type ModelConfig,
+  type Proxy,
   type RuntimeToolsConfig,
 } from '../api/client'
 
@@ -54,6 +56,8 @@ export default function AgentForm() {
   const [runtimeTools, setRuntimeTools] = useState<RuntimeToolsConfig>(emptyRuntimeTools())
   const [wecomChannelId, setWecomChannelId] = useState('')
   const [wecomChannels, setWecomChannels] = useState<Channel[]>([])
+  const [proxyId, setProxyId] = useState('')
+  const [proxies, setProxies] = useState<Proxy[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -82,6 +86,9 @@ export default function AgentForm() {
     channelApi.list({ type: 'wecom', page: 1, page_size: 100 })
       .then((res) => setWecomChannels(res.items))
       .catch(() => setWecomChannels([]))
+    proxyApi.list({ page: 1, page_size: 100, bindable: true })
+      .then((res) => setProxies(res.items))
+      .catch(() => setProxies([]))
     codeRootsApi.list()
       .then((res) => {
         const roots = res.roots || []
@@ -105,6 +112,7 @@ export default function AgentForm() {
         setDebugRun(a.debug_run ?? false)
         setRuntimeTools(a.runtime_tools ?? emptyRuntimeTools())
         setWecomChannelId(a.wecom_channel_id || '')
+        setProxyId(a.proxy_id || '')
       }).catch((e) => setError(e.message))
       agentApi
         .workspaceLinkStatus(id)
@@ -162,6 +170,7 @@ export default function AgentForm() {
         debug_run: debugRun,
         runtime_tools: serializeRuntimeTools(runtimeTools),
         wecom_channel_id: wecomChannelId || (isEdit ? '' : undefined),
+        proxy_id: proxyId.trim() || (isEdit ? '' : undefined),
       }
       if (isEdit && id) {
         await agentApi.update(id, data)
@@ -403,6 +412,21 @@ export default function AgentForm() {
                   <option key={ch.id} value={ch.id}>{ch.channel_id}</option>
                 ))}
               </select>
+            </div>
+            <div className="form-group">
+              <label>默认出网代理</label>
+              <select value={proxyId} onChange={(e) => setProxyId(e.target.value)}>
+                <option value="">直连</option>
+                {proxies.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}（{p.type} {p.host}:{p.port}）
+                  </option>
+                ))}
+                {proxyId && !proxies.some((p) => p.id === proxyId) ? (
+                  <option value={proxyId}>{proxyId}（当前）</option>
+                ) : null}
+              </select>
+              <small>空为直连。可到「代理」创建 HTTP/SOCKS5。</small>
             </div>
             <div className="form-group">
               <div className="form-panel">

@@ -10,6 +10,8 @@ import (
 
 	"backend/internal/biz"
 
+	"log/slog"
+
 	"github.com/sixath/framework/config"
 	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/datasource"
@@ -19,6 +21,7 @@ import (
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/netx"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/templates"
 	"github.com/sixath/framework/tool"
@@ -64,6 +67,11 @@ type RegistryBuildResult struct {
 type RegistryBuildOptions struct {
 	// Workspace is the agent writable root; rca_* uses workspace/code when present.
 	Workspace string
+	// AgentProxyID is agents.proxy_id (empty = direct inherit).
+	AgentProxyID string
+	// Proxies is the preloaded catalog (no ACL). A nonempty AgentProxyID
+	// missing from Proxies is a permanent miss (fail-closed; no silent direct).
+	Proxies map[string]netx.Spec
 }
 
 // BuildRegistry 根据 Agent 绑定的工具与 MCP Server 列表构建 tool.Registry。
@@ -86,6 +94,10 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 		case biz.ToolTypeMCP:
 			mc := tool.McpConfigFromMap(cfg)
 			if mc != nil {
+				if err := applyMCPHTTPClient(mc, toolEgressBinding(cfg), o); err != nil {
+					slog.Error("egress: skip mcp tool, proxy not in catalog", "tool", t.Name, "id", mc.Id, "err", err)
+					break
+				}
 				tool.RegisterMcpTool(reg, mc)
 				mcpServers = append(mcpServers, mcpEntryFromConfig(mc))
 			}
@@ -101,28 +113,27 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 				return nil, fmt.Errorf("数据源工具 %q 配置缺少 type", t.Name)
 			}
 			dsCfg = canonicalDatasourceConfig(t.Name, dsCfg)
-			datasourceConfigs = append(datasourceConfigs, dsCfg)
 			b := bindingFromConfig(t.Name, dsCfg, nil)
 			// purpose / default_index live on the tool config map, not datasource.Config.
 			b.DefaultIndex = mapStringField(dsMap, "default_index", "defaultIndex")
 			b.Purpose = mapStringField(dsMap, "purpose")
+			if err := applyDatasourceEgress(&dsCfg, toolEgressBinding(cfg), o); err != nil {
+				slog.Error("egress: datasource unavailable", "tool", t.Name, "id", dsCfg.ID, "err", err)
+				b.Available = false
+				b.Err = err.Error()
+			}
+			datasourceConfigs = append(datasourceConfigs, dsCfg)
 			dsBindings = append(dsBindings, b)
 		case biz.ToolTypeRCA:
-			registerRCATool(reg, cfg, o.Workspace)
+			registerRCATool(reg, cfg, o.Workspace, o)
 		}
 	}
 
-	for _, s := range servers {
-		mc := biz.McpServerToConfig(s)
-		if mc == nil {
-			continue
-		}
-		tool.RegisterMcpTool(reg, mc)
-		if !reg.HasMcpServer(mc.Id) {
-			return nil, fmt.Errorf("mcp server %q failed to register (check command/endpoint)", mc.Id)
-		}
-		mcpServers = append(mcpServers, mcpEntryFromConfig(mc))
+	bound, err := registerBoundMCPServers(reg, servers, o)
+	if err != nil {
+		return nil, err
 	}
+	mcpServers = append(mcpServers, bound...)
 
 	var dsPrompt string
 	if len(datasourceConfigs) > 0 {
@@ -134,9 +145,35 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 		dsPrompt = prompt
 	}
 
-	registerESLogFromAgentTools(reg, tools)
+	registerESLogFromAgentTools(reg, tools, o)
+	applyHTTPRequestOverlay(reg, o)
 
 	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
+}
+
+// registerBoundMCPServers registers ListByAgent MCP servers. Same-id rows already
+// marked on the registry are skipped before applyMCPHTTPClient / RegisterMcpTool.
+func registerBoundMCPServers(reg *tool.Registry, servers []*biz.McpServerMeta, o RegistryBuildOptions) ([]toolskill.McpServerEntry, error) {
+	var mcpServers []toolskill.McpServerEntry
+	for _, s := range servers {
+		mc := biz.McpServerToConfig(s)
+		if mc == nil {
+			continue
+		}
+		if reg.HasMcpServer(mc.Id) {
+			continue
+		}
+		if err := applyMCPHTTPClient(mc, netx.Binding{Mode: netx.ModeInherit}, o); err != nil {
+			slog.Error("egress: skip mcp server, proxy not in catalog", "id", mc.Id, "err", err)
+			return nil, fmt.Errorf("mcp server %q failed to register (check command/endpoint)", mc.Id)
+		}
+		tool.RegisterMcpTool(reg, mc)
+		if !reg.HasMcpServer(mc.Id) {
+			return nil, fmt.Errorf("mcp server %q failed to register (check command/endpoint)", mc.Id)
+		}
+		mcpServers = append(mcpServers, mcpEntryFromConfig(mc))
+	}
+	return mcpServers, nil
 }
 
 func mcpEntryFromConfig(mc *tool.McpConfig) toolskill.McpServerEntry {
@@ -192,6 +229,11 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 			b.SkipDataTools = true
 			b.Available = false
 			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query(cluster=…) 或 http_request"
+			outBindings = append(outBindings, b)
+			continue
+		}
+		if strings.TrimSpace(b.Err) != "" {
+			b.Available = false
 			outBindings = append(outBindings, b)
 			continue
 		}

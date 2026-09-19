@@ -37,9 +37,14 @@ type jaegerSpan struct {
 }
 
 // RegisterJaegerTool 注册 jaeger_trace 工具。queryURL 为 Jaeger Query 基址(无鉴权)。
-func RegisterJaegerTool(reg *Registry, queryURL string) error {
+// 可选 client：省略或 nil 时保持现网 30s 直连 Client。
+func RegisterJaegerTool(reg *Registry, queryURL string, client ...*http.Client) error {
 	if reg == nil {
 		return errors.New("jaeger tool: registry is nil")
+	}
+	var httpClient *http.Client
+	if len(client) > 0 {
+		httpClient = client[0]
 	}
 	base := strings.TrimRight(queryURL, "/")
 	return reg.Register(Tool{
@@ -78,7 +83,7 @@ func RegisterJaegerTool(reg *Registry, queryURL string) error {
 				endpoint = base + "/api/traces?" + q.Encode()
 			}
 
-			body, err := jaegerGET(ctx, endpoint)
+			body, err := jaegerGET(ctx, endpoint, httpClient)
 			if err != nil {
 				return rcaErrFrom(toolName, err), nil
 			}
@@ -97,12 +102,14 @@ func RegisterJaegerTool(reg *Registry, queryURL string) error {
 	})
 }
 
-func jaegerGET(ctx context.Context, endpoint string) ([]byte, error) {
+func jaegerGET(ctx context.Context, endpoint string, client *http.Client) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

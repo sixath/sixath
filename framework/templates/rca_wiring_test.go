@@ -1,13 +1,19 @@
 package templates
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/sixath/framework/config"
 	"github.com/sixath/framework/datasource"
+	"github.com/sixath/framework/netx"
 	"github.com/sixath/framework/tool"
 )
 
@@ -114,6 +120,50 @@ func TestRegisterRCATools_ESInlineEndpoint(t *testing.T) {
 	}
 	if !hasTool(reg, "es_log_query") {
 		t.Fatal("inline endpoint should register es_log_query")
+	}
+}
+
+func TestRegisterRCATools_InjectsProxyClient(t *testing.T) {
+	saw := false
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer proxy.Close()
+	u, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{
+		ProxyID: "office",
+		Proxies: []netx.Spec{{
+			ID:   "office",
+			Type: netx.TypeHTTP,
+			Host: u.Hostname(),
+			Port: port,
+		}},
+		RCA: config.RCAConfig{
+			Jaeger: config.RCAJaegerConfig{QueryURL: "http://jaeger.example:16686"},
+		},
+	}
+	reg := tool.NewRegistry()
+	if err := registerRCATools(reg, cfg); err != nil {
+		t.Fatalf("registerRCATools: %v", err)
+	}
+	tl, ok := reg.Get("jaeger_trace")
+	if !ok {
+		t.Fatal("jaeger_trace should register")
+	}
+	_, _ = tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	if !saw {
+		t.Fatal("jaeger client must be injected from Config.Proxies/ProxyID")
 	}
 }
 

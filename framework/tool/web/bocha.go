@@ -45,6 +45,14 @@ func NewBochaBackend(cfg BochaConfig) *BochaBackend {
 	}
 }
 
+// SetHTTPClient replaces the outbound client used by Search.
+func (b *BochaBackend) SetHTTPClient(c *http.Client) {
+	if b == nil || c == nil {
+		return
+	}
+	b.httpClient = c
+}
+
 func (b *BochaBackend) Name() string { return "bocha" }
 
 func (b *BochaBackend) Check(_ context.Context) error {

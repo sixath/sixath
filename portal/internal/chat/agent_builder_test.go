@@ -2,13 +2,21 @@ package chat
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"backend/internal/biz"
 
+	"github.com/sixath/framework/datasource"
+	"github.com/sixath/framework/netx"
 	"github.com/sixath/framework/tool"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -252,3 +260,499 @@ func TestBuildRegistry_RegisterSSHExecBuiltin(t *testing.T) {
 	}
 }
 
+func TestBuildRegistry_NoProxyUseACL(t *testing.T) {
+	repo := &catalogOnlyProxyRepo{byID: map[string]*biz.ProxyMeta{
+		"office": {
+			ID:       "office",
+			Name:     "office",
+			Type:     "http",
+			Host:     "127.0.0.1",
+			Port:     8080,
+			Password: "secret",
+			NoProxy:  []string{"es.local"},
+		},
+	}}
+	ctx := context.Background()
+	cat := LoadProxyCatalog(ctx, repo, "office", nil)
+	if repo.aclCalled {
+		t.Fatal("loadProxyCatalog must not call ACL or extra repo methods")
+	}
+	if len(cat) != 1 {
+		t.Fatalf("catalog=%v want office", cat)
+	}
+	if cat["office"].Password != "secret" {
+		t.Fatal("catalog must keep password from GetByID")
+	}
+
+	reg := tool.NewRegistry()
+	if _, err := BuildRegistry(nil, nil, reg, RegistryBuildOptions{
+		AgentProxyID: "office",
+		Proxies:      cat,
+	}); err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	if repo.aclCalled {
+		t.Fatal("BuildRegistry must not call ACL")
+	}
+	if reg.HTTPClient() == nil {
+		t.Fatal("http_request overlay must be SetHTTPClient from agent proxy")
+	}
+}
+
+func TestBuildRegistry_HTTPRequestOverlaySet(t *testing.T) {
+	spec := netxSpecHTTP("office")
+	reg := tool.NewRegistry()
+	if _, err := BuildRegistry(nil, nil, reg, RegistryBuildOptions{
+		AgentProxyID: "office",
+		Proxies:      map[string]netx.Spec{"office": spec},
+	}); err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	c := reg.HTTPClient()
+	if c == nil {
+		t.Fatal("expected registry HTTPClient overlay")
+	}
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil {
+		t.Fatal("overlay Transport.Proxy must be set for HTTP agent proxy")
+	}
+	u, err := tr.Proxy(&http.Request{URL: mustURL(t, "http://target.example/path")})
+	if err != nil || u == nil || u.Host != "127.0.0.1:8080" {
+		t.Fatalf("proxy URL=%v err=%v", u, err)
+	}
+}
+
+func TestBuildRegistry_MySQLAgentHTTPUnavailable(t *testing.T) {
+	mysqlCfg, err := structpb.NewStruct(map[string]interface{}{
+		"datasource": map[string]interface{}{
+			"id":     "orders",
+			"type":   "mysql",
+			"dsn":    "user:pass@tcp(127.0.0.1:3306)/db",
+			"dbname": "db",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	res, err := BuildRegistry([]*biz.ToolMeta{{
+		ID:     "m1",
+		Name:   "orders",
+		Type:   biz.ToolTypeDatasource,
+		Config: mysqlCfg,
+	}}, nil, reg, RegistryBuildOptions{
+		AgentProxyID: "office",
+		Proxies:      map[string]netx.Spec{"office": netxSpecHTTP("office")},
+	})
+	if err != nil {
+		t.Fatalf("BuildRegistry should keep going with binding.Err, got %v", err)
+	}
+	if res == nil || len(res.DsBindings) != 1 {
+		t.Fatalf("bindings=%+v", res)
+	}
+	b := res.DsBindings[0]
+	if b.Available {
+		t.Fatal("mysql + agent HTTP proxy must not register")
+	}
+	if b.Err == "" {
+		t.Fatal("want binding.Err")
+	}
+	if !strings.Contains(b.Err, "office") {
+		t.Fatalf("binding.Err should mention proxy id, got %q", b.Err)
+	}
+	if strings.Contains(b.Err, "secret") {
+		t.Fatalf("binding.Err must not contain password: %q", b.Err)
+	}
+	if _, ok := reg.Get("execute_read"); ok {
+		t.Fatal("unavailable mysql must not register data trio")
+	}
+}
+
+func TestBuildRegistry_MissingAgentProxyFailClosed(t *testing.T) {
+	mysqlCfg, err := structpb.NewStruct(map[string]interface{}{
+		"datasource": map[string]interface{}{
+			"id":     "orders",
+			"type":   "mysql",
+			"dsn":    "user:pass@tcp(127.0.0.1:3306)/db",
+			"dbname": "db",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	res, err := BuildRegistry([]*biz.ToolMeta{{
+		ID:     "m1",
+		Name:   "orders",
+		Type:   biz.ToolTypeDatasource,
+		Config: mysqlCfg,
+	}}, nil, reg, RegistryBuildOptions{
+		AgentProxyID: "missing-office",
+		Proxies:      map[string]netx.Spec{},
+	})
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+
+	c := reg.HTTPClient()
+	if c == nil {
+		t.Fatal("missing agent proxy must overlay a fail-closed client, not leave default direct")
+	}
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	resp, reqErr := c.Get(srv.URL)
+	if reqErr == nil {
+		resp.Body.Close()
+		t.Fatal("fail-closed overlay must not succeed as a direct client")
+	}
+	if hit {
+		t.Fatal("fail-closed overlay must not reach dest")
+	}
+	if !strings.Contains(reqErr.Error(), "missing-office") {
+		t.Fatalf("error should mention proxy id, got %v", reqErr)
+	}
+
+	if res == nil || len(res.DsBindings) != 1 {
+		t.Fatalf("bindings=%+v", res)
+	}
+	b := res.DsBindings[0]
+	if b.Available {
+		t.Fatal("mysql inherit with missing agent proxy must not register")
+	}
+	if b.Err == "" || !strings.Contains(b.Err, "missing-office") {
+		t.Fatalf("want binding.Err mentioning proxy, got %q", b.Err)
+	}
+	if _, ok := reg.Get("execute_read"); ok {
+		t.Fatal("unavailable mysql must not register data trio")
+	}
+}
+
+func TestResolveEffective_InheritMissingAgentProxy(t *testing.T) {
+	_, err := resolveEffective(netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "gone",
+		Proxies:      map[string]netx.Spec{},
+	}, "es.local")
+	if err == nil || !strings.Contains(err.Error(), "gone") {
+		t.Fatalf("want miss err, got %v", err)
+	}
+
+	eff, err := resolveEffective(netx.Binding{Mode: netx.ModeOff}, RegistryBuildOptions{
+		AgentProxyID: "gone",
+		Proxies:      map[string]netx.Spec{},
+	}, "es.local")
+	if err != nil || eff != nil {
+		t.Fatalf("ModeOff: %+v %v", eff, err)
+	}
+
+	eff, err = resolveEffective(netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{}, "es.local")
+	if err != nil || eff != nil {
+		t.Fatalf("empty AgentProxyID: %+v %v", eff, err)
+	}
+}
+
+func TestApplyMCPHTTPClient_InheritMissingDoesNotInjectDirect(t *testing.T) {
+	mc := &tool.McpConfig{Id: "http-mcp", Transport: "http", Endpoint: "http://example.com"}
+	err := applyMCPHTTPClient(mc, netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "gone",
+		Proxies:      map[string]netx.Spec{},
+	})
+	if err == nil {
+		t.Fatal("inherit miss must error so caller can skip")
+	}
+	if mc.HTTPClient != nil {
+		t.Fatal("must not inject a client (nil would mean direct)")
+	}
+}
+
+func TestResolveJaegerClient_InheritMissing(t *testing.T) {
+	c, err := resolveJaegerClient("http://jaeger:16686", netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "gone",
+		Proxies:      map[string]netx.Spec{},
+	})
+	if err == nil || c != nil {
+		t.Fatalf("want skip, got client=%v err=%v", c, err)
+	}
+}
+
+func TestApplyDatasourceEgress_ESInheritMissing(t *testing.T) {
+	cfg := datasource.Config{ID: "logs", Type: "elasticsearch", DSN: "http://es.local:9200"}
+	err := applyDatasourceEgress(&cfg, netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "gone",
+		Proxies:      map[string]netx.Spec{},
+	})
+	if err == nil {
+		t.Fatal("want inherit miss error")
+	}
+	if cfg.HTTPClient != nil {
+		t.Fatal("must not inject a client (nil would mean direct)")
+	}
+}
+
+func TestApplyDatasourceEgress_ModeOffDirectDespiteMissingAgent(t *testing.T) {
+	cfg := datasource.Config{
+		ID:     "orders",
+		Type:   "mysql",
+		DSN:    "user:pass@tcp(127.0.0.1:3306)/db",
+		DBName: "db",
+	}
+	if err := applyDatasourceEgress(&cfg, netx.Binding{Mode: netx.ModeOff}, RegistryBuildOptions{
+		AgentProxyID: "gone",
+		Proxies:      map[string]netx.Spec{},
+	}); err != nil {
+		t.Fatalf("ModeOff must stay direct: %v", err)
+	}
+	if cfg.DialContext != nil {
+		t.Fatal("ModeOff must not inject DialContext")
+	}
+}
+
+func TestApplyDatasourceEgress_MongoAgentSOCKS5SetsDialContext(t *testing.T) {
+	cfg := datasource.Config{
+		ID:     "cgmongo",
+		Type:   "mongodb",
+		Host:   "127.0.0.1",
+		Port:   27017,
+		DBName: "app",
+	}
+	if err := applyDatasourceEgress(&cfg, netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "lab",
+		Proxies:      map[string]netx.Spec{"lab": netxSpecSOCKS5("lab")},
+	}); err != nil {
+		t.Fatalf("applyDatasourceEgress: %v", err)
+	}
+	if cfg.DialContext == nil {
+		t.Fatal("mongodb + agent SOCKS5 must set Config.DialContext")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, dialErr := cfg.DialContext(ctx, "tcp", "127.0.0.1:1")
+	if dialErr == nil {
+		t.Fatal("expected socks dial error")
+	}
+	if !strings.Contains(dialErr.Error(), "lab") {
+		t.Fatalf("annotated dial err should mention proxy id, got %v", dialErr)
+	}
+}
+
+func TestApplyDatasourceEgress_MongoHTTPRejected(t *testing.T) {
+	cfg := datasource.Config{
+		ID:     "cgmongo",
+		Type:   "mongodb",
+		Host:   "127.0.0.1",
+		Port:   27017,
+		DBName: "app",
+	}
+	err := applyDatasourceEgress(&cfg, netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "office",
+		Proxies:      map[string]netx.Spec{"office": netxSpecHTTP("office")},
+	})
+	if err == nil {
+		t.Fatal("mongodb + HTTP proxy must fail")
+	}
+	if !strings.Contains(err.Error(), "http") && !strings.Contains(err.Error(), "office") {
+		t.Fatalf("want http/proxy error, got %v", err)
+	}
+	if cfg.DialContext != nil {
+		t.Fatal("must not inject DialContext for HTTP proxy")
+	}
+}
+
+func TestApplyDatasourceEgress_HiveStaysDirect(t *testing.T) {
+	cfg := datasource.Config{ID: "hv", Type: "hive", Host: "h", Port: 10000, DBName: "d"}
+	if err := applyDatasourceEgress(&cfg, netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "lab",
+		Proxies:      map[string]netx.Spec{"lab": netxSpecSOCKS5("lab")},
+	}); err != nil {
+		t.Fatalf("hive inherit must stay direct: %v", err)
+	}
+	if cfg.DialContext != nil {
+		t.Fatal("hive must not inject DialContext")
+	}
+}
+
+func TestApplyDatasourceEgress_MySQLAgentSOCKS5SetsDialContext(t *testing.T) {
+	cfg := datasource.Config{
+		ID:     "orders",
+		Type:   "mysql",
+		DSN:    "user:pass@tcp(127.0.0.1:3306)/db",
+		DBName: "db",
+	}
+	if err := applyDatasourceEgress(&cfg, netx.Binding{Mode: netx.ModeInherit}, RegistryBuildOptions{
+		AgentProxyID: "lab",
+		Proxies:      map[string]netx.Spec{"lab": netxSpecSOCKS5("lab")},
+	}); err != nil {
+		t.Fatalf("applyDatasourceEgress: %v", err)
+	}
+	if cfg.DialContext == nil {
+		t.Fatal("mysql + agent SOCKS5 must set Config.DialContext")
+	}
+	if cfg.ProxyNetKey != "lab" {
+		t.Fatalf("ProxyNetKey=%q want lab", cfg.ProxyNetKey)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, dialErr := cfg.DialContext(ctx, "tcp", "127.0.0.1:1")
+	if dialErr == nil {
+		t.Fatal("expected socks dial error")
+	}
+	if !strings.Contains(dialErr.Error(), "lab") {
+		t.Fatalf("annotated dial err should mention proxy id, got %v", dialErr)
+	}
+}
+
+func TestRegisterBoundMCPServers_SkipsWhenAlreadyMarked(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	reg := tool.NewRegistry()
+	reg.MarkMcpServer("fixture")
+	entries, err := registerBoundMCPServers(reg, []*biz.McpServerMeta{{
+		ID:        "fixture",
+		Name:      "fixture-from-servers",
+		Transport: "http",
+		Endpoint:  srv.URL,
+	}}, RegistryBuildOptions{})
+	if err != nil {
+		t.Fatalf("registerBoundMCPServers: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("pre-marked server must be skipped, got %d entries", len(entries))
+	}
+	if hits != 0 {
+		t.Fatalf("skip must happen before RegisterMcpTool; httptest hits=%d want 0", hits)
+	}
+}
+
+func TestBuildRegistry_MCPToolRowClientWins(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	fixture := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "framework", "tool", "testdata", "mcp_stdio_fixture.js"))
+	if _, err := os.Stat(fixture); err != nil {
+		t.Fatalf("fixture missing at %s: %v", fixture, err)
+	}
+
+	toolCfg, err := structpb.NewStruct(map[string]interface{}{
+		"egress_mode": "proxy",
+		"proxy_id":    "lab",
+		"mcp": map[string]interface{}{
+			"id":        "fixture",
+			"transport": "stdio",
+			"command":   "node",
+			"args":      []interface{}{fixture},
+			"backend":   "mark3labs",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	reg := tool.NewRegistry()
+	if _, err := BuildRegistry([]*biz.ToolMeta{{
+		ID:     "mcp-row",
+		Name:   "fixture",
+		Type:   biz.ToolTypeMCP,
+		Config: toolCfg,
+	}}, []*biz.McpServerMeta{{
+		ID:        "fixture",
+		Name:      "fixture-from-servers",
+		Transport: "http",
+		Endpoint:  srv.URL,
+	}}, reg, RegistryBuildOptions{
+		AgentProxyID: "office",
+		Proxies: map[string]netx.Spec{
+			"office": netxSpecHTTP("office"),
+			"lab":    netxSpecHTTP("lab"),
+		},
+	}); err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+	if !reg.HasMcpServer("fixture") {
+		t.Fatal("tool row must register MCP server")
+	}
+	if hits != 0 {
+		t.Fatalf("servers loop must skip HasMcpServer; httptest hits=%d want 0", hits)
+	}
+}
+
+func netxSpecHTTP(id string) netx.Spec {
+	return netx.Spec{ID: id, Type: netx.TypeHTTP, Host: "127.0.0.1", Port: 8080, Password: "secret"}
+}
+
+func netxSpecSOCKS5(id string) netx.Spec {
+	return netx.Spec{ID: id, Type: netx.TypeSOCKS5, Host: "127.0.0.1", Port: 1080}
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+// catalogOnlyProxyRepo implements biz.ProxyRepo with GetByID only.
+// Any other method counts as an ACL/extra lookup and fails the test contract.
+type catalogOnlyProxyRepo struct {
+	byID      map[string]*biz.ProxyMeta
+	aclCalled bool
+}
+
+func (r *catalogOnlyProxyRepo) markACL() {
+	r.aclCalled = true
+}
+
+func (r *catalogOnlyProxyRepo) Create(context.Context, *biz.ProxyMeta) (*biz.ProxyMeta, error) {
+	r.markACL()
+	panic("Create must not be called")
+}
+
+func (r *catalogOnlyProxyRepo) GetByID(_ context.Context, id string) (*biz.ProxyMeta, error) {
+	if r.byID == nil {
+		return nil, biz.ErrProxyNotFound
+	}
+	m, ok := r.byID[id]
+	if !ok {
+		return nil, biz.ErrProxyNotFound
+	}
+	cp := *m
+	return &cp, nil
+}
+
+func (r *catalogOnlyProxyRepo) List(context.Context, biz.ListOptions) ([]*biz.ProxyMeta, int, error) {
+	r.markACL()
+	panic("List must not be called")
+}
+
+func (r *catalogOnlyProxyRepo) Update(context.Context, *biz.ProxyMeta) (*biz.ProxyMeta, error) {
+	r.markACL()
+	panic("Update must not be called")
+}
+
+func (r *catalogOnlyProxyRepo) Delete(context.Context, string) error {
+	r.markACL()
+	panic("Delete must not be called")
+}
+
+func (r *catalogOnlyProxyRepo) ListReferences(context.Context, string, int) ([]biz.ProxyReference, bool, error) {
+	r.markACL()
+	panic("ListReferences must not be called")
+}

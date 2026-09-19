@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sixath/framework/events"
+	"github.com/sixath/framework/netx"
 )
 
 // RegisterHTTPTool 向 Registry 注册一个通用的 HTTP 请求工具。
@@ -114,17 +115,26 @@ func RegisterHTTPTool(reg *Registry) error {
 				}
 			}
 
-			// Fail fast on unreachable addresses (common in Docker/WSL → corp LAN).
-			transport := http.DefaultTransport.(*http.Transport).Clone()
-			transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
-			transport.ResponseHeaderTimeout = 15 * time.Second
-			client := &http.Client{
-				Timeout:   timeout,
-				Transport: transport,
+			overlay, spec := reg.httpOverlay()
+			var client *http.Client
+			if overlay != nil {
+				client = cloneHTTPClient(overlay, timeout)
+			} else {
+				// Fail fast on unreachable addresses (common in Docker/WSL → corp LAN).
+				transport := http.DefaultTransport.(*http.Transport).Clone()
+				transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
+				transport.ResponseHeaderTimeout = 15 * time.Second
+				client = &http.Client{
+					Timeout:   timeout,
+					Transport: transport,
+				}
 			}
 
 			resp, err := client.Do(req)
 			if err != nil {
+				if spec.ID != "" {
+					err = netx.AnnotateError(spec, err)
+				}
 				completedPayload := map[string]any{
 					"method": method,
 					"url":    rawURL,
@@ -171,6 +181,16 @@ func RegisterHTTPTool(reg *Registry) error {
 			}, nil
 		},
 	})
+}
+
+// cloneHTTPClient copies c so per-request Timeout does not mutate the shared overlay.
+func cloneHTTPClient(c *http.Client, timeout time.Duration) *http.Client {
+	if c == nil {
+		return &http.Client{Timeout: timeout}
+	}
+	out := *c
+	out.Timeout = timeout
+	return &out
 }
 
 // stringReader 是一个简单的只读字符串 reader，用于避免引入额外依赖。

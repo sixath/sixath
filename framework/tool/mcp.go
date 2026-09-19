@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sixath/framework/events"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sixath/framework/events"
 
 	markclient "github.com/mark3labs/mcp-go/client"
 	marktransport "github.com/mark3labs/mcp-go/client/transport"
@@ -40,6 +42,7 @@ type McpConfig struct {
 	Args       []string
 	Env        map[string]string
 	TimeoutSec int
+	HTTPClient *http.Client
 	mcpTool    *mcpTool
 }
 
@@ -206,9 +209,9 @@ func NewMcpTool(cfg *McpConfig) (*mcpTool, error) {
 	var err error
 	switch backend {
 	case "mark3labs":
-		cli, err = newMark3labsClient(cfg.Endpoint)
+		cli, err = newMark3labsClient(cfg.Endpoint, cfg.HTTPClient)
 	default:
-		cli, err = newMetoroClient(cfg.Endpoint)
+		cli, err = newMetoroClient(cfg.Endpoint, cfg.HTTPClient)
 	}
 	if err != nil {
 		return nil, err
@@ -420,12 +423,14 @@ type metoroClientAdapter struct {
 	cli *mcpmetoro.Client
 }
 
-func newMetoroClient(endpoint string) (mcpClient, error) {
+func newMetoroClient(endpoint string, client *http.Client) (mcpClient, error) {
 
 	transport := mcphttp.NewHTTPClientTransport(endpoint)
 	transport.WithHeader("Accept", "application/json, text/event-stream")
+	if client != nil {
+		transport.WithClient(client)
+	}
 
-	// 创建 MCP 客户端
 	cli := mcpmetoro.NewClient(transport)
 
 	adapter := &metoroClientAdapter{
@@ -433,10 +438,6 @@ func newMetoroClient(endpoint string) (mcpClient, error) {
 	}
 
 	return adapter, nil
-	/*httpTransport := mcphttp.NewHTTPClientTransport("/mcp")
-	httpTransport.WithBaseURL(endpoint)
-		cli := mcpmetoro.NewClient(httpTransport)
-		return &metoroClientAdapter{cli: cli}, nil*/
 }
 
 func (a *metoroClientAdapter) Initialize(ctx context.Context) error {
@@ -521,13 +522,16 @@ type mark3labsClientAdapter struct {
 	cli *markclient.Client
 }
 
-func newMark3labsClient(endpoint string) (mcpClient, error) {
-	httpTransport, err := marktransport.NewStreamableHTTP(
-		endpoint,
+func newMark3labsClient(endpoint string, client *http.Client) (mcpClient, error) {
+	opts := []marktransport.StreamableHTTPCOption{
 		marktransport.WithHTTPHeaders(map[string]string{
 			"Accept": "application/json, text/event-stream",
 		}),
-	)
+	}
+	if client != nil {
+		opts = append(opts, marktransport.WithHTTPBasicClient(client))
+	}
+	httpTransport, err := marktransport.NewStreamableHTTP(endpoint, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create mark3labs HTTP transport: %w", err)
 	}

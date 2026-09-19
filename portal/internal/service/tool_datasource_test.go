@@ -78,6 +78,41 @@ func TestToolConfigRoundTrip_DatasourceESCamelCase(t *testing.T) {
 	}
 }
 
+func TestToolConfigRoundTrip_EgressModeAndProxyID(t *testing.T) {
+	in, err := structpb.NewStruct(map[string]any{
+		"egress_mode": "proxy",
+		"proxy_id":    "office",
+		"datasource": map[string]any{
+			"id":             "zj-elk",
+			"type":           "elasticsearch",
+			"dsn":            "http://es:9200",
+			"default_index":  "app-*",
+			"trace_id_field": "trace_id",
+			"purpose":        "应用日志",
+		},
+	})
+	if err != nil {
+		t.Fatalf("structpb: %v", err)
+	}
+	proto := structToToolConfig(in)
+	if proto.EgressMode != "proxy" || proto.ProxyId != "office" {
+		t.Fatalf("top-level egress fields wrong: mode=%q id=%q", proto.EgressMode, proto.ProxyId)
+	}
+	if proto.Datasource == nil || proto.Datasource.Type != "elasticsearch" {
+		t.Fatalf("datasource must stay independent of egress: %+v", proto.Datasource)
+	}
+	back := protoToolConfigToStruct(proto)
+	if back.Fields["egress_mode"].GetStringValue() != "proxy" {
+		t.Fatalf("round-trip egress_mode wrong: %v", back.Fields["egress_mode"])
+	}
+	if back.Fields["proxy_id"].GetStringValue() != "office" {
+		t.Fatalf("round-trip proxy_id wrong: %v", back.Fields["proxy_id"])
+	}
+	if _, ok := back.Fields["datasource"]; !ok {
+		t.Fatal("datasource must still emit after egress round-trip")
+	}
+}
+
 func TestToolConfigRoundTrip_DatasourceESWithoutDSN(t *testing.T) {
 	in, err := structpb.NewStruct(map[string]any{
 		"datasource": map[string]any{

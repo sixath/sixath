@@ -16,8 +16,8 @@ type fakeAgentACLRepo struct {
 	created   *AgentMeta
 }
 
-func (f *fakeAgentACLRepo) Create(_ context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
-	f.created = &AgentMeta{ID: id, Name: name, Workspace: workspace}
+func (f *fakeAgentACLRepo) Create(_ context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID, proxyID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
+	f.created = &AgentMeta{ID: id, Name: name, Workspace: workspace, ProxyID: proxyID}
 	f.agents[f.created.ID] = f.created
 	return f.created, nil
 }
@@ -93,8 +93,18 @@ func (f *fakeAgentACLRepo) ListByIDs(_ context.Context, ids []string, page, page
 	}
 	return items[start:end], len(items), nil
 }
-func (f *fakeAgentACLRepo) Update(_ context.Context, id string, _ map[string]any) (*AgentMeta, error) {
-	return f.GetByID(context.Background(), id)
+func (f *fakeAgentACLRepo) Update(_ context.Context, id string, updates map[string]any) (*AgentMeta, error) {
+	agent, err := f.GetByID(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := updates["proxy_id"].(string); ok {
+		agent.ProxyID = v
+	}
+	if v, ok := updates["name"].(string); ok {
+		agent.Name = v
+	}
+	return agent, nil
 }
 func (f *fakeAgentACLRepo) Delete(_ context.Context, id string) error {
 	if _, ok := f.agents[id]; !ok {
@@ -162,6 +172,15 @@ func newAgentACLUsecase() (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceR
 }
 
 func newAgentACLUsecaseAt(dataRoot string) (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo) {
+	uc, agents, resources, _ := newAgentACLUsecaseWithProxiesAt(dataRoot)
+	return uc, agents, resources
+}
+
+func newAgentACLUsecaseWithProxies() (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo, *fakeProxyRepo) {
+	return newAgentACLUsecaseWithProxiesAt("/portal-data")
+}
+
+func newAgentACLUsecaseWithProxiesAt(dataRoot string) (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo, *fakeProxyRepo) {
 	agents := &fakeAgentACLRepo{agents: map[string]*AgentMeta{}}
 	resources := &fakeAgentResourceRepo{
 		fakeResourceReader: fakeResourceReader{
@@ -171,7 +190,8 @@ func newAgentACLUsecaseAt(dataRoot string) (*AgentUsecase, *fakeAgentACLRepo, *f
 		},
 		byPayload: map[string]*Resource{},
 	}
-	return NewAgentUsecase(agents, resources, NewAccessChecker(resources), dataRoot, log.NewStdLogger(nil)), agents, resources
+	proxies := &fakeProxyRepo{proxies: map[string]*ProxyMeta{}}
+	return NewAgentUsecase(agents, resources, NewAccessChecker(resources), proxies, dataRoot, log.NewStdLogger(nil)), agents, resources, proxies
 }
 
 func TestAgentCreateCreatesPrivateResourceForCaller(t *testing.T) {
@@ -179,7 +199,7 @@ func TestAgentCreateCreatesPrivateResourceForCaller(t *testing.T) {
 	uc, agents, resources := newAgentACLUsecaseAt(root)
 	ctx := WithOrgID(WithCallerUserID(context.Background(), "user-1"), "org-1")
 
-	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", RuntimeToolsConfig{}, nil)
+	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", "", RuntimeToolsConfig{}, nil)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -306,6 +326,51 @@ func TestAgentBindToolsRequiresAgentEditAndToolUse(t *testing.T) {
 
 func isReason(err error, reason string) bool {
 	return err != nil && kratosErrors.FromError(err).Reason == reason
+}
+
+func TestAgentUpdateProxyRequiresUse(t *testing.T) {
+	uc, agents, resources, proxies := newAgentACLUsecaseWithProxies()
+	proxies.proxies["office"] = &ProxyMeta{ID: "office", Name: "office", Type: "http", Host: "127.0.0.1", Port: 8080}
+	proxyRes := &Resource{ID: "proxy-resource", Type: ResourceTypeProxy, PayloadRef: "office", OwnerUserID: "proxy-owner", Visibility: VisibilityPrivate}
+	resources.resources[proxyRes.ID] = proxyRes
+	resources.byPayload["proxy:office"] = proxyRes
+	resources.grants[proxyRes.ID] = []ResourceGrant{{ResourceID: proxyRes.ID, GranteeType: "user", GranteeID: "owner", Perm: PermView}}
+
+	agents.agents["agent-1"] = &AgentMeta{ID: "agent-1"}
+	agentRes := &Resource{ID: "agent-resource", Type: ResourceTypeAgent, PayloadRef: "agent-1", OwnerUserID: "owner", Visibility: VisibilityPrivate}
+	resources.resources[agentRes.ID] = agentRes
+	resources.byPayload["agent:agent-1"] = agentRes
+
+	ownerCtx := WithCallerUserID(context.Background(), "owner")
+	if _, err := uc.Update(ownerCtx, "agent-1", map[string]any{"proxy_id": "office"}); !isReason(err, "FORBIDDEN_PERM") {
+		t.Fatalf("Update proxy without use error = %v, want FORBIDDEN_PERM", err)
+	}
+	if _, err := uc.Create(ownerCtx, "no-use", "", "", "", ModelConfig{}, false, "", "office", RuntimeToolsConfig{}, nil); !isReason(err, "FORBIDDEN_PERM") {
+		t.Fatalf("Create proxy without use error = %v, want FORBIDDEN_PERM", err)
+	}
+	if _, err := uc.Create(ownerCtx, "missing", "", "", "", ModelConfig{}, false, "", "nope", RuntimeToolsConfig{}, nil); !isReason(err, "PROXY_NOT_FOUND") {
+		t.Fatalf("Create missing proxy error = %v, want PROXY_NOT_FOUND", err)
+	}
+
+	resources.grants[proxyRes.ID] = []ResourceGrant{{ResourceID: proxyRes.ID, GranteeType: "user", GranteeID: "owner", Perm: PermUse}}
+	updated, err := uc.Update(ownerCtx, "agent-1", map[string]any{"proxy_id": "office"})
+	if err != nil {
+		t.Fatalf("Update with use: %v", err)
+	}
+	if updated.ProxyID != "office" {
+		t.Fatalf("Update ProxyID = %q, want office", updated.ProxyID)
+	}
+
+	created, err := uc.Create(ownerCtx, "with-proxy", "", "", "", ModelConfig{}, false, "", "office", RuntimeToolsConfig{}, nil)
+	if err != nil {
+		t.Fatalf("Create with use: %v", err)
+	}
+	if created.ProxyID != "office" {
+		t.Fatalf("Create returned ProxyID = %q, want office", created.ProxyID)
+	}
+	if agents.created == nil || agents.created.ProxyID != "office" {
+		t.Fatal("Create must persist proxy_id on the stored AgentMeta row, not via a follow-up Update")
+	}
 }
 
 func TestRequireWorkspaceRoot(t *testing.T) {

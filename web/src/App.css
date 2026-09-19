@@ -713,10 +713,54 @@ button.nav-item {
 .form-row {
   display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
 }
 
 .form-row .form-group {
   flex: 1;
+  min-width: 12rem;
+}
+
+.page-header h2 {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+.section-card .table-card {
+  box-shadow: none;
+}
+
+.section-card table input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  min-width: 10rem;
+  padding: 0.45rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.section-card table input:not([type="checkbox"]):not([type="radio"]):focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+@media (max-width: 720px) {
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-row .form-group {
+    min-width: 0;
+  }
 }
 
 /* Filter bar */

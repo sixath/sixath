@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,20 @@ import (
 
 	"github.com/sixath/framework/tool/web"
 )
+
+type webSearchRoundTripStub struct {
+	saw *bool
+}
+
+func (s webSearchRoundTripStub) RoundTrip(req *http.Request) (*http.Response, error) {
+	*s.saw = true
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{"webPages":{"value":[{"name":"Hit","url":"https://x.test","snippet":"s"}]}}`)),
+		Request:    req,
+	}, nil
+}
 
 func TestValidateOutboundURL_BlocksPrivateIP(t *testing.T) {
 	if err := ValidateOutboundURL("http://127.0.0.1/secret"); err == nil {
@@ -63,6 +78,37 @@ func TestWebSearchTool_HiddenWithoutAPIKey(t *testing.T) {
 	}
 	if err := tl.CheckFn(context.Background()); err == nil {
 		t.Fatal("expected check failure")
+	}
+}
+
+func TestWebSearchTool_UsesProvidedHTTPClient(t *testing.T) {
+	saw := false
+	client := &http.Client{Transport: webSearchRoundTripStub{saw: &saw}}
+	backend := web.NewBochaBackend(web.BochaConfig{
+		APIKey:   "k",
+		Endpoint: "http://bocha.test/search",
+	})
+	reg := NewRegistry()
+	if err := RegisterWebTools(reg, &WebToolsConfig{
+		SearchBackend: backend,
+		HTTPClient:    client,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tl, ok := reg.Get("web_search")
+	if !ok {
+		t.Fatal("missing web_search")
+	}
+	res, err := tl.Execute(context.Background(), map[string]any{"query": "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !saw {
+		t.Fatal("search backend did not use provided HTTPClient")
+	}
+	resp := res.(*web.SearchResponse)
+	if len(resp.Results) != 1 || resp.Results[0].Title != "Hit" {
+		t.Fatalf("%#v", res)
 	}
 }
 

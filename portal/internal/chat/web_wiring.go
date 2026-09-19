@@ -19,9 +19,11 @@ func registerWebTools(reg *tool.Registry, force bool) error {
 	if count <= 0 {
 		count = 8
 	}
+	overlay := reg.HTTPClient()
 	return tool.RegisterWebTools(reg, &tool.WebToolsConfig{
-		SearchBackend:  tool.NewWebSearchBackend(s.SearchBackend, s.BochaAPIKey, s.TavilyAPIKey),
+		SearchBackend:  tool.NewWebSearchBackend(s.SearchBackend, s.BochaAPIKey, s.TavilyAPIKey, overlay),
 		DefaultCount:   count,
 		DefaultSummary: s.DefaultSummary,
+		HTTPClient:     overlay,
 	})
 }
