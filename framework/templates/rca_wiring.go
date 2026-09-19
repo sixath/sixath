@@ -63,6 +63,7 @@ func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 			DatasourceID: inlineID,
 			DefaultIndex: cfg.RCA.ES.DefaultIndex,
 			TraceIDField: cfg.RCA.ES.TraceIDField,
+			BodyField:    cfg.RCA.ES.BodyField,
 		}); err != nil {
 			return err
 		}
@@ -76,6 +77,7 @@ func registerRCATools(reg *tool.Registry, cfg config.Config) error {
 				DatasourceID: cfg.RCA.ES.DatasourceID,
 				DefaultIndex: cfg.RCA.ES.DefaultIndex,
 				TraceIDField: cfg.RCA.ES.TraceIDField,
+				BodyField:    cfg.RCA.ES.BodyField,
 			}); err != nil {
 				return err
 			}

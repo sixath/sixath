@@ -345,3 +345,35 @@ func TestCollectESLog_BothEndpointAndDatasourceIDSkipped(t *testing.T) {
 		t.Fatalf("both endpoint and datasource_id must skip, got %v", clusters)
 	}
 }
+
+func TestCollectESLog_BodyFieldFromDatasource(t *testing.T) {
+	tools := []*biz.ToolMeta{
+		esDatasourceMeta(t, "zj-elk", map[string]any{
+			"dsn":            "http://ds:9200",
+			"default_index":  "app-*",
+			"body_field":     "message",
+		}),
+	}
+	clusters, _ := collectESLogClusters(tools)
+	c, ok := clusterByID(clusters, "zj-elk")
+	if !ok {
+		t.Fatal("missing zj-elk")
+	}
+	if c.BodyField != "message" {
+		t.Fatalf("BodyField=%q want message", c.BodyField)
+	}
+}
+
+func TestCollectESLog_BodyFieldOptionalEmpty(t *testing.T) {
+	tools := []*biz.ToolMeta{
+		esDatasourceMeta(t, "zj-elk", map[string]any{"dsn": "http://ds:9200", "default_index": "app-*"}),
+	}
+	clusters, _ := collectESLogClusters(tools)
+	c, ok := clusterByID(clusters, "zj-elk")
+	if !ok {
+		t.Fatal("missing zj-elk")
+	}
+	if c.BodyField != "" {
+		t.Fatalf("BodyField=%q want empty", c.BodyField)
+	}
+}

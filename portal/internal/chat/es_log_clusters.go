@@ -48,6 +48,7 @@ func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, 
 		c.DefaultIndex = mapStringField(dsMap, "default_index", "defaultIndex")
 		c.TraceIDField = mapStringField(dsMap, "trace_id_field", "traceIdField")
 		c.Purpose = mapStringField(dsMap, "purpose")
+		c.BodyField = mapStringField(dsMap, "body_field", "bodyField")
 	}
 
 	for _, t := range tools {
@@ -78,6 +79,9 @@ func collectESLogClusters(tools []*biz.ToolMeta) (clusters []tool.ESLogCluster, 
 			}
 			if c.TraceIDField == "" {
 				c.TraceIDField = mapStringField(rcaMap, "trace_id_field", "traceIdField")
+			}
+			if c.BodyField == "" {
+				c.BodyField = mapStringField(rcaMap, "body_field", "bodyField")
 			}
 			if c.Purpose == "" {
 				c.Purpose = strings.TrimSpace(t.Description)

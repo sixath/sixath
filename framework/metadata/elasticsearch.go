@@ -86,6 +86,21 @@ func groupIndicesByPattern(indexNames []string) []*esIndexGroup {
 	return out
 }
 
+// GroupIndicesByPattern returns logical index patterns for a cluster's physical
+// index names (date-suffixed names collapse to base-*). System indices should be
+// filtered by the caller before passing names in.
+func GroupIndicesByPattern(indexNames []string) []string {
+	groups := groupIndicesByPattern(indexNames)
+	out := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if g == nil || g.Pattern == "" {
+			continue
+		}
+		out = append(out, g.Pattern)
+	}
+	return out
+}
+
 // FetchSchemaElasticsearch 从 ES 拉取索引列表并按「索引模式」分组，每个模式只对代表索引拉一次 mapping，
 // 得到逻辑表（Table.Name = 模式名，Table.Comment = 示例索引 + 时间约定），减少请求数与重复 mapping。
 func FetchSchemaElasticsearch(ctx context.Context, client *datasource.ESHTTP) (*Schema, error) {

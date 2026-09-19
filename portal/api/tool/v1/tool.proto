@@ -65,6 +65,7 @@ message DatasourceConfig {
   string default_index = 10;   // elasticsearch: default index/pattern
   string trace_id_field = 11;  // elasticsearch: trace field, default trace_id
   string purpose = 12;         // elasticsearch: human/model purpose
+  string body_field = 13;      // elasticsearch: optional log body column (message/M/...)
 }
 
 // RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
@@ -78,6 +79,7 @@ message RCAConfig {
   string endpoint = 7;           // es_log_query: 内联 ES URL（DSN）
   string user = 8;               // es_log_query: 可选 Basic 用户名
   string password = 9;           // es_log_query: 可选 Basic 密码
+  string body_field = 10;        // es_log_query: optional log body column
 }
 
 // 工具配置：内置用 func_path/parameters，MCP 用 mcp 或 mcp_* 字段，数据源用 datasource

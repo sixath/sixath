@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -593,6 +594,324 @@ func isLuceneMetaField(name string) bool {
 	default:
 		return false
 	}
+}
+
+var esBodyFieldCandidates = []string{"message", "msg", "log", "body", "@message", "M"}
+
+func rewriteUnknownQueryFields(dsl map[string]any, catalog []string, bodyField string) (map[string]any, bool, string) {
+	if dsl == nil || len(catalog) == 0 {
+		return dsl, false, ""
+	}
+	unknown := unknownQueryFields(collectQueryFieldNames(dsl), catalog)
+	if len(unknown) == 0 {
+		return dsl, false, ""
+	}
+	cloned := cloneJSONMap(dsl)
+	q, _ := cloned["query"].(map[string]any)
+	if q == nil {
+		return dsl, false, ""
+	}
+	reason := rewriteUnknownQueryNode(q, unknown, catalog, bodyField)
+	if reason == "" {
+		return dsl, false, ""
+	}
+	return cloned, true, reason
+}
+
+func rewriteUnknownQueryNode(node map[string]any, unknown []string, catalog []string, bodyField string) string {
+	if node == nil {
+		return ""
+	}
+	if qs, ok := node["query_string"].(map[string]any); ok {
+		return rewriteUnknownQueryString(qs, unknown, catalog, bodyField)
+	}
+	if qs, ok := node["simple_query_string"].(map[string]any); ok {
+		return rewriteUnknownQueryString(qs, unknown, catalog, bodyField)
+	}
+	for _, kind := range []string{"term", "terms", "match", "match_phrase"} {
+		leaf, ok := node[kind].(map[string]any)
+		if !ok {
+			continue
+		}
+		return rewriteUnknownLeaf(node, kind, leaf, unknown, catalog, bodyField)
+	}
+	if b, ok := node["bool"].(map[string]any); ok {
+		reason := ""
+		for _, k := range []string{"must", "should", "filter", "must_not"} {
+			if r := rewriteUnknownBoolClause(b, k, unknown, catalog, bodyField); r != "" && reason == "" {
+				reason = r
+			}
+		}
+		return reason
+	}
+	return ""
+}
+
+func rewriteUnknownBoolClause(b map[string]any, key string, unknown []string, catalog []string, bodyField string) string {
+	switch v := b[key].(type) {
+	case []any:
+		reason := ""
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if r := rewriteUnknownQueryNode(m, unknown, catalog, bodyField); r != "" && reason == "" {
+				reason = r
+			}
+		}
+		return reason
+	case map[string]any:
+		return rewriteUnknownQueryNode(v, unknown, catalog, bodyField)
+	default:
+		return ""
+	}
+}
+
+func rewriteUnknownQueryString(qs map[string]any, unknown []string, catalog []string, bodyField string) string {
+	s, _ := qs["query"].(string)
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	if repl, ok := similarReplacements(unknown, catalog); ok {
+		newQ := s
+		for old, neu := range repl {
+			newQ = replaceLuceneFieldName(newQ, old, neu)
+		}
+		qs["query"] = newQ
+		return "similar_field"
+	}
+	stripped := strings.TrimSpace(stripLuceneFieldNames(s, unknown))
+	if stripped == "" {
+		stripped = s
+	}
+	if body := resolveBodyField(bodyField, catalog); body != "" {
+		qs["query"] = stripped
+		qs["default_field"] = body
+		return "body_field"
+	}
+	qs["query"] = stripped
+	delete(qs, "default_field")
+	return "unfielded"
+}
+
+func rewriteUnknownLeaf(node map[string]any, kind string, leaf map[string]any, unknown []string, catalog []string, bodyField string) string {
+	unkSet := map[string]struct{}{}
+	for _, u := range unknown {
+		unkSet[u] = struct{}{}
+	}
+	var unknownHere []string
+	for _, f := range leafFieldNames(leaf) {
+		if _, ok := unkSet[baseFieldName(f)]; ok {
+			unknownHere = append(unknownHere, baseFieldName(f))
+		}
+	}
+	if len(unknownHere) == 0 {
+		return ""
+	}
+	if repl, ok := similarReplacements(unknownHere, catalog); ok {
+		for old, neu := range repl {
+			if old == neu {
+				continue
+			}
+			if v, exists := leaf[old]; exists {
+				leaf[neu] = v
+				delete(leaf, old)
+			}
+		}
+		return "similar_field"
+	}
+	val := firstLeafValue(leaf)
+	body := resolveBodyField(bodyField, catalog)
+	qs := map[string]any{"query": fmt.Sprint(val)}
+	reason := "unfielded"
+	if body != "" {
+		qs["default_field"] = body
+		reason = "body_field"
+	}
+	delete(node, kind)
+	node["query_string"] = qs
+	return reason
+}
+
+func firstLeafValue(leaf map[string]any) any {
+	if v, ok := leaf["value"]; ok {
+		return v
+	}
+	for k, v := range leaf {
+		if isQueryClauseMetaKey(k) {
+			continue
+		}
+		return v
+	}
+	return ""
+}
+
+func similarReplacements(unknown, catalog []string) (map[string]string, bool) {
+	if len(unknown) == 0 {
+		return nil, false
+	}
+	repl := map[string]string{}
+	for _, u := range unknown {
+		sim, ok := uniqueSimilarField(u, catalog)
+		if !ok {
+			return nil, false
+		}
+		repl[u] = sim
+	}
+	return repl, true
+}
+
+func uniqueSimilarField(unknown string, catalog []string) (string, bool) {
+	want := normalizeMappedField(unknown)
+	if want == "" {
+		return "", false
+	}
+	var exact []string
+	seen := map[string]struct{}{}
+	for _, f := range catalog {
+		base := baseFieldName(f)
+		if strings.EqualFold(base, unknown) {
+			continue
+		}
+		if normalizeMappedField(base) != want {
+			continue
+		}
+		if _, ok := seen[base]; ok {
+			continue
+		}
+		seen[base] = struct{}{}
+		exact = append(exact, base)
+	}
+	if len(exact) == 1 {
+		return exact[0], true
+	}
+	sim := suggestSimilarMappedFields(unknown, catalog)
+	if len(sim) == 1 {
+		return sim[0], true
+	}
+	return "", false
+}
+
+func resolveBodyField(configured string, catalog []string) string {
+	have := mappedFieldSet(catalog)
+	if c := strings.TrimSpace(configured); c != "" && mappedFieldInSet(c, have) {
+		return c
+	}
+	for _, c := range esBodyFieldCandidates {
+		if mappedFieldInSet(c, have) {
+			return c
+		}
+	}
+	return ""
+}
+
+func replaceLuceneFieldName(q, old, neu string) string {
+	if old == "" || neu == "" || old == neu {
+		return q
+	}
+	var b strings.Builder
+	inQuote := byte(0)
+	for i := 0; i < len(q); {
+		c := q[i]
+		if inQuote != 0 {
+			b.WriteByte(c)
+			if c == '\\' && i+1 < len(q) {
+				b.WriteByte(q[i+1])
+				i += 2
+				continue
+			}
+			if c == inQuote {
+				inQuote = 0
+			}
+			i++
+			continue
+		}
+		if c == '"' || c == '\'' {
+			inQuote = c
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if isMappedFieldStart(c) {
+			j := i + 1
+			for j < len(q) && isMappedFieldCont(q[j]) {
+				j++
+			}
+			k := j
+			for k < len(q) && (q[k] == ' ' || q[k] == '\t') {
+				k++
+			}
+			name := q[i:j]
+			if k < len(q) && q[k] == ':' && name == old {
+				b.WriteString(neu)
+				b.WriteString(q[j:k])
+				b.WriteByte(':')
+				i = k + 1
+				continue
+			}
+			b.WriteString(q[i:j])
+			i = j
+			continue
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return b.String()
+}
+
+func stripLuceneFieldNames(q string, fields []string) string {
+	drop := map[string]struct{}{}
+	for _, f := range fields {
+		drop[f] = struct{}{}
+	}
+	var b strings.Builder
+	inQuote := byte(0)
+	for i := 0; i < len(q); {
+		c := q[i]
+		if inQuote != 0 {
+			b.WriteByte(c)
+			if c == '\\' && i+1 < len(q) {
+				b.WriteByte(q[i+1])
+				i += 2
+				continue
+			}
+			if c == inQuote {
+				inQuote = 0
+			}
+			i++
+			continue
+		}
+		if c == '"' || c == '\'' {
+			inQuote = c
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if isMappedFieldStart(c) {
+			j := i + 1
+			for j < len(q) && isMappedFieldCont(q[j]) {
+				j++
+			}
+			k := j
+			for k < len(q) && (q[k] == ' ' || q[k] == '\t') {
+				k++
+			}
+			name := q[i:j]
+			if k < len(q) && q[k] == ':' {
+				if _, ok := drop[name]; ok && !isLuceneMetaField(name) {
+					i = k + 1
+					continue
+				}
+			}
+			b.WriteString(q[i:j])
+			i = j
+			continue
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 func flattenMappingFieldNames(raw []byte) []string {

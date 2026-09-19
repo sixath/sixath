@@ -366,6 +366,14 @@ export default function ToolForm() {
                     placeholder="如 应用日志"
                   />
                 </div>
+                <div className="form-group">
+                  <label>日志正文列（可选）</label>
+                  <input
+                    value={config.datasource?.body_field || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), body_field: e.target.value } }))}
+                    placeholder="如 message；空则按 mapping 推断"
+                  />
+                </div>
               </>
             )}
           </>
@@ -502,6 +510,14 @@ export default function ToolForm() {
                     value={config.rca?.trace_id_field || ''}
                     onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), trace_id_field: e.target.value } }))}
                     placeholder="trace_id"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>日志正文列（可选）</label>
+                  <input
+                    value={config.rca?.body_field || ''}
+                    onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), body_field: e.target.value } }))}
+                    placeholder="如 message"
                   />
                 </div>
               </>

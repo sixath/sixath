@@ -129,6 +129,7 @@ func structToToolConfig(s *structpb.Struct) *toolv1.ToolConfig {
 		c.Datasource.DefaultIndex = structFieldString(ds, "default_index", "defaultIndex")
 		c.Datasource.TraceIdField = structFieldString(ds, "trace_id_field", "traceIdField")
 		c.Datasource.Purpose = structFieldString(ds, "purpose")
+		c.Datasource.BodyField = structFieldString(ds, "body_field", "bodyField")
 	}
 	// RCAConfig 嵌套
 	if v, ok := s.Fields["rca"]; ok && v.GetStructValue() != nil {
@@ -164,6 +165,9 @@ func structToToolConfig(s *structpb.Struct) *toolv1.ToolConfig {
 		}
 		if x, ok := rc["password"]; ok {
 			c.Rca.Password = x.GetStringValue()
+		}
+		if x, ok := rc["body_field"]; ok {
+			c.Rca.BodyField = x.GetStringValue()
 		}
 	}
 	return c
@@ -219,6 +223,7 @@ func protoToolConfigToStruct(c *toolv1.ToolConfig) *structpb.Struct {
 		dsFields["default_index"], _ = structpb.NewValue(c.Datasource.DefaultIndex)
 		dsFields["trace_id_field"], _ = structpb.NewValue(c.Datasource.TraceIdField)
 		dsFields["purpose"], _ = structpb.NewValue(c.Datasource.Purpose)
+		dsFields["body_field"], _ = structpb.NewValue(c.Datasource.BodyField)
 		fields["datasource"] = structpb.NewStructValue(&structpb.Struct{Fields: dsFields})
 	}
 	if c.Rca != nil {
@@ -231,6 +236,7 @@ func protoToolConfigToStruct(c *toolv1.ToolConfig) *structpb.Struct {
 			"endpoint":       c.Rca.Endpoint,
 			"user":           c.Rca.User,
 			"password":       c.Rca.Password,
+			"body_field":     c.Rca.BodyField,
 		}
 		roots := make([]interface{}, 0, len(c.Rca.Roots))
 		for _, r := range c.Rca.Roots {
@@ -320,5 +326,5 @@ func datasourceShouldEmit(ds *toolv1.DatasourceConfig) bool {
 	if ds == nil {
 		return false
 	}
-	return ds.Id != "" || ds.Type != "" || ds.Dsn != "" || ds.DefaultIndex != "" || ds.Purpose != "" || ds.TraceIdField != ""
+	return ds.Id != "" || ds.Type != "" || ds.Dsn != "" || ds.DefaultIndex != "" || ds.Purpose != "" || ds.TraceIdField != "" || ds.BodyField != ""
 }

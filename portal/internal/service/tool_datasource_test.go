@@ -15,6 +15,7 @@ func TestToolConfigRoundTrip_DatasourceESMetadata(t *testing.T) {
 			"default_index":  "app-*",
 			"trace_id_field": "trace_id",
 			"purpose":        "应用日志",
+			"body_field":     "message",
 		},
 	})
 	if err != nil {
@@ -26,7 +27,8 @@ func TestToolConfigRoundTrip_DatasourceESMetadata(t *testing.T) {
 	}
 	if proto.Datasource.Id != "zj-elk" || proto.Datasource.Type != "elasticsearch" ||
 		proto.Datasource.Dsn != "http://es:9200" || proto.Datasource.DefaultIndex != "app-*" ||
-		proto.Datasource.TraceIdField != "trace_id" || proto.Datasource.Purpose != "应用日志" {
+		proto.Datasource.TraceIdField != "trace_id" || proto.Datasource.Purpose != "应用日志" ||
+		proto.Datasource.BodyField != "message" {
 		t.Fatalf("proto.Datasource fields wrong: %+v", proto.Datasource)
 	}
 	back := protoToolConfigToStruct(proto)
@@ -43,6 +45,9 @@ func TestToolConfigRoundTrip_DatasourceESMetadata(t *testing.T) {
 	}
 	if f["purpose"].GetStringValue() != "应用日志" {
 		t.Fatalf("round-trip purpose wrong: %v", f["purpose"])
+	}
+	if f["body_field"].GetStringValue() != "message" {
+		t.Fatalf("round-trip body_field wrong: %v", f["body_field"])
 	}
 }
 

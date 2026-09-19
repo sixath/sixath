@@ -32,6 +32,7 @@ export function normalizeExportConfig(raw?: unknown): ToolConfig {
       datasource_id: (r.datasource_id as string | undefined) ?? (r.datasourceId as string | undefined),
       default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
       trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
+      body_field: (r.body_field as string | undefined) ?? (r.bodyField as string | undefined),
       endpoint: (r.endpoint as string | undefined) ?? undefined,
       user: (r.user as string | undefined) ?? undefined,
       password: (r.password as string | undefined) ?? undefined,
@@ -70,6 +71,7 @@ function normalizeDatasourceConfig(raw: unknown): ToolConfig['datasource'] {
     default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
     trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
     purpose: r.purpose as string | undefined,
+    body_field: (r.body_field as string | undefined) ?? (r.bodyField as string | undefined),
   }
 }
 

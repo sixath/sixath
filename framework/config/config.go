@@ -101,6 +101,7 @@ type RCAESConfig struct {
 	DatasourceID string `json:"datasource_id" yaml:"datasource_id"`
 	DefaultIndex string `json:"default_index" yaml:"default_index"`
 	TraceIDField string `json:"trace_id_field" yaml:"trace_id_field"`
+	BodyField    string `json:"body_field" yaml:"body_field"`
 }
 
 // RCAReposConfig 多仓库代码检索的仓库根白名单。

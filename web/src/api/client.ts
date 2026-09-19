@@ -109,6 +109,7 @@ export interface DatasourceConfig {
   default_index?: string
   trace_id_field?: string
   purpose?: string
+  body_field?: string
 }
 
 export interface ToolConfig {
@@ -128,6 +129,7 @@ export interface ToolConfig {
     datasource_id?: string
     default_index?: string
     trace_id_field?: string
+    body_field?: string
     endpoint?: string
     user?: string
     password?: string
@@ -206,6 +208,7 @@ function normalizeDatasourceConfig(raw: unknown): DatasourceConfig | undefined {
     default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
     trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
     purpose: r.purpose as string | undefined,
+    body_field: (r.body_field as string | undefined) ?? (r.bodyField as string | undefined),
   }
 }
 
@@ -221,6 +224,7 @@ function normalizeRCAConfig(raw: unknown): ToolConfig['rca'] | undefined {
     datasource_id: (r.datasource_id as string | undefined) ?? (r.datasourceId as string | undefined),
     default_index: (r.default_index as string | undefined) ?? (r.defaultIndex as string | undefined),
     trace_id_field: (r.trace_id_field as string | undefined) ?? (r.traceIdField as string | undefined),
+    body_field: (r.body_field as string | undefined) ?? (r.bodyField as string | undefined),
     endpoint: (r.endpoint as string | undefined) ?? undefined,
     user: (r.user as string | undefined) ?? undefined,
     password: (r.password as string | undefined) ?? undefined,

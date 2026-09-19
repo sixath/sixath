@@ -3,6 +3,7 @@ package templates
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sixath/framework/config"
@@ -32,7 +33,7 @@ func TestRegisterRCATools_AllConfigured(t *testing.T) {
 		},
 		RCA: config.RCAConfig{
 			Jaeger: config.RCAJaegerConfig{QueryURL: "http://jaeger:16686"},
-			ES:     config.RCAESConfig{DatasourceID: "es-logs", DefaultIndex: "app-logs-*", TraceIDField: "trace_id"},
+			ES:     config.RCAESConfig{DatasourceID: "es-logs", DefaultIndex: "app-logs-*", TraceIDField: "trace_id", BodyField: "message"},
 			Repos:  config.RCAReposConfig{Roots: []string{"/repos/a", "/repos/b"}},
 		},
 	}
@@ -44,6 +45,13 @@ func TestRegisterRCATools_AllConfigured(t *testing.T) {
 		if !hasTool(reg, n) {
 			t.Fatalf("expected %s registered", n)
 		}
+	}
+	es, ok := reg.Get("es_log_query")
+	if !ok {
+		t.Fatal("es_log_query missing")
+	}
+	if !strings.Contains(es.Description, "body field `message`") {
+		t.Fatalf("YAML body_field not wired into es_log_query: %s", es.Description)
 	}
 }
 

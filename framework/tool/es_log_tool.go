@@ -16,14 +16,17 @@ type ESLogCluster struct {
 	DefaultIndex string
 	TraceIDField string
 	Purpose      string
+	BodyField    string // optional log body column; empty → infer from mapping
 }
 
 // ESLogConfig 为 es_log_query 的静态配置。
 type ESLogConfig struct {
-	DatasourceID string        // 单集群简写：指向已注册的 ES datasource
-	DefaultIndex string        // 单集群简写：默认业务日志索引
-	TraceIDField string        // 单集群简写：日志中关联 trace 的字段名(如 trace_id)
-	FieldMapper  ESFieldMapper // 空击时查 mapping；nil 则按本次 cluster 从 Reader 推断
+	DatasourceID string         // 单集群简写：指向已注册的 ES datasource
+	DefaultIndex string         // 单集群简写：默认业务日志索引
+	TraceIDField string         // 单集群简写：日志中关联 trace 的字段名(如 trace_id)
+	BodyField    string         // 单集群简写：日志正文列
+	FieldMapper  ESFieldMapper  // 空击时查 mapping；nil 则按本次 cluster 从 Reader 推断
+	IndexCatalog ESIndexCatalog // 物理索引探测；nil 则按 Reader 推断，测中可注入
 	Clusters     []ESLogCluster
 }
 
@@ -46,7 +49,7 @@ func (cfg ESLogConfig) resolvedClusters() []ESLogCluster {
 	if tf == "" {
 		tf = "trace_id"
 	}
-	return []ESLogCluster{{ID: id, DefaultIndex: cfg.DefaultIndex, TraceIDField: tf}}
+	return []ESLogCluster{{ID: id, DefaultIndex: cfg.DefaultIndex, TraceIDField: tf, BodyField: cfg.BodyField}}
 }
 
 func lookupCluster(clusters []ESLogCluster, id string) (ESLogCluster, bool) {
@@ -94,11 +97,18 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			return errors.New("es log tool: cluster id is empty")
 		}
 	}
+	if cfg.IndexCatalog == nil {
+		cfg.IndexCatalog = catalogFromReader(reader)
+	}
 	clusterIDs := make([]string, len(clusters))
-	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string (field:value, AND/OR) or a JSON ES query clause / search body. Page large totals with from (use next_from from the previous result). Per-call limit max 500. On 0 hits, looks up field mapping: unknown fields are reported (do not invent names); term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file)."
+	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string or a JSON ES query clause / search body. Index must be a real index or pattern on this cluster — do not invent names from service names. Omit index to use the cluster default_index; if that is also empty the call fails and lists discovered patterns. Prefer an unfielded query or a field that exists in the index mapping; do not assume identifiers like vmid or flow_id are mapped fields. On 0 hits the tool checks that the index exists and may rewrite unknown fields once; hit_status=empty means the index and fields were valid but no documents matched. Page large totals with from (use next_from from the previous result). Per-call limit max 500. term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file)."
 	for i, c := range clusters {
 		clusterIDs[i] = c.ID
-		desc += fmt.Sprintf("\n`%s` — %s; default index `%s`", c.ID, c.Purpose, c.DefaultIndex)
+		line := fmt.Sprintf("\n`%s` — %s; default index `%s`", c.ID, c.Purpose, c.DefaultIndex)
+		if strings.TrimSpace(c.BodyField) != "" {
+			line += fmt.Sprintf("; body field `%s`", c.BodyField)
+		}
+		desc += line
 	}
 	return reg.Register(Tool{
 		Name:        "es_log_query",
@@ -113,8 +123,8 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 					"description": "ES cluster / datasource id to query. Required; do not omit or invent names.",
 				},
 				"trace_id": map[string]any{"type": "string", "description": "Correlate logs by trace id (matched on the configured trace id field)."},
-				"query":    map[string]any{"type": "string", "description": "Lucene query_string (e.g. operation:DiscardUserArchive) or JSON query clause / search body when trace_id is not used."},
-				"index":    map[string]any{"type": "string", "description": "Override the default log index/pattern."},
+				"query":    map[string]any{"type": "string", "description": "Lucene query_string (unfielded value or a mapped field:value) or JSON query clause / search body when trace_id is not used."},
+				"index":    map[string]any{"type": "string", "description": "Override the default log index/pattern. Must exist on the cluster; do not invent names."},
 				"limit":    map[string]any{"type": "integer", "description": "Max hits per page (default 50, max 500)."},
 				"from":     map[string]any{"type": "integer", "description": "Offset for pagination (default 0). Use next_from from the previous page when truncated."},
 			},
@@ -143,7 +153,12 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				index = v
 			}
 			if strings.TrimSpace(index) == "" {
-				return stampFail(rcaErr(toolName, "index is required when cluster default_index is empty", ErrorPermanent), "", cl.ID)
+				out := rcaErr(toolName, "index is required when cluster default_index is empty", ErrorPermanent)
+				attachSuggestedPatterns(ctx, out, cfg.IndexCatalog, cl.ID, "", "")
+				return stampFail(out, "", cl.ID)
+			}
+			if unresolved := indexUnresolvedPayload(ctx, cfg.IndexCatalog, cl, index); unresolved != nil {
+				return stampFail(unresolved, index, cl.ID)
 			}
 
 			traceID, _ := params["trace_id"].(string)
@@ -212,6 +227,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				rewrittenQuery any
 				fieldHints     []ESFieldHint
 				queryRewritten bool
+				rewriteReason  string
 				unknownFields  []string
 				similarFields  []string
 			)
@@ -229,13 +245,27 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 						similarFields = append(similarFields, s)
 					}
 				}
-				fields := lookupQueryFields(ctx, mapper, index, dslObj)
-				rewritten, changed, hints := rewriteEmptyHitQuery(dslObj, fields)
-				fieldHints = hints
-				if changed && len(unknownFields) == 0 {
+				work := dslObj
+				if rewrittenUnk, changed, reason := rewriteUnknownQueryFields(work, catalog, cl.BodyField); changed {
 					origQuery = dslObj["query"]
-					rewrittenQuery = rewritten["query"]
-					retryBytes, mErr := json.Marshal(rewritten)
+					work = rewrittenUnk
+					rewrittenQuery = work["query"]
+					queryRewritten = true
+					rewriteReason = reason
+				}
+				fields := lookupQueryFields(ctx, mapper, index, work)
+				rewritten, changed, hints := rewriteEmptyHitQuery(work, fields)
+				fieldHints = hints
+				if changed {
+					if origQuery == nil {
+						origQuery = dslObj["query"]
+					}
+					work = rewritten
+					rewrittenQuery = work["query"]
+					queryRewritten = true
+				}
+				if queryRewritten {
+					retryBytes, mErr := json.Marshal(work)
 					if mErr != nil {
 						return stampFail(rcaErr(toolName, mErr.Error(), ErrorPermanent), index, cl.ID)
 					}
@@ -247,7 +277,6 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 						return stampFail(rcaErrFrom(toolName, qErr), index, cl.ID)
 					}
 					res = retryRes
-					queryRewritten = true
 				}
 			}
 			truncated := false
@@ -287,6 +316,9 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				payload["query_rewritten"] = true
 				payload["original_query"] = origQuery
 				payload["rewritten_query"] = rewrittenQuery
+			}
+			if rewriteReason != "" {
+				payload["rewrite_reason"] = rewriteReason
 			}
 			if len(fieldHints) > 0 {
 				payload["field_hints"] = fieldHints

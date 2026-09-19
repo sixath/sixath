@@ -25,11 +25,12 @@ Thin workflow skill for Sixath RCA tools. **Do not invent traces, logs, or file 
 
 ## Standard order (lock)
 
+0. **Quoted error (when present)** — `rca_grep` the user's original text, then `rca_read` the translation point. Do not use workspace `search_files` for application source.
 1. **Trace** — `jaeger_trace` with `trace_id` (or service/operation search if id unknown).
-2. **Logs** — `es_log_query(cluster="<elasticsearch tool name>", trace_id=...)` with the same `trace_id` (and time window / service filters if available). `cluster` is required (bound elasticsearch datasource name). A call without `cluster` does not succeed. The same task may call a second `cluster` for another bound ES.
-3. **Code** — from error messages / stack frames / class names found above, use `rca_grep` → `rca_glob` → `rca_read` to pin files and lines.
+2. **Logs** — `es_log_query(cluster="<elasticsearch tool name>", trace_id=...)` with the same `trace_id` (and time window / service filters if available). `cluster` is required (bound elasticsearch datasource name). A call without `cluster` does not succeed. The same task may call a second `cluster` for another bound ES. Prefer the English RPC / error code from step 0 over UI copy. `hit_status=empty` means the index and fields were valid but no documents matched. `index_error=unresolved` means the index pattern does not exist — pick a name from `suggested_index_patterns` and retry; do not treat it as missing logs.
+3. **Code follow-up** — from error messages / stack frames / class names found above, use `rca_grep` → `rca_glob` → `rca_read` to pin files and lines.
 
-Do **not** jump to code before you have either a failing span or a log line that names a symbol/path.
+Do **not** jump to speculative code failure lists. Grepping the user's quoted error is evidence gathering, not speculation. Never ask the user to restate the original question after context compression.
 
 ## Tool checklist
 
@@ -43,6 +44,7 @@ On `ok: false`:
 
 - `error_code=transient` → retry once with backoff / narrower query; say so if still failing.
 - `error_code=permanent` → stop that branch; report the error; do not fabricate data.
+- `index_error=unresolved` → the query did not land on a real index; retry with `suggested_index_patterns`. This is not `insufficient evidence`.
 
 ## Closing the case
 

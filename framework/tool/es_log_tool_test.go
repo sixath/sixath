@@ -519,8 +519,11 @@ func TestESLogQuery_EmptyHitUnknownTermsField(t *testing.T) {
 	if !strings.Contains(note, "flowId") {
 		t.Fatalf("mapping_error=%q", note)
 	}
-	if _, ok := m["query_rewritten"]; ok {
-		t.Fatalf("unknown field must not be rewritten into a guessed name: %#v", m)
+	if m["query_rewritten"] != true || m["rewrite_reason"] != "body_field" {
+		t.Fatalf("unknown field should rewrite onto mapped body column, got %#v", m)
+	}
+	if len(sr.calls) != 2 {
+		t.Fatalf("want rewrite retry, calls=%d %v", len(sr.calls), sr.calls)
 	}
 }
 
@@ -547,8 +550,8 @@ func TestESLogQuery_EmptyHitUnknownFieldNotInvented(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if len(sr.calls) != 1 {
-		t.Fatalf("unknown field must not retry a guessed rewrite, calls=%d %v", len(sr.calls), sr.calls)
+	if len(sr.calls) != 2 {
+		t.Fatalf("similar mapped field must retry rewrite, calls=%d %v", len(sr.calls), sr.calls)
 	}
 	m := out.(map[string]any)
 	unknown, _ := m["unknown_fields"].([]string)
@@ -561,6 +564,12 @@ func TestESLogQuery_EmptyHitUnknownFieldNotInvented(t *testing.T) {
 	}
 	if containsStr(similar, "trace_id") {
 		t.Fatalf("must not suggest unrelated _id fields: %v", similar)
+	}
+	if m["query_rewritten"] != true || m["rewrite_reason"] != "similar_field" {
+		t.Fatalf("flow_id should rewrite to similar flowId, got %#v", m)
+	}
+	if !strings.Contains(sr.calls[1], "flowId") {
+		t.Fatalf("retry query should use flowId, got %s", sr.calls[1])
 	}
 	note, _ := m["mapping_error"].(string)
 	if note == "" || !strings.Contains(note, "flow_id") {
@@ -730,5 +739,171 @@ func TestESLogQuery_RegisterRejectsEmptyClusterID(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("empty cluster id must fail register")
+	}
+}
+
+func TestESLogQuery_UnmatchedIndexIsErrorNotEmpty(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{Columns: []string{"message"}, Rows: nil}}
+	cat := &memIndexCatalog{byPattern: map[string][]string{
+		"cgschedule-*": nil,
+		"":             {"app-logs-2026.01.02", "svc-logs-2026.01.02"},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{
+		Clusters:     []ESLogCluster{{ID: "es", DefaultIndex: "app-logs-*", Purpose: "app"}},
+		IndexCatalog: cat,
+	})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"cluster": "es",
+		"index":   "cgschedule-*",
+		"query":   "vmid:199306",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["ok"] != false || m["hit_status"] != HitStatusError {
+		t.Fatalf("unmatched index must be error not empty: %#v", m)
+	}
+	if m["index_error"] != esIndexErrorUnresolved {
+		t.Fatalf("index_error=%v", m["index_error"])
+	}
+	if fr.gotDatasource != "" {
+		t.Fatal("must not Search when index is unresolved")
+	}
+	sugs, _ := m["suggested_index_patterns"].([]string)
+	if !containsStr(sugs, "app-logs-*") {
+		t.Fatalf("suggestions want default app-logs-*, got %v", sugs)
+	}
+	if containsStr(sugs, "backend-sched-hub-*") {
+		t.Fatalf("must not hardcode backend- patterns: %v", sugs)
+	}
+}
+
+func TestESLogQuery_MissingIndexListsPatterns(t *testing.T) {
+	fr := &fakeReader{result: &executor.QueryResult{}}
+	cat := &memIndexCatalog{byPattern: map[string][]string{
+		"": {"svc-2026.01.02", "other-2026.01.02"},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, fr, ESLogConfig{
+		Clusters:     []ESLogCluster{{ID: "zj-elk", DefaultIndex: "", Purpose: "应用"}},
+		IndexCatalog: cat,
+	})
+	tl, _ := reg.Get("es_log_query")
+	out, _ := tl.Execute(context.Background(), map[string]any{"cluster": "zj-elk", "query": "a:b"})
+	m := out.(map[string]any)
+	if m["ok"] != false {
+		t.Fatal("empty default_index without index param must fail")
+	}
+	if fr.gotDatasource != "" {
+		t.Fatal("must not Query with empty index")
+	}
+	sugs, _ := m["suggested_index_patterns"].([]string)
+	if !containsStr(sugs, "svc-*") {
+		t.Fatalf("error must list discovered patterns, got %v", sugs)
+	}
+}
+
+func TestESLogQuery_UnknownVmidRewritesToSimilar(t *testing.T) {
+	sr := &seqReader{results: []*executor.QueryResult{
+		{Columns: []string{"M"}, Rows: nil},
+		{Columns: []string{"M"}, Rows: [][]any{{"alloc 199306"}}},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, sr, ESLogConfig{
+		DatasourceID: "es", DefaultIndex: "app-logs-*", TraceIDField: "trace_id",
+		FieldMapper: mapFieldMapper{"vm_id": {Type: "text"}, "M": {Type: "text"}},
+	})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"cluster": "es",
+		"query":   "vmid:199306",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["query_rewritten"] != true || m["rewrite_reason"] != "similar_field" {
+		t.Fatalf("want similar_field rewrite, got %#v", m)
+	}
+	if m["hit_status"] != HitStatusHits {
+		t.Fatalf("hit_status=%v", m["hit_status"])
+	}
+	if !strings.Contains(sr.calls[1], "vm_id") {
+		t.Fatalf("retry must query vm_id, got %s", sr.calls[1])
+	}
+}
+
+func TestESLogQuery_MappedEmptyStaysEmpty(t *testing.T) {
+	sr := &seqReader{results: []*executor.QueryResult{
+		{Columns: []string{"message"}, Rows: nil},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, sr, ESLogConfig{
+		DatasourceID: "es", DefaultIndex: "app-logs-*", TraceIDField: "trace_id",
+		FieldMapper:  mapFieldMapper{"vm_id": {Type: "keyword"}},
+	})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"cluster": "es",
+		"query":   "vm_id:199306",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["ok"] != true || m["hit_status"] != HitStatusEmpty {
+		t.Fatalf("mapped 0-hit must stay empty, got %#v", m)
+	}
+	if _, ok := m["index_error"]; ok {
+		t.Fatalf("must not set index_error on true empty: %#v", m)
+	}
+	if len(sr.calls) != 1 {
+		t.Fatalf("no rewrite retry, calls=%d", len(sr.calls))
+	}
+}
+
+func TestESLogQuery_BodyFieldConfigWins(t *testing.T) {
+	sr := &seqReader{results: []*executor.QueryResult{
+		{Columns: []string{"text"}, Rows: nil},
+		{Columns: []string{"text"}, Rows: [][]any{{"hit"}}},
+	}}
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, sr, ESLogConfig{
+		Clusters: []ESLogCluster{{
+			ID: "es", DefaultIndex: "app-*", BodyField: "text",
+		}},
+		FieldMapper: mapFieldMapper{"text": {Type: "text"}, "message": {Type: "text"}},
+	})
+	tl, _ := reg.Get("es_log_query")
+	out, err := tl.Execute(context.Background(), map[string]any{
+		"cluster": "es",
+		"query":   "foo:bar",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["rewrite_reason"] != "body_field" {
+		t.Fatalf("want body_field, got %#v", m)
+	}
+	if !strings.Contains(sr.calls[1], `"default_field":"text"`) && !strings.Contains(sr.calls[1], `"default_field": "text"`) {
+		t.Fatalf("retry must use configured body field text, got %s", sr.calls[1])
+	}
+}
+
+func TestESLogQueryDescriptionForbidsInventingIndex(t *testing.T) {
+	reg := NewRegistry()
+	if err := RegisterESLogTool(reg, &fakeReader{}, ESLogConfig{DatasourceID: "es-logs"}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("es_log_query")
+	if !strings.Contains(tl.Description, "do not invent") {
+		t.Fatalf("description must tell the model not to invent index/field names: %s", tl.Description)
+	}
+	if strings.Contains(tl.Description, "operation:DiscardUserArchive") {
+		t.Fatalf("must not use unmapped field:value as the sole example: %s", tl.Description)
 	}
 }
