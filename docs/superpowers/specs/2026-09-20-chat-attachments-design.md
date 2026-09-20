@@ -1,6 +1,6 @@
 # 对话附件：图片多模态 + 会话 uploads 文本文件
 
-> 状态：已评审（对话确认）  
+> 状态：已评审（spec review Approved）  
 > 日期：2026-09-20  
 > 关联：`web/src/pages/ChatPage.tsx`、`web/src/api/client.ts`、`portal/api/chat/v1/chat.proto`、`portal/internal/service/chat.go`、`framework/model/{model,openai,openai_tools}.go`、`framework/tool/{file_tools,vision}.go`  
 > 触发：Web 对话目前只能发纯文本；排障常要贴截图与日志，框架已有 `ContentPart` / `vision_analyze` / workspace 文件工具，但未接到发消息入站。
