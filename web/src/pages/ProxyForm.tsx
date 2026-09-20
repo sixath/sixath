@@ -148,7 +148,10 @@ export default function ProxyForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? '编辑代理' : '新建代理'}</h1>
+        <div>
+          <h1>{isEdit ? '编辑代理' : '新建代理'}</h1>
+          <p className="page-sub">配置 HTTP / SOCKS5 出口地址，供 Agent 与工具复用。</p>
+        </div>
         <Link to="/proxies" className="btn btn-secondary">
           返回
         </Link>

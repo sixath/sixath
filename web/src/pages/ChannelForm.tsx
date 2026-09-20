@@ -293,8 +293,11 @@ export default function ChannelForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? 'Edit Channel' : 'New Channel'}</h1>
-        <Link to="/channels" className="btn btn-secondary">Back</Link>
+        <div>
+          <h1>{isEdit ? '编辑 Channel' : '新建 Channel'}</h1>
+          <p className="page-sub">配置接入通道、默认 Agent 与启用状态。</p>
+        </div>
+        <Link to="/channels" className="btn btn-secondary">返回</Link>
       </div>
 
       <div className="section-card" style={{ maxWidth: 640 }}>

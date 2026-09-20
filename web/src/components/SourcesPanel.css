@@ -1,8 +1,8 @@
 .sources-panel {
   margin-bottom: 0.75rem;
-  border: 1px solid var(--border, #e2e8f0);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-sm, 6px);
-  background: var(--bg-accent, #f8fafc);
+  background: var(--bg-accent, #121826);
   font-size: 0.85rem;
 }
 
@@ -15,7 +15,7 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: var(--muted, #64748b);
+  color: var(--muted, #94a3b8);
   font: inherit;
 }
 
@@ -26,7 +26,7 @@
 }
 
 .sources-panel-link {
-  color: var(--primary, #2563eb);
+  color: var(--primary, #00f0ff);
   text-decoration: none;
 }
 

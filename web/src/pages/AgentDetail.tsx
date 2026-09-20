@@ -235,11 +235,16 @@ export default function AgentDetail() {
   return (
     <div>
       <div className="page-header">
-        <h1>{agent.name}</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>{agent.name}</h1>
+          </div>
+          <p className="page-sub">{agent.description || '配置模型、工具、MCP 与出网代理。'}</p>
+        </div>
         <div className="actions">
-          <Link to="/agents" className="btn btn-secondary btn-sm">返回列表</Link>
-          <Link to={`/agents/${id}/chat`} className="btn btn-sm">对话</Link>
-          <Link to={`/agents/${id}/edit`} className="btn btn-secondary btn-sm">编辑</Link>
+          <Link to="/agents" className="btn btn-secondary">返回列表</Link>
+          <Link to={`/agents/${id}/chat`} className="btn">对话</Link>
+          <Link to={`/agents/${id}/edit`} className="btn btn-secondary">编辑</Link>
         </div>
       </div>
 

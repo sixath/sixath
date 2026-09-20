@@ -36,16 +36,22 @@ export default function ModelProviderList() {
     return (
       <div className="loading">
         <div className="loading-spinner" />
-        <span style={{ marginLeft: '0.75rem' }}>Loading...</span>
+        <span style={{ marginLeft: '0.75rem' }}>加载中…</span>
       </div>
     )
   }
-  if (error) return <div className="error">Load failed: {error}</div>
+  if (error) return <div className="error">加载失败：{error}</div>
 
   return (
     <div>
       <div className="page-header">
-        <h1>模型供应商</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>模型供应商</h1>
+            <span className="page-count">{providers.length}</span>
+          </div>
+          <p className="page-sub">登记中转站或直连厂商，供 Agent 选择模型。</p>
+        </div>
         <Link to="/model-providers/new" className="btn">
           新建供应商
         </Link>
@@ -67,28 +73,34 @@ export default function ModelProviderList() {
                 <th>Base URL</th>
                 <th>密钥</th>
                 <th>启用</th>
-                <th>操作</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
               {providers.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <strong>{p.name}</strong>
+                    <span className="cell-name">
+                      <span className="cell-dot cell-dot--purple" aria-hidden />
+                      {p.name}
+                    </span>
                   </td>
                   <td>
-                    <code>{p.kind}</code>
+                    {p.kind === 'dashscope' ? 'DashScope' : 'OpenAI 兼容'}
                   </td>
-                  <td style={{ color: 'var(--muted)', maxWidth: 280 }}>{p.base_url}</td>
+                  <td className="cell-desc">
+                    {p.base_url || '—'}
+                  </td>
                   <td>{p.has_api_key ? '已配置' : '无'}</td>
                   <td>{p.enabled ? '是' : '否'}</td>
-                  <td>
-                    <div className="actions">
-                      <Link to={`/model-providers/${p.id}`} className="btn btn-secondary btn-sm">
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <Link to={`/model-providers/${p.id}`} className="btn btn-ghost btn-sm">
                         编辑
                       </Link>
                       <button
-                        className="btn btn-danger btn-sm"
+                        type="button"
+                        className="btn btn-ghost btn-sm btn-danger"
                         onClick={() => setPendingDelete({ id: p.id, name: p.name })}
                       >
                         删除

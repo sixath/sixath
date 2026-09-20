@@ -213,7 +213,10 @@ export default function AgentForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? '编辑 Agent' : '新建 Agent'}</h1>
+        <div>
+          <h1>{isEdit ? '编辑 Agent' : '新建 Agent'}</h1>
+          <p className="page-sub">配置名称、模型、工作区与工具能力。</p>
+        </div>
         <Link to="/agents" className="btn btn-secondary">返回</Link>
       </div>
       <div className="section-card" style={{ maxWidth: 640 }}>

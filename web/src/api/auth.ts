@@ -6,6 +6,7 @@ const TOKEN_KEY = 'sixath-api-token'
 const ORG_KEY = 'sixath-org-id'
 export const AUTH_GATE_KEY = 'sixath-auth-gate'
 const EMAIL_VERIFIED_KEY = 'sixath-email-verified'
+const EMAIL_KEY = 'sixath-user-email'
 
 /** Matches portal configs auth.bootstrap_token default for local DEV only. */
 export const DEV_BOOTSTRAP_TOKEN = 'dev-bootstrap-token'
@@ -112,6 +113,7 @@ export function logout(): void {
   setStoredOrgId('')
   setAuthGate()
   clearSessionEmailVerified()
+  clearSessionEmail()
 }
 
 function setSessionEmailVerified(verified: boolean): void {
@@ -120,6 +122,18 @@ function setSessionEmailVerified(verified: boolean): void {
 
 export function clearSessionEmailVerified(): void {
   writeSession(EMAIL_VERIFIED_KEY, '')
+}
+
+export function getSessionEmail(): string {
+  return readSession(EMAIL_KEY)
+}
+
+function setSessionEmail(email: string): void {
+  writeSession(EMAIL_KEY, email.trim())
+}
+
+export function clearSessionEmail(): void {
+  writeSession(EMAIL_KEY, '')
 }
 
 /** True after email login/register when portal reports unverified mailbox. */
@@ -146,6 +160,7 @@ export function applyLoginSession(session: AuthSession): void {
   const orgId = pickOrgIdAfterLogin(session.orgs, getStoredOrgId())
   saveCredentials(session.token, orgId)
   setSessionEmailVerified(session.email_verified)
+  setSessionEmail(session.email)
 }
 
 /**

@@ -5,14 +5,14 @@
   justify-content: center;
   min-height: 100vh;
   padding: 24px;
-  background: linear-gradient(160deg, var(--bg-accent) 0%, var(--bg) 45%, color-mix(in srgb, var(--accent) 6%, var(--bg)) 100%);
+  background: var(--bg);
 }
 
 .login-card {
   width: 100%;
   max-width: 420px;
   padding: 2rem 2.25rem;
-  background: var(--card);
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
@@ -144,11 +144,16 @@
 
 
 .email-unverified-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
   margin: 0 0 1rem;
-  padding: 0.65rem 1rem;
+  padding: 0.85rem 1rem;
   font-size: 13px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--muted) 12%, var(--card));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  color: var(--neon-amber, #ffb020);
+  background: rgba(255, 176, 32, 0.1);
+  border: 1px solid rgba(255, 176, 32, 0.2);
+  border-radius: 1rem;
 }

@@ -77,48 +77,53 @@ export default function CronTaskList() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Cron Tasks</h1>
-          <div className="page-sub">{total} configured</div>
+          <div className="page-title-row">
+            <h1>定时任务</h1>
+            <span className="page-count">{total}</span>
+          </div>
+          <p className="page-sub">按计划触发 Agent，并把结果投递到指定通道。</p>
         </div>
-        <Link to="/cron/new" className="btn">New Task</Link>
-      </div>
-
-      <div className="section-card" style={{ marginBottom: '1.25rem', padding: '1rem 1.25rem' }}>
-        <div className="filter-bar">
-          <span className="filter-label">Filter</span>
-          <select value={enabled} onChange={(e) => setEnabled(e.target.value)}>
-            <option value="">All states</option>
-            <option value="true">Enabled</option>
-            <option value="false">Disabled</option>
-          </select>
-          <button type="button" className="btn btn-secondary" onClick={loadTasks}>Apply</button>
-        </div>
+        <Link to="/cron/new" className="btn">新建任务</Link>
       </div>
 
       {total === 0 ? (
         <div className="section-card empty-state">
-          <p>No cron tasks yet.</p>
-          <Link to="/cron/new" className="btn">New Task</Link>
+          <p>还没有定时任务。</p>
+          <Link to="/cron/new" className="btn">新建任务</Link>
         </div>
       ) : (
         <div className="table-card">
+          <div className="table-toolbar">
+            <div className="filter-bar">
+              <span className="filter-label">筛选</span>
+              <select value={enabled} onChange={(e) => setEnabled(e.target.value)}>
+                <option value="">全部状态</option>
+                <option value="true">已启用</option>
+                <option value="false">已停用</option>
+              </select>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={loadTasks}>应用</button>
+            </div>
+          </div>
           <table>
             <thead>
               <tr>
-                <th>Task</th>
+                <th>任务</th>
                 <th>Agent</th>
-                <th>Schedule</th>
-                <th>Delivery</th>
-                <th>Next Run</th>
-                <th>Actions</th>
+                <th>计划</th>
+                <th>投递</th>
+                <th>下次运行</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id}>
                   <td>
-                    <Link to={`/cron/${task.id}`} className="link">{task.name}</Link>
-                    <div className="page-sub">{task.enabled ? 'Enabled' : 'Disabled'}</div>
+                    <span className="cell-name">
+                      <span className="cell-dot cell-dot--amber" aria-hidden />
+                      <Link to={`/cron/${task.id}`} className="link">{task.name}</Link>
+                    </span>
+                    <div className="page-sub">{task.enabled ? '已启用' : '已停用'}</div>
                   </td>
                   <td>{agentNames.get(task.agent_id) || task.agent_id}</td>
                   <td>
@@ -127,12 +132,12 @@ export default function CronTaskList() {
                   </td>
                   <td>{task.delivery_mode}</td>
                   <td>{task.next_run_at || '-'}</td>
-                  <td>
-                    <div className="actions">
-                      <button className="btn btn-sm" onClick={() => setPendingRun({ id: task.id, name: task.name })}>Run</button>
-                      <Link to={`/cron/${task.id}`} className="btn btn-secondary btn-sm">Detail</Link>
-                      <Link to={`/cron/${task.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
-                      <button className="btn btn-danger btn-sm" onClick={() => setPendingDelete({ id: task.id, name: task.name })}>Delete</button>
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPendingRun({ id: task.id, name: task.name })}>运行</button>
+                      <Link to={`/cron/${task.id}`} className="btn btn-ghost btn-sm">详情</Link>
+                      <Link to={`/cron/${task.id}/edit`} className="btn btn-ghost btn-sm">编辑</Link>
+                      <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => setPendingDelete({ id: task.id, name: task.name })}>删除</button>
                     </div>
                   </td>
                 </tr>
@@ -143,18 +148,18 @@ export default function CronTaskList() {
       )}
       <ConfirmDialog
         open={!!pendingRun}
-        title="Run task now"
-        description={pendingRun ? `Run "${pendingRun.name}" now?` : ''}
-        confirmLabel="Run"
+        title="立即运行"
+        description={pendingRun ? `现在运行「${pendingRun.name}」？` : ''}
+        confirmLabel="运行"
         loading={confirmLoading}
         onCancel={() => setPendingRun(null)}
         onConfirm={confirmRun}
       />
       <ConfirmDialog
         open={!!pendingDelete}
-        title="Delete cron task"
-        description={pendingDelete ? `Delete "${pendingDelete.name}"? This action cannot be undone.` : ''}
-        confirmLabel="Delete"
+        title="删除定时任务"
+        description={pendingDelete ? `删除「${pendingDelete.name}」？此操作不可恢复。` : ''}
+        confirmLabel="删除"
         variant="danger"
         loading={confirmLoading}
         onCancel={() => setPendingDelete(null)}

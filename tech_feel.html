@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIXATH - 全站温暖科技风重构</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        brand: { bg: '#F8FAFC', indigo: '#4F46E5', amber: '#F59E0B', teal: '#10B981' }
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(149, 157, 165, 0.08)',
+                        'float': '0 10px 30px -5px rgba(0, 0, 0, 0.06)'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+
+        /* 页面切换动画 */
+        .page-view { display: none; animation: fadeIn 0.4s ease-out; }
+        .page-view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 呼吸灯 */
+        .breathing-dot { animation: breathe 2s ease-in-out infinite; }
+        @keyframes breathe {
+            0%, 100% { opacity: 0.6; transform: scale(0.8); box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4); }
+            50% { opacity: 1; transform: scale(1.1); box-shadow: 0 0 8px 2px rgba(79, 70, 229, 0.2); }
+        }
+        .breathing-dot-amber { animation: breathe-amber 2s ease-in-out infinite; }
+        @keyframes breathe-amber {
+            0%, 100% { opacity: 0.6; transform: scale(0.8); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+            50% { opacity: 1; transform: scale(1.1); box-shadow: 0 0 8px 2px rgba(245, 158, 11, 0.2); }
+        }
+
+        /* 表格行悬停 */
+        .table-row { transition: all 0.2s ease; }
+        .table-row:hover { background-color: #F8FAFC; transform: translateY(-1px); box-shadow: 0 4px 12px -2px rgba(0,0,0,0.03); }
+        .action-btns { opacity: 0; transform: translateX(10px); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .table-row:hover .action-btns { opacity: 1; transform: translateX(0); }
+
+        /* 卡片悬浮 */
+        .agent-card { transition: all 0.3s ease; }
+        .agent-card:hover { transform: translateY(-4px); box-shadow: 0 12px 25px -5px rgba(0,0,0,0.08); border-color: rgba(79, 70, 229, 0.3); }
+    </style>
+</head>
+<body class="bg-brand-bg text-slate-800 font-sans h-screen flex overflow-hidden antialiased">
+
+<!-- 左侧主导航 -->
+<aside class="w-64 border-r border-slate-200 bg-white flex flex-col z-20">
+    <div class="h-20 flex items-center px-6">
+        <div class="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-indigo to-cyan-400 mr-3 shadow-md flex items-center justify-center">
+            <div class="w-2 h-2 bg-white rounded-full"></div>
+        </div>
+        <span class="text-md font-bold tracking-widest text-slate-800">SIXATH</span>
+    </div>
+
+    <nav class="flex-1 px-3 space-y-1 mt-2">
+        <!-- 对话 -->
+        <a href="#" onclick="switchPage('chat')" id="nav-chat" class="nav-item flex items-center px-3 py-3 text-sm font-medium text-slate-500 rounded-xl hover:bg-slate-50 transition-colors">
+            <svg class="w-5 h-5 mr-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            对话
+        </a>
+        <!-- 工具管理 -->
+        <a href="#" onclick="switchPage('tools')" id="nav-tools" class="nav-item flex items-center px-3 py-3 text-sm font-semibold text-brand-indigo bg-brand-indigo/5 rounded-xl transition-colors">
+            <div class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-brand-indigo rounded-r-md hidden" id="indicator-tools"></div>
+            <svg class="w-5 h-5 mr-3 text-brand-indigo" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            工具管理
+        </a>
+        <!-- 代理 -->
+        <a href="#" onclick="switchPage('agents')" id="nav-agents" class="nav-item flex items-center px-3 py-3 text-sm font-medium text-slate-500 rounded-xl hover:bg-slate-50 transition-colors">
+            <svg class="w-5 h-5 mr-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"></path></svg>
+            代理管理
+        </a>
+        <a href="#" class="flex items-center px-3 py-3 text-sm font-medium text-slate-500 rounded-xl hover:bg-slate-50 transition-colors">
+            <svg class="w-5 h-5 mr-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+            模型供应商
+        </a>
+        <a href="#" class="flex items-center px-3 py-3 text-sm font-medium text-slate-500 rounded-xl hover:bg-slate-50 transition-colors">
+            <svg class="w-5 h-5 mr-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            定时任务
+        </a>
+        <a href="#" class="flex items-center px-3 py-3 text-sm font-medium text-slate-500 rounded-xl hover:bg-slate-50 transition-colors">
+            <svg class="w-5 h-5 mr-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            设置
+        </a>
+    </nav>
+</aside>
+
+<!-- 右侧主内容区 -->
+<main class="flex-1 flex flex-col h-screen overflow-hidden relative">
+    <!-- 顶栏 -->
+    <header class="h-16 border-b border-slate-200 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md z-10">
+        <h1 id="page-title" class="text-sm font-medium text-slate-400">工具管理</h1>
+        <div class="flex items-center space-x-4">
+            <span class="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-1 rounded">v2.1.0</span>
+            <div class="w-8 h-8 rounded-full bg-brand-indigo/10 text-brand-indigo flex items-center justify-center text-xs font-bold">ZJ</div>
+        </div>
+    </header>
+
+    <div class="flex-1 overflow-auto p-8 relative">
+        <!-- ================= 页面 1：工具管理 (Tools) ================= -->
+        <div id="view-tools" class="page-view active max-w-6xl mx-auto space-y-6">
+            <div class="flex justify-between items-end">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900 flex items-center">
+                        Tools <span class="ml-3 text-sm font-medium text-brand-indigo bg-brand-indigo/10 px-2.5 py-0.5 rounded-full border border-brand-indigo/20">25</span>
+                    </h2>
+                    <p class="text-sm text-slate-500 mt-2">管理你的 AI 智能体工具和数据源。</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button class="px-5 py-2.5 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-all shadow-sm">导入 JSON</button>
+                    <button class="px-5 py-2.5 text-sm font-bold text-white bg-brand-indigo hover:bg-indigo-600 rounded-xl shadow-[0_4px_14px_0_rgba(79,70,229,0.39)] transition-all transform hover:-translate-y-0.5">新建 Tool</button>
+                </div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-2xl shadow-soft overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center bg-slate-50/50">
+                    <button class="px-3 py-1.5 text-xs font-medium text-slate-400 bg-white border border-slate-200 rounded-lg cursor-not-allowed" disabled>批量导出</button>
+                    <span class="ml-4 text-xs text-slate-500">已选择 0 项</span>
+                </div>
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                    <tr class="text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                        <th class="px-6 py-4 w-12"><input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-brand-indigo focus:ring-brand-indigo cursor-pointer"></th>
+                        <th class="px-6 py-4 w-1/4">Name</th>
+                        <th class="px-6 py-4 w-32">Type</th>
+                        <th class="px-6 py-4 w-2/5">Description</th>
+                        <th class="px-6 py-4 text-right w-32">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                    <tr class="table-row group">
+                        <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-brand-indigo"></td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="flex items-center">
+                                <span class="w-2 h-2 rounded-full bg-brand-indigo mr-3 breathing-dot"></span>
+                                <span class="text-sm font-semibold text-slate-800 font-mono text-xs">instance_vm_tool_zijian</span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap"><span class="px-2.5 py-1 rounded-md text-xs font-medium bg-brand-indigo/10 text-brand-indigo border border-brand-indigo/20">RCA</span></td>
+                        <td class="px-6 py-4 text-sm text-slate-500 truncate max-w-xs" title="1.查看实例的vm的服务日志 2.监控实例的进程等 3.执行一些cmd任务">1.查看实例的vm的服务日志 2.监控实例的进程等 3.执行一些cmd任务</td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="action-btns flex justify-end items-center space-x-1">
+                                <button class="text-slate-500 hover:text-brand-indigo hover:bg-brand-indigo/10 px-3 py-1.5 rounded-lg text-xs font-medium">编辑</button>
+                                <button class="text-slate-500 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-medium">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr class="table-row group">
+                        <td class="px-6 py-4"><input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-brand-indigo"></td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="flex items-center">
+                                <span class="w-2 h-2 rounded-full bg-brand-amber mr-3 breathing-dot-amber"></span>
+                                <span class="text-sm font-semibold text-slate-800 font-mono text-xs">zjian_mongodb</span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap"><span class="px-2.5 py-1 rounded-md text-xs font-medium bg-brand-amber/10 text-brand-amber border border-brand-amber/20">DATASOURCE</span></td>
+                        <td class="px-6 py-4 text-sm text-slate-500">zjian mongodb</td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="action-btns flex justify-end items-center space-x-1">
+                                <button class="text-slate-500 hover:text-brand-indigo hover:bg-brand-indigo/10 px-3 py-1.5 rounded-lg text-xs font-medium">编辑</button>
+                                <button class="text-slate-500 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-medium">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ================= 页面 2：对话 (Chat) ================= -->
+        <div id="view-chat" class="page-view max-w-5xl mx-auto space-y-6">
+            <div class="flex justify-between items-end mb-6">
+                <div>
+                    <h2 class="text-2xl font-bold tracking-tight text-slate-900">Chat</h2>
+                    <p class="text-sm text-slate-500 mt-1">与你的 AI Agent 进行交互与调试。</p>
+                </div>
+                <select class="bg-white border border-slate-200 text-sm font-medium text-brand-indigo rounded-xl px-4 py-2 focus:outline-none shadow-sm cursor-pointer">
+                    <option>自建agent (openai/deepseek-v4-pro)</option>
+                </select>
+            </div>
+
+            <!-- 聊天记录 -->
+            <div class="space-y-6">
+                <!-- 用户气泡 -->
+                <div class="flex justify-end">
+                    <div class="bg-brand-indigo text-white rounded-2xl rounded-tr-sm px-6 py-3.5 max-w-[80%] shadow-[0_4px_15px_-3px_rgba(79,70,229,0.3)]">
+                        <p class="text-sm">查看这个实例199306有哪些进程</p>
+                    </div>
+                </div>
+                <!-- AI 气泡与执行卡片 -->
+                <div class="flex justify-start">
+                    <div class="flex max-w-[95%] w-full">
+                        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-indigo to-brand-teal flex items-center justify-center mr-4 flex-shrink-0 mt-1 shadow-md text-white text-xs font-bold">AI</div>
+                        <div class="flex-1 space-y-3">
+                            <div class="text-sm text-slate-700 bg-white px-5 py-3 rounded-2xl rounded-tl-sm shadow-soft border border-slate-100 inline-block">好的，正在调取底层数据并执行排查。</div>
+                            <!-- 执行卡片 -->
+                            <div class="bg-white rounded-2xl border border-slate-200 shadow-soft overflow-hidden mt-3">
+                                <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                                    <div class="flex items-center">
+                                        <div class="w-2.5 h-2.5 rounded-full bg-brand-teal breathing-dot mr-3"></div>
+                                        <span class="text-sm font-bold text-slate-800">任务执行详情</span>
+                                    </div>
+                                    <div class="flex items-center space-x-4 text-xs font-mono">
+                                        <span class="text-brand-teal font-semibold bg-brand-teal/10 px-2 py-0.5 rounded">✅ 成功</span>
+                                        <span class="text-slate-500">总计 ~450ms</span>
+                                    </div>
+                                </div>
+                                <div class="p-6">
+                                    <!-- 垂直时间轴 -->
+                                    <div class="relative pl-6 space-y-6">
+                                        <div class="absolute left-[7px] top-2 bottom-2 w-[2px] bg-gradient-to-b from-brand-indigo/50 to-slate-200"></div>
+                                        <div class="relative">
+                                            <div class="absolute -left-[1.3rem] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-brand-indigo shadow-[0_0_0_3px_rgba(79,70,229,0.15)]"></div>
+                                            <div class="flex items-start">
+                                                <span class="text-xs font-mono text-slate-400 w-24 pt-0.5">21:30:40.356</span>
+                                                <div><p class="text-sm text-slate-800 font-semibold">GetUserArchive 请求</p><p class="text-xs text-slate-500 mt-1">RPC 耗时 <span class="text-brand-indigo font-mono bg-brand-indigo/5 px-1 rounded">43ms</span></p></div>
+                                            </div>
+                                        </div>
+                                        <div class="relative">
+                                            <div class="absolute -left-[1.3rem] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-brand-amber shadow-[0_0_0_3px_rgba(245,158,11,0.15)]"></div>
+                                            <div class="flex items-start">
+                                                <span class="text-xs font-mono text-slate-400 w-24 pt-0.5">21:30:40.702</span>
+                                                <div><p class="text-sm text-slate-800 font-semibold">GameEventDownload</p><p class="text-xs text-slate-500 mt-1">耗时 <span class="text-brand-amber font-mono bg-brand-amber/10 px-1 rounded">251ms</span></p></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 页面 3：代理管理 (Agents) ================= -->
+        <div id="view-agents" class="page-view max-w-6xl mx-auto space-y-6">
+            <div class="flex justify-between items-end">
+                <div>
+                    <h2 class="text-3xl font-bold tracking-tight text-slate-900">Agents</h2>
+                    <p class="text-sm text-slate-500 mt-2">管理和配置你的 AI 智能体团队。</p>
+                </div>
+                <button class="px-5 py-2.5 text-sm font-bold text-white bg-brand-indigo hover:bg-indigo-600 rounded-xl shadow-[0_4px_14px_0_rgba(79,70,229,0.39)] transition-all transform hover:-translate-y-0.5">+ 创建 Agent</button>
+            </div>
+
+            <!-- Agent 卡片网格 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- 卡片 1 -->
+                <div class="agent-card bg-white rounded-2xl border border-slate-200 p-6 shadow-soft cursor-pointer">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-brand-indigo to-cyan-400 flex items-center justify-center text-white font-bold text-lg shadow-md">R</div>
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-brand-teal/10 text-brand-teal border border-brand-teal/20">
+                                <span class="w-1.5 h-1.5 rounded-full bg-brand-teal mr-1.5 breathing-dot"></span>在线
+                            </span>
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-800">RCA 排查助手</h3>
+                    <p class="text-sm text-slate-500 mt-2 line-clamp-2">专门用于排查 vm 实例故障，可以调用底层日志和监控接口。</p>
+                    <div class="flex flex-wrap gap-2 mt-4">
+                        <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-mono">deepseek-v4-pro</span>
+                        <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-mono">gopls</span>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-xs text-slate-400">
+                        <span>更新于 2 小时前</span>
+                        <span class="text-brand-indigo font-medium hover:underline">配置 &rarr;</span>
+                    </div>
+                </div>
+
+                <!-- 卡片 2 -->
+                <div class="agent-card bg-white rounded-2xl border border-slate-200 p-6 shadow-soft cursor-pointer">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-brand-amber to-orange-400 flex items-center justify-center text-white font-bold text-lg shadow-md">D</div>
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                <span class="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>离线
+                            </span>
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-800">数据分析师</h3>
+                    <p class="text-sm text-slate-500 mt-2 line-clamp-2">负责连接 mongodb 和 es，进行数据提取和报表生成。</p>
+                    <div class="flex flex-wrap gap-2 mt-4">
+                        <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-mono">gpt-4o</span>
+                        <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs font-mono">mongodb</span>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-slate-100 flex justify-between items-center text-xs text-slate-400">
+                        <span>更新于 1 天前</span>
+                        <span class="text-brand-indigo font-medium hover:underline">配置 &rarr;</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<script>
+    function switchPage(pageId) {
+        // 隐藏所有页面
+        document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active'));
+        // 显示目标页面
+        document.getElementById('view-' + pageId).classList.add('active');
+
+        // 重置导航样式
+        document.querySelectorAll('.nav-item').forEach(el => {
+            el.classList.remove('bg-brand-indigo/5', 'text-brand-indigo', 'font-semibold');
+            el.classList.add('text-slate-500', 'hover:bg-slate-50');
+            // 隐藏指示条（如果有）
+            const indicator = el.querySelector('div');
+            if(indicator) indicator.classList.add('hidden');
+        });
+
+        // 设置当前导航样式
+        const activeNav = document.getElementById('nav-' + pageId);
+        activeNav.classList.remove('text-slate-500', 'hover:bg-slate-50');
+        activeNav.classList.add('bg-brand-indigo/5', 'text-brand-indigo', 'font-semibold');
+        // 显示指示条
+        const activeIndicator = activeNav.querySelector('div');
+        if(activeIndicator) activeIndicator.classList.remove('hidden');
+
+        // 更新顶栏标题
+        const titles = { chat: '对话', tools: '工具管理', agents: '代理管理' };
+        document.getElementById('page-title').innerText = titles[pageId];
+    }
+</script>
+</body>
+</html>

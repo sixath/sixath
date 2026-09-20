@@ -50,7 +50,13 @@ export default function McpServerList() {
   return (
     <div>
       <div className="page-header">
-        <h1>MCP 服务</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>MCP 服务</h1>
+            <span className="page-count">{total}</span>
+          </div>
+          <p className="page-sub">管理已接入的 MCP 服务与传输方式。</p>
+        </div>
         <Link to="/mcp-servers/new" className="btn">
           新建 MCP 服务
         </Link>
@@ -71,7 +77,7 @@ export default function McpServerList() {
                 <th>名称</th>
                 <th>Transport</th>
                 <th>描述</th>
-                <th>操作</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -81,21 +87,25 @@ export default function McpServerList() {
                     <code>{server.id}</code>
                   </td>
                   <td>
-                    <strong>{server.name}</strong>
+                    <span className="cell-name">
+                      <span className="cell-dot cell-dot--purple" aria-hidden />
+                      {server.name}
+                    </span>
                   </td>
                   <td>
                     <span className={`badge badge-${server.transport === 'stdio' ? 'mcp' : 'builtin'}`}>
                       {server.transport}
                     </span>
                   </td>
-                  <td style={{ color: 'var(--muted)', maxWidth: 320 }}>{server.description}</td>
-                  <td>
-                    <div className="actions">
-                      <Link to={`/mcp-servers/${server.id}/edit`} className="btn btn-secondary btn-sm">
+                  <td className="cell-desc">{server.description}</td>
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <Link to={`/mcp-servers/${server.id}/edit`} className="btn btn-ghost btn-sm">
                         编辑
                       </Link>
                       <button
-                        className="btn btn-danger btn-sm"
+                        type="button"
+                        className="btn btn-ghost btn-sm btn-danger"
                         onClick={() => setPendingDelete({ id: server.id, name: server.name })}
                       >
                         删除

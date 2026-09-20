@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import ToolList from './pages/ToolList'
 import ToolForm from './pages/ToolForm'
 import McpServerList from './pages/McpServerList'
@@ -26,7 +26,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
 import RequireAuth from './components/RequireAuth'
-import { hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
+import { getSessionEmail, hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
 import './App.css'
 
 function Breadcrumb() {
@@ -95,10 +95,26 @@ function Breadcrumb() {
 
 const SIDEBAR_KEY = 'sixath-sidebar-open'
 
+function sessionDisplayName(email: string): string {
+  if (!email) return '已登录'
+  return email.split('@')[0] || email
+}
+
+function sessionInitials(email: string): string {
+  if (!email) return 'SX'
+  const local = sessionDisplayName(email)
+  const letters = local.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '')
+  if (letters.length >= 2) return letters.slice(0, 2).toUpperCase()
+  if (letters.length === 1) return letters.toUpperCase()
+  return 'SX'
+}
+
 function AppShell() {
   const loc = useLocation()
   const navigate = useNavigate()
   const tokenConfigured = hasApiToken()
+  const sessionEmail = getSessionEmail()
+  const emailUnverified = isSessionEmailUnverified()
   // re-check when navigating (e.g. after saving Settings)
   void loc.pathname
 
@@ -177,7 +193,7 @@ function AppShell() {
             </NavLink>
             <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">⚙️</span>
-              设置{tokenConfigured ? ' ·已登录' : ' ·!'}
+              设置{tokenConfigured ? '' : ' ·!'}
             </NavLink>
             <button
               type="button"
@@ -192,6 +208,18 @@ function AppShell() {
             </button>
           </div>
         </nav>
+        <div className="sidebar-user">
+          <Link to="/settings" className="sidebar-user__card">
+            <div className="sidebar-user__avatar">{sessionInitials(sessionEmail)}</div>
+            <div className="sidebar-user__meta">
+              <p className="sidebar-user__name">{sessionDisplayName(sessionEmail)}</p>
+              <p className={`sidebar-user__status${emailUnverified ? '' : ' is-ok'}`}>
+                <span className="sidebar-user__status-dot" aria-hidden />
+                {emailUnverified ? '未验证邮箱' : sessionEmail || '本地会话'}
+              </p>
+            </div>
+          </Link>
+        </div>
       </aside>
       <header className="topbar">
         {!navOpen && (
@@ -209,10 +237,14 @@ function AppShell() {
       </header>
       <main className="content">
         <div className="content-inner">
-          {isSessionEmailUnverified() && (
-            <p className="email-unverified-banner" role="status">
-              邮箱尚未验证。请查收验证邮件，或稍后在设置中确认账号状态。
-            </p>
+          {emailUnverified && (
+            <div className="email-unverified-banner" role="status">
+              <div className="email-unverified-banner__body">
+                <div className="email-unverified-banner__icon" aria-hidden>!</div>
+                <span>邮箱尚未验证。请查收验证邮件，或稍后在设置中确认账号状态。</span>
+              </div>
+              <Link to="/settings" className="btn">去验证</Link>
+            </div>
           )}
           <Routes>
             <Route path="/" element={<ChatHome />} />

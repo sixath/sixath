@@ -62,53 +62,56 @@ export default function CronTaskDetail() {
     <div>
       <div className="page-header">
         <div>
-          <h1>{task.name}</h1>
-          <div className="page-sub">{task.enabled ? 'Enabled' : 'Disabled'}</div>
+          <div className="page-title-row">
+            <h1>{task.name}</h1>
+            <span className="page-count">{task.enabled ? '已启用' : '已停用'}</span>
+          </div>
+          <p className="page-sub">查看计划、投递方式与最近运行记录。</p>
         </div>
         <div className="actions">
-          <Link to="/cron" className="btn btn-secondary btn-sm">Back</Link>
-          <button className="btn btn-sm" onClick={() => setPendingRun(true)}>Run Now</button>
-          <Link to={`/cron/${task.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
+          <Link to="/cron" className="btn btn-secondary">返回</Link>
+          <button type="button" className="btn" onClick={() => setPendingRun(true)}>立即运行</button>
+          <Link to={`/cron/${task.id}/edit`} className="btn btn-secondary">编辑</Link>
         </div>
       </div>
 
       <section className="section">
-        <h2 className="section-title">Configuration</h2>
+        <h2 className="section-title">配置</h2>
         <div className="section-card">
           <div style={{ display: 'grid', gap: '0.75rem' }}>
-            <p><strong>Agent: </strong>{agent?.name || task.agent_id}</p>
-            <p><strong>Schedule: </strong><span className="badge badge-api">{task.schedule_kind}</span> <code>{task.schedule_expr}</code></p>
-            <p><strong>Timezone: </strong>{task.timezone || '-'}</p>
-            <p><strong>Payload: </strong>{task.payload_kind}</p>
-            <p><strong>Delivery: </strong>{task.delivery_mode}</p>
-            <p><strong>Next Run: </strong>{task.next_run_at || '-'}</p>
+            <p><strong>Agent：</strong>{agent?.name || task.agent_id}</p>
+            <p><strong>计划：</strong><span className="badge badge-api">{task.schedule_kind}</span> <code>{task.schedule_expr}</code></p>
+            <p><strong>时区：</strong>{task.timezone || '-'}</p>
+            <p><strong>载荷：</strong>{task.payload_kind}</p>
+            <p><strong>投递：</strong>{task.delivery_mode}</p>
+            <p><strong>下次运行：</strong>{task.next_run_at || '-'}</p>
           </div>
         </div>
       </section>
 
       <section className="section">
-        <h2 className="section-title">Payload</h2>
+        <h2 className="section-title">载荷内容</h2>
         <div className="section-card">
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'var(--mono)', fontSize: 13 }}>{task.payload_content || '-'}</pre>
         </div>
       </section>
 
       <section className="section">
-        <h2 className="section-title">Recent Runs</h2>
+        <h2 className="section-title">最近运行</h2>
         {runs.length === 0 ? (
           <div className="section-card empty-state">
-            <p>No runs yet.</p>
+            <p>还没有运行记录。</p>
           </div>
         ) : (
           <div className="table-card">
             <table>
               <thead>
                 <tr>
-                  <th>Triggered</th>
-                  <th>Status</th>
-                  <th>Delivery</th>
-                  <th>Finished</th>
-                  <th>Summary</th>
+                  <th>触发时间</th>
+                  <th>状态</th>
+                  <th>投递</th>
+                  <th>结束时间</th>
+                  <th>摘要</th>
                 </tr>
               </thead>
               <tbody>
@@ -116,7 +119,7 @@ export default function CronTaskDetail() {
                   <tr key={run.id}>
                     <td>{run.triggered_at}</td>
                     <td>{run.status}</td>
-                    <td>{run.delivery_ok === undefined ? '-' : run.delivery_ok ? 'OK' : 'Failed'}</td>
+                    <td>{run.delivery_ok === undefined ? '-' : run.delivery_ok ? '成功' : '失败'}</td>
                     <td>{run.finished_at || '-'}</td>
                     <td>{run.output_summary || run.error || '-'}</td>
                   </tr>
@@ -129,9 +132,9 @@ export default function CronTaskDetail() {
 
       <ConfirmDialog
         open={pendingRun}
-        title="Run task now"
-        description={`Run "${task.name}" now?`}
-        confirmLabel="Run"
+        title="立即运行"
+        description={`现在运行「${task.name}」？`}
+        confirmLabel="运行"
         loading={confirmLoading}
         onCancel={() => setPendingRun(false)}
         onConfirm={confirmRun}

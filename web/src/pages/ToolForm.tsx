@@ -208,7 +208,10 @@ export default function ToolForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? '编辑工具' : '新建工具'}</h1>
+        <div>
+          <h1>{isEdit ? '编辑工具' : '新建工具'}</h1>
+          <p className="page-sub">定义工具类型、描述与出网方式。</p>
+        </div>
         <Link to="/tools" className="btn btn-secondary">返回</Link>
       </div>
       <div className="section-card" style={{ maxWidth: 520 }}>
@@ -513,6 +516,9 @@ export default function ToolForm() {
 
             {config.rca?.func_path === 'vm_run_cmd' && (
               <div className="form-group">
+                <p style={{ fontSize: '0.82em', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
+                  实例 :53000/runCmd 只执行 cmd.exe，不支持 PowerShell（用 type / dir / findstr / tasklist）。
+                </p>
                 <label>MySQL 工具名（可选，用于按 vmid 查 VM IP）</label>
                 <input
                   value={config.rca?.datasource_id || ''}

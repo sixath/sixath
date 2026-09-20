@@ -13,6 +13,7 @@ import {
   type ConfirmResultPayload,
   type WebSourceItem,
 } from '../api/chatStream'
+import { SearchableChipSelect } from '../components/SearchableChipSelect'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
 import { SourcesPanel } from '../components/SourcesPanel'
@@ -47,6 +48,8 @@ export interface ChatPageProps {
   sessionId?: string
   isHome?: boolean
   onNavigate?: (agentId: string, sessionId?: string) => void
+  agents?: Agent[]
+  onAgentChange?: (agentId: string) => void
 }
 
 interface ChatConfirmationItem extends ChatConfirmationRequest {
@@ -251,6 +254,8 @@ export default function ChatPage(props?: ChatPageProps) {
   const sessionId = props?.sessionId ?? params.sessionId
   const isHome = props?.isHome ?? false
   const onNavigate = props?.onNavigate
+  const homeAgents = props?.agents
+  const onAgentChange = props?.onAgentChange
   const [agent, setAgent] = useState<Agent | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [confirmations, setConfirmations] = useState<ChatConfirmationItem[]>([])
@@ -486,7 +491,7 @@ export default function ChatPage(props?: ChatPageProps) {
 
   const handleRewind = useCallback(async (messageId: string) => {
     if (!sessionId || !messageId || streaming || rewinding || forking) return
-    if (!window.confirm('Rewind to before this message? Later messages will be hidden from the chat and search.')) {
+    if (!window.confirm('回溯到这条消息之前？之后的消息会从对话和搜索中隐藏。')) {
       return
     }
     setRewinding(true)
@@ -965,15 +970,41 @@ export default function ChatPage(props?: ChatPageProps) {
     <div className="chat-page">
       <main className="chat-main">
         <div className="chat-main-header">
-          <span className="chat-header-title">Chat</span>
-          <button
-            type="button"
-            className={`chat-debug-toggle ${showDebug ? 'chat-debug-toggle-on' : ''}`}
-            onClick={() => setShowDebug((prev) => !prev)}
-            disabled={!hasAgent}
-          >
-            {showDebug ? 'Hide Debug' : 'Show Debug'}
-          </button>
+          <span className="chat-header-title">对话</span>
+          <div className="chat-header-actions">
+            {isHome && homeAgents && homeAgents.length > 0 ? (
+              <SearchableChipSelect
+                value={agentId ?? ''}
+                options={homeAgents.map((a) => ({
+                  value: a.id,
+                  label: a.name,
+                }))}
+                onChange={(id) => onAgentChange?.(id)}
+                placeholder="请选择 Agent"
+                searchPlaceholder="搜索 Agent…"
+                leading={(
+                  <>
+                    <span className="chat-chip__label">Agent</span>
+                    <span className="chat-chip__dot breathing-dot" aria-hidden />
+                  </>
+                )}
+              />
+            ) : agent ? (
+              <span className="chat-chip">
+                <span className="chat-chip__label">Agent</span>
+                <span className="chat-chip__dot breathing-dot" aria-hidden />
+                <span className="chat-chip__text">{agent.name}</span>
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className={`chat-chip chat-chip--ghost ${showDebug ? 'is-on' : ''}`}
+              onClick={() => setShowDebug((prev) => !prev)}
+              disabled={!hasAgent}
+            >
+              {showDebug ? '关闭调试' : '调试'}
+            </button>
+          </div>
         </div>
         {error && (
           <div className="chat-error-banner">
@@ -985,16 +1016,16 @@ export default function ChatPage(props?: ChatPageProps) {
           <div className="chat-messages-inner">
             {!hasAgent ? (
               <div className="chat-welcome">
-                <p>Select an Agent to start chatting.</p>
+                <p>选择一个 Agent 开始对话。</p>
               </div>
             ) : !sessionId ? (
               <div className="chat-welcome">
-                <p>Start a new conversation.</p>
+                <p>开始一段新对话。</p>
               </div>
             ) : loadingHistory ? (
               <div className="chat-welcome">
                 <div className="loading-spinner" />
-                <p>Loading history…</p>
+                <p>正在加载历史…</p>
               </div>
             ) : (
               <>
@@ -1159,21 +1190,21 @@ export default function ChatPage(props?: ChatPageProps) {
                           <div className="chat-msg-actions">
                             <button
                               type="button"
-                              className="btn btn-secondary btn-sm chat-rewind-btn"
-                              title="Hide this message and everything after; continue from earlier context"
+                              className="chat-rewind-btn"
+                              title="隐藏这条及之后的消息，从更早的上下文继续"
                               disabled={rewinding || forking}
                               onClick={() => handleRewind(m.id)}
                             >
-                              {rewinding ? 'Rewinding…' : 'Rewind here'}
+                              {rewinding ? '回溯中…' : '回溯'}
                             </button>
                             <button
                               type="button"
-                              className="btn btn-secondary btn-sm chat-rewind-btn"
-                              title="Start a new session with history up to this message; the original chat is unchanged"
+                              className="chat-rewind-btn"
+                              title="复制到此为止的历史，开一个新会话"
                               disabled={rewinding || forking}
                               onClick={() => handleFork(m.id)}
                             >
-                              {forking ? 'Forking…' : 'Fork from here'}
+                              {forking ? '分叉中…' : '分叉'}
                             </button>
                           </div>
                         ) : null}
@@ -1217,96 +1248,90 @@ export default function ChatPage(props?: ChatPageProps) {
           </div>
         </div>
         <div className="chat-input-wrap">
-          <div className="chat-input-wrap-inner">
+          <div className="chat-composer">
             {hasAgent ? (
-              <select
-                className="chat-input"
-                style={{ maxWidth: 280, flex: '0 0 auto' }}
-                value={modelChoice}
-                disabled={streaming || !sessionId}
-                onChange={async (e) => {
-                  const next = e.target.value
-                  const prev = modelChoice
-                  if (!sessionId || next === prev) return
-                  try {
-                    if (next === 'agent_default') {
-                      await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
-                    } else {
-                      const sep = next.indexOf('::')
-                      await modelCatalogApi.patchSessionModel(sessionId, {
-                        model_provider_id: next.slice(0, sep),
-                        model: next.slice(sep + 2),
-                      })
-                    }
-                    setModelChoice(next)
-                  } catch (err) {
-                    setError((err as Error).message)
-                    setModelChoice(prev)
-                  }
-                }}
-              >
-                {(() => {
-                  const groups = new Map<string, ModelChoiceItem[]>()
-                  const defaults: ModelChoiceItem[] = []
-                  for (const item of modelChoices) {
+              <div className="chat-composer__toolbar">
+                <SearchableChipSelect
+                  className="chat-chip--compact"
+                  value={modelChoice}
+                  disabled={streaming || !sessionId}
+                  placement="up"
+                  searchPlaceholder="搜索模型…"
+                  placeholder="选择模型"
+                  leading={<span className="chat-chip__ai" aria-hidden>AI</span>}
+                  options={modelChoices.map((item) => {
                     if (item.id === 'agent_default') {
-                      defaults.push(item)
-                      continue
+                      const model = item.model || agent?.model_config?.model
+                      return {
+                        value: 'agent_default',
+                        label: model ? `默认 · ${model}` : (item.label?.replace(/^Agent\s*/, '') || '默认模型'),
+                      }
                     }
-                    const key = item.provider_name || '其他'
-                    const list = groups.get(key) || []
-                    list.push(item)
-                    groups.set(key, list)
-                  }
-                  return (
-                    <>
-                      {defaults.map((item) => (
-                        <option key={item.id} value="agent_default">
-                          {item.label}
-                        </option>
-                      ))}
-                      {Array.from(groups.entries()).map(([name, items]) => (
-                        <optgroup key={name} label={name}>
-                          {items.map((item) => (
-                            <option key={item.id} value={`${item.provider_id}::${item.model}`}>
-                              {item.display_name || item.model}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </>
-                  )
-                })()}
-              </select>
+                    return {
+                      value: `${item.provider_id}::${item.model}`,
+                      label: item.display_name || item.model || item.label,
+                      group: item.provider_name || '其他',
+                    }
+                  })}
+                  onChange={async (next) => {
+                    const prev = modelChoice
+                    if (!sessionId || next === prev) return
+                    try {
+                      if (next === 'agent_default') {
+                        await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
+                      } else {
+                        const sep = next.indexOf('::')
+                        await modelCatalogApi.patchSessionModel(sessionId, {
+                          model_provider_id: next.slice(0, sep),
+                          model: next.slice(sep + 2),
+                        })
+                      }
+                      setModelChoice(next)
+                    } catch (err) {
+                      setError((err as Error).message)
+                      setModelChoice(prev)
+                    }
+                  }}
+                />
+                <span className="chat-composer__hint">Shift + Enter 换行</span>
+              </div>
             ) : null}
-            <textarea
-              className="chat-input"
-              placeholder={hasAgent ? 'Type a message. Enter to send, Shift+Enter for newline.' : 'Select an Agent first'}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={streaming || !hasAgent}
-              rows={2}
-            />
-            <button
-              className="btn chat-send"
-              onClick={() => handleSend()}
-              disabled={!input.trim() || streaming || !hasAgent}
-            >
-              {streaming ? 'Sending...' : 'Send'}
-            </button>
-            {streaming && (
-              <button
-                className="btn btn-secondary chat-stop"
-                onClick={() => {
-                  abortRef.current?.abort()
-                  streamSessionRef.current = null
-                  setStreaming(false)
-                }}
-              >
-                Stop
-              </button>
-            )}
+            <div className="chat-composer__row">
+              <textarea
+                className="chat-input"
+                placeholder={hasAgent ? '给 AI Agent 发送指令...' : '请先选择 Agent'}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={streaming || !hasAgent}
+                rows={1}
+              />
+              {streaming ? (
+                <button
+                  type="button"
+                  className="chat-stop"
+                  onClick={() => {
+                    abortRef.current?.abort()
+                    streamSessionRef.current = null
+                    setStreaming(false)
+                  }}
+                >
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="chat-send"
+                  aria-label="发送"
+                  onClick={() => handleSend()}
+                  disabled={!input.trim() || !hasAgent}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </main>

@@ -169,7 +169,13 @@ export default function SessionHistoryPage() {
   return (
     <div className="session-history">
       <div className="page-header session-history__header">
-        <h1>会话历史</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>会话历史</h1>
+            <span className="page-count">{total}</span>
+          </div>
+          <p className="page-sub">回看过往对话，按标题或内容继续打开。</p>
+        </div>
       </div>
 
       <div className="section-card session-history__filters">
@@ -214,25 +220,32 @@ export default function SessionHistoryPage() {
                 <th>Agent</th>
                 <th>预览</th>
                 <th>更新时间</th>
-                <th>操作</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.session_id}>
-                  <td className="session-history__cell-title">{r.title}</td>
+                  <td className="session-history__cell-title">
+                    <span className="cell-name">
+                      <span className="cell-dot cell-dot--cyan" aria-hidden />
+                      {r.title}
+                    </span>
+                  </td>
                   <td style={{ color: 'var(--muted)' }}>{r.agent_name}</td>
                   <td className="session-history__cell-preview">{r.preview}</td>
                   <td style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }}>{formatTime(r.updated_at)}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      data-testid={`sessions-open-${r.session_id}`}
-                      onClick={() => openSession(r.agent_id, r.session_id)}
-                    >
-                      打开
-                    </button>
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        data-testid={`sessions-open-${r.session_id}`}
+                        onClick={() => openSession(r.agent_id, r.session_id)}
+                      >
+                        打开
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

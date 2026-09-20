@@ -152,8 +152,11 @@ export default function CronTaskForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? 'Edit Cron Task' : 'New Cron Task'}</h1>
-        <Link to="/cron" className="btn btn-secondary">Back</Link>
+        <div>
+          <h1>{isEdit ? '编辑定时任务' : '新建定时任务'}</h1>
+          <p className="page-sub">设置计划表达式、载荷内容与投递方式。</p>
+        </div>
+        <Link to="/cron" className="btn btn-secondary">返回</Link>
       </div>
 
       <div className="section-card" style={{ maxWidth: 760 }}>

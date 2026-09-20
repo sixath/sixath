@@ -58,7 +58,13 @@ export default function ProxyList() {
   return (
     <div>
       <div className="page-header">
-        <h1>代理</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>代理</h1>
+            <span className="page-count">{total}</span>
+          </div>
+          <p className="page-sub">配置 HTTP / SOCKS5 出口代理，供 Agent 与工具复用。</p>
+        </div>
         <Link to="/proxies/new" className="btn">
           新建代理
         </Link>
@@ -84,7 +90,7 @@ export default function ProxyList() {
                 <th>名称</th>
                 <th>类型</th>
                 <th>地址</th>
-                <th>操作</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -94,7 +100,10 @@ export default function ProxyList() {
                     <code>{proxy.id}</code>
                   </td>
                   <td>
-                    <strong>{proxy.name}</strong>
+                    <span className="cell-name">
+                      <span className="cell-dot cell-dot--cyan" aria-hidden />
+                      {proxy.name}
+                    </span>
                   </td>
                   <td>
                     <span className={`badge badge-${proxy.type === 'socks5' ? 'mcp' : 'builtin'}`}>
@@ -106,13 +115,14 @@ export default function ProxyList() {
                       {proxy.host}:{proxy.port}
                     </code>
                   </td>
-                  <td>
-                    <div className="actions">
-                      <Link to={`/proxies/${proxy.id}/edit`} className="btn btn-secondary btn-sm">
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <Link to={`/proxies/${proxy.id}/edit`} className="btn btn-ghost btn-sm">
                         编辑
                       </Link>
                       <button
-                        className="btn btn-danger btn-sm"
+                        type="button"
+                        className="btn btn-ghost btn-sm btn-danger"
                         onClick={() => {
                           setError('')
                           setPendingDelete({ id: proxy.id, name: proxy.name })

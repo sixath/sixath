@@ -9,7 +9,7 @@
 .compact-boundary-line {
   flex: 1;
   height: 1px;
-  background: var(--border, #e2e8f0);
+  background: var(--border, rgba(255, 255, 255, 0.08));
 }
 
 .compact-boundary-body {
@@ -17,21 +17,21 @@
   max-width: min(420px, 100%);
   text-align: center;
   padding: 0.65rem 1rem;
-  border: 1px dashed var(--border, #cbd5e1);
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-sm, 8px);
-  background: var(--bg-accent, #f8fafc);
+  background: var(--bg-accent, #121826);
 }
 
 .compact-boundary-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--text-strong, #334155);
+  color: var(--text-strong, #f8fafc);
 }
 
 .compact-boundary-subtitle {
   margin-top: 0.25rem;
   font-size: 0.75rem;
-  color: var(--muted, #64748b);
+  color: var(--muted, #94a3b8);
 }
 
 .compact-boundary-toggle {
@@ -43,12 +43,12 @@
   border: none;
   border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: var(--primary, #2563eb);
+  color: var(--primary, #00f0ff);
   font: inherit;
   font-size: 0.8rem;
   cursor: pointer;
 }
 
 .compact-boundary-toggle:hover {
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(0, 240, 255, 0.08);
 }

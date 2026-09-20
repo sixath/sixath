@@ -71,23 +71,6 @@ export default function ChatHome() {
 
   return (
     <div className="chat-home chat-home-layout">
-      <div className="chat-home-agent-bar">
-        <div className="chat-home-agent-bar-inner">
-          <label className="chat-home-agent-label">选择 Agent</label>
-          <select
-            className="chat-home-agent-select"
-            value={agentId}
-            onChange={(e) => updateUrl(e.target.value)}
-          >
-            <option value="">请选择 Agent...</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({a.model_config?.provider}/{a.model_config?.model})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
       <div className="chat-home-main">
         <div className="chat-home-session-col">
           <SessionSidebar
@@ -103,6 +86,8 @@ export default function ChatHome() {
             sessionId={sessionId || undefined}
             isHome
             onNavigate={updateUrl}
+            agents={agents}
+            onAgentChange={(id) => updateUrl(id)}
           />
         </div>
       </div>
