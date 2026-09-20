@@ -34,6 +34,7 @@ func (a *ReActAgent) pipelineConfig(trace *RunTrace) *fwctx.PipelineConfig {
 		MaxContextRunes:      a.config.MaxContextRunes,
 		MaxContextTokensSoft: a.config.MaxContextTokensSoft,
 		TokenEstimateAlpha:   a.config.TokenEstimateAlpha,
+		TokenCounter:         a.config.TokenCounter,
 		SnipCompactEnabled:   a.config.SnipCompactEnabled,
 		L2:                   a.config.L2Runtime,
 	}

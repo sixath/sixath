@@ -14,7 +14,7 @@ type deleteSessionAgentRepo struct {
 	workspace string
 }
 
-func (r *deleteSessionAgentRepo) Create(context.Context, string, string, string, string, string, ModelConfig, bool, string, string, RuntimeToolsConfig, []string) (*AgentMeta, error) {
+func (r *deleteSessionAgentRepo) Create(context.Context, string, string, string, string, string, ModelConfig, bool, string, string, RuntimeToolsConfig, []string, string) (*AgentMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
 func (r *deleteSessionAgentRepo) CountByWecomChannelID(context.Context, string) (int, error) {

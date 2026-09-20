@@ -91,6 +91,7 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 		&model.McpServer{}, &model.AgentMcpServer{},
 		&model.Proxy{},
 		&model.ModelProvider{}, &model.ModelCatalogEntry{},
+		&model.ChannelDelivery{},
 	); err != nil {
 		return nil, nil, err
 	}

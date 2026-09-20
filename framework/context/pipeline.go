@@ -19,9 +19,11 @@ type PipelineConfig struct {
 	MaxContextRunes      int
 	MaxContextTokensSoft int
 	TokenEstimateAlpha   float64
-	Trace                ContextTraceFunc
-	L2                   *L2Runtime
-	SnipCompactEnabled   bool
+	// TokenCounter 可选；非空时优先用于 token 估算与压缩触发（可由真实 usage 自校准）。
+	TokenCounter       TokenCounter
+	Trace              ContextTraceFunc
+	L2                 *L2Runtime
+	SnipCompactEnabled bool
 }
 
 // Prepare 在进入网关请求前对 messages 执行与 OpenAIClient 一致的变换（无 ctx 时使用 Background）。
@@ -75,12 +77,15 @@ func PrepareCtx(ctx stdctx.Context, messages []model.Message, callCfg *PipelineC
 		}
 	}
 	if callCfg != nil && callCfg.MaxContextTokensSoft > 0 {
-		alpha := callCfg.TokenEstimateAlpha
-		if alpha <= 0 {
-			alpha = DefaultTokenEstimateAlpha
+		// 优先用注入的 TokenCounter（可能已被真实 usage 校准）；
+		// 否则退回固定 alpha 的粗估，行为与既有实现一致。
+		counter := callCfg.TokenCounter
+		if counter == nil {
+			counter = NewConservativeCounter(callCfg.TokenEstimateAlpha)
 		}
-		est := EstimateTokensConservative(out, alpha)
-		if est > callCfg.MaxContextTokensSoft {
+		est := counter.Count(out)
+		alpha := counter.Alpha()
+		if est > callCfg.MaxContextTokensSoft && alpha > 0 {
 			// 将 token 阈值映射到近似 rune 预算，复用既有 L0 裁剪策略（按 user block + tool 原子链）。
 			budgetRunes := int(float64(callCfg.MaxContextTokensSoft) / alpha)
 			if budgetRunes <= 0 {

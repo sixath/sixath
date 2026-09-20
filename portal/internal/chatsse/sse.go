@@ -33,11 +33,13 @@ type PersistAssistant func(ctx context.Context, sessionID, content string, metad
 
 // StreamResult summarizes a drained chat stream.
 type StreamResult struct {
-	Content   string
-	Failed    bool
-	HITL      bool // confirm_required or input_required observed
-	Error     string
+	Content    string
+	Failed     bool
+	HITL       bool // confirm_required or input_required observed
+	Error      string
 	HasContent bool
+	// Canceled 为 true 表示本轮被用户停止/断连取消（已产生的正文仍会落库）。
+	Canceled bool
 }
 
 // WriteStream drains ch onto w with chat SSE event semantics (chunk/input/confirm/tool/model/error/done).
@@ -78,6 +80,10 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 			if event.ConfirmResult != nil {
 				WriteEvent(w, "confirm_result", map[string]any{"confirm_result": event.ConfirmResult})
 			}
+		case service.ChatStreamEventCancelled:
+			// 取消不是失败：不置 Failed，保证流结束时把已收到的增量落库（与"错误即丢弃"区分）。
+			res.Canceled = true
+			WriteEvent(w, "cancelled", map[string]any{"cancelled": true})
 		case service.ChatStreamEventError:
 			if suppressTerminalStreamError(errors.New(event.Error), res.HasContent) {
 				continue
@@ -96,6 +102,14 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 			if event.ModelCall != nil {
 				timeline.ApplyModelCall(event.ModelCall)
 				WriteEvent(w, "model_call", map[string]any{"model_call": event.ModelCall})
+			}
+		case service.ChatStreamEventPlan:
+			if event.Plan != nil {
+				WriteEvent(w, "plan", map[string]any{"plan": event.Plan})
+			}
+		case service.ChatStreamEventPlanStep:
+			if event.PlanStep != nil {
+				WriteEvent(w, "plan_step", map[string]any{"plan_step": event.PlanStep})
 			}
 		case service.ChatStreamEventMEA:
 			if event.MEA != nil {
@@ -132,6 +146,13 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 		persistContent = "Error: " + res.Error
 	}
 	meta := service.MetadataWithTimeline(timeline.Finalize())
+	if res.Canceled {
+		// 标记中断：UI 恢复历史时可显示"已中断"，并让后续轮次知道该回答不完整。
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["interrupted"] = true
+	}
 	if persist != nil && (res.Failed || persistContent != "" || meta != nil) {
 		if err := persist(persistCtx, sessionID, persistContent, meta); err != nil {
 			if res.Failed {
@@ -187,6 +208,13 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 			res.Failed = true
 			if res.Error == "" {
 				res.Error = "hitl required but reply_mode=final has no interactive surface"
+			}
+		case service.ChatStreamEventCancelled:
+			// final 模式没有可交互面：取消按终态失败上报（部分内容仍随 res.Content 返回）。
+			res.Canceled = true
+			res.Failed = true
+			if res.Error == "" {
+				res.Error = "run canceled"
 			}
 		case service.ChatStreamEventError:
 			// Do not suppress deadline/cancel here — final JSON must surface failure (runFinalTurn also checks ctx).

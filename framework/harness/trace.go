@@ -50,6 +50,16 @@ type RunTrace struct {
 	ToolCalls []ToolCallRecord
 	Errors    []string
 
+	// ModelCalls 为本 Run 内模型调用次数（含各工具轮）。
+	ModelCalls int `json:"model_calls,omitempty"`
+	// InputTokens/OutputTokens 为聚合 token 用量。provider 未返回 usage 时为 0
+	// （例如只拿到增量文本的 ChatStream 路径），因此非零即代表"有真实计量"。
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	// EstimatedCostUSD 为按计价表估算的本 Run 成本（美元），由 Portal 在持久化前计算
+	// 填充（framework 不感知计价表）。0 表示未配置计价或尚无用量。
+	EstimatedCostUSD float64 `json:"estimated_cost_usd,omitempty"`
+
 	// GuardrailHalt 为 true 表示因护栏硬停结束本次 Run（设计 §6.2、§3.1）。
 	GuardrailHalt bool `json:"guardrail_halt,omitempty"`
 	// GuardrailHaltMessage 硬停时注入的 system 消息（含 sixath.origin=guardrail_halt），供审计与回放。
@@ -89,8 +99,35 @@ type RunTrace struct {
 	// ParallelTools 为 true 表示本 Run 中至少有一轮 tool_calls 走了并行执行（D2）。
 	ParallelTools bool `json:"parallel_tools,omitempty"`
 
+	// Canceled 为 true 表示本 Run 因取消而终止（Cancel API 或父 ctx 取消/断连）。
+	Canceled bool `json:"canceled,omitempty"`
+	// CanceledByRequest 为 true 表示取消来自 Cancel API（区别于父 ctx 取消/客户端断连）。
+	CanceledByRequest bool `json:"canceled_by_request,omitempty"`
+
 	// invocationSeq 为单次 Run 内 model 调用序号，不序列化。
 	invocationSeq int `json:"-"`
+}
+
+// recordModelCall 记录一次模型调用；provider 未回传 usage 时也应调用，
+// 使 ModelCalls 反映真实轮次。
+func (t *RunTrace) recordModelCall() {
+	if t == nil {
+		return
+	}
+	t.ModelCalls++
+}
+
+// recordModelUsage 记录一次模型调用及其 token 用量（gen 可为 nil）。
+func (t *RunTrace) recordModelUsage(gen *model.Generation) {
+	if t == nil {
+		return
+	}
+	t.ModelCalls++
+	if gen == nil || gen.TokenUsage == nil {
+		return
+	}
+	t.InputTokens += gen.TokenUsage.InputTokens
+	t.OutputTokens += gen.TokenUsage.OutputTokens
 }
 
 // DroppedProposal records a tool call discarded by post-model policy (family/drift/intake).
@@ -156,6 +193,14 @@ const (
 	StreamEventHookBlocked      StreamEventType = "hook_blocked"
 	StreamEventError            StreamEventType = "error"
 	StreamEventDone             StreamEventType = "done"
+
+	// StreamEventPlan 表示 Plan-Execute 已产出结构化规划（Metadata["plan"] 为 *Plan）。
+	StreamEventPlan StreamEventType = "plan"
+	// StreamEventPlanStep 表示开始执行规划中的某一步（Metadata["step"] 为 PlanStep）。
+	StreamEventPlanStep StreamEventType = "plan_step"
+	// StreamEventCancelled 表示本次 Run 因取消（Cancel API 或父 ctx 取消/断连）而终止；
+	// 已产生的增量文本与工具结果保留，不视为 error。
+	StreamEventCancelled StreamEventType = "cancelled"
 )
 
 type StreamEvent struct {

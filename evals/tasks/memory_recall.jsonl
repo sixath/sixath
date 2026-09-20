@@ -1,0 +1,8 @@
+{"id":"memory_recall-1","category":"memory_recall","input":"我之前记录的数据库连接信息是什么","expect":{"must_recall":["host","password"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-2","category":"memory_recall","input":"上次那次支付故障的根因结论是什么","expect":{"must_recall":["根因"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-3","category":"memory_recall","input":"客户 A 之前说过有哪些偏好的部署方式","expect":{"must_recall":["偏好"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-4","category":"memory_recall","input":"我之前记下的那个临时 API token 是什么","expect":{"must_recall":["token"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-5","category":"memory_recall","input":"这个项目里我们约定的代码规范有哪些","expect":{"must_recall":["规范"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-6","category":"memory_recall","input":"我之前提到过的还没解决的技术债是什么","expect":{"must_recall":["技术债"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-7","category":"memory_recall","input":"我记录过的常用 git 命令别名有哪些","expect":{"must_recall":["git","别名"]},"max_steps":3,"tags":["memory"]}
+{"id":"memory_recall-8","category":"memory_recall","input":"上次会议决定的发布窗口是几点","expect":{"must_recall":["发布","窗口"]},"max_steps":3,"tags":["memory"]}

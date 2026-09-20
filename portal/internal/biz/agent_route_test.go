@@ -35,6 +35,9 @@ func (f *fakeRouteChannelRepo) GetByChannelID(_ context.Context, channelID strin
 func (f *fakeRouteChannelRepo) GetWecomByDefaultAgent(context.Context, string) (*ChannelMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
+func (f *fakeRouteChannelRepo) GetOutboundByDefaultAgent(context.Context, string) (*ChannelMeta, error) {
+	return nil, pkgErrors.ErrNotFound
+}
 func (f *fakeRouteChannelRepo) List(context.Context, int32, int32, string, *bool) ([]*ChannelMeta, int, error) {
 	return nil, 0, nil
 }

@@ -16,8 +16,8 @@ type fakeAgentACLRepo struct {
 	created   *AgentMeta
 }
 
-func (f *fakeAgentACLRepo) Create(_ context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID, proxyID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error) {
-	f.created = &AgentMeta{ID: id, Name: name, Workspace: workspace, ProxyID: proxyID}
+func (f *fakeAgentACLRepo) Create(_ context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID, proxyID string, runtimeTools RuntimeToolsConfig, toolIDs []string, mode string) (*AgentMeta, error) {
+	f.created = &AgentMeta{ID: id, Name: name, Workspace: workspace, ProxyID: proxyID, Mode: mode}
 	f.agents[f.created.ID] = f.created
 	return f.created, nil
 }
@@ -199,7 +199,7 @@ func TestAgentCreateCreatesPrivateResourceForCaller(t *testing.T) {
 	uc, agents, resources := newAgentACLUsecaseAt(root)
 	ctx := WithOrgID(WithCallerUserID(context.Background(), "user-1"), "org-1")
 
-	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", "", RuntimeToolsConfig{}, nil)
+	agent, err := uc.Create(ctx, "agent", "", "", "", ModelConfig{}, false, "", "", RuntimeToolsConfig{}, nil, "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -345,10 +345,10 @@ func TestAgentUpdateProxyRequiresUse(t *testing.T) {
 	if _, err := uc.Update(ownerCtx, "agent-1", map[string]any{"proxy_id": "office"}); !isReason(err, "FORBIDDEN_PERM") {
 		t.Fatalf("Update proxy without use error = %v, want FORBIDDEN_PERM", err)
 	}
-	if _, err := uc.Create(ownerCtx, "no-use", "", "", "", ModelConfig{}, false, "", "office", RuntimeToolsConfig{}, nil); !isReason(err, "FORBIDDEN_PERM") {
+	if _, err := uc.Create(ownerCtx, "no-use", "", "", "", ModelConfig{}, false, "", "office", RuntimeToolsConfig{}, nil, ""); !isReason(err, "FORBIDDEN_PERM") {
 		t.Fatalf("Create proxy without use error = %v, want FORBIDDEN_PERM", err)
 	}
-	if _, err := uc.Create(ownerCtx, "missing", "", "", "", ModelConfig{}, false, "", "nope", RuntimeToolsConfig{}, nil); !isReason(err, "PROXY_NOT_FOUND") {
+	if _, err := uc.Create(ownerCtx, "missing", "", "", "", ModelConfig{}, false, "", "nope", RuntimeToolsConfig{}, nil, ""); !isReason(err, "PROXY_NOT_FOUND") {
 		t.Fatalf("Create missing proxy error = %v, want PROXY_NOT_FOUND", err)
 	}
 
@@ -361,7 +361,7 @@ func TestAgentUpdateProxyRequiresUse(t *testing.T) {
 		t.Fatalf("Update ProxyID = %q, want office", updated.ProxyID)
 	}
 
-	created, err := uc.Create(ownerCtx, "with-proxy", "", "", "", ModelConfig{}, false, "", "office", RuntimeToolsConfig{}, nil)
+	created, err := uc.Create(ownerCtx, "with-proxy", "", "", "", ModelConfig{}, false, "", "office", RuntimeToolsConfig{}, nil, "")
 	if err != nil {
 		t.Fatalf("Create with use: %v", err)
 	}

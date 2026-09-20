@@ -209,6 +209,9 @@ func (r *channelCreateRepo) GetByChannelID(context.Context, string) (*biz.Channe
 func (r *channelCreateRepo) GetWecomByDefaultAgent(context.Context, string) (*biz.ChannelMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
+func (r *channelCreateRepo) GetOutboundByDefaultAgent(context.Context, string) (*biz.ChannelMeta, error) {
+	return nil, pkgErrors.ErrNotFound
+}
 func (r *channelCreateRepo) List(context.Context, int32, int32, string, *bool) ([]*biz.ChannelMeta, int, error) {
 	return nil, 0, nil
 }

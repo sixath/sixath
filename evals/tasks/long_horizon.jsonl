@@ -1,0 +1,8 @@
+{"id":"long_horizon-1","category":"long_horizon","input":"给 archive 库做一次数据完整性检查，找出所有没有主键的表并输出检查报告","expect":{"output_contains":"报告"},"max_steps":8,"tags":["data","report"]}
+{"id":"long_horizon-2","category":"long_horizon","input":"分析线上支付失败率上升的原因，给出结论和证据","expect":{"output_contains":"结论"},"max_steps":10,"tags":["observability","analysis"]}
+{"id":"long_horizon-3","category":"long_horizon","input":"把 /tmp 下超过 30 天的日志归档到 backup/ 并验证归档完整性","expect":{"output_contains":"归档"},"max_steps":8,"tags":["file","terminal"]}
+{"id":"long_horizon-4","category":"long_horizon","input":"为一个新服务生成部署前检查清单，并逐项自查给出结果","expect":{"output_contains":"检查"},"max_steps":6,"tags":["ops"]}
+{"id":"long_horizon-5","category":"long_horizon","input":"从最近日志里提取错误模式，聚合出 top5 并写进 error-report.md","expect":{"output_contains":"top"},"max_steps":8,"tags":["observability","report"]}
+{"id":"long_horizon-6","category":"long_horizon","input":"定位一个慢查询，给出优化后的 SQL 并说明验证结果","expect":{"output_contains":"优化"},"max_steps":10,"tags":["data","analysis"]}
+{"id":"long_horizon-7","category":"long_horizon","input":"对比两个配置文件的差异，输出一份变更影响分析","expect":{"output_contains":"差异"},"max_steps":6,"tags":["file","analysis"]}
+{"id":"long_horizon-8","category":"long_horizon","input":"巡检所有已绑定数据源的连接健康状态并汇总报告","expect":{"output_contains":"健康"},"max_steps":8,"tags":["data","ops"]}

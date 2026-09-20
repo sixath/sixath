@@ -88,6 +88,16 @@ func (uc *ChatUsecase) SearchSessions(ctx context.Context, query, agentIDFilter 
 		limit = searchSessionsMaxLimit
 	}
 
+	// 鉴权先于「功能是否可用」的短路：否则未授权调用方会拿到
+	// "session search disabled" 而不是 FORBIDDEN_PERM——既泄露功能开关，
+	// 也让 ACL 变成可被短路绕过的旁路。
+	// 回归用例：TestSearchSessionsWithAgentFilterRequiresAgentUse。
+	if agentIDFilter != "" {
+		if err := uc.requireAgentUse(ctx, caller, agentIDFilter); err != nil {
+			return nil, "", err
+		}
+	}
+
 	if uc.sessionSearch == nil {
 		return []SearchHit{}, "session search disabled", nil
 	}
@@ -96,9 +106,6 @@ func (uc *ChatUsecase) SearchSessions(ctx context.Context, query, agentIDFilter 
 	agentNames := map[string]string{}
 
 	if agentIDFilter != "" {
-		if err := uc.requireAgentUse(ctx, caller, agentIDFilter); err != nil {
-			return nil, "", err
-		}
 		agent, err := uc.agentRepo.GetByID(ctx, agentIDFilter)
 		if err != nil {
 			return nil, "", err

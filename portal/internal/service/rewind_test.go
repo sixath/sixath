@@ -27,6 +27,9 @@ func (r *rewindMsgRepo) ListBySession(_ context.Context, sessionID string, _ int
 	}
 	return out, nil
 }
+func (r *rewindMsgRepo) ListBySessionBefore(context.Context, string, biz.MessageCursor, int) ([]*biz.ChatMessage, string, error) {
+	return nil, "", nil
+}
 func (r *rewindMsgRepo) LastUserOrAssistantBySessions(context.Context, []string) (map[string]string, error) {
 	return nil, nil
 }

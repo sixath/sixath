@@ -1,0 +1,8 @@
+{"id":"single_tool-1","category":"single_tool","input":"列出 archive 数据库里的所有表","expect":{"tools":["list_tables"]},"max_steps":3,"tags":["data","mysql"]}
+{"id":"single_tool-2","category":"single_tool","input":"搜索 Kubernetes 1.30 Pod Security Admission 的最新文档","expect":{"tools":["web_search"]},"max_steps":3,"tags":["web"]}
+{"id":"single_tool-3","category":"single_tool","input":"读取 workspace 下的 config.yaml 完整内容","expect":{"tools":["read_file"]},"max_steps":2,"tags":["file"]}
+{"id":"single_tool-4","category":"single_tool","input":"我上周记录的那个线上报错信息是什么","expect":{"tools":["memory_recall"]},"max_steps":3,"tags":["memory"]}
+{"id":"single_tool-5","category":"single_tool","input":"查看 orders 表的结构和字段注释","expect":{"tools":["describe_table"]},"max_steps":3,"tags":["data","mysql"]}
+{"id":"single_tool-6","category":"single_tool","input":"列出当前工作目录下的所有文件","expect":{"tools":["terminal"]},"max_steps":2,"tags":["terminal"]}
+{"id":"single_tool-7","category":"single_tool","input":"查一下 payment 服务最近 5 分钟的调用链","expect":{"tools":["jaeger_trace"]},"max_steps":3,"tags":["observability"]}
+{"id":"single_tool-8","category":"single_tool","input":"统计 orders 表里 status='paid' 的行数","expect":{"tools":["execute_read"]},"max_steps":3,"tags":["data","mysql"]}

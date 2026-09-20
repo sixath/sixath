@@ -114,6 +114,7 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 		WecomChannelId: m.WecomChannelID,
 		ProxyId:        m.ProxyID,
 		RuntimeTools:   biz.RuntimeToolsToProto(m.RuntimeTools),
+		Mode:           m.Mode,
 		CreatedAt:      m.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      m.UpdatedAt.Format(time.RFC3339),
 	}
@@ -131,7 +132,7 @@ func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgent
 	if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
 		return nil, biz.ErrWorkspaceWholeRepoRetired
 	}
-	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), workspace, modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), req.GetProxyId(), rt, req.GetToolIds())
+	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), workspace, modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), req.GetProxyId(), rt, req.GetToolIds(), req.GetMode())
 	if err != nil {
 		s.log.Errorf("CreateAgent failed: name=%s workspace=%s err=%v", req.GetName(), req.GetWorkspace(), err)
 		return nil, err
@@ -211,6 +212,9 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 	}
 	if req.ProxyId != nil {
 		updates["proxy_id"] = *req.ProxyId
+	}
+	if req.Mode != nil {
+		updates["mode"] = *req.Mode
 	}
 	agent, err := s.uc.Update(ctx, req.GetId(), updates)
 	if err != nil {
@@ -329,7 +333,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat register runtime tools failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
-	registerWeComToolForAgent(ctx, s.channelUC, reg, agentMeta)
+	registerWeComToolForAgent(ctx, s.channelUC, nil, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -356,7 +360,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
-	a := chat.BuildReActAgent(m, reg, agentText, 20, opts...)
+	a := chat.BuildAgent(m, reg, agentText, 20, agentMeta.Mode, opts...)
 
 	messages := make([]model.Message, 0, 1)
 	messages = append(messages, model.Message{Role: "user", Content: content})

@@ -133,6 +133,7 @@ message CreateAgentRequest {
   bool debug_run = 7;   // 是否启用调试运行（详细日志、request_id 等）
   RuntimeToolsConfig runtime_tools = 8;
   string wecom_channel_id = 12;  // optional; bound WeCom channel (channels.id, type=wecom)
+  string mode = 13;              // 执行模式：空/"react" → ReAct；"plan"/"plan_execute" → Plan-Execute
   string proxy_id = 15;          // optional; default egress proxy (proxies.id); empty = direct
 }
 
@@ -161,6 +162,7 @@ message UpdateAgentRequest {
   optional bool debug_run = 7;
   optional RuntimeToolsConfig runtime_tools = 8;
   optional string wecom_channel_id = 12;
+  optional string mode = 13;
   optional string proxy_id = 15; // omit does not clear
 }
 
@@ -278,4 +280,5 @@ message AgentReply {
   RuntimeToolsConfig runtime_tools = 13;
   repeated string mcp_server_ids = 14;
   string proxy_id = 15;
+  string mode = 16; // 执行模式：空/"react" → ReAct；"plan"/"plan_execute" → Plan-Execute
 }

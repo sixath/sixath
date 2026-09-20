@@ -111,6 +111,17 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []Message, opts ...Opt
 	return gen, nil
 }
 
+// tokenUsageFromOpenAI 将 SDK Usage 映射为框架 TokenUsage；无有效计量时返回 nil。
+func tokenUsageFromOpenAI(u openai.Usage) *TokenUsage {
+	if u.PromptTokens <= 0 && u.CompletionTokens <= 0 {
+		return nil
+	}
+	return &TokenUsage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+	}
+}
+
 // buildChatRequest 构建 Chat 请求体，供 Chat 与 ChatStream 复用。
 func (c *OpenAIClient) buildChatRequest(messages []Message, callCfg *CallConfig) openai.ChatCompletionRequest {
 	modelName := c.model

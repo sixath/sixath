@@ -40,7 +40,7 @@ func TestNewFromIdentifier_OpenAI(t *testing.T) {
 		t.Fatalf("NewFromIdentifier error: %v", err)
 	}
 
-	cli, ok := m.(*OpenAIClient)
+	cli, ok := UnwrapModel(m).(*OpenAIClient)
 	if !ok {
 		t.Fatalf("expected *OpenAIClient, got %T", m)
 	}
@@ -60,7 +60,7 @@ func TestNewFromIdentifier_Ollama(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromIdentifier error: %v", err)
 	}
-	if _, ok := m.(*OllamaClient); !ok {
+	if _, ok := UnwrapModel(m).(*OllamaClient); !ok {
 		t.Fatalf("expected *OllamaClient, got %T", m)
 	}
 }

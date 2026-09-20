@@ -1,0 +1,8 @@
+{"id":"multi_tool-1","category":"multi_tool","input":"先看 archive 库有哪些表，再统计最大那张表的行数","expect":{"tool_sequence":["list_tables","execute_read"]},"max_steps":5,"tags":["data","orchestration"]}
+{"id":"multi_tool-2","category":"multi_tool","input":"搜索这个错误码的含义，把结论写进 notes.md","expect":{"tool_sequence":["web_search","write_file"]},"max_steps":5,"tags":["web","file"]}
+{"id":"multi_tool-3","category":"multi_tool","input":"查一下我记录过的问题，如果找不到就向我确认","expect":{"tool_sequence":["memory_recall","ask_user"]},"max_steps":5,"tags":["memory","hitl"]}
+{"id":"multi_tool-4","category":"multi_tool","input":"找到用户表，看它的结构，然后查最近的 10 条记录","expect":{"tool_sequence":["list_tables","describe_table","execute_read"]},"max_steps":6,"tags":["data","orchestration"]}
+{"id":"multi_tool-5","category":"multi_tool","input":"运行单元测试，把输出保存到 test-output.txt","expect":{"tool_sequence":["terminal","write_file"]},"max_steps":5,"tags":["terminal","file"]}
+{"id":"multi_tool-6","category":"multi_tool","input":"搜索数据库迁移方案，把关键步骤记到待办清单","expect":{"tool_sequence":["web_search","todo"]},"max_steps":5,"tags":["web","todo"]}
+{"id":"multi_tool-7","category":"multi_tool","input":"读取旧配置文件，把端口改成 8080 后写回新文件","expect":{"tool_sequence":["read_file","write_file"]},"max_steps":5,"tags":["file"]}
+{"id":"multi_tool-8","category":"multi_tool","input":"先在日志里找到失败的订单 id，再查这个订单的详情","expect":{"tool_sequence":["es_log_query","execute_read"]},"max_steps":6,"tags":["observability","data"]}
