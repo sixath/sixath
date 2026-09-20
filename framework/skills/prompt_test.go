@@ -33,7 +33,7 @@ func TestBuildSkillsAwarePrompt_omitsAppendLearning(t *testing.T) {
 
 func TestBuildSkillsAwarePrompt_errorQuoteUsesRcaGrepFirst(t *testing.T) {
 	out := BuildSkillsAwarePrompt(nil)
-	for _, needle := range []string{"rca_grep", "vm_run_cmd", "search_files", "禁止要求用户重述"} {
+	for _, needle := range []string{"rca_grep", "vm_run_cmd", "cmd.exe", "search_files", "禁止要求用户重述"} {
 		if !strings.Contains(out, needle) {
 			t.Fatalf("missing %q in skills prompt: %s", needle, out)
 		}

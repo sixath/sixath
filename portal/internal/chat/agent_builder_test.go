@@ -753,7 +753,7 @@ func TestBuildRegistry_VMRunCmdClientForHostUsesSOCKS5(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, _ = tl.Execute(ctx, map[string]any{
-		"cmd":         "Get-Process",
+		"cmd":         "tasklist",
 		"host":        u.Hostname(),
 		"port":        destPort,
 		"timeout_sec": 2,

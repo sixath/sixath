@@ -30,8 +30,8 @@ func TestClassifyVMRunCmd(t *testing.T) {
 	if got := classifyVMRunCmd(`Remove-Item D:\tmp\a`); got != vmRunCmdConfirm {
 		t.Fatalf("Remove-Item: %v", got)
 	}
-	if got := classifyVMRunCmd(`Get-Process`); got != vmRunCmdAllow {
-		t.Fatalf("Get-Process: %v", got)
+	if got := classifyVMRunCmd(`tasklist`); got != vmRunCmdAllow {
+		t.Fatalf("tasklist: %v", got)
 	}
 	if got := classifyVMRunCmd(`powershell -Command "taskkill /F /IM a.exe"`); got != vmRunCmdConfirm {
 		t.Fatalf("wrapped taskkill: %v", got)
@@ -70,7 +70,8 @@ func TestVMRunCmd_Description(t *testing.T) {
 		t.Fatal("vm_run_cmd not registered")
 	}
 	for _, phrase := range []string{
-		"Windows PowerShell",
+		"cmd.exe",
+		"PowerShell",
 		"http_request",
 		":53000",
 		"output_empty",
@@ -80,6 +81,58 @@ func TestVMRunCmd_Description(t *testing.T) {
 		if !strings.Contains(tl.Description, phrase) {
 			t.Fatalf("description missing %q: %q", phrase, tl.Description)
 		}
+	}
+	if strings.Contains(tl.Description, "Windows PowerShell command") {
+		t.Fatalf("description must not say the tool runs PowerShell: %q", tl.Description)
+	}
+	schema, _ := tl.Parameters.(map[string]any)
+	props, _ := schema["properties"].(map[string]any)
+	cmdField, _ := props["cmd"].(map[string]any)
+	cmdDesc, _ := cmdField["description"].(string)
+	for _, phrase := range []string{"cmd.exe", "type", "tasklist"} {
+		if !strings.Contains(cmdDesc, phrase) {
+			t.Fatalf("cmd description missing %q: %q", phrase, cmdDesc)
+		}
+	}
+}
+
+func TestVMRunCmd_RejectsPowerShellCmdlet(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	t.Cleanup(srv.Close)
+	host, port := hostPort(t, srv.URL)
+	reg := NewRegistry()
+	if err := RegisterVMRunCmd(reg, VMRunCmdConfig{HTTPClient: srv.Client()}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("vm_run_cmd")
+	for _, cmd := range []string{
+		`Get-Content -Path D:\CloudGameBundle\apps\cgvmagent\current\logs\*.log`,
+		`Get-Process`,
+		`powershell -Command "Get-Content D:\a.log"`,
+	} {
+		out, err := tl.Execute(context.Background(), map[string]any{
+			"host": host, "port": port, "cmd": cmd,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := out.(map[string]any)
+		if m["ok"] != false {
+			t.Fatalf("cmd %q should not run: %#v", cmd, m)
+		}
+		if m["error_code"] != ErrorPermanent {
+			t.Fatalf("cmd %q error_code=%#v", cmd, m["error_code"])
+		}
+		msg, _ := m["error"].(string)
+		if !strings.Contains(strings.ToLower(msg), "cmd.exe") {
+			t.Fatalf("cmd %q error should mention cmd.exe: %q", cmd, msg)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("PowerShell cmdlets must not POST, hits=%d", hits)
 	}
 }
 
@@ -117,7 +170,7 @@ func TestVMRunCmd_HostPostsJSON(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process",
+		"host": host, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +182,7 @@ func TestVMRunCmd_HostPostsJSON(t *testing.T) {
 	if m["port"] != port {
 		t.Fatalf("port=%#v want %d", m["port"], port)
 	}
-	if gotPath != "/runCmd" || gotBody != `{"cmd":"Get-Process"}` || gotCT != "application/json" {
+	if gotPath != "/runCmd" || gotBody != `{"cmd":"tasklist"}` || gotCT != "application/json" {
 		t.Fatalf("path=%s body=%s ct=%s", gotPath, gotBody, gotCT)
 	}
 }
@@ -146,7 +199,7 @@ func TestVMRunCmd_Empty200(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process",
+		"host": host, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +229,7 @@ func TestVMRunCmd_RejectsURLParam(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process", "url": "http://evil.example/runCmd",
+		"host": host, "port": port, "cmd": "tasklist", "url": "http://evil.example/runCmd",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +257,7 @@ func TestVMRunCmd_HTTPStatusCodes(t *testing.T) {
 		}
 		tl, _ := reg.Get("vm_run_cmd")
 		out, err := tl.Execute(context.Background(), map[string]any{
-			"host": host, "port": port, "cmd": "Get-Process",
+			"host": host, "port": port, "cmd": "tasklist",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -230,7 +283,7 @@ func TestVMRunCmd_HTTPStatusCodes(t *testing.T) {
 		}
 		tl, _ := reg.Get("vm_run_cmd")
 		out, err := tl.Execute(context.Background(), map[string]any{
-			"host": host, "port": port, "cmd": "Get-Process",
+			"host": host, "port": port, "cmd": "tasklist",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -260,7 +313,7 @@ func TestVMRunCmd_TimeoutTransient(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process", "timeout_sec": 1,
+		"host": host, "port": port, "cmd": "tasklist", "timeout_sec": 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +362,7 @@ func TestVMRunCmd_TimeoutSecOverridesInjectedClientTimeout(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process", "timeout_sec": 1,
+		"host": host, "port": port, "cmd": "tasklist", "timeout_sec": 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -346,7 +399,7 @@ func TestVMRunCmd_UsesClientForHost(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process",
+		"host": host, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -383,7 +436,7 @@ func TestVMRunCmd_HostWinsOverVMID(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host": host, "port": port, "cmd": "Get-Process", "vmid": 199306,
+		"host": host, "port": port, "cmd": "tasklist", "vmid": 199306,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -689,7 +742,7 @@ func TestVMRunCmd_VmidLookupPostsToReturnedHost(t *testing.T) {
 	}
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"vmid": 199306, "port": port, "cmd": "Get-Process",
+		"vmid": 199306, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -727,7 +780,7 @@ func TestVMRunCmd_LookupZeroRowsNoPOST(t *testing.T) {
 	})
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"vmid": 199306, "port": port, "cmd": "Get-Process",
+		"vmid": 199306, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -760,7 +813,7 @@ func TestVMRunCmd_TwoMySQLIDsNoPreferred(t *testing.T) {
 	})
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"vmid": 199306, "port": port, "cmd": "Get-Process",
+		"vmid": 199306, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -794,7 +847,7 @@ func TestVMRunCmd_LookupAmbiguous(t *testing.T) {
 	})
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"vmid": 199306, "port": port, "cmd": "Get-Process",
+		"vmid": 199306, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -828,7 +881,7 @@ func TestVMRunCmd_LookupDeadlineTransient(t *testing.T) {
 	})
 	tl, _ := reg.Get("vm_run_cmd")
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"vmid": 199306, "port": port, "cmd": "Get-Process",
+		"vmid": 199306, "port": port, "cmd": "tasklist",
 	})
 	if err != nil {
 		t.Fatal(err)

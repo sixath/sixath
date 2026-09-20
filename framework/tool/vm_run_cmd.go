@@ -48,7 +48,12 @@ var (
 	}
 	vmRunCmdDriveRootRe    = regexp.MustCompile(`(?i)[a-z]:\\(?:\s|$)`)
 	vmRunCmdDriveRootEndRe = regexp.MustCompile(`(?i)[a-z]:\\?\s*$`)
+	vmRunCmdPowerShellRe   = regexp.MustCompile(`(?i)(?:^|[|&;\n])\s*(?:powershell(?:\.exe)?|pwsh(?:\.exe)?)\b|(?i)\b(?:Get|Set|Select|Where|ForEach|Out|Format|Measure|New|Remove|Stop|Start|Restart|Write|Add|Clear|Copy|Move|Rename|Test|ConvertTo|ConvertFrom|Import|Export|Invoke|Wait)-[A-Za-z]+\b`)
 )
+
+func isVMRunCmdPowerShell(cmd string) bool {
+	return vmRunCmdPowerShellRe.MatchString(strings.TrimSpace(cmd))
+}
 
 func classifyVMRunCmd(cmd string) vmRunCmdPolicy {
 	lower := strings.ToLower(cmd)
@@ -156,12 +161,12 @@ func RegisterVMRunCmd(reg *Registry, cfg VMRunCmdConfig) error {
 	}
 	return reg.Register(Tool{
 		Name:        vmRunCmdName,
-		Description: "Run a Windows PowerShell command on a VM via POST /runCmd. Address the instance by host (hostname or IPv4) or vmid — do not pass a url parameter. Do not use http_request to hit :53000/runCmd; use this tool instead. Empty stdout (output_empty) is not evidence of missing logs — the command may have produced no output or the log pipeline may not capture it.",
+		Description: "Run a Windows cmd.exe command on a VM via POST /runCmd. The instance executes cmd only — do not send PowerShell cmdlets (Get-Content, Get-Process, Select-String) or powershell.exe. Use cmd equivalents: type, dir, findstr, tasklist. Address the instance by host (hostname or IPv4) or vmid — do not pass a url parameter. Do not use http_request to hit :53000/runCmd; use this tool instead. Empty stdout (output_empty) is not evidence of missing logs — the command may have produced no output or the log pipeline may not capture it.",
 		Toolset:     ToolsetRCA,
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"cmd":           map[string]any{"type": "string", "description": "Command to run on the instance."},
+				"cmd":           map[string]any{"type": "string", "description": "cmd.exe command only. Examples: type D:\\path\\file.log, dir D:\\path, findstr keyword file, tasklist. Do not send PowerShell."},
 				"host":          map[string]any{"type": "string", "description": "Instance hostname or IPv4."},
 				"vmid":          map[string]any{"description": "VM id (integer or decimal string)."},
 				"port":          map[string]any{"type": "integer", "description": "runCmd port (default 53000)."},
@@ -202,6 +207,9 @@ func executeVMRunCmd(ctx context.Context, cfg VMRunCmdConfig, params map[string]
 	cmd, _ := params["cmd"].(string)
 	if strings.TrimSpace(cmd) == "" {
 		return rcaErr(vmRunCmdName, "cmd is required", ErrorPermanent)
+	}
+	if isVMRunCmdPowerShell(cmd) {
+		return rcaErr(vmRunCmdName, "vm_run_cmd only runs cmd.exe, not PowerShell. Use type/dir/findstr/tasklist instead of Get-Content/Get-ChildItem/Select-String/Get-Process.", ErrorPermanent)
 	}
 
 	policy := classifyVMRunCmd(cmd)

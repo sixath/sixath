@@ -21,7 +21,7 @@
 
 ## 1. 背景
 
-现有 RCA 闭环是 Jaeger → ES → `rca_grep`/`rca_glob`/`rca_read`。云游戏等实例上的进程日志、落盘目录**不采集到 ES**。每台实例监听 **53000**，`runCmd` 在机器上执行命令（现场样例为 PowerShell）。
+现有 RCA 闭环是 Jaeger → ES → `rca_grep`/`rca_glob`/`rca_read`。云游戏等实例上的进程日志、落盘目录**不采集到 ES**。每台实例监听 **53000**，`runCmd` 在机器上走 **cmd.exe**（不是 PowerShell；`Get-Content` 会报「不是内部或外部命令」）。
 
 现网失败模式：
 
@@ -205,7 +205,7 @@ Content-Type: application/json
 
 ### 5.3 直接执行
 
-未命中 5.1/5.2 的命令，包括只读：`Get-ChildItem`、`Get-Process`、`Get-Content`、`type `、`tasklist`、`powershell -Command` 包着的只读脚本。若 PowerShell 包装里仍含 5.1/5.2 关键字，按内层命中（对整串匹配即可覆盖）。
+未命中 5.1/5.2 的 **cmd.exe** 命令，包括只读：`type `、`dir `、`findstr`、`tasklist`。裸 PowerShell cmdlet（`Get-Content` / `Get-Process` / `Select-String` 等）以及 `powershell` / `pwsh` 包装在发 HTTP 前 `permanent` 拒绝，提示改用 cmd 等价命令。
 
 ### 5.4 确认存储
 

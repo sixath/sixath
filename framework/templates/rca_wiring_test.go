@@ -161,7 +161,7 @@ func TestRegisterRCATools_VMRunCmdHostPostsWithoutProxy(t *testing.T) {
 		t.Fatal("expected vm_run_cmd")
 	}
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"cmd":  "Get-Process",
+		"cmd":  "tasklist",
 		"host": u.Hostname(),
 		"port": port,
 	})
@@ -206,7 +206,7 @@ func TestRegisterRCATools_VMRunCmdUnknownProxyFailClosed(t *testing.T) {
 		t.Fatal("expected vm_run_cmd")
 	}
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"cmd":  "Get-Process",
+		"cmd":  "tasklist",
 		"host": u.Hostname(),
 		"port": port,
 	})
