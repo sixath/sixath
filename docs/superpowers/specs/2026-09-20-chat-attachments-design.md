@@ -154,12 +154,7 @@ Composer
 - `relative_path` 相对 workspace，须能通过现有 pathguard，供 `read_file` / `vision_analyze` 使用
 - 删除会话：若已有 session 目录清理钩子则一并删 `sessions/{id}/`；若无，一期在实现计划中列明确 TODO，不阻塞主路径
 
-附件元数据一期可仅存于：
-
-1. 上传成功后的进程内/轻量索引（或小 JSON sidecar：`uploads/.index.json`），以及  
-2. 绑定后的 `chat_messages.metadata.attachments`
-
-不强制新建独立 DB 表；若实现中发现 sidecar 竞态难处理，可改为 `chat_attachments` 表（实现计划里允许等价替换，产品语义不变）。
+附件元数据一期优先持久化（推荐 `chat_attachments` 表或 `uploads/.index.json` 落盘），**禁止**仅进程内存索引（重启后未绑定附件与配额会丢）。若实现中选表或 sidecar，产品语义不变。
 
 ## 5. 入模与降级
 
@@ -173,6 +168,18 @@ Composer
 | text | **必填** `〔附件 text〕{relative_path} — 可用 read_file 读取` | 无 |
 
 用户原文与脚注之间空一行拼接。`content` 为空时允许仅脚注（或仅 Parts）。
+
+### 5.1.1 历史多轮：哪些消息带 image `Parts`（一期写死）
+
+组装发给模型的 `[]model.Message` 时：
+
+1. **仅当前 turn 新写入的那条 user message** 为其图片附件重建 `data:` `Parts`（并按 §5.3 决定是否降级）。
+2. **更早的历史 user 消息**：即使 metadata 含 image 附件，也**只保留文本脚注路径**，**不再**内联 `Parts`。理由：避免每轮把历史截图重复打进上下文导致 token 爆炸；工具仍可按路径 `read_file` / `vision_analyze`。
+3. Context budget / snip 对当前轮 `Parts` 按高成本内容处理；若仍超预算，允许去掉当前轮 image `Parts` 并强制脚注（等同 §5.3 降级），不得静默丢整条 user 文本。
+
+刷新 UI 缩略图走附件 GET，与「是否把历史图再送进模型」无关。
+
+一期不做「滑动窗口内多轮历史图全部重嵌」；若后续需要，单独立项。
 
 ### 5.2 `openAIChatMessage`
 
@@ -217,8 +224,9 @@ Composer
 ### 单测
 
 - 上传白名单 / 大小 / 文件名 sanitize
-- 发消息归属校验与 metadata 形状
-- 历史→`model.Message`：图进 Parts、文本仅脚注
+- 发消息归属校验与 metadata 形状；**仅附件、空 content** 合法；content 与 attachments 皆空 → 400
+- **已绑定 id 再次引用**成功；DELETE 在仍被引用时 409；无引用可删
+- 历史→`model.Message`：当前轮图进 Parts；**更早历史图仅脚注、无 Parts**；文本仅脚注
 - `openAIChatMessage`：有 Parts → MultiContent；无 Parts 回归
 - DELETE 绑定前后
 
