@@ -21,6 +21,7 @@ import (
 const (
 	workspaceFileScopeHint = "For workspace files use read_file/write_file/patch/search_files; " +
 		"for source / call-chain analysis prefer rca_grep/rca_glob/rca_read when those tools are available; " +
+		"do not use search_files as a substitute for rca_grep when looking up application error strings or source under code roots; " +
 		"for datasource/SQL use execute_read/execute_write/list_tables/describe_table."
 
 	readFileDefaultLimit = 500
@@ -146,9 +147,9 @@ func registerReadFileTool(reg *Registry) error {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return map[string]any{
-						"error":    "file not found",
-						"path":     rel,
-						"similar":  suggestSimilarFiles(ws, rel),
+						"error":   "file not found",
+						"path":    rel,
+						"similar": suggestSimilarFiles(ws, rel),
 					}, nil
 				}
 				return map[string]any{"error": err.Error()}, nil

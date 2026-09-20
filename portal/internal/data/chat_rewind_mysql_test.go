@@ -137,6 +137,49 @@ func TestListActiveOrdered_NoLimitAndIdTiebreak(t *testing.T) {
 	}
 }
 
+func TestListBySessionIncludingInactive_IncludesInactive(t *testing.T) {
+	db := openChatRewindTestDB(t)
+	sessRepo := &chatSessionRepo{db: db}
+	msgRepo := &chatMessageRepo{db: db}
+	ctx := context.Background()
+	sess, _ := sessRepo.Create(ctx, "u1", "a1", "t", "")
+	base := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	_ = db.Create(&model.ChatMessage{
+		ID: "m-live", SessionID: sess.ID, Role: "user", Content: "live", Active: true,
+		CreatedAt: base,
+		Metadata: model.JSONMap{
+			"attachments": []any{map[string]any{"id": "att-1"}},
+		},
+	}).Error
+	_ = db.Create(&model.ChatMessage{
+		ID: "m-dead", SessionID: sess.ID, Role: "user", Content: "dead", Active: true,
+		CreatedAt: base.Add(time.Second),
+		Metadata: model.JSONMap{
+			"attachments": []any{map[string]any{"id": "att-dead"}},
+		},
+	}).Error
+	_ = db.Model(&model.ChatMessage{}).Where("id = ?", "m-dead").Update("active", false).Error
+
+	activeOnly, err := msgRepo.ListBySession(ctx, sess.ID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(activeOnly) != 1 || activeOnly[0].ID != "m-live" {
+		t.Fatalf("active list = %+v", activeOnly)
+	}
+
+	all, err := msgRepo.ListBySessionIncludingInactive(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("including inactive len=%d want 2", len(all))
+	}
+	if !biz.MessageReferencesAttachment(all, "att-dead") {
+		t.Fatal("inactive message should still reference att-dead")
+	}
+}
+
 func TestInsertClone_PreservesCreatedAt(t *testing.T) {
 	db := openChatRewindTestDB(t)
 	sessRepo := &chatSessionRepo{db: db}

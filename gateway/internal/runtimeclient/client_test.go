@@ -95,6 +95,8 @@ func TestClient_SessionCRUDPaths(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"hits": []any{}})
 		case r.Method == http.MethodPost && r.URL.Path == "/runtime/v1/sessions/s1/rewind":
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		case r.Method == http.MethodPatch && r.URL.Path == "/runtime/v1/sessions/s1/model":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
 			http.NotFound(w, r)
 		}
@@ -163,6 +165,14 @@ func TestClient_SessionCRUDPaths(t *testing.T) {
 	assertCall(t, last, http.MethodPost, "/runtime/v1/sessions/s1/rewind", "Bearer tok", uid)
 	if !strings.Contains(last.body, `"message_id":"m1"`) {
 		t.Fatalf("rewind body=%s", last.body)
+	}
+
+	if _, err := c.SetSessionModel(ctx, uid, "s1", SetSessionModelRequest{ModelProviderID: "p1", Model: "gpt-4o"}); err != nil {
+		t.Fatal(err)
+	}
+	assertCall(t, last, http.MethodPatch, "/runtime/v1/sessions/s1/model", "Bearer tok", uid)
+	if !strings.Contains(last.body, `"model_provider_id":"p1"`) || !strings.Contains(last.body, `"model":"gpt-4o"`) {
+		t.Fatalf("set model body=%s", last.body)
 	}
 }
 

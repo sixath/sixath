@@ -157,6 +157,7 @@ message SessionReply {
 message SendMessageRequest {
   string session_id = 1;  // 从 path 注入
   string content = 2;     // 用户消息内容
+  repeated string attachment_ids = 3; // 先上传得到的附件 id；可与 content 二选一非空
 }
 
 message ListMessagesRequest {

@@ -251,67 +251,73 @@ export default function AgentDetail() {
       <section className="section">
         <h2 className="section-title">基本信息</h2>
         <div className="section-card">
-          <div style={{ display: 'grid', gap: '0.75rem' }}>
-            <p><strong>描述：</strong>{agent.description || '-'}</p>
-            <p><strong>Workspace：</strong><code>{agent.workspace}</code></p>
-            <p><strong>模型：</strong>{agent.model_config?.provider}/{agent.model_config?.model}</p>
-            <p><strong>最大输出 Token：</strong>{agent.model_config?.max_output_tokens && agent.model_config.max_output_tokens > 0 ? agent.model_config.max_output_tokens : '8192（默认）'}</p>
-            <p><strong>调试运行：</strong>{agent.debug_run ? '是' : '否'}</p>
-            <div data-testid="runtime-tools-section">
-              <strong>运行时工具：</strong>
+          <div className="detail-kv">
+            <div className="detail-kv__label">描述</div>
+            <div className="detail-kv__value">{agent.description || '-'}</div>
+
+            <div className="detail-kv__label">Workspace</div>
+            <div className="detail-kv__value"><code>{agent.workspace}</code></div>
+
+            <div className="detail-kv__label">模型</div>
+            <div className="detail-kv__value">
+              {agent.model_config?.provider}/{agent.model_config?.model}
+              <span style={{ color: 'var(--muted)', marginLeft: '0.5rem' }}>
+                · 最大输出 {agent.model_config?.max_output_tokens && agent.model_config.max_output_tokens > 0 ? agent.model_config.max_output_tokens : '8192（默认）'}
+              </span>
+            </div>
+
+            <div className="detail-kv__label" data-testid="runtime-tools-section">运行时工具</div>
+            <div className="detail-kv__value">
               {enabledRuntimeTools.length > 0 ? (
-                <div data-testid="runtime-tools-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.35rem' }}>
+                <div className="detail-badge-row" data-testid="runtime-tools-badges">
                   {enabledRuntimeTools.map(({ key, label }) => (
                     <span key={key} className="badge badge-mcp">{label}</span>
                   ))}
                 </div>
               ) : (
-                <span style={{ marginLeft: '0.25rem' }}>未启用（仍可能由全局 env 开启）</span>
+                <span style={{ color: 'var(--muted)' }}>未启用（仍可能由全局 env 开启）</span>
               )}
             </div>
-          </div>
-        </div>
-      </section>
 
-      <section className="section" data-testid="default-proxy-section">
-        <h2 className="section-title">默认出网代理</h2>
-        <div className="section-card">
-          <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginBottom: '0.75rem' }}>
-            空为直连。工具可在表单里继承、直连或指定代理。可先到{' '}
-            <Link to="/proxies">代理</Link> 创建 HTTP/SOCKS5。
-          </p>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <select
-              value={selectedProxyId}
-              onChange={(e) => {
-                setSelectedProxyId(e.target.value)
-                setProxyMsg('')
-              }}
-              style={{ minWidth: 240 }}
-            >
-              <option value="">直连</option>
-              {proxies.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}（{p.type} {p.host}:{p.port}）
-                </option>
-              ))}
-              {selectedProxyId && !proxies.some((p) => p.id === selectedProxyId) ? (
-                <option value={selectedProxyId}>{selectedProxyId}（当前）</option>
-              ) : null}
-            </select>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={handleSaveDefaultProxy}
-              disabled={proxySaving}
-            >
-              {proxySaving ? '保存中...' : '保存'}
-            </button>
-            {proxyMsg ? (
-              <span className={proxyMsg.includes('已保存') ? 'success' : 'error'} style={{ fontSize: '0.875rem' }}>
-                {proxyMsg}
-              </span>
-            ) : null}
+            <div className="detail-kv__label" data-testid="default-proxy-section">出网代理</div>
+            <div className="detail-kv__value detail-kv__value--stack">
+              <p className="detail-kv__hint">
+                空为直连。工具可在表单里继承、直连或指定代理。可先到{' '}
+                <Link to="/proxies">代理</Link> 创建 HTTP/SOCKS5。
+              </p>
+              <div className="detail-kv__controls">
+                <select
+                  value={selectedProxyId}
+                  onChange={(e) => {
+                    setSelectedProxyId(e.target.value)
+                    setProxyMsg('')
+                  }}
+                >
+                  <option value="">直连</option>
+                  {proxies.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}（{p.type} {p.host}:{p.port}）
+                    </option>
+                  ))}
+                  {selectedProxyId && !proxies.some((p) => p.id === selectedProxyId) ? (
+                    <option value={selectedProxyId}>{selectedProxyId}（当前）</option>
+                  ) : null}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={handleSaveDefaultProxy}
+                  disabled={proxySaving}
+                >
+                  {proxySaving ? '保存中...' : '保存'}
+                </button>
+                {proxyMsg ? (
+                  <span className={proxyMsg.includes('已保存') ? 'success' : 'error'} style={{ fontSize: '0.875rem' }}>
+                    {proxyMsg}
+                  </span>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -320,36 +326,27 @@ export default function AgentDetail() {
         <h2 className="section-title">绑定工具</h2>
         <div className="section-card">
           {boundTools.length > 0 ? (
-            <div className="table-card" style={{ marginBottom: '1rem', border: 'none' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>类型</th>
-                    <th>默认索引</th>
-                    <th>用途</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {boundTools.map((t) => (
-                    <tr key={t.id}>
-                      <td>{t.name}</td>
-                      <td><span className={`badge badge-${t.type}`}>{t.type}</span></td>
-                      <td>{boundToolIndex(t)}</td>
-                      <td>{boundToolPurpose(t)}</td>
-                      <td>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleUnbindTool(t.id)}>解绑</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="bind-list">
+              {boundTools.map((t) => {
+                const index = boundToolIndex(t)
+                const purpose = boundToolPurpose(t)
+                const meta = [index, purpose].filter(Boolean).join(' · ')
+                return (
+                  <div key={t.id} className="bind-row">
+                    <div className="bind-row__name" title={t.name}>{t.name}</div>
+                    <span className={`badge badge-${t.type}`}>{t.type}</span>
+                    <div className="bind-row__meta" title={meta || undefined}>{meta || '—'}</div>
+                    <div className="bind-row__actions">
+                      <button className="btn btn-danger btn-sm" onClick={() => handleUnbindTool(t.id)}>解绑</button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           ) : (
             <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>暂无绑定工具</p>
           )}
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="section-card__footer">
             <SearchableToolSelect
               tools={availableTools}
               value={bindToolId}
@@ -371,26 +368,27 @@ export default function AgentDetail() {
       <section className="section" data-testid="mcp-servers-bind-section">
         <h2 className="section-title">MCP 服务</h2>
         <div className="section-card">
-          <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginBottom: '0.75rem' }}>
+          <p className="detail-kv__hint" style={{ marginBottom: '0.85rem' }}>
             勾选要绑定的 MCP 服务后保存（全量替换）。可先到{' '}
             <Link to="/mcp-servers">MCP 服务</Link> 创建 stdio/HTTP 服务。
           </p>
           {mcpCatalog.length > 0 ? (
-            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem' }}>
+            <ul className="mcp-bind-list">
               {mcpCatalog.map((s) => (
-                <li key={s.id} style={{ marginBottom: '0.5rem' }}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                <li key={s.id}>
+                  <label className="mcp-bind-item">
                     <input
                       type="checkbox"
                       checked={selectedMcpIds.includes(s.id)}
                       onChange={() => toggleMcpServer(s.id)}
                     />
-                    <strong>{s.name}</strong>
-                    <code style={{ fontSize: '0.85em' }}>{s.id}</code>
+                    <span className="mcp-bind-item__name">{s.name}</span>
                     <span className={`badge badge-${s.transport === 'stdio' ? 'mcp' : 'builtin'}`}>{s.transport}</span>
                     {s.description ? (
-                      <span style={{ color: 'var(--muted)', fontSize: '0.85em' }}>{s.description}</span>
-                    ) : null}
+                      <span className="mcp-bind-item__desc" title={s.description}>{s.description}</span>
+                    ) : (
+                      <code className="mcp-bind-item__id">{s.id}</code>
+                    )}
                   </label>
                 </li>
               ))}
@@ -398,7 +396,7 @@ export default function AgentDetail() {
           ) : (
             <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>暂无可用 MCP 服务</p>
           )}
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="section-card__footer">
             <button
               type="button"
               className="btn btn-sm"
@@ -420,35 +418,24 @@ export default function AgentDetail() {
         <h2 className="section-title">技能管理</h2>
         <div className="section-card">
           {skills.length > 0 ? (
-            <div className="table-card" style={{ marginBottom: '1rem', border: 'none' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>描述</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {skills.map((s) => (
-                    <tr key={s.name}>
-                      <td><code>{s.name}</code></td>
-                      <td>{s.description || '-'}</td>
-                      <td>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDeleteSkill(s.name)}>删除</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="bind-list">
+              {skills.map((s) => (
+                <div key={s.name} className="bind-row bind-row--skill">
+                  <div className="bind-row__name"><code>{s.name}</code></div>
+                  <div className="bind-row__meta" title={s.description || undefined}>{s.description || '—'}</div>
+                  <div className="bind-row__actions">
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteSkill(s.name)}>删除</button>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>暂无技能</p>
           )}
-          <p style={{ color: 'var(--muted)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+          <p className="detail-kv__hint" style={{ marginBottom: '0.75rem' }}>
             上传 .zip 压缩包，校验通过后解压到 <code>{agent.workspace}/skills/</code>
           </p>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="section-card__footer">
             <input
               type="file"
               accept=".zip"
@@ -456,8 +443,12 @@ export default function AgentDetail() {
               style={{ color: 'var(--muted)', fontSize: '0.875rem' }}
             />
             <button className="btn btn-sm" onClick={handleUploadSkill} disabled={!skillFile}>上传</button>
+            {skillMsg ? (
+              <span className={skillMsg.includes('成功') ? 'success' : 'error'} style={{ fontSize: '0.875rem' }}>
+                {skillMsg}
+              </span>
+            ) : null}
           </div>
-          {skillMsg && <div className={skillMsg.includes('成功') ? 'success' : 'error'} style={{ marginTop: '0.5rem' }}>{skillMsg}</div>}
         </div>
       </section>
     </div>

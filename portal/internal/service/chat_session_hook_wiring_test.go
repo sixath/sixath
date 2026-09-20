@@ -41,7 +41,7 @@ func (stubSessionRepoSucceedDelete) SetModelOverride(context.Context, string, st
 }
 
 func TestDeleteSession_InvokesChatSessionEndHooks(t *testing.T) {
-	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil)
+	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil, nil)
 	reg := agent.NewChatSessionHookRegistry()
 	var gotSessionID string
 	reg.Register(agent.ChatSessionHookFunc(func(_ context.Context, sessionID string) error {
@@ -69,7 +69,7 @@ func TestDeleteSession_InvokesChatSessionEndHooks(t *testing.T) {
 }
 
 func TestDeleteSession_HookErrorStillReturnsOK(t *testing.T) {
-	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil)
+	chatUC := biz.NewChatUsecase(stubSessionRepoSucceedDelete{}, nil, nil, nil, nil, nil)
 	reg := agent.NewChatSessionHookRegistry()
 	reg.Register(agent.ChatSessionHookFunc(func(context.Context, string) error {
 		return errors.New("hook boom")

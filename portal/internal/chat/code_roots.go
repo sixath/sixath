@@ -161,13 +161,28 @@ func ResolveWorkspaceCodeRoot(workspace string) string {
 	return fwws.ResolveCodeMount(workspace)
 }
 
-// MergeRCARoots returns workspace/code when mounted. Configured tool roots are ignored
-// (no dual-root waiver).
-func MergeRCARoots(workspace string, _ []string) []string {
+// MergeRCARoots returns workspace/code when mounted. Otherwise it uses configured
+// tool roots that already exist on disk (single source at runtime, mount wins).
+func MergeRCARoots(workspace string, configured []string) []string {
 	if code := ResolveWorkspaceCodeRoot(workspace); code != "" {
 		return []string{code}
 	}
-	return nil
+	return existingCodeDirs(NormalizeCodeRoots(configured))
+}
+
+func existingCodeDirs(roots []string) []string {
+	if len(roots) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(roots))
+	for _, r := range roots {
+		st, err := os.Stat(r)
+		if err != nil || !st.IsDir() {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // WorkspaceUnderCodeRoots reports whether workspace is under any code root.

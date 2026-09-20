@@ -251,6 +251,7 @@ func TestWeb_SessionRoutesWired(t *testing.T) {
 		{http.MethodGet, "/api/v1/sessions/s1/messages", "", "/runtime/v1/sessions/s1/messages"},
 		{http.MethodGet, "/api/v1/sessions/s1/result-files?path=tmp/results/s1/a.jsonl", "", "/runtime/v1/sessions/s1/result-files"},
 		{http.MethodPost, "/api/v1/sessions/s1/rewind", `{"message_id":"m1"}`, "/runtime/v1/sessions/s1/rewind"},
+		{http.MethodPatch, "/api/v1/sessions/s1/model", `{"model_provider_id":"p1","model":"gpt-4o"}`, "/runtime/v1/sessions/s1/model"},
 	}
 	for _, c := range calls {
 		var body io.Reader
@@ -273,6 +274,64 @@ func TestWeb_SessionRoutesWired(t *testing.T) {
 		if last.path != c.wantPath {
 			t.Fatalf("%s %s → runtime path %q want %q", c.method, c.path, last.path, c.wantPath)
 		}
+	}
+}
+
+func TestWeb_AttachmentRoutesProxyToPortal(t *testing.T) {
+	var last methodPath
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/me" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"user_id": "u1"})
+			return
+		}
+		last = methodPath{r.Method, r.URL.Path}
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("png"))
+			return
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "att_1", "kind": "image"})
+	}))
+	defer portal.Close()
+
+	mux := newWebMux(t, portal.URL)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions/s1/attachments", strings.NewReader("fake-multipart"))
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if last.path != "/api/v1/sessions/s1/attachments" || last.method != http.MethodPost {
+		t.Fatalf("upload proxied to %+v", last)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/sessions/s1/attachments/att_1", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || rr.Body.String() != "png" {
+		t.Fatalf("get status=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("content-type=%q", rr.Header().Get("Content-Type"))
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/s1/attachments/att_1", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d", rr.Code)
 	}
 }
 

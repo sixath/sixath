@@ -56,6 +56,13 @@ type RewindBackend interface {
 	RewindToMessage(ctx context.Context, sessionID, messageID string) (*service.RewindResult, error)
 }
 
+// ModelOverrideBackend writes session model overlay (ChatService satisfies this).
+type ModelOverrideBackend interface {
+	SetSessionModel(ctx context.Context, sessionID string, in service.SetSessionModelInput) error
+}
+
+var _ ModelOverrideBackend = (*service.ChatService)(nil)
+
 // TurnBackend runs a chat turn (ChatService satisfies this).
 type TurnBackend interface {
 	SendMessage(ctx context.Context, req *chatv1.SendMessageRequest) (*chatv1.MessageReply, error)
@@ -77,12 +84,13 @@ type Service struct {
 	runtimeStatus biz.ChannelRuntimeRepo
 	rewinder      RewindBackend
 	turns         TurnBackend
+	models        ModelOverrideBackend
 	router        routeBackend
 }
 
 // NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
 func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channelUC *biz.ChannelUsecase, agentUC *biz.AgentUsecase, sessions biz.ChatSessionRepo, runtimeStatus biz.ChannelRuntimeRepo, rewinder RewindBackend, turns TurnBackend, routeUC *biz.AgentRouteUsecase) *Service {
-	return &Service{
+	svc := &Service{
 		chat:          chatUC,
 		peer:          peerUC,
 		channels:      channelUC,
@@ -93,6 +101,10 @@ func NewService(chatUC *biz.ChatUsecase, peerUC *biz.ChannelPeerUsecase, channel
 		turns:         turns,
 		router:        routeUC,
 	}
+	if m, ok := rewinder.(ModelOverrideBackend); ok {
+		svc.models = m
+	}
+	return svc
 }
 
 type resolveRequest struct {
@@ -120,6 +132,12 @@ type updateSessionRequest struct {
 	Title string `json:"title"`
 }
 
+type setSessionModelRequest struct {
+	Choice          string `json:"choice"`
+	ModelProviderID string `json:"model_provider_id"`
+	Model           string `json:"model"`
+}
+
 type rewindRequest struct {
 	MessageID string `json:"message_id"`
 }
@@ -127,6 +145,7 @@ type rewindRequest struct {
 type turnRequest struct {
 	SessionID       string                      `json:"session_id"`
 	Content         string                      `json:"content"`
+	AttachmentIds   []string                    `json:"attachment_ids"`
 	ReplyMode       string                      `json:"reply_mode"`
 	ChannelID       string                      `json:"channel_id"`
 	PeerID          string                      `json:"peer_id"`
@@ -609,6 +628,20 @@ func (s *Service) rewindSession(ctx context.Context, sessionID, messageID string
 	return s.rewinder.RewindToMessage(ctx, sessionID, messageID)
 }
 
+func (s *Service) patchSessionModel(ctx context.Context, sessionID string, req setSessionModelRequest) error {
+	if err := s.requireSessionOwner(ctx, sessionID); err != nil {
+		return err
+	}
+	if s.models == nil {
+		return errors.InternalServer("UNAVAILABLE", "model overlay unavailable")
+	}
+	return s.models.SetSessionModel(ctx, sessionID, service.SetSessionModelInput{
+		Choice:          req.Choice,
+		ModelProviderID: req.ModelProviderID,
+		Model:           req.Model,
+	})
+}
+
 func (s *Service) bindTurnContext(ctx context.Context, req turnRequest) context.Context {
 	if req.InputResponse != nil {
 		ctx = portalchat.WithInputResponse(ctx, req.InputResponse)
@@ -639,7 +672,7 @@ func (s *Service) runFinalTurn(ctx context.Context, req turnRequest) (*turnFinal
 	runCtx, cancel := context.WithTimeout(s.bindTurnContext(ctx, req), turnFinalTimeout)
 	defer cancel()
 
-	chatReq := &chatv1.SendMessageRequest{SessionId: req.SessionID, Content: req.Content}
+	chatReq := &chatv1.SendMessageRequest{SessionId: req.SessionID, Content: req.Content, AttachmentIds: req.AttachmentIds}
 	ch, sessionID, err := s.turns.SendMessageStream(runCtx, chatReq)
 	if err != nil {
 		out.Error = err.Error()
@@ -690,7 +723,7 @@ func (s *Service) startStreamTurn(ctx context.Context, req turnRequest) (<-chan 
 		return nil, "", err
 	}
 	runCtx := s.bindTurnContext(ctx, req)
-	chatReq := &chatv1.SendMessageRequest{SessionId: req.SessionID, Content: req.Content}
+	chatReq := &chatv1.SendMessageRequest{SessionId: req.SessionID, Content: req.Content, AttachmentIds: req.AttachmentIds}
 	return s.turns.SendMessageStream(runCtx, chatReq)
 }
 

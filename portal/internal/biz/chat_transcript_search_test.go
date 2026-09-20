@@ -40,7 +40,7 @@ func TestSearchTranscript_RequiresAgentView(t *testing.T) {
 	resources.grants[resource.ID] = []ResourceGrant{{ResourceID: resource.ID, GranteeType: "user", GranteeID: "viewer", Perm: PermView}}
 
 	backend := &fakeAnchoredBackend{hits: []AnchoredHit{{SessionID: "s1", Title: "t"}}}
-	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources))
+	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources), nil)
 	uc.SetSessionSearchBackend(backend)
 
 	// View-only caller is allowed (unlike SearchSessions which needs use).
@@ -86,7 +86,7 @@ func TestSearchTranscript_EmptyQuery(t *testing.T) {
 	resources.grants[resource.ID] = []ResourceGrant{{ResourceID: resource.ID, GranteeType: "user", GranteeID: "owner", Perm: PermUse}}
 
 	backend := &fakeAnchoredBackend{hits: []AnchoredHit{{SessionID: "s1"}}}
-	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources))
+	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources), nil)
 	uc.SetSessionSearchBackend(backend)
 
 	out, err := uc.SearchTranscript(WithCallerUserID(context.Background(), "owner"), TranscriptSearchOpts{

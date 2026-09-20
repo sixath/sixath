@@ -2,7 +2,7 @@
   font-size: 0.9rem;
   line-height: 1.6;
   color: var(--text, #334155);
-  color-scheme: light;
+  color-scheme: inherit;
   forced-color-adjust: none;
 }
 
@@ -92,6 +92,7 @@
 }
 
 .markdown-content table {
+  width: 100%;
   border-collapse: collapse;
   margin: 0.75rem 0;
   font-size: 0.9rem;

@@ -302,7 +302,7 @@ func (s *ChatService) UpdateSession(ctx context.Context, req *chatv1.UpdateSessi
 	return sessionToReply(session), nil
 }
 
-// DeleteSession 删除会话（级联删除消息）
+// DeleteSession 删除会话（级联删除消息与附件行；workspace uploads 由 ChatUsecase 清理）
 func (s *ChatService) DeleteSession(ctx context.Context, req *chatv1.DeleteSessionRequest) (*chatv1.DeleteSessionReply, error) {
 	if err := s.chatUC.DeleteSession(ctx, req.GetId()); err != nil {
 		s.log.Errorf("DeleteSession failed: session_id=%s err=%v", req.GetId(), err)
@@ -320,8 +320,12 @@ func (s *ChatService) DeleteSession(ctx context.Context, req *chatv1.DeleteSessi
 func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRequest) (*chatv1.MessageReply, error) {
 	sessionID := req.GetSessionId()
 	content := req.GetContent()
-	if sessionID == "" || content == "" {
+	attachmentIDs := chat.UniqueNonEmpty(req.GetAttachmentIds())
+	if sessionID == "" {
 		return nil, biz.ErrSessionNotFound
+	}
+	if err := validateSendMessagePayload(content, attachmentIDs, false); err != nil {
+		return nil, err
 	}
 
 	session, err := s.chatUC.GetSession(ctx, sessionID)
@@ -342,13 +346,38 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
-	// 保存 user 消息
-	userMsg, err := s.chatUC.CreateMessage(ctx, sessionID, "user", content)
+	var turnAtts *resolvedTurnAttachments
+	if len(attachmentIDs) > 0 {
+		turnAtts, err = s.resolveTurnAttachments(ctx, sessionID, agentMeta.Workspace, attachmentIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	baseContent := strings.TrimSpace(content)
+	persistContent := baseContent
+	var metas []chat.AttachmentMeta
+	var metaItems []map[string]any
+	if turnAtts != nil {
+		metas = turnAtts.Metas
+		metaItems = turnAtts.MetadataItems
+		persistContent = chat.BuildUserContentWithAttachments(baseContent, metas, chat.ContentForPersist)
+	}
+
+	// 保存 user 消息（落库 content 始终含图片脚注）
+	var userMsg *biz.ChatMessage
+	if len(metaItems) > 0 {
+		userMsg, err = s.chatUC.CreateMessageWithMetadata(ctx, sessionID, "user", persistContent, map[string]any{
+			"attachments": metaItems,
+		})
+	} else {
+		userMsg, err = s.chatUC.CreateMessage(ctx, sessionID, "user", persistContent)
+	}
 	if err != nil {
 		s.log.Errorf("SendMessage save user message failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(content), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
+	go chat.NotifyMemorySessionDirty(ctx, sessionID, len(persistContent), 1, s.chatUC, s.agentUC, chat.NewChatTranscriptProvider(s.chatUC))
 	chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, userMsg)
 
 	// 加载工具（session 归属已校验；channel peer 无 agent/tool PermUse）
@@ -444,23 +473,24 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
 	a := chat.BuildReActAgent(m, reg, agentText, maxHistory, opts...)
 
-	// 加载历史消息（已包含刚保存的 user 消息）
+	// 加载历史（含刚写入的 user）；组装时剔除当前 user，改用 modelContent+Parts
 	history, err := s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
 	if err != nil {
 		s.log.Errorf("SendMessage list history failed: session_id=%s err=%v", sessionID, err)
 		return nil, err
 	}
-
-	// 转换为 agent.Request.Messages（system 由 Harness PromptBuilder 写入）
-	messages := make([]model.Message, 0, len(history)+1)
+	prior := make([]*biz.ChatMessage, 0, len(history))
 	for _, h := range history {
-		if h.Role == "system" {
+		if userMsg != nil && h.ID == userMsg.ID {
 			continue
 		}
-		if strings.TrimSpace(h.Content) == "" {
-			continue
-		}
-		messages = append(messages, model.Message{Role: h.Role, Content: h.Content})
+		prior = append(prior, h)
+	}
+	currentUser := buildCurrentUserModelMessage(baseContent, persistContent, metas, agentMeta.Workspace)
+	messages := chat.AssembleTurnMessages(historyToModelMessages(prior), currentUser)
+	vision := &chat.VisionDegradeState{
+		PersistContent: persistContent,
+		HadImageParts:  len(currentUser.Parts) > 0,
 	}
 
 	// 注入 workspace_root、agent_id、session_id、user_id 供 MemoryStore 工具与 Prefetch 使用
@@ -479,11 +509,16 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	}
 
 	// 调用 Agent（附带记忆预取所需 metadata：session/agent/workspace/user_id/identity）
-	resp, err := a.Run(runCtx, &agent.Request{
-		Messages: messages,
-		Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
-	})
-	if err != nil {
+	var resp *agent.Response
+	for {
+		var err error
+		resp, err = a.Run(runCtx, &agent.Request{
+			Messages: messages,
+			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
+		})
+		if err == nil {
+			break
+		}
 		isH, vis, persist, raw := chat.DecomposeGuardrailRunError(err)
 		if isH && !raw && vis != "" {
 			if persist {
@@ -512,8 +547,13 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 				CreatedAt: time.Now().UTC().Format(time.RFC3339),
 			}, nil
 		}
-		s.log.Errorf("SendMessage run agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
-		return nil, err
+		retry, next := vision.TryDegrade(err, messages)
+		if !retry {
+			s.log.Errorf("SendMessage run agent failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
+			return nil, err
+		}
+		s.log.Infof("SendMessage %s session_id=%s agent_id=%s", chat.AttachmentVisionDegradedMarker, sessionID, session.AgentID)
+		messages = next
 	}
 	tr := chat.RunTraceFromMetadata(resp.Metadata)
 	s.persistTurnTrace(runCtx, sessionID, session.AgentID, tr)
@@ -544,8 +584,17 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	content := req.GetContent()
 	ir := chat.InputResponseFromContext(ctx)
 	cr := chat.ConfirmResponseFromContext(ctx)
-	if sessionID == "" || (content == "" && ir == nil && cr == nil) {
+	hitl := ir != nil || cr != nil
+	attachmentIDs := chat.UniqueNonEmpty(req.GetAttachmentIds())
+	if hitl {
+		// HITL paths ignore attachments (一期不绑).
+		attachmentIDs = nil
+	}
+	if sessionID == "" {
 		return nil, "", biz.ErrSessionNotFound
+	}
+	if err := validateSendMessagePayload(content, attachmentIDs, hitl); err != nil {
+		return nil, "", err
 	}
 
 	session, err := s.chatUC.GetSession(ctx, sessionID)
@@ -564,6 +613,14 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 	if err := requireRunWorkspace(agentMeta.Workspace, s.codeRoots); err != nil {
 		return nil, "", err
+	}
+
+	var turnAtts *resolvedTurnAttachments
+	if len(attachmentIDs) > 0 {
+		turnAtts, err = s.resolveTurnAttachments(ctx, sessionID, agentMeta.Workspace, attachmentIDs)
+		if err != nil {
+			return nil, "", err
+		}
 	}
 
 	if cr != nil && cr.Kind == "skill_manage" && cr.Token != "" {
@@ -720,9 +777,12 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream list history failed: session_id=%s err=%v", sessionID, err)
 		return nil, "", err
 	}
+	priorHistory := history
 
 	userContent := chat.UserMessageContentForTurn(content, ir)
 	var synthetic []model.Message
+	var messages []model.Message
+	var visionState *chat.VisionDegradeState
 	if ir != nil {
 		pending, outcome, applyErr := chat.ApplyInputResponse(ctx, sessionID, *ir, chat.AskUserPendingStore(), chat.AskUserFulfillmentStore())
 		if applyErr != nil {
@@ -741,44 +801,56 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		if err != nil {
 			return nil, "", err
 		}
+		messages = historyToModelMessages(history)
+		messages = chat.InjectSyntheticBeforeLastUser(messages, synthetic)
 	} else {
-		persistContent := strings.TrimSpace(userContent)
+		baseContent := strings.TrimSpace(userContent)
+		persistContent := baseContent
 		if persistContent == "" && cr != nil {
 			persistContent = chat.UserMessagePlaceholderForConfirm(cr.Kind)
+			baseContent = persistContent
 			userContent = persistContent
+		}
+		var metas []chat.AttachmentMeta
+		var metaItems []map[string]any
+		if turnAtts != nil {
+			metas = turnAtts.Metas
+			metaItems = turnAtts.MetadataItems
+			persistContent = chat.BuildUserContentWithAttachments(baseContent, metas, chat.ContentForPersist)
 		}
 		if persistContent != "" {
 			// Normal chat / confirm turns must persist the user row. Non-stream SendMessage
 			// already does; stream previously only saved on input_response, so reload showed
 			// assistant answer without the question.
-			userMsg, cerr := s.chatUC.CreateMessage(ctx, sessionID, "user", persistContent)
+			// 落库 content 始终含图片脚注（ContentForPersist）。
+			var userMsg *biz.ChatMessage
+			var cerr error
+			if len(metaItems) > 0 {
+				userMsg, cerr = s.chatUC.CreateMessageWithMetadata(ctx, sessionID, "user", persistContent, map[string]any{
+					"attachments": metaItems,
+				})
+			} else {
+				userMsg, cerr = s.chatUC.CreateMessage(ctx, sessionID, "user", persistContent)
+			}
 			if cerr != nil {
 				s.log.Errorf("SendMessageStream save user message failed: session_id=%s err=%v", sessionID, cerr)
 				return nil, "", cerr
 			}
 			go chat.NotifyMemorySessionDirty(ctx, sessionID, len(persistContent), 1, s.chatUC, s.agentUC, streamSessionProvider)
 			chat.NotifySessionMessageIndexed(ctx, s.chatUC, sessionID, userMsg)
-			history, err = s.chatUC.ListMessages(ctx, sessionID, maxHistory*2)
-			if err != nil {
-				return nil, "", err
-			}
-		}
-	}
 
-	messages := make([]model.Message, 0, len(history)+3)
-	for _, h := range history {
-		if h.Role == "system" {
-			continue
+			currentUser := buildCurrentUserModelMessage(baseContent, persistContent, metas, agentMeta.Workspace)
+			messages = chat.AssembleTurnMessages(historyToModelMessages(priorHistory), currentUser)
+			if len(currentUser.Parts) > 0 {
+				visionState = &chat.VisionDegradeState{
+					PersistContent: persistContent,
+					HadImageParts:  true,
+				}
+			}
+		} else {
+			messages = historyToModelMessages(priorHistory)
 		}
-		if strings.TrimSpace(h.Content) == "" {
-			continue
-		}
-		messages = append(messages, model.Message{Role: h.Role, Content: h.Content})
 	}
-	if ir != nil {
-		messages = chat.InjectSyntheticBeforeLastUser(messages, synthetic)
-	}
-	// Normal turns: user row is already in history after CreateMessage+reload above.
 
 	runCtx := context.WithValue(ctx, tool.ContextKeyWorkspaceRoot, agentMeta.Workspace)
 	runCtx = context.WithValue(runCtx, tool.ContextKeyAgentID, session.AgentID)
@@ -817,7 +889,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 			Metadata: prefetchRequestMetadata(sessionID, session.AgentID, agentMeta.Workspace, userID),
 		}
 
-		if _, err := s.streamAgentEvents(runCtx, sessionID, session.AgentID, agentMeta.Workspace, a, req, streamSessionProvider, ch); err != nil {
+		if _, err := s.streamAgentEventsWithVisionDegrade(runCtx, sessionID, session.AgentID, agentMeta.Workspace, a, req, streamSessionProvider, ch, visionState); err != nil {
 			return
 		}
 	}()

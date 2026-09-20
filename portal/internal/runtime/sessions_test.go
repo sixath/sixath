@@ -606,6 +606,52 @@ func TestRuntimeSessions_Messages(t *testing.T) {
 	}
 }
 
+type fakeModels struct {
+	lastSession string
+	lastIn      service.SetSessionModelInput
+	err         error
+}
+
+func (f *fakeModels) SetSessionModel(_ context.Context, sessionID string, in service.SetSessionModelInput) error {
+	f.lastSession = sessionID
+	f.lastIn = in
+	return f.err
+}
+
+func TestRuntimeSessions_PatchModel(t *testing.T) {
+	chat := newFakeChat()
+	sess, err := chat.CreateSession(biz.WithCallerUserID(context.Background(), "user-1"), "agent-x", "t", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := &fakeModels{}
+	svc := newTestService(chat, nil, &fakeSessions{byID: chat.sessions})
+	svc.models = models
+	srv := testRuntimeServer(t, svc)
+
+	req := runtimeReq(http.MethodPatch, "/runtime/v1/sessions/"+sess.ID+"/model",
+		`{"model_provider_id":"prov-1","model":"gpt-4o"}`, "user-1", true)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if models.lastSession != sess.ID || models.lastIn.ModelProviderID != "prov-1" || models.lastIn.Model != "gpt-4o" {
+		t.Fatalf("models call session=%s in=%+v", models.lastSession, models.lastIn)
+	}
+
+	clearReq := runtimeReq(http.MethodPatch, "/runtime/v1/sessions/"+sess.ID+"/model",
+		`{"choice":"agent_default"}`, "user-1", true)
+	clearRec := httptest.NewRecorder()
+	srv.ServeHTTP(clearRec, clearReq)
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("clear status = %d, body=%s", clearRec.Code, clearRec.Body.String())
+	}
+	if models.lastIn.Choice != "agent_default" {
+		t.Fatalf("clear in=%+v", models.lastIn)
+	}
+}
+
 func TestRuntimeSessions_UserMismatchForbidden(t *testing.T) {
 	chat := newFakeChat()
 	sess, err := chat.CreateSession(biz.WithCallerUserID(context.Background(), "owner"), "agent-x", "t", "")

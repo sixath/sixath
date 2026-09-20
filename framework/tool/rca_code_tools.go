@@ -32,6 +32,7 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 		Name: "rca_grep",
 		Description: "Search source code by regex across configured code roots (multi-repo). " +
 			"Prefer this over workspace search_files and over terminal/rg for source / call-chain analysis. " +
+			"When the user quotes an error message (报错原文), call this first before search_files or entering a VM. " +
 			"Each hit includes ±3 lines of numbered context by default (set context=0 for the hit line only). " +
 			"Skips vendor/, *_gen.go, and *.txt. Optionally limit to one repo. Returns file, line and snippet with the owning repo.",
 		Toolset: ToolsetRCA,

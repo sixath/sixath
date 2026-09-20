@@ -26,6 +26,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
 import RequireAuth from './components/RequireAuth'
+import ThemeToggle from './components/ThemeToggle'
 import { getSessionEmail, hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
 import './App.css'
 
@@ -191,34 +192,37 @@ function AppShell() {
               <span className="nav-item__icon">🏢</span>
               组织
             </NavLink>
-            <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-              <span className="nav-item__icon">⚙️</span>
-              设置{tokenConfigured ? '' : ' ·!'}
+          </div>
+        </nav>
+        <div className="sidebar-user">
+          <div
+            className={`sidebar-user__card${loc.pathname.startsWith('/settings') ? ' is-active' : ''}${tokenConfigured ? '' : ' needs-attn'}`}
+          >
+            <NavLink
+              to="/settings"
+              className="sidebar-user__main"
+              title={tokenConfigured ? '设置' : '设置（未配置 Token）'}
+            >
+              <div className="sidebar-user__avatar">{sessionInitials(sessionEmail)}</div>
+              <div className="sidebar-user__meta">
+                <p className="sidebar-user__name">{sessionDisplayName(sessionEmail)}</p>
+                <p className={`sidebar-user__status${emailUnverified ? '' : ' is-ok'}`}>
+                  <span className="sidebar-user__status-dot" aria-hidden />
+                  {emailUnverified ? '未验证邮箱' : sessionEmail || '本地会话'}
+                </p>
+              </div>
             </NavLink>
             <button
               type="button"
-              className="nav-item"
+              className="sidebar-user__logout"
               onClick={() => {
                 logout()
                 navigate('/login', { replace: true })
               }}
             >
-              <span className="nav-item__icon">⎋</span>
               退出
             </button>
           </div>
-        </nav>
-        <div className="sidebar-user">
-          <Link to="/settings" className="sidebar-user__card">
-            <div className="sidebar-user__avatar">{sessionInitials(sessionEmail)}</div>
-            <div className="sidebar-user__meta">
-              <p className="sidebar-user__name">{sessionDisplayName(sessionEmail)}</p>
-              <p className={`sidebar-user__status${emailUnverified ? '' : ' is-ok'}`}>
-                <span className="sidebar-user__status-dot" aria-hidden />
-                {emailUnverified ? '未验证邮箱' : sessionEmail || '本地会话'}
-              </p>
-            </div>
-          </Link>
         </div>
       </aside>
       <header className="topbar">
@@ -234,6 +238,9 @@ function AppShell() {
           </button>
         )}
         <Breadcrumb />
+        <div className="topbar__actions">
+          <ThemeToggle />
+        </div>
       </header>
       <main className="content">
         <div className="content-inner">

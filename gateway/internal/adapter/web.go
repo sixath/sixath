@@ -42,6 +42,10 @@ func MountWeb(mux *http.ServeMux, deps WebDeps) {
 	mux.HandleFunc("GET /api/v1/sessions/{id}/result-files", h.listResultFiles)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/messages/stream", h.streamMessages)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/rewind", h.rewind)
+	mux.HandleFunc("PATCH /api/v1/sessions/{id}/model", h.patchModel)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/attachments", h.proxyAttachment)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/attachments/{att_id}", h.proxyAttachment)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}/attachments/{att_id}", h.proxyAttachment)
 }
 
 func newWebHandler(deps WebDeps) *WebHandler {
@@ -58,6 +62,7 @@ func newWebHandler(deps WebDeps) *WebHandler {
 
 type streamRequestBody struct {
 	Content         string          `json:"content"`
+	AttachmentIds   []string        `json:"attachment_ids"`
 	ConfirmResponse json.RawMessage `json:"confirm_response"`
 	InputResponse   json.RawMessage `json:"input_response"`
 }
@@ -176,6 +181,76 @@ func (h *WebHandler) rewind(w http.ResponseWriter, r *http.Request) {
 	writeRuntimeJSON(w, raw, err)
 }
 
+func (h *WebHandler) patchModel(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUser(w, r)
+	if !ok {
+		return
+	}
+	var body runtimeclient.SetSessionModelRequest
+	if err := decodeJSONBody(r, &body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	raw, err := h.runtime.SetSessionModel(r.Context(), userID, r.PathValue("id"), body)
+	writeRuntimeJSON(w, raw, err)
+}
+
+// proxyAttachment forwards Web attachment upload/download/delete to Portal chat API.
+// Vite proxies /api/v1/sessions/* to Gateway; Portal hosts the multipart handlers.
+func (h *WebHandler) proxyAttachment(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireUser(w, r); !ok {
+		return
+	}
+	if h.portalBase == "" {
+		http.Error(w, "portal not configured", http.StatusInternalServerError)
+		return
+	}
+	target := h.portalBase + r.URL.Path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
+	if err != nil {
+		http.Error(w, "proxy request failed", http.StatusInternalServerError)
+		return
+	}
+	if auth := r.Header.Get("Authorization"); auth != "" {
+		outReq.Header.Set("Authorization", auth)
+	}
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		outReq.Header.Set("Content-Type", ct)
+	}
+	if cl := r.Header.Get("Content-Length"); cl != "" {
+		outReq.Header.Set("Content-Length", cl)
+		if n, err := strconv.ParseInt(cl, 10, 64); err == nil && n >= 0 {
+			outReq.ContentLength = n
+		}
+	}
+	client := h.httpClient
+	if r.Method == http.MethodPost || r.Method == http.MethodGet {
+		// Uploads / downloads can exceed the short auth/me client timeout.
+		client = &http.Client{Timeout: 120 * time.Second}
+	}
+	resp, err := client.Do(outReq)
+	if err != nil {
+		http.Error(w, "portal attachment proxy failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	for _, key := range []string{
+		"Content-Type",
+		"Content-Disposition",
+		"X-Content-Type-Options",
+		"Content-Length",
+	} {
+		if v := resp.Header.Get(key); v != "" {
+			w.Header().Set(key, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, 32<<20))
+}
+
 func (h *WebHandler) streamMessages(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUser(w, r)
 	if !ok {
@@ -189,6 +264,7 @@ func (h *WebHandler) streamMessages(w http.ResponseWriter, r *http.Request) {
 	turn := runtimeclient.TurnRequest{
 		SessionID:       r.PathValue("id"),
 		Content:         body.Content,
+		AttachmentIds:   body.AttachmentIds,
 		ConfirmResponse: body.ConfirmResponse,
 		InputResponse:   body.InputResponse,
 	}

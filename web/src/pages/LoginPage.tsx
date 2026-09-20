@@ -8,6 +8,7 @@ import {
 } from '../api/auth'
 import { login } from '../api/sessionAuth'
 import './LoginPage.css'
+import ThemeToggle from '../components/ThemeToggle'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -62,6 +63,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
+      <ThemeToggle />
       <form className="login-card" onSubmit={onEmailSubmit}>
         <h1>Sixath 登录</h1>
         <p className="login-muted">使用邮箱与密码登录</p>

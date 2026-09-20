@@ -30,6 +30,9 @@ func patchChatCompletionMessageForStrictGateways(msg *openai.ChatCompletionMessa
 	if msg == nil {
 		return
 	}
+	if len(msg.MultiContent) > 0 {
+		return
+	}
 	msg.Content = sanitizeOpenAIMessageContent(msg.Content)
 	role := strings.ToLower(msg.Role)
 	// 仅发起 tool_calls 时 OpenAI 允许 content 为空；部分兼容实现（如通义 OpenAI 兼容）要求长度 ∈ [1,1e6]。
@@ -163,8 +166,28 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 
 func openAIChatMessage(m Message) (openai.ChatCompletionMessage, error) {
 	msg := openai.ChatCompletionMessage{
-		Role:    m.Role,
-		Content: m.Content,
+		Role: m.Role,
+	}
+	if len(m.Parts) > 0 {
+		mc := make([]openai.ChatMessagePart, 0, len(m.Parts))
+		for _, p := range m.Parts {
+			switch p.Type {
+			case ContentTypeText:
+				mc = append(mc, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: sanitizeOpenAIMessageContent(p.Text)})
+			case ContentTypeImageURL:
+				mc = append(mc, openai.ChatMessagePart{
+					Type:     openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{URL: p.URL},
+				})
+			default:
+			}
+		}
+		if len(mc) > 0 {
+			msg.MultiContent = mc
+		}
+	}
+	if msg.MultiContent == nil {
+		msg.Content = m.Content
 	}
 	if m.Metadata != nil {
 		if id, _ := m.Metadata["tool_call_id"].(string); id != "" {

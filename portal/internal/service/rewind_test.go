@@ -54,6 +54,15 @@ func (r *rewindMsgRepo) SoftDeactivateAfter(_ context.Context, sessionID string,
 func (r *rewindMsgRepo) ListActiveOrdered(context.Context, string) ([]*biz.ChatMessage, error) {
 	return nil, nil
 }
+func (r *rewindMsgRepo) ListBySessionIncludingInactive(_ context.Context, sessionID string) ([]*biz.ChatMessage, error) {
+	var out []*biz.ChatMessage
+	for _, m := range r.msgs {
+		if m.SessionID == sessionID {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
 func (r *rewindMsgRepo) InsertClone(context.Context, string, *biz.ChatMessage) (*biz.ChatMessage, error) {
 	return nil, nil
 }
@@ -125,7 +134,7 @@ func TestRewindToMessage_SoftHidesAndBumps(t *testing.T) {
 	}
 	sessRepo := &rewindSessRepo{sess: sess}
 	msgRepo := &rewindMsgRepo{msgs: msgs}
-	uc := biz.NewChatUsecase(sessRepo, msgRepo, nil, nil, nil)
+	uc := biz.NewChatUsecase(sessRepo, msgRepo, nil, nil, nil, nil)
 	traceStore := &rewindTraceStore{}
 	s := &ChatService{
 		chatUC:         uc,

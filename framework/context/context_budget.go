@@ -9,7 +9,7 @@ import (
 
 // DefaultMaxContextRunes 默认上下文预算（Unicode 码点近似），用于 ReAct 等多轮场景；
 // 实际 token 与语言相关，调用方可按需调整。
-const DefaultMaxContextRunes = 200_000
+const DefaultMaxContextRunes = 200_000_0
 
 // plainTextForBudget 估算单条消息占用的「文本量」（与 DashScope 侧 plain 文本规则一致）。
 func plainTextForBudget(m model.Message) string {
@@ -170,6 +170,7 @@ func CompressMessagesByRunesBudget(msgs []model.Message, maxRunes int) []model.M
 	if beforeRunes <= maxRunes {
 		return msgs
 	}
+	originalQ := FirstInvestigationUserContent(msgs)
 	beforeLen := len(msgs)
 	out := stripLeadingOrphanToolsAfterSystem(compressMessagesByRunesBudgetInner(msgs, maxRunes))
 	if len(out) >= beforeLen {
@@ -180,7 +181,7 @@ func CompressMessagesByRunesBudget(msgs []model.Message, maxRunes int) []model.M
 		dropped = 1
 	}
 	h := leadingSystemCount(out)
-	return stripLeadingOrphanToolsAfterSystem(insertCompressionNotice(out, h, dropped))
+	return stripLeadingOrphanToolsAfterSystem(insertCompressionNotice(out, h, dropped, originalQ))
 }
 
 func compressionNoticeUserMessage(m model.Message) bool {
@@ -194,8 +195,47 @@ func compressionNoticeUserMessage(m model.Message) bool {
 	return strings.Contains(m.Content, "上下文已压缩")
 }
 
-func insertCompressionNotice(msgs []model.Message, head int, droppedCount int) []model.Message {
+func syntheticUserMessage(m model.Message) bool {
+	if compressionNoticeUserMessage(m) {
+		return true
+	}
+	if m.Metadata != nil {
+		if s, ok := m.Metadata[model.MetadataKeySixathOrigin].(string); ok {
+			switch strings.TrimSpace(s) {
+			case model.OriginForcedSummary, model.OriginCompressionNotice, model.OriginL2Handoff, model.OriginCompactBoundary:
+				return true
+			}
+		}
+	}
+	if strings.HasPrefix(strings.TrimSpace(m.Content), "You have finished collecting tool results.") {
+		return true
+	}
+	return false
+}
+
+// FirstInvestigationUserContent returns the first real user question in msgs,
+// skipping compression notices and forced-summary closers.
+func FirstInvestigationUserContent(msgs []model.Message) string {
+	for _, m := range msgs {
+		if !strings.EqualFold(m.Role, "user") {
+			continue
+		}
+		if syntheticUserMessage(m) {
+			continue
+		}
+		if q := strings.TrimSpace(plainTextForBudget(m)); q != "" {
+			return q
+		}
+	}
+	return ""
+}
+
+func insertCompressionNotice(msgs []model.Message, head int, droppedCount int, originalQ string) []model.Message {
 	text := fmt.Sprintf("[上下文已压缩：已省略较早的 %d 条消息；以下为保留的最近对话。]", droppedCount)
+	if q := strings.TrimSpace(originalQ); q != "" {
+		q = model.TruncateMessageRunes(q, 2000, "…")
+		text += fmt.Sprintf(" 本轮原始问题仍是：%s。请基于保留的工具结果作答，禁止要求用户重述问题。", q)
+	}
 	note := model.Message{
 		Role:    "user",
 		Content: text,

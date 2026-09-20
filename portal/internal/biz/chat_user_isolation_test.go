@@ -85,7 +85,7 @@ func TestChatSessionUserIsolation(t *testing.T) {
 			"session-a": {ID: "session-a", UserID: "user-a", AgentID: "agent-1", Title: "user A session"},
 		},
 	}
-	uc := NewChatUsecase(repo, nil, nil, nil, nil)
+	uc := NewChatUsecase(repo, nil, nil, nil, nil, nil)
 
 	if _, err := uc.GetSession(WithCallerUserID(context.Background(), "user-b"), "session-a"); !isReason(err, "SESSION_NOT_FOUND") {
 		t.Fatalf("GetSession by user B error = %v, want SESSION_NOT_FOUND", err)
@@ -113,7 +113,7 @@ func TestCreateSessionRequiresAgentUse(t *testing.T) {
 	resources.byPayload["agent:agent-1"] = resource
 	resources.grants[resource.ID] = []ResourceGrant{{ResourceID: resource.ID, GranteeType: "user", GranteeID: "viewer", Perm: PermView}}
 
-	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources))
+	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources), nil)
 	ctx := WithCallerUserID(context.Background(), "viewer")
 	if _, err := uc.CreateSession(ctx, "agent-1", "", ""); !isReason(err, "FORBIDDEN_PERM") {
 		t.Fatalf("CreateSession without agent use error = %v, want FORBIDDEN_PERM", err)
@@ -137,7 +137,7 @@ func TestSearchSessionsWithAgentFilterRequiresAgentUse(t *testing.T) {
 	resources.byPayload["agent:agent-1"] = resource
 	resources.grants[resource.ID] = []ResourceGrant{{ResourceID: resource.ID, GranteeType: "user", GranteeID: "viewer", Perm: PermView}}
 
-	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources))
+	uc := NewChatUsecase(&fakeChatSessionRepo{sessions: map[string]*ChatSession{}}, nil, agents, resources, NewAccessChecker(resources), nil)
 	if _, _, err := uc.SearchSessions(WithCallerUserID(context.Background(), "viewer"), "needle", "agent-1", 1); !isReason(err, "FORBIDDEN_PERM") {
 		t.Fatalf("SearchSessions with view-only agent error = %v, want FORBIDDEN_PERM", err)
 	}

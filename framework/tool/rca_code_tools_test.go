@@ -597,3 +597,17 @@ func TestRCAGrep_SkipsVendorGenAndTxt(t *testing.T) {
 		t.Fatalf("file=%v", matches[0]["file"])
 	}
 }
+
+func TestRCAGrep_DescriptionSaysQuotedErrorFirst(t *testing.T) {
+	reg := newRCARegistry(t, []string{t.TempDir()})
+	tl, ok := reg.Get("rca_grep")
+	if !ok {
+		t.Fatal("rca_grep missing")
+	}
+	if !strings.Contains(tl.Description, "search_files") {
+		t.Fatalf("rca_grep should tell the model not to use search_files, got %q", tl.Description)
+	}
+	if !strings.Contains(strings.ToLower(tl.Description), "error") && !strings.Contains(tl.Description, "报错") {
+		t.Fatalf("rca_grep should mention quoted error strings, got %q", tl.Description)
+	}
+}

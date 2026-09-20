@@ -32,21 +32,22 @@
 
 .session-sidebar-new {
   width: 100%;
-  padding: 0.75rem 0.85rem;
+  padding: 0.7rem 0.85rem;
   border-radius: 0.75rem;
-  border: none;
-  background: var(--brand-indigo, #4f46e5);
-  color: #fff;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px 0 rgba(79, 70, 229, 0.39);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow var(--duration-fast);
+  box-shadow: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .session-sidebar-new:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 6px 15px rgba(79, 70, 229, 0.3);
+  background: #e0e7ff;
+  border-color: #a5b4fc;
+  color: #3730a3;
 }
 
 .session-sidebar-search-wrap {
@@ -65,7 +66,7 @@
   font-size: 0.875rem;
   background: #f1f5f9;
   color: var(--text-strong);
-  color-scheme: light;
+  color-scheme: inherit;
 }
 
 .session-sidebar-search:focus {

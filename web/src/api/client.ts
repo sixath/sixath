@@ -1072,6 +1072,15 @@ export interface SessionSearchHit {
   updated_at: string
 }
 
+export type ChatAttachment = {
+  id: string
+  kind: 'image' | 'text'
+  mime: string
+  name: string
+  size: number
+  relative_path: string
+}
+
 export interface ChatMessage {
   id: string
   session_id: string
@@ -1084,6 +1093,8 @@ export interface ChatMessage {
     compact_summary_hash?: string
     /** Finalize 后的执行时间线；刷新后从 listMessages 回放 */
     timeline?: TimelineNode[]
+    /** 用户消息绑定的附件（刷新后回放缩略图 / 下载） */
+    attachments?: ChatAttachment[]
   }
 }
 
@@ -1158,12 +1169,56 @@ function normalizeMessageMetadata(raw: unknown): ChatMessage['metadata'] | undef
 
   const timeline = normalizeTimeline(md.timeline)
 
-  if (!sources && !sixathOrigin && !compactSummaryHash && !timeline) return undefined
+  let attachments: ChatAttachment[] | undefined
+  const attachmentsRaw = md.attachments
+  if (Array.isArray(attachmentsRaw) && attachmentsRaw.length > 0) {
+    const parsed: ChatAttachment[] = []
+    for (const item of attachmentsRaw) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      const id = typeof row.id === 'string' ? row.id : ''
+      if (!id) continue
+      const kindRaw = typeof row.kind === 'string' ? row.kind : ''
+      const kind: ChatAttachment['kind'] = kindRaw === 'image' ? 'image' : 'text'
+      parsed.push({
+        id,
+        kind,
+        mime: typeof row.mime === 'string' ? row.mime : '',
+        name: typeof row.name === 'string' ? row.name : id,
+        size: typeof row.size === 'number' ? row.size : Number(row.size) || 0,
+        relative_path:
+          typeof row.relative_path === 'string'
+            ? row.relative_path
+            : typeof row.relativePath === 'string'
+              ? row.relativePath
+              : '',
+      })
+    }
+    if (parsed.length > 0) attachments = parsed
+  }
+
+  if (!sources && !sixathOrigin && !compactSummaryHash && !timeline && !attachments) return undefined
   return {
     sources,
     sixath_origin: sixathOrigin,
     compact_summary_hash: compactSummaryHash,
     timeline,
+    attachments,
+  }
+}
+
+function normalizeChatAttachment(raw: Record<string, unknown>): ChatAttachment {
+  const kindRaw = typeof raw.kind === 'string' ? raw.kind : ''
+  return {
+    id: (raw.id as string | undefined) ?? '',
+    kind: kindRaw === 'image' ? 'image' : 'text',
+    mime: (raw.mime as string | undefined) ?? '',
+    name: (raw.name as string | undefined) ?? '',
+    size: typeof raw.size === 'number' ? raw.size : Number(raw.size) || 0,
+    relative_path:
+      (raw.relative_path as string | undefined) ??
+      (raw.relativePath as string | undefined) ??
+      '',
   }
 }
 
@@ -1301,6 +1356,62 @@ export const chatApi = {
     const data = await request<{ ret?: BaseResponse }>(`/sessions/${id}`, { method: 'DELETE' })
     checkRet(data)
   },
+  /** POST multipart field `file`; do not set Content-Type (browser sets boundary). */
+  uploadAttachment: async (sessionId: string, file: File): Promise<ChatAttachment> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/attachments`, {
+      method: 'POST',
+      headers: {
+        ...authHeaders(),
+      },
+      body: form,
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      if (maybeUnauthorized(res.status, err)) {
+        handleUnauthorized()
+      }
+      throw new Error(httpErrorMessage(res.status, err))
+    }
+    const data = (await res.json()) as Record<string, unknown> & { ret?: BaseResponse }
+    checkRet(data)
+    return normalizeChatAttachment(data)
+  },
+  /** DELETE unbound attachment; 204 on success. Callers may ignore 409 (already bound). */
+  deleteAttachment: async (sessionId: string, attId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/attachments/${encodeURIComponent(attId)}`, {
+      method: 'DELETE',
+      headers: {
+        ...authHeaders(),
+      },
+    })
+    if (res.status === 204 || res.ok) return
+    const err = await res.text()
+    if (maybeUnauthorized(res.status, err)) {
+      handleUnauthorized()
+    }
+    const e = new Error(httpErrorMessage(res.status, err)) as Error & { status?: number }
+    e.status = res.status
+    throw e
+  },
+  /** Authenticated GET for thumbnails / downloads (needs Authorization header). */
+  fetchAttachmentBlob: async (sessionId: string, attId: string): Promise<Blob> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/attachments/${encodeURIComponent(attId)}`, {
+      method: 'GET',
+      headers: {
+        ...authHeaders(),
+      },
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      if (maybeUnauthorized(res.status, err)) {
+        handleUnauthorized()
+      }
+      throw new Error(httpErrorMessage(res.status, err))
+    }
+    return res.blob()
+  },
   /** 流式发送消息，onChunk 收到增量，onDone 结束，onError 错误；返回 AbortController 用于停止 */
   sendMessageStream: (
     sessionId: string,
@@ -1320,6 +1431,7 @@ export const chatApi = {
     options?: {
       input_response?: ChatInputSubmitBody['input_response']
       confirm_response?: { kind: string; token: string }
+      attachment_ids?: string[]
     }
   ): AbortController => {
     const ac = new AbortController()
@@ -1329,6 +1441,9 @@ export const chatApi = {
     }
     if (options?.confirm_response) {
       body.confirm_response = options.confirm_response
+    }
+    if (options?.attachment_ids && options.attachment_ids.length > 0) {
+      body.attachment_ids = options.attachment_ids
     }
     fetch(`${API_BASE}/sessions/${sessionId}/messages/stream`, {
       method: 'POST',

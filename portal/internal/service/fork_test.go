@@ -13,7 +13,7 @@ import (
 )
 
 func TestForkToMessage_InvalidArgs(t *testing.T) {
-	s := &ChatService{chatUC: biz.NewChatUsecase(&rewindSessRepo{sess: &biz.ChatSession{ID: "s1", UserID: "u1", AgentID: "a1"}}, &rewindMsgRepo{msgs: map[string]*biz.ChatMessage{}}, nil, nil, nil), log: log.NewHelper(log.DefaultLogger)}
+	s := &ChatService{chatUC: biz.NewChatUsecase(&rewindSessRepo{sess: &biz.ChatSession{ID: "s1", UserID: "u1", AgentID: "a1"}}, &rewindMsgRepo{msgs: map[string]*biz.ChatMessage{}}, nil, nil, nil, nil), log: log.NewHelper(log.DefaultLogger)}
 	ctx := biz.WithCallerUserID(context.Background(), "u1")
 	_, err := s.ForkToMessage(ctx, "", "m1")
 	if err == nil {
@@ -31,7 +31,7 @@ func TestForkToMessage_WrongSessionMessage(t *testing.T) {
 			&rewindMsgRepo{msgs: map[string]*biz.ChatMessage{
 				"m1": {ID: "m1", SessionID: "other", Role: "user", Content: "x", Active: true},
 			}},
-			nil, nil, nil,
+			nil, nil, nil, nil,
 		),
 		log: log.NewHelper(log.DefaultLogger),
 	}
@@ -52,7 +52,7 @@ func TestForkToMessage_Inactive(t *testing.T) {
 			&rewindMsgRepo{msgs: map[string]*biz.ChatMessage{
 				"m1": {ID: "m1", SessionID: "s1", Role: "user", Content: "x", Active: false},
 			}},
-			nil, nil, nil,
+			nil, nil, nil, nil,
 		),
 		log: log.NewHelper(log.DefaultLogger),
 	}
@@ -73,7 +73,7 @@ func TestForkToMessage_NilDB(t *testing.T) {
 			&rewindMsgRepo{msgs: map[string]*biz.ChatMessage{
 				"m1": {ID: "m1", SessionID: "s1", Role: "user", Content: "hi", Active: true},
 			}},
-			nil, nil, nil,
+			nil, nil, nil, nil,
 		),
 		log: log.NewHelper(log.DefaultLogger),
 	}

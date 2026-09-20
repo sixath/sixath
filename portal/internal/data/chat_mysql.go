@@ -262,6 +262,7 @@ func (r *chatSessionRepo) SetModelOverride(ctx context.Context, sessionID, provi
 func (r *chatSessionRepo) Delete(ctx context.Context, id string) error {
 	// 级联删除消息
 	r.db.WithContext(ctx).Where("session_id = ?", id).Delete(&model.ChatMessage{})
+	r.db.WithContext(ctx).Where("session_id = ?", id).Delete(&model.ChatAttachment{})
 	res := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.ChatSession{})
 	if res.Error != nil {
 		return res.Error
@@ -330,6 +331,23 @@ func (r *chatMessageRepo) ListActiveOrdered(ctx context.Context, sessionID strin
 	var rows []model.ChatMessage
 	if err := r.db.WithContext(ctx).
 		Where("session_id = ? AND active = ?", sessionID, true).
+		Order("created_at ASC, id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]*biz.ChatMessage, len(rows))
+	for i := range rows {
+		items[i] = toBizChatMessage(&rows[i])
+	}
+	return items, nil
+}
+
+// ListBySessionIncludingInactive loads all messages for attachment reference checks.
+// No active filter and no row limit (v1 sessions are small enough).
+func (r *chatMessageRepo) ListBySessionIncludingInactive(ctx context.Context, sessionID string) ([]*biz.ChatMessage, error) {
+	var rows []model.ChatMessage
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
 		Order("created_at ASC, id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
