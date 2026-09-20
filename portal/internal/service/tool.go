@@ -44,6 +44,12 @@ func structToToolConfig(s *structpb.Struct) *toolv1.ToolConfig {
 		return &toolv1.ToolConfig{}
 	}
 	c := &toolv1.ToolConfig{}
+	if v, ok := s.Fields["egress_mode"]; ok {
+		c.EgressMode = v.GetStringValue()
+	}
+	if v, ok := s.Fields["proxy_id"]; ok {
+		c.ProxyId = v.GetStringValue()
+	}
 	if v, ok := s.Fields["func_path"]; ok && v.GetStringValue() != "" {
 		c.FuncPath = v.GetStringValue()
 	}
@@ -225,6 +231,12 @@ func protoToolConfigToStruct(c *toolv1.ToolConfig) *structpb.Struct {
 		dsFields["purpose"], _ = structpb.NewValue(c.Datasource.Purpose)
 		dsFields["body_field"], _ = structpb.NewValue(c.Datasource.BodyField)
 		fields["datasource"] = structpb.NewStructValue(&structpb.Struct{Fields: dsFields})
+	}
+	if c.EgressMode != "" {
+		fields["egress_mode"], _ = structpb.NewValue(c.EgressMode)
+	}
+	if c.ProxyId != "" {
+		fields["proxy_id"], _ = structpb.NewValue(c.ProxyId)
 	}
 	if c.Rca != nil {
 		rcaFields := map[string]interface{}{

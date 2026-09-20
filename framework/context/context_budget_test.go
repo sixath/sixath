@@ -94,3 +94,47 @@ func TestCompressMessagesByRunesBudget_DropsLeadingToolRound(t *testing.T) {
 		t.Fatalf("expected final assistant kept: %#v", out)
 	}
 }
+
+func TestCompressMessagesByRunesBudget_PinsOriginalQuestionInNotice(t *testing.T) {
+	original := "为什么这个vmid=199306 上线的时候报操作不合法，需重启实例后才允许上线"
+	msgs := []model.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: original},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: strings.Repeat("y", 80)},
+		{Role: "assistant", Content: "a2"},
+	}
+	out := CompressMessagesByRunesBudget(msgs, 120)
+	joined := ""
+	for _, m := range out {
+		joined += m.Content
+	}
+	if !strings.Contains(joined, "vmid=199306") || !strings.Contains(joined, "操作不合法") {
+		t.Fatalf("original question must survive compression, got %#v", out)
+	}
+	if !strings.Contains(joined, "禁止要求用户重述") {
+		t.Fatalf("compression notice must forbid restating the question, got %#v", out)
+	}
+}
+
+func TestCompressMessagesByRunesBudget_ForcedSummaryCloserKeepsOriginalQuestion(t *testing.T) {
+	original := "为什么这个vmid=199306 上线报操作不合法，需重启实例后才允许上线"
+	closer := "You have finished collecting tool results. Do not call any tools. Reply directly with a complete answer to the user's original question."
+	msgs := []model.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: original},
+		{Role: "assistant", Content: " ", Metadata: map[string]any{"tool_calls": []model.ToolCall{{
+			ID: "c1", Name: "es_log_query", Arguments: map[string]any{},
+		}}}},
+		{Role: "tool", Content: strings.Repeat("LOG", 400), Metadata: map[string]any{"tool_call_id": "c1"}},
+		{Role: "user", Content: closer, Metadata: map[string]any{model.MetadataKeySixathOrigin: model.OriginForcedSummary}},
+	}
+	out := CompressMessagesByRunesBudget(msgs, 180)
+	joined := ""
+	for _, m := range out {
+		joined += m.Content + "\n"
+	}
+	if !strings.Contains(joined, "vmid=199306") || !strings.Contains(joined, "操作不合法") {
+		t.Fatalf("closer turn must not hide original question, got %#v", out)
+	}
+}

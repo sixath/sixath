@@ -52,6 +52,7 @@ const (
 	ResourceTypeTool      ResourceType = "tool"
 	ResourceTypeSkill     ResourceType = "skill"
 	ResourceTypeMcpServer ResourceType = "mcp_server"
+	ResourceTypeProxy     ResourceType = "proxy"
 )
 
 type Resource struct {

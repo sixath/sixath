@@ -10,6 +10,8 @@ import (
 
 	"backend/internal/biz"
 
+	"log/slog"
+
 	"github.com/sixath/framework/config"
 	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/datasource"
@@ -19,6 +21,7 @@ import (
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/netx"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/templates"
 	"github.com/sixath/framework/tool"
@@ -64,6 +67,11 @@ type RegistryBuildResult struct {
 type RegistryBuildOptions struct {
 	// Workspace is the agent writable root; rca_* uses workspace/code when present.
 	Workspace string
+	// AgentProxyID is agents.proxy_id (empty = direct inherit).
+	AgentProxyID string
+	// Proxies is the preloaded catalog (no ACL). A nonempty AgentProxyID
+	// missing from Proxies is a permanent miss (fail-closed; no silent direct).
+	Proxies map[string]netx.Spec
 }
 
 // BuildRegistry 根据 Agent 绑定的工具与 MCP Server 列表构建 tool.Registry。
@@ -79,6 +87,7 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	var mcpServers []toolskill.McpServerEntry
 	var datasourceConfigs []datasource.Config
 	var dsBindings []DatasourceBinding
+	var pendingVM []map[string]interface{}
 
 	for _, t := range tools {
 		cfg := toolConfigToMap(t.Config)
@@ -86,6 +95,10 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 		case biz.ToolTypeMCP:
 			mc := tool.McpConfigFromMap(cfg)
 			if mc != nil {
+				if err := applyMCPHTTPClient(mc, toolEgressBinding(cfg), o); err != nil {
+					slog.Error("egress: skip mcp tool, proxy not in catalog", "tool", t.Name, "id", mc.Id, "err", err)
+					break
+				}
 				tool.RegisterMcpTool(reg, mc)
 				mcpServers = append(mcpServers, mcpEntryFromConfig(mc))
 			}
@@ -101,21 +114,72 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 				return nil, fmt.Errorf("数据源工具 %q 配置缺少 type", t.Name)
 			}
 			dsCfg = canonicalDatasourceConfig(t.Name, dsCfg)
-			datasourceConfigs = append(datasourceConfigs, dsCfg)
 			b := bindingFromConfig(t.Name, dsCfg, nil)
 			// purpose / default_index live on the tool config map, not datasource.Config.
 			b.DefaultIndex = mapStringField(dsMap, "default_index", "defaultIndex")
 			b.Purpose = mapStringField(dsMap, "purpose")
+			if err := applyDatasourceEgress(&dsCfg, toolEgressBinding(cfg), o); err != nil {
+				slog.Error("egress: datasource unavailable", "tool", t.Name, "id", dsCfg.ID, "err", err)
+				b.Available = false
+				b.Err = err.Error()
+			}
+			datasourceConfigs = append(datasourceConfigs, dsCfg)
 			dsBindings = append(dsBindings, b)
 		case biz.ToolTypeRCA:
-			registerRCATool(reg, cfg, o.Workspace)
+			rcaMap, _ := cfg["rca"].(map[string]interface{})
+			funcPath, _ := rcaMap["func_path"].(string)
+			if funcPath == "vm_run_cmd" {
+				pendingVM = append(pendingVM, cfg)
+				break
+			}
+			registerRCATool(reg, cfg, o.Workspace, o)
 		}
 	}
 
+	bound, err := registerBoundMCPServers(reg, servers, o)
+	if err != nil {
+		return nil, err
+	}
+	mcpServers = append(mcpServers, bound...)
+
+	var dsPrompt string
+	var mysqlExec executor.Executor
+	var mysqlIDs []string
+	if len(datasourceConfigs) > 0 {
+		registered, prompt, exec, ids, err := registerDatasourceTools(reg, datasourceConfigs, dsBindings)
+		if err != nil {
+			return nil, err
+		}
+		dsBindings = registered
+		dsPrompt = prompt
+		mysqlExec = exec
+		mysqlIDs = ids
+	}
+	for _, cfg := range pendingVM {
+		registerVMRunCmdFromPortal(reg, cfg, o, mysqlExec, mysqlIDs)
+	}
+
+	registerESLogFromAgentTools(reg, tools, o)
+	applyHTTPRequestOverlay(reg, o)
+
+	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
+}
+
+// registerBoundMCPServers registers ListByAgent MCP servers. Same-id rows already
+// marked on the registry are skipped before applyMCPHTTPClient / RegisterMcpTool.
+func registerBoundMCPServers(reg *tool.Registry, servers []*biz.McpServerMeta, o RegistryBuildOptions) ([]toolskill.McpServerEntry, error) {
+	var mcpServers []toolskill.McpServerEntry
 	for _, s := range servers {
 		mc := biz.McpServerToConfig(s)
 		if mc == nil {
 			continue
+		}
+		if reg.HasMcpServer(mc.Id) {
+			continue
+		}
+		if err := applyMCPHTTPClient(mc, netx.Binding{Mode: netx.ModeInherit}, o); err != nil {
+			slog.Error("egress: skip mcp server, proxy not in catalog", "id", mc.Id, "err", err)
+			return nil, fmt.Errorf("mcp server %q failed to register (check command/endpoint)", mc.Id)
 		}
 		tool.RegisterMcpTool(reg, mc)
 		if !reg.HasMcpServer(mc.Id) {
@@ -123,20 +187,7 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 		}
 		mcpServers = append(mcpServers, mcpEntryFromConfig(mc))
 	}
-
-	var dsPrompt string
-	if len(datasourceConfigs) > 0 {
-		registered, prompt, err := registerDatasourceTools(reg, datasourceConfigs, dsBindings)
-		if err != nil {
-			return nil, err
-		}
-		dsBindings = registered
-		dsPrompt = prompt
-	}
-
-	registerESLogFromAgentTools(reg, tools)
-
-	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
+	return mcpServers, nil
 }
 
 func mcpEntryFromConfig(mc *tool.McpConfig) toolskill.McpServerEntry {
@@ -176,7 +227,8 @@ func canonicalDatasourceConfig(toolName string, cfg datasource.Config) datasourc
 // registerDatasourceTools 注册 list_tables、describe_table、execute_read。
 // Elasticsearch 绑定不进入 data 三件套（仍可作为 RCA es_log_query 的连接配置存在于工具列表）。
 // 单个非 ES 数据源注册失败时降级为不可用（其余仍可用）；全部非 ES 均失败才返回错误。
-func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bindings []DatasourceBinding) ([]DatasourceBinding, string, error) {
+// 至少成功注册一个 mysql 时返回 NewMultiExecutor 与其 cfg.ID；否则 mysqlExec/mysqlIDs 为 nil。
+func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bindings []DatasourceBinding) ([]DatasourceBinding, string, executor.Executor, []string, error) {
 	dsReg := datasource.NewRegistry()
 	datasource.RegisterMySQL(dsReg)
 	datasource.RegisterHive(dsReg)
@@ -192,6 +244,11 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 			b.SkipDataTools = true
 			b.Available = false
 			b.Err = "elasticsearch 不走 list_tables/describe_table/execute_read；请用 es_log_query(cluster=…) 或 http_request"
+			outBindings = append(outBindings, b)
+			continue
+		}
+		if strings.TrimSpace(b.Err) != "" {
+			b.Available = false
 			outBindings = append(outBindings, b)
 			continue
 		}
@@ -224,7 +281,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 				parts = append(parts, name+": unknown error")
 			}
 		}
-		return outBindings, FormatDatasourcePrompt(outBindings, ""), fmt.Errorf("所有数据源均注册失败（请检查连接与账号）: %s", strings.Join(parts, "; "))
+		return outBindings, FormatDatasourcePrompt(outBindings, ""), nil, nil, fmt.Errorf("所有数据源均注册失败（请检查连接与账号）: %s", strings.Join(parts, "; "))
 	}
 
 	defaultDSID := ""
@@ -235,7 +292,7 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 	prompt := FormatDatasourcePrompt(outBindings, defaultDSID)
 	if len(registered) == 0 {
 		// ES-only（或无可注册 data 源）：不注册三件套，仍返回路由提示。
-		return outBindings, prompt, nil
+		return outBindings, prompt, nil, nil, nil
 	}
 
 	store := metadata.NewInMemoryStore(nil)
@@ -281,7 +338,16 @@ func registerDatasourceTools(reg *tool.Registry, configs []datasource.Config, bi
 			}, opts)
 		}
 	}
-	return outBindings, prompt, nil
+	var mysqlIDs []string
+	for _, cfg := range registered {
+		if strings.EqualFold(strings.TrimSpace(cfg.Type), "mysql") {
+			mysqlIDs = append(mysqlIDs, cfg.ID)
+		}
+	}
+	if len(mysqlIDs) == 0 {
+		return outBindings, prompt, nil, nil, nil
+	}
+	return outBindings, prompt, exec, mysqlIDs, nil
 }
 
 func toolConfigToMap(s interface{}) map[string]interface{} {

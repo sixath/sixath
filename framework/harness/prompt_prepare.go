@@ -122,7 +122,7 @@ func ephemeralFor(trace *RunTrace) string {
 	}
 	prev := trace.ContextOps.Invocations[n-2]
 	if prev.L0DroppedMessages > 0 {
-		return "上下文已按预算裁剪较早轮次。"
+		return "上下文已按预算裁剪较早轮次。原始问题仍有效，禁止要求用户重述。"
 	}
 	return ""
 }

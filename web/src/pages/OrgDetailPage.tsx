@@ -141,12 +141,14 @@ export default function OrgDetailPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">{org.name}</h1>
-          <div className="page-sub">
+          <div className="page-title-row">
+            <h1>{org.name}</h1>
+            {currentOrgId === org.id && <span className="page-count">当前</span>}
+          </div>
+          <p className="page-sub">
             {org.role === 'owner' ? '所有者' : org.role || '成员'} ·{' '}
             <code>{org.id}</code>
-            {currentOrgId === org.id && ' · 当前组织'}
-          </div>
+          </p>
         </div>
         <div className="actions">
           <Link to="/orgs" className="btn btn-secondary">

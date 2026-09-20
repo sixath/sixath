@@ -83,3 +83,19 @@ type ChatMessage struct {
 func (ChatMessage) TableName() string {
 	return "chat_messages"
 }
+
+// ChatAttachment 会话附件元数据表
+type ChatAttachment struct {
+	ID           string    `gorm:"column:id;primaryKey;size:36"`
+	SessionID    string    `gorm:"column:session_id;size:36;index;not null"`
+	Kind         string    `gorm:"column:kind;size:16;not null"` // image|text
+	Mime         string    `gorm:"column:mime;size:128;not null"`
+	Name         string    `gorm:"column:name;size:256;not null"`
+	Size         int64     `gorm:"column:size;not null"`
+	RelativePath string    `gorm:"column:relative_path;size:512;not null"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null"`
+}
+
+func (ChatAttachment) TableName() string {
+	return "chat_attachments"
+}

@@ -92,66 +92,71 @@ export default function ChannelList() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Channels</h1>
-          <div className="page-sub">{total} configured</div>
+          <div className="page-title-row">
+            <h1>Channels</h1>
+            <span className="page-count">{total}</span>
+          </div>
+          <p className="page-sub">配置 Web、Webhook、企业微信等接入通道。</p>
         </div>
-        <Link to="/channels/new" className="btn">New Channel</Link>
-      </div>
-
-      <div className="section-card" style={{ marginBottom: '1.25rem', padding: '1rem 1.25rem' }}>
-        <div className="filter-bar">
-          <span className="filter-label">Filter</span>
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="">All types</option>
-            <option value="web">Web</option>
-            <option value="api">API</option>
-            <option value="webhook">Webhook</option>
-            <option value="wxpusher">WxPusher</option>
-            <option value="wecom">WeCom</option>
-            <option value="wecom_bot">WeCom Bot</option>
-          </select>
-          <select value={enabled} onChange={(e) => setEnabled(e.target.value)}>
-            <option value="">All states</option>
-            <option value="true">Enabled</option>
-            <option value="false">Disabled</option>
-          </select>
-          <button type="button" className="btn btn-secondary" onClick={loadChannels}>Apply</button>
-        </div>
+        <Link to="/channels/new" className="btn">新建 Channel</Link>
       </div>
 
       {total === 0 ? (
         <div className="section-card empty-state">
-          <p>No channels yet.</p>
-          <Link to="/channels/new" className="btn">New Channel</Link>
+          <p>还没有 Channel。</p>
+          <Link to="/channels/new" className="btn">新建 Channel</Link>
         </div>
       ) : (
         <div className="table-card">
+          <div className="table-toolbar">
+            <div className="filter-bar">
+              <span className="filter-label">筛选</span>
+              <select value={type} onChange={(e) => setType(e.target.value)}>
+                <option value="">全部类型</option>
+                <option value="web">Web</option>
+                <option value="api">API</option>
+                <option value="webhook">Webhook</option>
+                <option value="wxpusher">WxPusher</option>
+                <option value="wecom">企业微信</option>
+                <option value="wecom_bot">企业微信 Bot</option>
+              </select>
+              <select value={enabled} onChange={(e) => setEnabled(e.target.value)}>
+                <option value="">全部状态</option>
+                <option value="true">已启用</option>
+                <option value="false">已停用</option>
+              </select>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={loadChannels}>应用</button>
+            </div>
+          </div>
           <table>
             <thead>
               <tr>
-                <th>Channel</th>
-                <th>Type</th>
-                <th>Default Agent</th>
-                <th>Status</th>
-                <th>Runtime Status</th>
-                <th>Actions</th>
+                <th>通道</th>
+                <th>类型</th>
+                <th>默认 Agent</th>
+                <th>状态</th>
+                <th>运行时</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
               {channels.map((channel) => (
                 <tr key={channel.id}>
                   <td>
-                    <strong>{channel.channel_id}</strong>
+                    <span className="cell-name">
+                      <span className="cell-dot cell-dot--cyan" aria-hidden />
+                      {channel.channel_id}
+                    </span>
                     {channel.webhook_path && <div className="page-sub">{channel.webhook_path}</div>}
                   </td>
                   <td><span className={`badge badge-${channel.type}`}>{channel.type}</span></td>
                   <td><code>{channel.default_agent || '-'}</code></td>
-                  <td>{channel.enabled ? 'Enabled' : 'Disabled'}</td>
+                  <td>{channel.enabled ? '已启用' : '已停用'}</td>
                   <td><RuntimeStatusCell channel={channel} /></td>
-                  <td>
-                    <div className="actions">
-                      <Link to={`/channels/${channel.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
-                      <button className="btn btn-danger btn-sm" onClick={() => setPendingDelete({ id: channel.id, name: channel.channel_id })}>Delete</button>
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <Link to={`/channels/${channel.id}/edit`} className="btn btn-ghost btn-sm">编辑</Link>
+                      <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={() => setPendingDelete({ id: channel.id, name: channel.channel_id })}>删除</button>
                     </div>
                   </td>
                 </tr>
@@ -162,9 +167,9 @@ export default function ChannelList() {
       )}
       <ConfirmDialog
         open={!!pendingDelete}
-        title="Delete channel"
-        description={pendingDelete ? `Delete "${pendingDelete.name}"? This action cannot be undone.` : ''}
-        confirmLabel="Delete"
+        title="删除 Channel"
+        description={pendingDelete ? `删除「${pendingDelete.name}」？此操作不可恢复。` : ''}
+        confirmLabel="删除"
         variant="danger"
         loading={confirmLoading}
         onCancel={() => setPendingDelete(null)}

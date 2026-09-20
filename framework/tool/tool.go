@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/sixath/framework/events"
+	"github.com/sixath/framework/netx"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -113,10 +115,12 @@ var tracer = otel.Tracer("github.com/sixath/framework/tool")
 
 // Registry 维护一组可用工具。
 type Registry struct {
-	mu           sync.RWMutex
-	tools        map[string]Tool
-	mcpServerIDs map[string]struct{} // 已注册的 MCP 服务 ID，用于按 Skill 使用时幂等注册
-	eventBus     *events.Bus         // 可选；非空时在每次工具执行后发布 ToolExecuted
+	mu             sync.RWMutex
+	tools          map[string]Tool
+	mcpServerIDs   map[string]struct{} // 已注册的 MCP 服务 ID，用于按 Skill 使用时幂等注册
+	eventBus       *events.Bus         // 可选；非空时在每次工具执行后发布 ToolExecuted
+	httpClient     *http.Client        // 可选出网 overlay；nil 时 http_request 保持直连
+	httpClientSpec netx.Spec           // overlay 对应的代理描述，仅用于错误标注（不含密码）
 }
 
 // NewRegistry 默认注册http工具
@@ -176,6 +180,34 @@ func (r *Registry) SetEventBus(b *events.Bus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.eventBus = b
+}
+
+// SetHTTPClient overlays the outbound HTTP client used by http_request.
+// spec is stored for error annotation (id/host only; never password).
+// Passing a nil client clears the overlay and restores the default dial path.
+func (r *Registry) SetHTTPClient(c *http.Client, spec netx.Spec) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.httpClient = c
+	r.httpClientSpec = spec
+}
+
+// HTTPClient returns the overlay client, or nil when http_request should dial directly.
+func (r *Registry) HTTPClient() *http.Client {
+	c, _ := r.httpOverlay()
+	return c
+}
+
+func (r *Registry) httpOverlay() (*http.Client, netx.Spec) {
+	if r == nil {
+		return nil, netx.Spec{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.httpClient, r.httpClientSpec
 }
 
 // Register 向注册表中添加一个工具。若已设置 EventBus，则包装 Execute：执行前发布 ToolInvoked，执行后发布 ToolExecuted（含 input/output）。

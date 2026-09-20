@@ -45,6 +45,14 @@ func NewTavilyBackend(cfg TavilyConfig) *TavilyBackend {
 	}
 }
 
+// SetHTTPClient replaces the outbound client used by Search.
+func (t *TavilyBackend) SetHTTPClient(c *http.Client) {
+	if t == nil || c == nil {
+		return
+	}
+	t.httpClient = c
+}
+
 func (t *TavilyBackend) Name() string { return "tavily" }
 
 func (t *TavilyBackend) Check(_ context.Context) error {
@@ -55,11 +63,11 @@ func (t *TavilyBackend) Check(_ context.Context) error {
 }
 
 type tavilySearchBody struct {
-	APIKey         string `json:"api_key"`
-	Query          string `json:"query"`
-	MaxResults     int    `json:"max_results"`
-	IncludeAnswer  bool   `json:"include_answer"`
-	SearchDepth    string `json:"search_depth"`
+	APIKey        string `json:"api_key"`
+	Query         string `json:"query"`
+	MaxResults    int    `json:"max_results"`
+	IncludeAnswer bool   `json:"include_answer"`
+	SearchDepth   string `json:"search_depth"`
 }
 
 func (t *TavilyBackend) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {

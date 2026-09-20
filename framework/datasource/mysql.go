@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"strings"
 	"time"
+	"unicode"
 
-	mysqldriver "github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 // mysqlDataSource 实现 DataSource，并暴露底层 *sql.DB 供执行器与元数据使用。
@@ -40,6 +42,7 @@ func buildMySQLDSN(cfg Config) (string, error) {
 			return "", fmt.Errorf("mysql datasource: parse dsn for id=%s: %w", cfg.ID, err)
 		}
 		ensureNoMultiStatements(parsed)
+		applyMySQLDialNet(parsed, cfg)
 		return parsed.FormatDSN(), nil
 	}
 	if cfg.Host == "" || cfg.User == "" || cfg.DBName == "" {
@@ -53,6 +56,7 @@ func buildMySQLDSN(cfg Config) (string, error) {
 	mc.User = cfg.User
 	mc.Passwd = cfg.Password
 	mc.Net = "tcp"
+	applyMySQLDialNet(mc, cfg)
 	mc.Addr = fmt.Sprintf("%s:%d", cfg.Host, port)
 	mc.DBName = cfg.DBName
 	mc.ParseTime = true
@@ -61,6 +65,35 @@ func buildMySQLDSN(cfg Config) (string, error) {
 		"multiStatements": "false",
 	}
 	return mc.FormatDSN(), nil
+}
+
+func mysqlProxyNetName(cfg Config) string {
+	if key := strings.TrimSpace(cfg.ProxyNetKey); key != "" {
+		return sanitizeMySQLNetID(cfg.ID) + "-" + sanitizeMySQLNetID(key)
+	}
+	return "sixath-proxy-" + sanitizeMySQLNetID(cfg.ID)
+}
+
+func sanitizeMySQLNetID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	if b.Len() == 0 {
+		return "unnamed"
+	}
+	return b.String()
+}
+
+func applyMySQLDialNet(parsed *mysqldriver.Config, cfg Config) {
+	if cfg.DialContext == nil {
+		return
+	}
+	parsed.Net = mysqlProxyNetName(cfg)
 }
 
 func ensureNoMultiStatements(cfg *mysqldriver.Config) {
@@ -84,6 +117,17 @@ func NewMySQLDataSource(cfg Config) (*mysqlDataSource, error) {
 	dsn, err := buildMySQLDSN(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.DialContext != nil {
+		netName := mysqlProxyNetName(cfg)
+		dial := cfg.DialContext
+		mysqldriver.RegisterDialContext(netName, func(ctx context.Context, addr string) (net.Conn, error) {
+			conn, err := dial(ctx, "tcp", addr)
+			if err != nil {
+				return nil, fmt.Errorf("mysql datasource: dial failed for id=%s: %w", cfg.ID, err)
+			}
+			return conn, nil
+		})
 	}
 
 	db, err := sql.Open("mysql", dsn)

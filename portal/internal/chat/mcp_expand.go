@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -25,15 +26,17 @@ type McpExpandOnMissOptions struct {
 	BoundServers []*biz.McpServerMeta // full agent bindings
 	Wiring       CatalogWiringInput
 	Catalog      tool.ToolCatalog
+	HTTPClient   *http.Client // Agent inherit client for HTTP MCP; stdio ignores
 }
 
 // McpExpandOnMiss hot-registers bound MCP servers when discovery misses.
 type McpExpandOnMiss struct {
-	mu      sync.Mutex
-	reg     *tool.Registry
-	bound   []*biz.McpServerMeta
-	wiring  CatalogWiringInput
-	catalog tool.ToolCatalog
+	mu         sync.Mutex
+	reg        *tool.Registry
+	bound      []*biz.McpServerMeta
+	wiring     CatalogWiringInput
+	catalog    tool.ToolCatalog
+	httpClient *http.Client
 }
 
 // NewMcpExpandOnMiss builds a controller. Returns nil when disabled or inputs incomplete.
@@ -45,10 +48,11 @@ func NewMcpExpandOnMiss(opts McpExpandOnMissOptions) *McpExpandOnMiss {
 		return nil
 	}
 	return &McpExpandOnMiss{
-		reg:     opts.Reg,
-		bound:   opts.BoundServers,
-		wiring:  opts.Wiring,
-		catalog: opts.Catalog,
+		reg:        opts.Reg,
+		bound:      opts.BoundServers,
+		wiring:     opts.Wiring,
+		catalog:    opts.Catalog,
+		httpClient: opts.HTTPClient,
 	}
 }
 
@@ -86,6 +90,9 @@ func (e *McpExpandOnMiss) ExpandOnMiss(ctx context.Context, query string) ([]str
 		mc := biz.McpServerToConfig(s)
 		if mc == nil {
 			continue
+		}
+		if e.httpClient != nil && !isStdioTransport(mc.Transport) {
+			mc.HTTPClient = e.httpClient
 		}
 		tool.RegisterMcpTool(e.reg, mc)
 		if !e.reg.HasMcpServer(mc.Id) {

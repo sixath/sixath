@@ -52,6 +52,8 @@ export function normalizeExportConfig(raw?: unknown): ToolConfig {
     mcp: cfg.mcp as ToolConfig['mcp'],
     datasource: normalizeDatasourceConfig(cfg.datasource),
     rca,
+    egress_mode: (cfg.egress_mode as string | undefined) ?? (cfg.egressMode as string | undefined),
+    proxy_id: (cfg.proxy_id as string | undefined) ?? (cfg.proxyId as string | undefined),
   }
 }
 

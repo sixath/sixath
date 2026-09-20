@@ -61,6 +61,9 @@ func (stubMessageRepo) SoftDeactivateAfter(context.Context, string, time.Time, s
 func (stubMessageRepo) ListActiveOrdered(context.Context, string) ([]*biz.ChatMessage, error) {
 	return nil, nil
 }
+func (stubMessageRepo) ListBySessionIncludingInactive(context.Context, string) ([]*biz.ChatMessage, error) {
+	return nil, nil
+}
 func (stubMessageRepo) InsertClone(context.Context, string, *biz.ChatMessage) (*biz.ChatMessage, error) {
 	return nil, nil
 }
@@ -82,7 +85,7 @@ func TestNotifySessionMessageIndexed_WithDetachedCaller(t *testing.T) {
 		Title:     "t",
 		UpdatedAt: time.Now(),
 	}
-	uc := biz.NewChatUsecase(&stubSessionRepo{session: sess}, stubMessageRepo{}, nil, nil, nil)
+	uc := biz.NewChatUsecase(&stubSessionRepo{session: sess}, stubMessageRepo{}, nil, nil, nil, nil)
 	msg := &biz.ChatMessage{
 		ID:        "msg-1",
 		SessionID: sessionID,
@@ -128,7 +131,7 @@ func TestNotifySessionMessageIndexed_WithoutCallerSkips(t *testing.T) {
 	sess := &biz.ChatSession{
 		ID: sessionID, AgentID: agentID, UserID: "bootstrap", UpdatedAt: time.Now(),
 	}
-	uc := biz.NewChatUsecase(&stubSessionRepo{session: sess}, stubMessageRepo{}, nil, nil, nil)
+	uc := biz.NewChatUsecase(&stubSessionRepo{session: sess}, stubMessageRepo{}, nil, nil, nil, nil)
 	msg := &biz.ChatMessage{
 		ID: "msg-skip", SessionID: sessionID, Role: "user",
 		Content: "SHOULD_NOT_INDEX", CreatedAt: time.Now(),

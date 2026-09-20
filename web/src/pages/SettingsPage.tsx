@@ -43,7 +43,12 @@ export default function SettingsPage() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">设置</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>设置</h1>
+          </div>
+          <p className="page-sub">管理当前会话的鉴权凭证与组织上下文。</p>
+        </div>
       </div>
       <p className="muted" style={{ marginBottom: '1.25rem' }}>
         Portal 已启用 Bearer 鉴权。未配置 Token 时会进入登录页，API 也会返回 401。本地可与 portal{' '}
@@ -52,7 +57,7 @@ export default function SettingsPage() {
         组织与邀请请前往 <Link to="/orgs">组织管理</Link>。
       </p>
 
-      <form className="form-panel" onSubmit={onSave}>
+      <form className="form-panel section-card" onSubmit={onSave}>
         <div className="form-group">
           <label htmlFor="api-token">API Token</label>
           <input

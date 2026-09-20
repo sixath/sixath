@@ -28,6 +28,7 @@ func wireApp(*conf.Server, *conf.Data, *conf.Auth, *conf.Growth, log.Logger) (*k
 		cron.ProviderSet,
 		service.NewToolService,
 		service.NewMcpServerService,
+		service.NewProxyService,
 		service.NewAgentService,
 		service.ProvideChatServiceWithTurnTrace,
 		service.NewChannelService,

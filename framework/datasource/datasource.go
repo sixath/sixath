@@ -3,6 +3,8 @@ package datasource
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
 	"strings"
 )
 
@@ -32,6 +34,10 @@ type Config struct {
 	MaxIdleConns    int    `json:"max_idle_conns" yaml:"max_idle_conns"`
 	ConnMaxLifetime int    `json:"conn_max_lifetime_sec" yaml:"conn_max_lifetime_sec"` // 秒
 	ReadOnly        bool   `json:"read_only" yaml:"read_only"`
+	// HTTPClient / DialContext / ProxyNetKey 仅运行时注入，不入 JSON/YAML。
+	HTTPClient  *http.Client                                                      `json:"-" yaml:"-"`
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error) `json:"-" yaml:"-"`
+	ProxyNetKey string                                                            `json:"-" yaml:"-"`
 }
 
 // intFromAny 解析 JSON/structpb.AsInterface 中可能出现的 port 等整数字段（float64、int、json.Number 等）。

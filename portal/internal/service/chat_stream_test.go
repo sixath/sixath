@@ -216,6 +216,42 @@ func TestConfirmationRequestsFromResponseExtractsPendingTerminal(t *testing.T) {
 	}
 }
 
+func TestConfirmationRequestsFromResponseExtractsPendingVMRunCmd(t *testing.T) {
+	resp := &agent.Response{
+		Metadata: map[string]any{
+			"trace": &agent.RunTrace{
+				ToolCalls: []agent.ToolCallRecord{{
+					ToolCallID: "call_vm",
+					ToolName:   "vm_run_cmd",
+					Result: map[string]any{
+						"status":     "pending",
+						"token":      "vm_tok",
+						"command":    "taskkill /PID 1",
+						"expires_in": 300,
+					},
+				}},
+			},
+		},
+	}
+	items := confirmationRequestsFromResponse(resp)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 confirmation, got %d", len(items))
+	}
+	got := items[0]
+	if got.Kind != "vm_run_cmd" || got.Token != "vm_tok" {
+		t.Fatalf("unexpected identity: %#v", got)
+	}
+	if got.Title != "Confirm instance command" {
+		t.Fatalf("title=%q", got.Title)
+	}
+	if got.Description != "Review the instance command before it is executed." {
+		t.Fatalf("description=%q", got.Description)
+	}
+	if got.DSL != "taskkill /PID 1" || got.Severity != "danger" {
+		t.Fatalf("unexpected payload: %#v", got)
+	}
+}
+
 func TestConfirmationRequestsFromResponseExtractsPendingWorkspaceFile(t *testing.T) {
 	resp := &agent.Response{
 		Metadata: map[string]any{

@@ -172,7 +172,10 @@ export default function McpServerForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? '编辑 MCP 服务' : '新建 MCP 服务'}</h1>
+        <div>
+          <h1>{isEdit ? '编辑 MCP 服务' : '新建 MCP 服务'}</h1>
+          <p className="page-sub">登记 stdio / HTTP 传输与连接参数。</p>
+        </div>
         <Link to="/mcp-servers" className="btn btn-secondary">
           返回
         </Link>

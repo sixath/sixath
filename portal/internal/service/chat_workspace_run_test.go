@@ -24,10 +24,10 @@ func TestSendMessage_RejectsWholeRepoWorkspace(t *testing.T) {
 		sessionID = "sess-whole-repo"
 	)
 	sess := &biz.ChatSession{ID: sessionID, AgentID: agentID, UserID: "owner"}
-	chatUC := biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil)
+	chatUC := biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil, nil)
 	agentUC := biz.NewAgentUsecase(&hybridAgentRepo{agent: &biz.AgentMeta{
 		ID: agentID, Name: "a", Workspace: ws,
-	}}, nil, nil, t.TempDir(), log.NewStdLogger(nil))
+	}}, nil, nil, nil, t.TempDir(), log.NewStdLogger(nil))
 	s := NewChatService(chatUC, agentUC, nil, nil, nil, log.NewStdLogger(nil))
 	s.SetCodeRoots([]string{root})
 
@@ -54,10 +54,10 @@ func TestSendMessageStream_RejectsWholeRepoWorkspace(t *testing.T) {
 		sessionID = "sess-stream-whole-repo"
 	)
 	sess := &biz.ChatSession{ID: sessionID, AgentID: agentID, UserID: "owner"}
-	chatUC := biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil)
+	chatUC := biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil, nil)
 	agentUC := biz.NewAgentUsecase(&hybridAgentRepo{agent: &biz.AgentMeta{
 		ID: agentID, Name: "a", Workspace: ws,
-	}}, nil, nil, t.TempDir(), log.NewStdLogger(nil))
+	}}, nil, nil, nil, t.TempDir(), log.NewStdLogger(nil))
 	s := NewChatService(chatUC, agentUC, nil, nil, nil, log.NewStdLogger(nil))
 	s.SetCodeRoots([]string{root})
 

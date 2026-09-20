@@ -102,6 +102,14 @@ func TestMergeRCARoots_NoMountIgnoresConfigured(t *testing.T) {
 	}
 }
 
+func TestMergeRCARoots_NoMountUsesExistingConfigured(t *testing.T) {
+	root := t.TempDir()
+	got := MergeRCARoots(t.TempDir(), []string{root, "/repos/missing"})
+	if len(got) != 1 || got[0] != filepath.Clean(root) {
+		t.Fatalf("got %#v want [%q]", got, filepath.Clean(root))
+	}
+}
+
 func TestWorkspaceUnderAnyRoot(t *testing.T) {
 	root := t.TempDir()
 	ws := filepath.Join(root, "repo")

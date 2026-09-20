@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestESHTTP_DoWithoutProductHeader(t *testing.T) {
@@ -32,6 +33,34 @@ func TestESHTTP_DoWithoutProductHeader(t *testing.T) {
 	}
 	if st != 200 || !strings.Contains(string(body), `"total":1`) {
 		t.Fatalf("status=%d body=%s", st, body)
+	}
+}
+
+func TestNewElasticsearchDataSource_UsesConfigHTTPClient(t *testing.T) {
+	custom := &http.Client{Timeout: 3 * time.Second}
+	ds, err := NewElasticsearchDataSource(Config{
+		ID:         "es-proxy",
+		DSN:        "http://localhost:9200",
+		HTTPClient: custom,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ds.ESHTTP() == nil || ds.ESHTTP().Client != custom {
+		t.Fatal("want Config.HTTPClient assigned to ESHTTP.Client")
+	}
+}
+
+func TestNewElasticsearchDataSource_NilHTTPClientKeepsTimeout(t *testing.T) {
+	ds, err := NewElasticsearchDataSource(Config{ID: "es", DSN: "http://localhost:9200"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ds.ESHTTP() == nil || ds.ESHTTP().Client == nil {
+		t.Fatal("expected default HTTP client")
+	}
+	if ds.ESHTTP().Client.Timeout != defaultESHTTPTimeout {
+		t.Fatalf("timeout=%v want %v", ds.ESHTTP().Client.Timeout, defaultESHTTPTimeout)
 	}
 }
 

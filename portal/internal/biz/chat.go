@@ -3,6 +3,8 @@ package biz
 import (
 	"context"
 	"errors"
+	"log"
+	"strings"
 	"time"
 
 	pkgErrors "backend/internal/pkg/errors"
@@ -50,6 +52,18 @@ type ChatMessage struct {
 	CreatedAt time.Time
 }
 
+// ChatAttachment 会话附件元数据（落盘路径 + 表行）
+type ChatAttachment struct {
+	ID           string
+	SessionID    string
+	Kind         string // image|text
+	Mime         string
+	Name         string
+	Size         int64
+	RelativePath string
+	CreatedAt    time.Time
+}
+
 // ChatSessionRepo 会话存储接口
 type ChatSessionRepo interface {
 	Create(ctx context.Context, userID, agentID, title, parentSessionID string) (*ChatSession, error)
@@ -69,6 +83,16 @@ type ChatSessionRepo interface {
 
 var ErrSessionNotFound = kratosErrors.NotFound("SESSION_NOT_FOUND", "session not found")
 var ErrInvalidParentSession = kratosErrors.BadRequest("INVALID_PARENT_SESSION", "parent session must belong to the same agent")
+var ErrAttachmentNotFound = kratosErrors.NotFound("ATTACHMENT_NOT_FOUND", "attachment not found")
+
+// AttachmentRepo 会话附件元数据存储
+type AttachmentRepo interface {
+	Create(ctx context.Context, a *ChatAttachment) error
+	Get(ctx context.Context, sessionID, id string) (*ChatAttachment, error)
+	Delete(ctx context.Context, sessionID, id string) error
+	CountBySession(ctx context.Context, sessionID string) (int64, error)
+	ListByIDs(ctx context.Context, sessionID string, ids []string) ([]*ChatAttachment, error)
+}
 
 // ChatMessageRepo 消息存储接口
 type ChatMessageRepo interface {
@@ -85,6 +109,10 @@ type ChatMessageRepo interface {
 	// ListActiveOrdered returns all active messages for a session, ordered by
 	// created_at ASC, id ASC, with no row limit.
 	ListActiveOrdered(ctx context.Context, sessionID string) ([]*ChatMessage, error)
+	// ListBySessionIncludingInactive returns every message for the session
+	// (active and inactive), ordered by created_at ASC, id ASC, with no row limit.
+	// Used for attachment DELETE reference checks (spec: any message metadata).
+	ListBySessionIncludingInactive(ctx context.Context, sessionID string) ([]*ChatMessage, error)
 	// InsertClone copies src into destSessionID with a new ID, preserving CreatedAt
 	// and stamping metadata.forked_from_message_id.
 	InsertClone(ctx context.Context, destSessionID string, src *ChatMessage) (*ChatMessage, error)
@@ -92,22 +120,24 @@ type ChatMessageRepo interface {
 
 // ChatUsecase 对话用例
 type ChatUsecase struct {
-	sessionRepo   ChatSessionRepo
-	messageRepo   ChatMessageRepo
-	agentRepo     AgentRepo
-	resources     ResourceRepo
-	access        *AccessChecker
-	sessionSearch SessionSearchBackend
+	sessionRepo    ChatSessionRepo
+	messageRepo    ChatMessageRepo
+	attachmentRepo AttachmentRepo
+	agentRepo      AgentRepo
+	resources      ResourceRepo
+	access         *AccessChecker
+	sessionSearch  SessionSearchBackend
 }
 
 // NewChatUsecase creates ChatUsecase
-func NewChatUsecase(sessionRepo ChatSessionRepo, messageRepo ChatMessageRepo, agentRepo AgentRepo, resources ResourceRepo, access *AccessChecker) *ChatUsecase {
+func NewChatUsecase(sessionRepo ChatSessionRepo, messageRepo ChatMessageRepo, agentRepo AgentRepo, resources ResourceRepo, access *AccessChecker, attachmentRepo AttachmentRepo) *ChatUsecase {
 	return &ChatUsecase{
-		sessionRepo: sessionRepo,
-		messageRepo: messageRepo,
-		agentRepo:   agentRepo,
-		resources:   resources,
-		access:      access,
+		sessionRepo:    sessionRepo,
+		messageRepo:    messageRepo,
+		attachmentRepo: attachmentRepo,
+		agentRepo:      agentRepo,
+		resources:      resources,
+		access:         access,
 	}
 }
 
@@ -203,12 +233,33 @@ func (uc *ChatUsecase) UpdateSession(ctx context.Context, id string, title strin
 	return uc.sessionRepo.Update(ctx, id, map[string]any{"title": title})
 }
 
-// DeleteSession 删除会话
+// DeleteSession 删除会话（级联删消息/附件行，并 best-effort 清理 workspace/sessions/<id>）
 func (uc *ChatUsecase) DeleteSession(ctx context.Context, id string) error {
-	if _, err := uc.GetSession(ctx, id); err != nil {
+	session, err := uc.GetSession(ctx, id)
+	if err != nil {
 		return err
 	}
-	return uc.sessionRepo.Delete(ctx, id)
+	workspace := uc.agentWorkspaceForSession(ctx, session.AgentID)
+	if err := uc.sessionRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if workspace != "" {
+		if err := RemoveSessionWorkspaceDir(workspace, id); err != nil {
+			log.Printf("chat: DeleteSession remove session workspace dir: session_id=%s err=%v", id, err)
+		}
+	}
+	return nil
+}
+
+func (uc *ChatUsecase) agentWorkspaceForSession(ctx context.Context, agentID string) string {
+	if uc == nil || uc.agentRepo == nil || strings.TrimSpace(agentID) == "" {
+		return ""
+	}
+	agent, err := uc.agentRepo.GetByID(ctx, agentID)
+	if err != nil || agent == nil {
+		return ""
+	}
+	return strings.TrimSpace(agent.Workspace)
 }
 
 // ListMessages 获取会话消息
@@ -249,6 +300,94 @@ func (uc *ChatUsecase) GetMessageByID(ctx context.Context, messageID string) (*C
 		return nil, err
 	}
 	return msg, nil
+}
+
+// CreateAttachment persists attachment metadata after session ACL check.
+func (uc *ChatUsecase) CreateAttachment(ctx context.Context, a *ChatAttachment) error {
+	if a == nil || a.SessionID == "" {
+		return ErrAttachmentNotFound
+	}
+	if _, err := uc.GetSession(ctx, a.SessionID); err != nil {
+		return err
+	}
+	if uc.attachmentRepo == nil {
+		return ErrAttachmentNotFound
+	}
+	return uc.attachmentRepo.Create(ctx, a)
+}
+
+// GetAttachment returns attachment metadata for a session the caller owns.
+func (uc *ChatUsecase) GetAttachment(ctx context.Context, sessionID, id string) (*ChatAttachment, error) {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if uc.attachmentRepo == nil || id == "" {
+		return nil, ErrAttachmentNotFound
+	}
+	a, err := uc.attachmentRepo.Get(ctx, sessionID, id)
+	if err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) {
+			return nil, ErrAttachmentNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+// DeleteAttachment removes attachment metadata for a session the caller owns.
+func (uc *ChatUsecase) DeleteAttachment(ctx context.Context, sessionID, id string) error {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return err
+	}
+	if uc.attachmentRepo == nil || id == "" {
+		return ErrAttachmentNotFound
+	}
+	if err := uc.attachmentRepo.Delete(ctx, sessionID, id); err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) {
+			return ErrAttachmentNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// CountAttachmentsBySession returns attachment row count for a session.
+func (uc *ChatUsecase) CountAttachmentsBySession(ctx context.Context, sessionID string) (int64, error) {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return 0, err
+	}
+	if uc.attachmentRepo == nil {
+		return 0, nil
+	}
+	return uc.attachmentRepo.CountBySession(ctx, sessionID)
+}
+
+// ListAttachmentsByIDs returns attachments that exist for the session (missing ids omitted).
+func (uc *ChatUsecase) ListAttachmentsByIDs(ctx context.Context, sessionID string, ids []string) ([]*ChatAttachment, error) {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if uc.attachmentRepo == nil || len(ids) == 0 {
+		return nil, nil
+	}
+	return uc.attachmentRepo.ListByIDs(ctx, sessionID, ids)
+}
+
+// AttachmentReferencedInMessages reports whether any session message (including
+// inactive/rewound) references attID in metadata.attachments.
+func (uc *ChatUsecase) AttachmentReferencedInMessages(ctx context.Context, sessionID, attID string) (bool, error) {
+	if _, err := uc.GetSession(ctx, sessionID); err != nil {
+		return false, err
+	}
+	attID = strings.TrimSpace(attID)
+	if attID == "" || uc.messageRepo == nil {
+		return false, nil
+	}
+	msgs, err := uc.messageRepo.ListBySessionIncludingInactive(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return MessageReferencesAttachment(msgs, attID), nil
 }
 
 // SoftDeactivateAfter soft-hides the anchor and later messages (Rewind).

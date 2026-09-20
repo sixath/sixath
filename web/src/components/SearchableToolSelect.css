@@ -26,8 +26,8 @@
 }
 
 .tool-select-trigger.is-open {
-  border-color: var(--accent, #3b82f6);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #3b82f6) 25%, transparent);
+  border-color: var(--accent, #00f0ff);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #00f0ff) 25%, transparent);
 }
 
 .tool-select-label {
@@ -48,10 +48,10 @@
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  background: var(--bg-elevated, #fff);
+  background: var(--bg-elevated, #121826);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -64,7 +64,7 @@
   width: 100%;
   box-sizing: border-box;
   padding: 0.5rem 0.65rem;
-  background: var(--bg, #f8fafc);
+  background: var(--bg, #0a0e17);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius-md) - 2px);
   color: var(--text);
@@ -73,7 +73,7 @@
 
 .tool-select-search input:focus {
   outline: none;
-  border-color: var(--accent, #3b82f6);
+  border-color: var(--accent, #00f0ff);
 }
 
 .tool-select-list {
@@ -107,7 +107,7 @@
 
 .tool-select-option:hover,
 .tool-select-option.is-selected {
-  background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent);
+  background: color-mix(in srgb, var(--accent, #00f0ff) 14%, transparent);
 }
 
 .tool-select-option-name {

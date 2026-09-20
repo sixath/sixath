@@ -38,7 +38,7 @@ func catalogReason(err error) string {
 func TestSetSessionModel_RejectsUnknown(t *testing.T) {
 	sess := &biz.ChatSession{ID: "s1", UserID: "user-1", AgentID: "a1"}
 	s := &ChatService{
-		chatUC: biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil),
+		chatUC: biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil, nil),
 		log:    log.NewHelper(log.DefaultLogger),
 	}
 	ctx := biz.WithCallerUserID(context.Background(), "user-1")
@@ -71,9 +71,9 @@ func TestListModelChoices_IncludesAgentDefault(t *testing.T) {
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: "a1",
 		OwnerUserID: "user-1", Visibility: biz.VisibilityPrivate,
 	}}
-	agentUC := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), t.TempDir(), log.NewStdLogger(nil))
+	agentUC := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, t.TempDir(), log.NewStdLogger(nil))
 	s := &ChatService{
-		chatUC:  biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil),
+		chatUC:  biz.NewChatUsecase(&rewindSessRepo{sess: sess}, nil, nil, nil, nil, nil),
 		agentUC: agentUC,
 		catalog: st,
 		log:     log.NewHelper(log.DefaultLogger),
@@ -100,7 +100,7 @@ func TestSetSessionModel_Clear(t *testing.T) {
 	sess := &biz.ChatSession{ID: "s1", UserID: "user-1", AgentID: "a1", ModelProviderID: "p1", Model: "m1"}
 	repo := &rewindSessRepo{sess: sess}
 	s := &ChatService{
-		chatUC: biz.NewChatUsecase(repo, nil, nil, nil, nil),
+		chatUC: biz.NewChatUsecase(repo, nil, nil, nil, nil, nil),
 		log:    log.NewHelper(log.DefaultLogger),
 	}
 	ctx := biz.WithCallerUserID(context.Background(), "user-1")
@@ -142,7 +142,7 @@ func TestSetSessionModel_ThenResolveUsesOverlay(t *testing.T) {
 	sess := &biz.ChatSession{ID: "s1", UserID: "user-1", AgentID: "a1"}
 	sessRepo := &rewindSessRepo{sess: sess}
 	s := &ChatService{
-		chatUC:  biz.NewChatUsecase(sessRepo, nil, nil, nil, nil),
+		chatUC:  biz.NewChatUsecase(sessRepo, nil, nil, nil, nil, nil),
 		catalog: st,
 		log:     log.NewHelper(log.DefaultLogger),
 	}

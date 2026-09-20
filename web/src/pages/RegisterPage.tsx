@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { applyLoginSession, hasApiToken } from '../api/auth'
 import { previewInvite, register } from '../api/sessionAuth'
 import './LoginPage.css'
+import ThemeToggle from '../components/ThemeToggle'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -95,6 +96,7 @@ export default function RegisterPage() {
 
   return (
     <div className="login-page">
+      <ThemeToggle />
       <form className="login-card" onSubmit={onSubmit}>
         <h1>注册账号</h1>
         {previewLoading && <p className="login-muted">正在验证邀请…</p>}

@@ -24,6 +24,7 @@ type AgentMeta struct {
 	Workspace      string
 	DebugRun       bool
 	WecomChannelID string
+	ProxyID        string
 	RuntimeTools   RuntimeToolsConfig
 	ToolIDs        []string
 	McpServerIDs   []string
@@ -33,7 +34,7 @@ type AgentMeta struct {
 
 // AgentRepo interface for agent storage
 type AgentRepo interface {
-	Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error)
+	Create(ctx context.Context, id, name, description, systemPrompt, workspace string, modelConfig ModelConfig, debugRun bool, wecomChannelID, proxyID string, runtimeTools RuntimeToolsConfig, toolIDs []string) (*AgentMeta, error)
 	CountByWecomChannelID(ctx context.Context, channelID string) (int, error)
 	GetByID(ctx context.Context, id string) (*AgentMeta, error)
 	GetByName(ctx context.Context, name string) (*AgentMeta, error)

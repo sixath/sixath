@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
-import { agentApi, chatApi, DEFAULT_SESSION_TITLE, modelCatalogApi, type Agent, type ChatMessage, type ModelChoiceItem, type ModelChoiceSelected } from '../api/client'
+import { agentApi, chatApi, DEFAULT_SESSION_TITLE, modelCatalogApi, type Agent, type ChatAttachment, type ChatMessage, type ModelChoiceItem, type ModelChoiceSelected } from '../api/client'
 import { findLatestSessionId, prepareSessionForSend } from '../api/resolveSession'
 import {
   buildConfirmSubmitBody,
@@ -13,6 +14,7 @@ import {
   type ConfirmResultPayload,
   type WebSourceItem,
 } from '../api/chatStream'
+import { SearchableChipSelect } from '../components/SearchableChipSelect'
 import { MarkdownContent } from '../components/MarkdownContent'
 import { CompactBoundaryBanner } from '../components/CompactBoundaryBanner'
 import { SourcesPanel } from '../components/SourcesPanel'
@@ -21,6 +23,8 @@ import { isCompactBoundaryMessage, isMessageVisibleAtIndex } from '../utils/comp
 import { applyToolCall, applyModelCall, finalizeTimeline, type TimelineNode } from './timelineReducer'
 import { toolVerb } from './toolVerbMap'
 import './ChatPage.css'
+
+const ATTACH_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif,.txt,.log,.md,.json,.csv,image/*'
 
 function formatMessageTime(iso: string): string {
   if (!iso) return ''
@@ -42,11 +46,152 @@ function formatMessageTime(iso: string): string {
   })
 }
 
+async function downloadAttachment(sessionId: string, att: ChatAttachment) {
+  const blob = await chatApi.fetchAttachmentBlob(sessionId, att.id)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = att.name || 'download'
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function AttachmentImageThumb({
+  sessionId,
+  att,
+  className = 'chat-att-thumb',
+}: {
+  sessionId: string
+  att: ChatAttachment
+  className?: string
+}) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    let objectUrl = ''
+    let cancelled = false
+    void chatApi
+      .fetchAttachmentBlob(sessionId, att.id)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        if (!cancelled) setUrl(objectUrl)
+      })
+      .catch(() => {
+        /* thumbnail optional */
+      })
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [sessionId, att.id])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  if (!url) {
+    return <span className={`${className} chat-att-thumb--loading`} title={att.name}>{att.name}</span>
+  }
+
+  const lightbox = open
+    ? createPortal(
+        <div
+          className="chat-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`预览 ${att.name}`}
+          onClick={() => setOpen(false)}
+        >
+          <button
+            type="button"
+            className="chat-lightbox__close"
+            aria-label="关闭预览"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
+          <img
+            className="chat-lightbox__img"
+            src={url}
+            alt={att.name}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <div className="chat-lightbox__caption">{att.name}</div>
+        </div>,
+        document.body,
+      )
+    : null
+
+  return (
+    <>
+      <button
+        type="button"
+        className="chat-att-thumb-btn"
+        title={`点击放大 · ${att.name}`}
+        aria-label={`放大预览 ${att.name}`}
+        onClick={() => setOpen(true)}
+      >
+        <img className={className} src={url} alt={att.name} />
+      </button>
+      {lightbox}
+    </>
+  )
+}
+
+function MessageAttachmentList({
+  sessionId,
+  attachments,
+}: {
+  sessionId: string
+  attachments: ChatAttachment[]
+}) {
+  if (!attachments.length) return null
+  return (
+    <div className="chat-msg-attachments">
+      {attachments.map((att) =>
+        att.kind === 'image' ? (
+          <AttachmentImageThumb key={att.id} sessionId={sessionId} att={att} />
+        ) : (
+          <button
+            key={att.id}
+            type="button"
+            className="chat-att-file"
+            title={`下载 ${att.name}`}
+            onClick={() => {
+              void downloadAttachment(sessionId, att).catch(() => {
+                /* ignore download errors in bubble */
+              })
+            }}
+          >
+            {att.name}
+          </button>
+        ),
+      )}
+    </div>
+  )
+}
+
 export interface ChatPageProps {
   agentId?: string
   sessionId?: string
   isHome?: boolean
   onNavigate?: (agentId: string, sessionId?: string) => void
+  agents?: Agent[]
+  onAgentChange?: (agentId: string) => void
 }
 
 interface ChatConfirmationItem extends ChatConfirmationRequest {
@@ -239,6 +384,49 @@ function TimelineView({ nodes }: { nodes: TimelineNode[] }) {
   )
 }
 
+function TimelineCard({ nodes }: { nodes: TimelineNode[] }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!nodes.length) return null
+  const running = nodes.some((n) => (n.kind === 'tool' && n.phase === 'started') || (n.kind === 'model' && n.phase === 'invoked'))
+  const failed = nodes.some((n) => n.kind === 'tool' && (n.phase === 'failed' || n.allowed === false))
+  const interrupted = nodes.some((n) => n.phase === 'interrupted')
+  let badge = '执行成功'
+  let badgeMod = 'ok'
+  if (running) {
+    badge = '执行中'
+    badgeMod = 'run'
+  } else if (interrupted) {
+    badge = '已中断'
+    badgeMod = 'warn'
+  } else if (failed) {
+    badge = '有失败'
+    badgeMod = 'fail'
+  }
+  const visible = expanded || nodes.length === 1 ? nodes : nodes.slice(-1)
+  return (
+    <div className={`chat-exec-card${expanded ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="chat-exec-card__head"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="chat-exec-card__title">
+          <span className="chat-exec-card__chevron" aria-hidden />
+          执行链路
+          {nodes.length > 1 ? (
+            <span className="chat-exec-card__count">{expanded ? `${nodes.length} 步` : `最近 1 / ${nodes.length}`}</span>
+          ) : null}
+        </span>
+        <span className={`chat-exec-card__badge is-${badgeMod}`}>{badge}</span>
+      </button>
+      <div className="chat-exec-card__body">
+        <TimelineView nodes={visible} />
+      </div>
+    </div>
+  )
+}
+
 function choiceValue(selected: ModelChoiceSelected | null | undefined): string {
   if (!selected?.provider_id || !selected.model) return 'agent_default'
   return `${selected.provider_id}::${selected.model}`
@@ -251,6 +439,8 @@ export default function ChatPage(props?: ChatPageProps) {
   const sessionId = props?.sessionId ?? params.sessionId
   const isHome = props?.isHome ?? false
   const onNavigate = props?.onNavigate
+  const homeAgents = props?.agents
+  const onAgentChange = props?.onAgentChange
   const [agent, setAgent] = useState<Agent | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [confirmations, setConfirmations] = useState<ChatConfirmationItem[]>([])
@@ -262,7 +452,7 @@ export default function ChatPage(props?: ChatPageProps) {
   /** 仅用于展示；实际缓冲在 ref 中合并刷新，避免每条 SSE 触发整页重绘 */
   const [debugText, setDebugText] = useState('')
   const [debugEventCount, setDebugEventCount] = useState(0)
-  const [showDebug, setShowDebug] = useState(false)
+  const [showDebug] = useState(false)
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -273,7 +463,11 @@ export default function ChatPage(props?: ChatPageProps) {
   const [modelChoices, setModelChoices] = useState<ModelChoiceItem[]>([])
   const [modelChoice, setModelChoice] = useState('agent_default')
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([])
+  const [uploadingCount, setUploadingCount] = useState(0)
+  const [composerDragOver, setComposerDragOver] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   /** 当前流式请求所属会话；用于在切换路由会话时中止旧会话的流，且避免「无 session → 首条消息」误杀同一会话的流 */
   const streamSessionRef = useRef<string | null>(null)
@@ -486,7 +680,7 @@ export default function ChatPage(props?: ChatPageProps) {
 
   const handleRewind = useCallback(async (messageId: string) => {
     if (!sessionId || !messageId || streaming || rewinding || forking) return
-    if (!window.confirm('Rewind to before this message? Later messages will be hidden from the chat and search.')) {
+    if (!window.confirm('回溯到这条消息之前？之后的消息会从对话和搜索中隐藏。')) {
       return
     }
     setRewinding(true)
@@ -539,6 +733,18 @@ export default function ChatPage(props?: ChatPageProps) {
 
   const hasPendingConfirm = confirmations.some((c) => c.status === 'pending')
 
+  const prevSessionIdRef = useRef(sessionId)
+  useEffect(() => {
+    const prev = prevSessionIdRef.current
+    prevSessionIdRef.current = sessionId
+    setComposerDragOver(false)
+    // Clear pending only when switching between two concrete sessions (not undefined → id during first attach).
+    if (prev && sessionId && prev !== sessionId) {
+      setPendingAttachments([])
+      setUploadingCount(0)
+    }
+  }, [sessionId])
+
   useEffect(() => {
     if (!hasPendingConfirm) return
     setNowMs(Date.now())
@@ -568,7 +774,9 @@ export default function ChatPage(props?: ChatPageProps) {
     }
   ) => {
     const content = (overrideContent ?? input).trim()
-    if ((!content && !submit) || !agentId || streaming) return
+    const pendingSnapshot = pendingAttachments
+    const attachmentIds = submit ? [] : pendingSnapshot.map((a) => a.id)
+    if ((!content && !submit && attachmentIds.length === 0) || !agentId || streaming || uploadingCount > 0) return
 
     let sid = sessionId
     let userMsgCountBefore = messages.filter((m) => m.role === 'user').length
@@ -596,12 +804,24 @@ export default function ChatPage(props?: ChatPageProps) {
       !submit && content.length > 0 && userMsgCountBefore === 0
 
     if (!overrideContent && !submit) setInput('')
+    if (!submit && attachmentIds.length > 0) setPendingAttachments([])
     const userDisplay = submit?.input_response
       ? inputProvidedLabel(submit.input_response.field)
       : submit?.confirm_response
         ? `[confirmed: ${submit.confirm_response.kind}]`
         : content
-    setMessages((prev) => [...prev, { id: '', session_id: sid, role: 'user', content: userDisplay, created_at: new Date().toISOString() }])
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: '',
+        session_id: sid,
+        role: 'user',
+        content: userDisplay,
+        created_at: new Date().toISOString(),
+        metadata:
+          attachmentIds.length > 0 ? { attachments: pendingSnapshot } : undefined,
+      },
+    ])
     setStreaming(true)
 
     const assistantKey = `${sid}-assistant-${Date.now()}`
@@ -622,11 +842,69 @@ export default function ChatPage(props?: ChatPageProps) {
             ...(submit.input_response ? { input_response: submit.input_response } : {}),
             ...(submit.confirm_response ? { confirm_response: submit.confirm_response } : {}),
           }
-        : undefined,
+        : attachmentIds.length > 0
+          ? { attachment_ids: attachmentIds }
+          : undefined,
     })
     abortRef.current = ac
     streamSessionRef.current = sid
   }
+
+  const ensureSessionForAttach = useCallback(async (): Promise<string | null> => {
+    if (!agentId) return null
+    if (sessionId) return sessionId
+    try {
+      const prepared = await prepareSessionForSend(agentId, sessionId, chatApi)
+      const sid = prepared.id
+      if (prepared.history !== null) {
+        const history = prepared.history as ChatMessage[]
+        setMessages(history)
+        setConfirmations(restoreConfirmationsFromMessages(history))
+        setInputs(restoreInputsFromMessages(history))
+      }
+      goTo(agentId, sid)
+      return sid
+    } catch (e) {
+      setError((e as Error).message)
+      return null
+    }
+  }, [agentId, sessionId, goTo])
+
+  const uploadFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const list = Array.from(files).filter(Boolean)
+      if (!list.length || !agentId) return
+      const sid = await ensureSessionForAttach()
+      if (!sid) return
+      for (const file of list) {
+        setUploadingCount((c) => c + 1)
+        try {
+          const att = await chatApi.uploadAttachment(sid, file)
+          setPendingAttachments((prev) => [...prev, att])
+        } catch (e) {
+          setError((e as Error).message)
+        } finally {
+          setUploadingCount((c) => Math.max(0, c - 1))
+        }
+      }
+    },
+    [agentId, ensureSessionForAttach],
+  )
+
+  const removePendingAttachment = useCallback(
+    async (attId: string) => {
+      setPendingAttachments((prev) => prev.filter((a) => a.id !== attId))
+      const sid = sessionId
+      if (!sid) return
+      try {
+        await chatApi.deleteAttachment(sid, attId)
+      } catch (e) {
+        if ((e as { status?: number }).status === 409) return
+        setError((e as Error).message)
+      }
+    },
+    [sessionId],
+  )
 
   const startMessageStream = (
     sid: string,
@@ -638,6 +916,7 @@ export default function ChatPage(props?: ChatPageProps) {
       streamOptions?: {
         input_response?: ReturnType<typeof buildInputSubmitBody>['input_response']
         confirm_response?: ReturnType<typeof buildConfirmSubmitBody>['confirm_response']
+        attachment_ids?: string[]
       }
       onConfirmResult?: (result: ConfirmResultPayload) => void
       onStreamSettled?: (outcome: 'done' | 'error', err?: string) => void
@@ -952,6 +1231,15 @@ export default function ChatPage(props?: ChatPageProps) {
     }
   }
 
+  const handleComposerPaste = (e: React.ClipboardEvent) => {
+    const files = e.clipboardData?.files
+    if (!files?.length) return
+    const images = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (!images.length) return
+    e.preventDefault()
+    void uploadFiles(images)
+  }
+
   if (loading) return (
     <div className="chat-loading">
       <div className="loading-spinner" />
@@ -965,15 +1253,34 @@ export default function ChatPage(props?: ChatPageProps) {
     <div className="chat-page">
       <main className="chat-main">
         <div className="chat-main-header">
-          <span className="chat-header-title">Chat</span>
-          <button
-            type="button"
-            className={`chat-debug-toggle ${showDebug ? 'chat-debug-toggle-on' : ''}`}
-            onClick={() => setShowDebug((prev) => !prev)}
-            disabled={!hasAgent}
-          >
-            {showDebug ? 'Hide Debug' : 'Show Debug'}
-          </button>
+          <span className="chat-header-title">对话</span>
+          <div className="chat-header-actions">
+            {isHome && homeAgents && homeAgents.length > 0 ? (
+              <SearchableChipSelect
+                value={agentId ?? ''}
+                options={homeAgents.map((a) => ({
+                  value: a.id,
+                  label: a.name,
+                }))}
+                onChange={(id) => onAgentChange?.(id)}
+                placeholder="请选择 Agent"
+                searchPlaceholder="搜索 Agent…"
+                className={`chat-chip--agent${!agentId ? ' chat-chip--agent-empty' : ''}`}
+                leading={(
+                  <>
+                    <span className="chat-chip__label">Agent</span>
+                    <span className="chat-chip__dot breathing-dot" aria-hidden />
+                  </>
+                )}
+              />
+            ) : agent ? (
+              <span className="chat-chip chat-chip--agent">
+                <span className="chat-chip__label">Agent</span>
+                <span className="chat-chip__dot breathing-dot" aria-hidden />
+                <span className="chat-chip__text">{agent.name}</span>
+              </span>
+            ) : null}
+          </div>
         </div>
         {error && (
           <div className="chat-error-banner">
@@ -985,16 +1292,18 @@ export default function ChatPage(props?: ChatPageProps) {
           <div className="chat-messages-inner">
             {!hasAgent ? (
               <div className="chat-welcome">
-                <p>Select an Agent to start chatting.</p>
+                <h2>开始对话</h2>
+                <p>先在右上角选择一个 Agent，再发送消息。</p>
+                <span className="chat-welcome__hint">右上角 · 选择 Agent</span>
               </div>
             ) : !sessionId ? (
               <div className="chat-welcome">
-                <p>Start a new conversation.</p>
+                <p>开始一段新对话。</p>
               </div>
             ) : loadingHistory ? (
               <div className="chat-welcome">
                 <div className="loading-spinner" />
-                <p>Loading history…</p>
+                <p>正在加载历史…</p>
               </div>
             ) : (
               <>
@@ -1025,22 +1334,77 @@ export default function ChatPage(props?: ChatPageProps) {
                       (c.status === 'pending' || c.status === 'confirming')
                     )
                   })
+                  const timelineNodes = messageTimelines[messageKey] ?? m.metadata?.timeline ?? []
+                  const showTime = !(streaming && idx === messages.length - 1) && formatMessageTime(m.created_at)
+                  const actions = m.id && sessionId && !streaming && (m.role === 'user' || m.role === 'assistant') ? (
+                    <div className="chat-msg-actions">
+                      <button
+                        type="button"
+                        className="chat-rewind-btn"
+                        title="隐藏这条及之后的消息，从更早的上下文继续"
+                        disabled={rewinding || forking}
+                        onClick={() => handleRewind(m.id)}
+                      >
+                        {rewinding ? '回溯中…' : '回溯'}
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-rewind-btn"
+                        title="复制到此为止的历史，开一个新会话"
+                        disabled={rewinding || forking}
+                        onClick={() => handleFork(m.id)}
+                      >
+                        {forking ? '分叉中…' : '分叉'}
+                      </button>
+                    </div>
+                  ) : null
+                  if (m.role === 'user') {
+                    const userAtts = m.metadata?.attachments ?? []
+                    return (
+                      <div key={messageKey} className="chat-msg chat-msg-user">
+                        <div className="chat-user-block">
+                          <div className="chat-user-block__head">
+                            <span className="chat-user-block__tag">#user_input</span>
+                            <span className="chat-user-block__role">role: user</span>
+                          </div>
+                          <div className="chat-user-block__body">
+                            <div className="chat-user-block__avatar" aria-hidden>U</div>
+                            <div className="chat-user-block__main">
+                              {sessionId && userAtts.length > 0 ? (
+                                <MessageAttachmentList sessionId={sessionId} attachments={userAtts} />
+                              ) : null}
+                              {m.content ? <pre className="chat-user-block__text">{m.content}</pre> : null}
+                            </div>
+                            <div className="chat-user-block__wave" aria-hidden>
+                              <span /><span /><span /><span />
+                            </div>
+                          </div>
+                          <div className="chat-user-block__foot">
+                            {actions}
+                            {showTime ? (
+                              <span className="chat-msg-time" title={m.created_at}>
+                                {formatMessageTime(m.created_at)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  }
                   return (
                     <div key={messageKey} className={`chat-msg chat-msg-${m.role}`}>
-                      <div className="chat-msg-avatar">{m.role === 'user' ? 'U' : 'A'}</div>
-                      <div className="chat-msg-content">
-                        {m.role === 'assistant' ? (
+                      <div className="chat-msg-avatar">AI</div>
+                      <div className="chat-msg-stack">
+                        {timelineNodes.length > 0 ? <TimelineCard nodes={timelineNodes} /> : null}
+                        <SourcesPanel sources={sources} />
+                        <div className="chat-msg-content">
                           <>
-                            {((messageTimelines[messageKey]?.length ?? 0) > 0 || (m.metadata?.timeline?.length ?? 0) > 0) && (
-                              <TimelineView nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []} />
-                            )}
-                            <SourcesPanel sources={sources} />
                             <AssistantReplyBody
                               sessionId={sessionId}
                               content={m.content}
-                              nodes={messageTimelines[messageKey] ?? m.metadata?.timeline ?? []}
+                              nodes={timelineNodes}
                               showCursor={streaming && idx === messages.length - 1}
-                              interrupted={(messageTimelines[messageKey] ?? m.metadata?.timeline ?? []).some((n) => n.phase === 'interrupted')}
+                              interrupted={timelineNodes.some((n) => n.phase === 'interrupted')}
                             />
                             {(() => {
                               const messageInputs = inputs.filter((c) => {
@@ -1147,36 +1511,13 @@ export default function ChatPage(props?: ChatPageProps) {
                               )
                             })}
                           </>
-                        ) : (
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{m.content}</pre>
-                        )}
-                        {!(streaming && idx === messages.length - 1) && formatMessageTime(m.created_at) ? (
-                          <div className="chat-msg-time" title={m.created_at}>
-                            {formatMessageTime(m.created_at)}
-                          </div>
-                        ) : null}
-                        {m.id && sessionId && !streaming && (m.role === 'user' || m.role === 'assistant') ? (
-                          <div className="chat-msg-actions">
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm chat-rewind-btn"
-                              title="Hide this message and everything after; continue from earlier context"
-                              disabled={rewinding || forking}
-                              onClick={() => handleRewind(m.id)}
-                            >
-                              {rewinding ? 'Rewinding…' : 'Rewind here'}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm chat-rewind-btn"
-                              title="Start a new session with history up to this message; the original chat is unchanged"
-                              disabled={rewinding || forking}
-                              onClick={() => handleFork(m.id)}
-                            >
-                              {forking ? 'Forking…' : 'Fork from here'}
-                            </button>
-                          </div>
-                        ) : null}
+                          {showTime ? (
+                            <div className="chat-msg-time" title={m.created_at}>
+                              {formatMessageTime(m.created_at)}
+                            </div>
+                          ) : null}
+                          {actions}
+                        </div>
                       </div>
                     </div>
                   )
@@ -1217,96 +1558,180 @@ export default function ChatPage(props?: ChatPageProps) {
           </div>
         </div>
         <div className="chat-input-wrap">
-          <div className="chat-input-wrap-inner">
+          <div
+            className={`chat-composer${composerDragOver ? ' chat-composer--drag' : ''}`}
+            onDragEnter={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (!hasAgent || streaming) return
+              setComposerDragOver(true)
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (!hasAgent || streaming) return
+              setComposerDragOver(true)
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault()
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return
+              setComposerDragOver(false)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setComposerDragOver(false)
+              if (!hasAgent || streaming) return
+              if (e.dataTransfer.files?.length) void uploadFiles(e.dataTransfer.files)
+            }}
+          >
             {hasAgent ? (
-              <select
-                className="chat-input"
-                style={{ maxWidth: 280, flex: '0 0 auto' }}
-                value={modelChoice}
-                disabled={streaming || !sessionId}
-                onChange={async (e) => {
-                  const next = e.target.value
-                  const prev = modelChoice
-                  if (!sessionId || next === prev) return
-                  try {
-                    if (next === 'agent_default') {
-                      await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
-                    } else {
-                      const sep = next.indexOf('::')
-                      await modelCatalogApi.patchSessionModel(sessionId, {
-                        model_provider_id: next.slice(0, sep),
-                        model: next.slice(sep + 2),
-                      })
-                    }
-                    setModelChoice(next)
-                  } catch (err) {
-                    setError((err as Error).message)
-                    setModelChoice(prev)
-                  }
-                }}
-              >
-                {(() => {
-                  const groups = new Map<string, ModelChoiceItem[]>()
-                  const defaults: ModelChoiceItem[] = []
-                  for (const item of modelChoices) {
+              <div className="chat-composer__toolbar">
+                <SearchableChipSelect
+                  className="chat-chip--compact"
+                  value={modelChoice}
+                  disabled={streaming || !sessionId}
+                  placement="up"
+                  searchPlaceholder="搜索模型…"
+                  placeholder="选择模型"
+                  leading={<span className="chat-chip__ai" aria-hidden>AI</span>}
+                  options={modelChoices.map((item) => {
                     if (item.id === 'agent_default') {
-                      defaults.push(item)
-                      continue
+                      const model = item.model || agent?.model_config?.model
+                      return {
+                        value: 'agent_default',
+                        label: model ? `默认 · ${model}` : (item.label?.replace(/^Agent\s*/, '') || '默认模型'),
+                      }
                     }
-                    const key = item.provider_name || '其他'
-                    const list = groups.get(key) || []
-                    list.push(item)
-                    groups.set(key, list)
-                  }
-                  return (
-                    <>
-                      {defaults.map((item) => (
-                        <option key={item.id} value="agent_default">
-                          {item.label}
-                        </option>
-                      ))}
-                      {Array.from(groups.entries()).map(([name, items]) => (
-                        <optgroup key={name} label={name}>
-                          {items.map((item) => (
-                            <option key={item.id} value={`${item.provider_id}::${item.model}`}>
-                              {item.display_name || item.model}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </>
-                  )
-                })()}
-              </select>
+                    return {
+                      value: `${item.provider_id}::${item.model}`,
+                      label: item.display_name || item.model || item.label,
+                      group: item.provider_name || '其他',
+                    }
+                  })}
+                  onChange={async (next) => {
+                    const prev = modelChoice
+                    if (!sessionId || next === prev) return
+                    try {
+                      if (next === 'agent_default') {
+                        await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
+                      } else {
+                        const sep = next.indexOf('::')
+                        await modelCatalogApi.patchSessionModel(sessionId, {
+                          model_provider_id: next.slice(0, sep),
+                          model: next.slice(sep + 2),
+                        })
+                      }
+                      setModelChoice(next)
+                    } catch (err) {
+                      setError((err as Error).message)
+                      setModelChoice(prev)
+                    }
+                  }}
+                />
+                <span className="chat-composer__hint">Shift + Enter 换行</span>
+              </div>
             ) : null}
-            <textarea
-              className="chat-input"
-              placeholder={hasAgent ? 'Type a message. Enter to send, Shift+Enter for newline.' : 'Select an Agent first'}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={streaming || !hasAgent}
-              rows={2}
-            />
-            <button
-              className="btn chat-send"
-              onClick={() => handleSend()}
-              disabled={!input.trim() || streaming || !hasAgent}
-            >
-              {streaming ? 'Sending...' : 'Send'}
-            </button>
-            {streaming && (
-              <button
-                className="btn btn-secondary chat-stop"
-                onClick={() => {
-                  abortRef.current?.abort()
-                  streamSessionRef.current = null
-                  setStreaming(false)
+            {(pendingAttachments.length > 0 || uploadingCount > 0) ? (
+              <div className="chat-composer__pending">
+                {pendingAttachments.map((att) => (
+                  <div key={att.id} className="chat-pending-chip">
+                    {att.kind === 'image' && sessionId ? (
+                      <AttachmentImageThumb
+                        sessionId={sessionId}
+                        att={att}
+                        className="chat-pending-chip__thumb"
+                      />
+                    ) : (
+                      <span className="chat-pending-chip__name">{att.name}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="chat-pending-chip__remove"
+                      aria-label={`移除 ${att.name}`}
+                      disabled={streaming}
+                      onClick={() => void removePendingAttachment(att.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {uploadingCount > 0 ? (
+                  <span className="chat-pending-uploading">上传中 ({uploadingCount})…</span>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="chat-composer__row">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="chat-attach-input"
+                multiple
+                accept={ATTACH_ACCEPT}
+                disabled={streaming || !hasAgent}
+                onChange={(e) => {
+                  const files = e.target.files
+                  if (files?.length) void uploadFiles(files)
+                  e.target.value = ''
                 }}
+              />
+              <button
+                type="button"
+                className="chat-attach"
+                aria-label="添加附件"
+                title="添加图片或文本文件"
+                disabled={streaming || !hasAgent}
+                onClick={() => fileInputRef.current?.click()}
               >
-                Stop
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 01-7.78-7.78l8.49-8.49a3.5 3.5 0 014.95 4.95l-8.5 8.49a1.5 1.5 0 01-2.12-2.12l7.78-7.78"
+                  />
+                </svg>
               </button>
-            )}
+              <textarea
+                className="chat-input"
+                placeholder={hasAgent ? '给 AI Agent 发送指令...' : '请先选择 Agent'}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onPaste={handleComposerPaste}
+                disabled={streaming || !hasAgent}
+                rows={1}
+              />
+              {streaming ? (
+                <button
+                  type="button"
+                  className="chat-stop"
+                  onClick={() => {
+                    abortRef.current?.abort()
+                    streamSessionRef.current = null
+                    setStreaming(false)
+                  }}
+                >
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="chat-send"
+                  aria-label="发送"
+                  onClick={() => handleSend()}
+                  disabled={
+                    (!input.trim() && pendingAttachments.length === 0) ||
+                    !hasAgent ||
+                    uploadingCount > 0
+                  }
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </main>

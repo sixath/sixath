@@ -14,7 +14,7 @@
 | 资源 | Portal 独立「代理」实体（对齐 MCP 服务：CRUD + `resources` ACL），类型 `http` 或 `socks5` |
 | 绑定 | Agent 选一个默认代理（可空=直连）；每个工具/数据源：继承 / 直连 / 绑定另一代理 ID |
 | 例外 | 代理上的 `no_proxy`（域名/后缀/CIDR）；工具显式绑定某代理时**强制走该隧道**（忽略 `no_proxy`） |
-| 一期客户端 | `http_request`、web 检索、ES HTTP、MCP HTTP、Jaeger；MySQL 仅 SOCKS5 Dial |
+| 一期客户端 | `http_request`、web 检索、ES HTTP、MCP HTTP、Jaeger；MySQL / Mongo 仅 SOCKS5 Dial |
 | 非目标 | 模型流量、SSH、stdio MCP 走代理；HTTP 正向代理硬连 MySQL；用代理绕过 SSRF；按节点自动选代理 |
 
 一句话：运营维护几条命名隧道；Agent 选默认出口；个别工具覆盖；运行时统一 Dial，失败不得装成业务空结果。
@@ -37,7 +37,7 @@
 1. Portal 可创建/列出/更新/删除**命名代理**；测连通；密码回显打码。
 2. Agent 可选择默认代理或直连；选用时调用方对该代理有 `use`。
 3. 工具/数据源可：`inherit`（默认）/ `off`（直连）/ `proxy`（指定 `proxy_id`，覆盖 Agent）。
-4. 运行时解析绑定后，HTTP 类客户端与 MySQL SOCKS5 Dial 走同一套 ProxySpec；连接失败分类见 §6。
+4. 运行时解析绑定后，HTTP 类客户端与 MySQL / Mongo SOCKS5 Dial 走同一套 ProxySpec；连接失败分类见 §6。
 5. `no_proxy` 命中则直连；工具 `egress=proxy` 时忽略 `no_proxy`。
 6. 模型工具 schema **不得**出现代理 URL/账号。SSRF 仍校验**最终目标**主机；代理主机允许为内网。
 
@@ -76,7 +76,7 @@ framework/netx（名称可在实现时微调，必须单模块）
   HTTPClient(spec) / DialContext(spec)
   MatchNoProxy(host, no_proxy)
 
-http_request / web / ES / MCP HTTP / Jaeger / MySQL
+http_request / web / ES / MCP HTTP / Jaeger / MySQL / Mongo
   只用 netx，禁止各写一份 ProxyURL
 ```
 
@@ -114,13 +114,13 @@ http_request / web / ES / MCP HTTP / Jaeger / MySQL
 
 - `egress_mode`：`inherit` \| `off` \| `proxy`；缺省 `inherit`。
 - `proxy_id`：仅 `egress_mode=proxy` 时必填；保存时编辑者必须对该 id 有 `use`。
-- 解析后的 Spec 为 `http` 且目标为 MySQL → 校验失败，不保存（含 `inherit` 到 Agent 的 HTTP 代理）。
+- 解析后的 Spec 为 `http` 且目标为 MySQL / Mongo → 校验失败，不保存（含 `inherit` 到 Agent 的 HTTP 代理）。
 
 无 Portal 行的内置工具（`http_request`、默认 web_*）：**只能继承 Agent**，没有单独绑定 UI。
 
 Agent 绑定的 **MCP 服务目录**（`mcp_server_ids`，非工具行）一期只继承 Agent 默认代理，**不在 `mcp_servers` 表上增加 `egress_mode`**。若某 HTTP MCP 需要覆盖，做成 Portal `type=mcp` 工具行再绑 `egress`。
 
-Hive / Mongo 等未列入 §0 客户端名单的数据源一期保持直连；保存时若 `egress_mode=proxy` → **拒绝**（不要静默直连）。
+Hive 一期保持直连；保存时若 `egress_mode=proxy` → **拒绝**（不要静默直连）。Mongo 与 MySQL 相同：只接受 SOCKS5。
 
 ### 4.3 解析顺序
 
@@ -170,8 +170,8 @@ Hive / Mongo 等未列入 §0 客户端名单的数据源一期保持直连；�
 | web_* / Tavily / Bocha | 装配时传入同一 Agent 解析结果（继承 Agent；无工具级覆盖） |
 | ES `ESHTTP` / Jaeger | 按该工具 egress 解析后的 Client |
 | MCP HTTP transport | **工具行**按 egress 注入；仅 `mcp_server_ids` 绑定的服务继承 Agent 默认；stdio 忽略 egress |
-| MySQL 数据源 | 解析后的 Spec 为 socks5 时注入 Dialer（含 Agent inherit）；解析结果为 http → builder/保存错误；无 Spec → 直连 |
-| Hive / Mongo | 一期直连，不读 egress |
+| MySQL / Mongo 数据源 | 解析后的 Spec 为 socks5 时注入 Dialer（含 Agent inherit）；解析结果为 http → builder/保存错误；无 Spec → 直连 |
+| Hive | 一期直连，不读 egress |
 
 模型客户端（OpenAI/DashScope/Ollama）**不**读 Agent `proxy_id`。
 

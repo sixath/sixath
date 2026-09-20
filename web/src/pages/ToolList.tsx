@@ -13,6 +13,12 @@ import {
   type ToolImportResult,
 } from '../utils/toolImportExport'
 
+function typeDotClass(type: Tool['type']): string {
+  if (type === 'datasource') return 'cell-dot--amber'
+  if (type === 'mcp') return 'cell-dot--purple'
+  return 'cell-dot--cyan'
+}
+
 export default function ToolList() {
   const navigate = useNavigate()
   const [tools, setTools] = useState<Tool[]>([])
@@ -239,16 +245,21 @@ export default function ToolList() {
   return (
     <div>
       <div className="page-header">
-        <h1>Tools</h1>
+        <div>
+          <div className="page-title-row">
+            <h1>Tools</h1>
+            <span className="page-count">{total}</span>
+          </div>
+          <p className="page-sub">管理你的 AI 智能体工具和数据源。</p>
+        </div>
         <div className="actions">
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={exporting || importing || selectedCount === 0}
-            onClick={handleExportSelected}
-            title={selectedCount === 0 ? '先勾选工具' : `导出已选 ${selectedCount} 个`}
+            disabled={exporting || importing}
+            onClick={() => fileInputRef.current?.click()}
           >
-            {exporting ? 'Exporting…' : `批量导出${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+            {importing ? '导入中…' : '导入 JSON'}
           </button>
           <button
             type="button"
@@ -256,15 +267,7 @@ export default function ToolList() {
             disabled={exporting || importing || total === 0}
             onClick={() => void handleExportAll()}
           >
-            {exporting ? 'Exporting…' : '导出全部'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={importing || exporting}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {importing ? 'Importing…' : '导入 JSON'}
+            {exporting ? '导出中…' : '导出全部'}
           </button>
           <input
             ref={fileInputRef}
@@ -273,7 +276,7 @@ export default function ToolList() {
             style={{ display: 'none' }}
             onChange={(e) => void onPickFile(e.target.files?.[0] ?? null)}
           />
-          <Link to="/tools/new" className="btn">New Tool</Link>
+          <Link to="/tools/new" className="btn">新建 Tool</Link>
         </div>
       </div>
       {importSummary ? (
@@ -283,7 +286,7 @@ export default function ToolList() {
       ) : null}
       {total === 0 ? (
         <div className="section-card empty-state">
-          <p>No tools yet.</p>
+          <p>还没有工具。</p>
           <div className="actions" style={{ justifyContent: 'center' }}>
             <button
               type="button"
@@ -293,11 +296,36 @@ export default function ToolList() {
             >
               导入 JSON
             </button>
-            <Link to="/tools/new" className="btn">New Tool</Link>
+            <Link to="/tools/new" className="btn">新建 Tool</Link>
           </div>
         </div>
       ) : (
-        <div className="table-card">
+        <div className="table-card table-card--tools">
+          <div className="table-toolbar">
+            <div className="actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={exporting || importing || selectedCount === 0}
+                onClick={handleExportSelected}
+                title={selectedCount === 0 ? '先勾选工具' : `导出已选 ${selectedCount} 个`}
+              >
+                {exporting ? '导出中…' : '批量导出'}
+              </button>
+              <span className="table-toolbar__meta">
+                {selectedCount > 0 ? `已选择 ${selectedCount} 项` : '已选择 0 项'}
+              </span>
+              {selectedCount > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  清空选择
+                </button>
+              ) : null}
+            </div>
+          </div>
           <table>
             <thead>
               <tr>
@@ -315,7 +343,7 @@ export default function ToolList() {
                 <th>Name</th>
                 <th>Type</th>
                 <th>Description</th>
-                <th>Actions</th>
+                <th className="col-actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -331,40 +359,38 @@ export default function ToolList() {
                       />
                     </label>
                   </td>
-                  <td><strong>{tool.name}</strong></td>
-                  <td><span className={`badge badge-${tool.type}`}>{tool.type}</span></td>
-                  <td style={{ color: 'var(--muted)', maxWidth: 320 }}>{tool.description}</td>
                   <td>
-                    <div className="actions">
-                      <Link to={`/tools/${tool.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
+                    <span className="cell-name">
+                      <span className={`cell-dot ${typeDotClass(tool.type)}`} aria-hidden />
+                      {tool.name}
+                    </span>
+                  </td>
+                  <td><span className={`badge badge-${tool.type}`}>{tool.type}</span></td>
+                  <td className="cell-desc">{tool.description}</td>
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <Link to={`/tools/${tool.id}/edit`} className="btn btn-ghost btn-sm">编辑</Link>
                       <button
                         type="button"
-                        className="btn btn-secondary btn-sm"
+                        className="btn btn-ghost btn-sm"
                         disabled={copyingId === tool.id}
                         onClick={() => void handleCopy(tool)}
                       >
                         {copyingId === tool.id ? '复制中…' : '复制'}
                       </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => setPendingDelete({ id: tool.id, name: tool.name })}>Delete</button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm btn-danger"
+                        onClick={() => setPendingDelete({ id: tool.id, name: tool.name })}
+                      >
+                        删除
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {selectedCount > 0 ? (
-            <div style={{ padding: '0.75rem 1rem', color: 'var(--muted)', fontSize: 13 }}>
-              已选 {selectedCount} 个
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ marginLeft: 8 }}
-                onClick={() => setSelectedIds(new Set())}
-              >
-                清空选择
-              </button>
-            </div>
-          ) : null}
         </div>
       )}
       <ConfirmDialog

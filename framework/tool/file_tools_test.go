@@ -304,6 +304,10 @@ func TestSearchFiles_DescriptionPrefersRCAForSource(t *testing.T) {
 	if !strings.Contains(tl.Description, "rca_grep") && !strings.Contains(tl.Description, "rca_") {
 		t.Fatalf("search_files should prefer rca_* for source analysis, got %q", tl.Description)
 	}
+	desc := strings.ToLower(tl.Description)
+	if !strings.Contains(desc, "do not") && !strings.Contains(tl.Description, "禁止") && !strings.Contains(desc, "not a substitute") {
+		t.Fatalf("search_files must forbid substituting rca_grep for source/error search, got %q", tl.Description)
+	}
 }
 
 func TestSearchFiles_ContentFallback(t *testing.T) {

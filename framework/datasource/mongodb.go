@@ -3,6 +3,7 @@ package datasource
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -10,6 +11,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+type mongoContextDialer func(ctx context.Context, network, addr string) (net.Conn, error)
+
+func (d mongoContextDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return d(ctx, network, address)
+}
 
 // MongoDatabaseProvider 由 MongoDB 数据源实现，供 metadata 与 executor 使用。
 type MongoDatabaseProvider interface {
@@ -67,6 +74,9 @@ func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 	}
 
 	clientOpts := options.Client().ApplyURI(uri)
+	if cfg.DialContext != nil {
+		clientOpts.SetDialer(mongoContextDialer(cfg.DialContext))
+	}
 	if cfg.MaxOpenConns > 0 {
 		// 将 MaxOpenConns 粗略映射为连接池大小
 		clientOpts.SetMaxPoolSize(uint64(cfg.MaxOpenConns))

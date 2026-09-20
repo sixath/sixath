@@ -70,8 +70,11 @@ export default function OrgListPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">组织</h1>
-          <div className="page-sub">{orgs.length} 个成员身份</div>
+          <div className="page-title-row">
+            <h1>组织</h1>
+            <span className="page-count">{orgs.length}</span>
+          </div>
+          <p className="page-sub">管理你加入的组织，并切换当前工作空间。</p>
         </div>
       </div>
 
@@ -111,7 +114,7 @@ export default function OrgListPage() {
                 <th>名称</th>
                 <th>角色</th>
                 <th>Org ID</th>
-                <th>操作</th>
+                <th className="col-actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -120,11 +123,14 @@ export default function OrgListPage() {
                 return (
                   <tr key={org.id}>
                     <td>
-                      <Link to={`/orgs/${org.id}`} className="link" style={{ fontWeight: 600 }}>
-                        {org.name}
-                      </Link>
+                      <span className="cell-name">
+                        <span className="cell-dot cell-dot--amber" aria-hidden />
+                        <Link to={`/orgs/${org.id}`} className="link">
+                          {org.name}
+                        </Link>
+                      </span>
                       {isCurrent && (
-                        <span className="badge" style={{ marginLeft: '0.5rem' }}>
+                        <span className="badge badge-builtin" style={{ marginLeft: '0.5rem' }}>
                           当前
                         </span>
                       )}
@@ -133,17 +139,17 @@ export default function OrgListPage() {
                     <td>
                       <code style={{ fontSize: '0.8rem' }}>{org.id}</code>
                     </td>
-                    <td>
-                      <div className="actions">
+                    <td className="col-actions">
+                      <div className="row-actions">
                         <button
                           type="button"
-                          className="btn btn-secondary btn-sm"
+                          className="btn btn-ghost btn-sm"
                           onClick={() => selectOrg(org.id)}
                           disabled={isCurrent}
                         >
                           {isCurrent ? '已选中' : '设为当前'}
                         </button>
-                        <Link to={`/orgs/${org.id}`} className="btn btn-sm">
+                        <Link to={`/orgs/${org.id}`} className="btn btn-ghost btn-sm">
                           详情
                         </Link>
                       </div>

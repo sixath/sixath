@@ -27,6 +27,7 @@ func SendMessageSSE(chat *service.ChatService, logger log.Logger) func(ctx krato
 
 		var body struct {
 			Content         string                      `json:"content"`
+			AttachmentIDs   []string                    `json:"attachment_ids"`
 			InputResponse   *portalchat.InputResponse   `json:"input_response"`
 			ConfirmResponse *portalchat.ConfirmResponse `json:"confirm_response"`
 		}
@@ -34,9 +35,11 @@ func SendMessageSSE(chat *service.ChatService, logger log.Logger) func(ctx krato
 			l.Errorf("SendMessageSSE bind request body failed: session_id=%s err=%v", sessionID, err)
 			return writeSSEError(ctx, "invalid body")
 		}
-		if body.Content == "" && body.InputResponse == nil && body.ConfirmResponse == nil {
+		attachmentIDs := portalchat.UniqueNonEmpty(body.AttachmentIDs)
+		hitl := body.InputResponse != nil || body.ConfirmResponse != nil
+		if body.Content == "" && len(attachmentIDs) == 0 && !hitl {
 			l.Errorf("SendMessageSSE invalid request: empty content session_id=%s", sessionID)
-			return writeSSEError(ctx, "content or input_response or confirm_response required")
+			return writeSSEError(ctx, "content or attachment_ids or input_response or confirm_response required")
 		}
 
 		// Custom Route handlers skip the server middleware chain unless we invoke it
@@ -60,7 +63,11 @@ func SendMessageSSE(chat *service.ChatService, logger log.Logger) func(ctx krato
 			reqCtx = portalchat.WithConfirmResponse(reqCtx, body.ConfirmResponse)
 		}
 
-		chatReq := &chatv1.SendMessageRequest{SessionId: sessionID, Content: body.Content}
+		chatReq := &chatv1.SendMessageRequest{
+			SessionId:     sessionID,
+			Content:       body.Content,
+			AttachmentIds: attachmentIDs,
+		}
 
 		w := ctx.Response()
 		chatsse.SetHeaders(w)

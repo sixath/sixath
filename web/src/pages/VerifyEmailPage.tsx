@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { verifyEmail } from '../api/sessionAuth'
 import './LoginPage.css'
+import ThemeToggle from '../components/ThemeToggle'
 
 type VerifyState = 'idle' | 'loading' | 'success' | 'error'
 
@@ -35,6 +36,7 @@ export default function VerifyEmailPage() {
 
   return (
     <div className="login-page">
+      <ThemeToggle />
       <div className="login-card">
         <h1>邮箱验证</h1>
         {state === 'loading' && <p className="login-muted">正在验证…</p>}

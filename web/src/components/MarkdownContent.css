@@ -2,7 +2,7 @@
   font-size: 0.9rem;
   line-height: 1.6;
   color: var(--text, #334155);
-  color-scheme: light;
+  color-scheme: inherit;
   forced-color-adjust: none;
 }
 
@@ -26,9 +26,9 @@
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
   line-height: 1.5;
-  color: var(--muted, #64748b);
-  background: var(--bg-accent, #f8fafc);
-  border: 1px solid var(--border, #e2e8f0);
+  color: var(--muted, #94a3b8);
+  background: var(--bg-accent, #121826);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-sm, 6px);
 }
 
@@ -37,10 +37,10 @@
   padding: 0.35rem 0.75rem;
   font-size: 0.8rem;
   cursor: pointer;
-  border: 1px solid var(--border-strong, #cbd5e1);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-sm, 6px);
-  background: var(--bg, #fff);
-  color: var(--text-strong, #0f172a);
+  background: var(--bg, #0a0e17);
+  color: var(--text-strong, #f8fafc);
 }
 
 .markdown-huge-retry:disabled {
@@ -83,7 +83,7 @@
 .markdown-content :not(pre) > code {
   padding: 0.15em 0.4em;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .markdown-content ul, .markdown-content ol {
@@ -92,6 +92,7 @@
 }
 
 .markdown-content table {
+  width: 100%;
   border-collapse: collapse;
   margin: 0.75rem 0;
   font-size: 0.9rem;
@@ -116,7 +117,7 @@
 }
 
 .markdown-content a {
-  color: var(--primary, #2563eb);
+  color: var(--primary, #00f0ff);
 }
 
 .markdown-cursor {

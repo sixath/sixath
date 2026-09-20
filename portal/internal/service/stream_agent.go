@@ -8,6 +8,7 @@ import (
 	"backend/internal/chat"
 
 	agent "github.com/sixath/framework/harness"
+	"github.com/sixath/framework/model"
 )
 
 type streamEpisode struct {
@@ -18,6 +19,8 @@ type streamEpisode struct {
 
 // streamAgentEvents runs one agent episode and forwards events to ch.
 // Returns episode (FinalText from Done.Text / last assistant / resp.Text, not deltas).
+// When emitError is false, run failures are returned without writing error events to ch
+// (caller may vision-degrade and retry once).
 func (s *ChatService) streamAgentEvents(
 	runCtx context.Context,
 	sessionID, agentID, workspace string,
@@ -25,6 +28,7 @@ func (s *ChatService) streamAgentEvents(
 	req *agent.Request,
 	provider *chat.ChatTranscriptProvider,
 	ch chan<- ChatStreamEvent,
+	emitError bool,
 ) (streamEpisode, error) {
 	var summaryBuilder strings.Builder
 	var ep streamEpisode
@@ -33,7 +37,9 @@ func (s *ChatService) streamAgentEvents(
 	if !ok {
 		resp, runErr := a.Run(runCtx, req)
 		if runErr != nil {
-			s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, runErr)
+			if emitError {
+				s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, runErr)
+			}
 			return streamEpisode{}, runErr
 		}
 		tr := chat.RunTraceFromMetadata(resp.Metadata)
@@ -54,7 +60,9 @@ func (s *ChatService) streamAgentEvents(
 
 	evCh, runErr := ea.RunEvents(runCtx, req)
 	if runErr != nil {
-		ch <- ChatStreamEvent{Type: ChatStreamEventError, Error: runErr.Error()}
+		if emitError {
+			ch <- ChatStreamEvent{Type: ChatStreamEventError, Error: runErr.Error()}
+		}
 		return streamEpisode{}, runErr
 	}
 	for ev := range evCh {
@@ -81,7 +89,9 @@ func (s *ChatService) streamAgentEvents(
 				ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "failed")}
 			}
 		case agent.StreamEventError:
-			s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, errors.New(ev.Error))
+			if emitError {
+				s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, errors.New(ev.Error))
+			}
 			ep.Summary = summaryBuilder.String()
 			if ev.Trace != nil {
 				ep.Trace = ev.Trace
@@ -116,4 +126,43 @@ func (s *ChatService) streamAgentEvents(
 	}
 	ep.Summary = summaryBuilder.String()
 	return ep, nil
+}
+
+// streamAgentEventsWithVisionDegrade runs streamAgentEvents, and on a vision-class
+// upstream error retries once with persistContent footnotes and Parts=nil.
+func (s *ChatService) streamAgentEventsWithVisionDegrade(
+	runCtx context.Context,
+	sessionID, agentID, workspace string,
+	a agent.Agent,
+	req *agent.Request,
+	provider *chat.ChatTranscriptProvider,
+	ch chan<- ChatStreamEvent,
+	vision *chat.VisionDegradeState,
+) (streamEpisode, error) {
+	for {
+		canRetry := vision != nil && vision.HadImageParts && !vision.Degraded()
+		ep, err := s.streamAgentEvents(runCtx, sessionID, agentID, workspace, a, req, provider, ch, !canRetry)
+		if err == nil {
+			return ep, nil
+		}
+		var retry bool
+		var nextMsgs []model.Message
+		if vision != nil {
+			retry, nextMsgs = vision.TryDegrade(err, req.Messages)
+		}
+		if !retry {
+			if canRetry {
+				// Error emit was suppressed for a potential degrade; surface it now.
+				s.handleStreamRunError(runCtx, sessionID, agentID, provider, ch, err)
+			}
+			return ep, err
+		}
+		s.log.Infof("SendMessageStream %s session_id=%s agent_id=%s", chat.AttachmentVisionDegradedMarker, sessionID, agentID)
+		ch <- ChatStreamEvent{Type: ChatStreamEventDebug, Content: chat.AttachmentVisionDegradedMarker}
+		req = &agent.Request{
+			Messages: nextMsgs,
+			Metadata: req.Metadata,
+		}
+		// Loop at most once more: vision.Degraded() is now true.
+	}
 }

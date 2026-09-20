@@ -50,13 +50,14 @@ type AgentService struct {
 	mcpServerUC *biz.McpServerUsecase
 	skillUC     *biz.SkillResourceUsecase
 	channelUC   *biz.ChannelUsecase
+	proxyRepo   biz.ProxyRepo
 	codeRoots   []string
 	log         *log.Helper
 }
 
 // NewAgentService creates an AgentService
-func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, codeRoots []string, logger log.Logger) *AgentService {
-	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, codeRoots: codeRoots, log: log.NewHelper(logger)}
+func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, proxyRepo biz.ProxyRepo, codeRoots []string, logger log.Logger) *AgentService {
+	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, proxyRepo: proxyRepo, codeRoots: codeRoots, log: log.NewHelper(logger)}
 }
 
 func (s *AgentService) sharedSkillDirs(ctx context.Context, agentID string) ([]string, error) {
@@ -111,6 +112,7 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 		McpServerIds:   m.McpServerIDs,
 		DebugRun:       m.DebugRun,
 		WecomChannelId: m.WecomChannelID,
+		ProxyId:        m.ProxyID,
 		RuntimeTools:   biz.RuntimeToolsToProto(m.RuntimeTools),
 		CreatedAt:      m.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      m.UpdatedAt.Format(time.RFC3339),
@@ -129,7 +131,7 @@ func (s *AgentService) CreateAgent(ctx context.Context, req *agentv1.CreateAgent
 	if chat.WorkspaceUnderCodeRoots(workspace, s.codeRoots) {
 		return nil, biz.ErrWorkspaceWholeRepoRetired
 	}
-	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), workspace, modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), rt, req.GetToolIds())
+	agent, err := s.uc.Create(ctx, req.GetName(), req.GetDescription(), req.GetSystemPrompt(), workspace, modelConfig, req.GetDebugRun(), req.GetWecomChannelId(), req.GetProxyId(), rt, req.GetToolIds())
 	if err != nil {
 		s.log.Errorf("CreateAgent failed: name=%s workspace=%s err=%v", req.GetName(), req.GetWorkspace(), err)
 		return nil, err
@@ -206,6 +208,9 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 			return nil, err
 		}
 		updates["wecom_channel_id"] = *req.WecomChannelId
+	}
+	if req.ProxyId != nil {
+		updates["proxy_id"] = *req.ProxyId
 	}
 	agent, err := s.uc.Update(ctx, req.GetId(), updates)
 	if err != nil {
@@ -293,7 +298,12 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 	reg := tool.NewRegistry()
-	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{Workspace: agentMeta.Workspace})
+	cat := chat.LoadProxyCatalog(ctx, s.proxyRepo, agentMeta.ProxyID, tools)
+	regResult, err := chat.BuildRegistry(tools, mcpServerMetas, reg, chat.RegistryBuildOptions{
+		Workspace:    agentMeta.Workspace,
+		AgentProxyID: agentMeta.ProxyID,
+		Proxies:      cat,
+	})
 	if err != nil {
 		s.log.Errorf("Chat build tool registry failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
@@ -335,6 +345,14 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 
+	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
+		Reg:          reg,
+		BoundServers: mcpServerMetas,
+		Wiring:       catalogInput,
+		Catalog:      catalog,
+		HTTPClient:   reg.HTTPClient(),
+	})
+
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
@@ -347,6 +365,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	runCtx = context.WithValue(runCtx, tool.ContextKeyAgentID, agentID)
 	runCtx = context.WithValue(runCtx, tool.ContextKeyAgentName, agentMeta.Name)
 	runCtx = context.WithValue(runCtx, tool.ContextKeyToolCatalog, catalog)
+	runCtx = chat.WithDiscoveryExpand(runCtx, mcpExpand)
 	if toolSearchActive {
 		runCtx = context.WithValue(runCtx, tool.ContextKeyToolSearchActive, true)
 	}

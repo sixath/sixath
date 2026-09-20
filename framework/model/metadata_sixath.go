@@ -6,6 +6,7 @@ const (
 	MetadataKeyReasoningContent = "reasoning_content" // thinking 模式 assistant 消息需原样回传
 
 	OriginCompressionNotice = "compression_notice"
+	OriginForcedSummary     = "forced_summary"
 	OriginMemoryFence       = "memory_fence"
 	OriginGuardrailHalt     = "guardrail_halt"
 	OriginL2Handoff         = "l2_handoff"

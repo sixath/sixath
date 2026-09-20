@@ -808,11 +808,22 @@ func (a *ReActAgent) runToolEvents(
 	sendError(maxStreamErr, a.config.MaxSteps)
 }
 
-const ForcedFinalSummaryPrompt = "You have finished collecting tool results. Do not call any tools. Reply directly with a complete answer to the user's original question—cover every section or numbered item they asked for; do not stop after the first few headings. Use Markdown tables where appropriate. Rules: (1) Only include facts present in tool outputs above—never infer hostname/IP patterns from the user's input table or naming conventions. (2) If a host or area was not successfully queried, say so explicitly; do not fill gaps with guessed rows. (3) When summarizing config files (e.g. YAML extra_hosts), list actual entries from stdout; do not collapse them into a simplified template unless every row is verified. (4) If web_search results are in the transcript, synthesize all of them with citations (title + URL), not just the first query."
+const ForcedFinalSummaryPrompt = "You have finished collecting tool results. Do not call any tools. Reply directly with a complete answer to the user's original question—cover every section or numbered item they asked for; do not stop after the first few headings. Use Markdown tables where appropriate. Rules: (1) Only include facts present in tool outputs above—never infer hostname/IP patterns from the user's input table or naming conventions. (2) If a host or area was not successfully queried, say so explicitly; do not fill gaps with guessed rows. (3) When summarizing config files (e.g. YAML extra_hosts), list actual entries from stdout; do not collapse them into a simplified template unless every row is verified. (4) If web_search results are in the transcript, synthesize all of them with citations (title + URL), not just the first query. (5) Never ask the user to restate the original question, even if a compression notice is present. Do not say 请重新说明 / 请重问 / 由于上下文已压缩无法看到原问题. Quote remaining error codes and RPC messages. If evidence is insufficient, say what is already known. 禁止要求用户重述问题。"
 
 // AnswerOriginalQuestionPrompt is the MaxSteps closer: facts-only answer, no task lock.
 func AnswerOriginalQuestionPrompt() string {
 	return ForcedFinalSummaryPrompt
+}
+
+// AnswerOriginalQuestionPromptWithGoal restates the original user question so L0
+// compression cannot drop it when this closer becomes the only remaining user block.
+func AnswerOriginalQuestionPromptWithGoal(q string) string {
+	base := AnswerOriginalQuestionPrompt()
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return base
+	}
+	return base + "\n\n【本轮原始问题】\n" + q + "\n禁止要求用户重述该问题。"
 }
 
 func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messages []model.Message, trace *RunTrace, emit func(events.Kind, map[string]any)) (*Response, error) {
@@ -821,7 +832,10 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messag
 	}
 	msgs := append(append([]model.Message(nil), messages...), model.Message{
 		Role:    "user",
-		Content: AnswerOriginalQuestionPrompt(),
+		Content: AnswerOriginalQuestionPromptWithGoal(fwctx.FirstInvestigationUserContent(messages)),
+		Metadata: map[string]any{
+			model.MetadataKeySixathOrigin: model.OriginForcedSummary,
+		},
 	})
 	emit(events.ModelInvoked, map[string]any{"message_count": len(msgs), "step": -1, "mode": "plain_summary", "forced_summary": true})
 	beginModelInvocation(trace, "plain_summary")

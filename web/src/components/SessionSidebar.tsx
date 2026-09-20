@@ -154,7 +154,7 @@ export default function SessionSidebar({
           data-testid="session-sidebar-new"
           onClick={() => onNewSession()}
         >
-          新建对话
+          + 新建对话
         </button>
       </div>
       <div className="session-sidebar-search-wrap">

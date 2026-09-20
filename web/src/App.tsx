@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import ToolList from './pages/ToolList'
 import ToolForm from './pages/ToolForm'
 import McpServerList from './pages/McpServerList'
 import McpServerForm from './pages/McpServerForm'
+import ProxyList from './pages/ProxyList'
+import ProxyForm from './pages/ProxyForm'
 import ModelProviderList from './pages/ModelProviderList'
 import ModelProviderForm from './pages/ModelProviderForm'
 import AgentList from './pages/AgentList'
@@ -24,7 +26,8 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
 import RequireAuth from './components/RequireAuth'
-import { hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
+import ThemeToggle from './components/ThemeToggle'
+import { getSessionEmail, hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
 import './App.css'
 
 function Breadcrumb() {
@@ -47,6 +50,11 @@ function Breadcrumb() {
     else if (segments[2] === 'edit') { current = '编辑 MCP 服务'; icon = '✏️' }
     else if (segments[1]) { current = 'MCP 服务详情'; icon = '🔌' }
     else { current = 'MCP 服务'; icon = '🔌' }
+  } else if (segments[0] === 'proxies') {
+    if (segments[1] === 'new') { current = '新建代理'; icon = '➕' }
+    else if (segments[2] === 'edit') { current = '编辑代理'; icon = '✏️' }
+    else if (segments[1]) { current = '代理详情'; icon = '🌐' }
+    else { current = '代理'; icon = '🌐' }
   } else if (segments[0] === 'model-providers') {
     if (segments[1] === 'new') { current = '新建模型供应商'; icon = '➕' }
     else if (segments[1]) { current = '编辑模型供应商'; icon = '✏️' }
@@ -88,10 +96,26 @@ function Breadcrumb() {
 
 const SIDEBAR_KEY = 'sixath-sidebar-open'
 
+function sessionDisplayName(email: string): string {
+  if (!email) return '已登录'
+  return email.split('@')[0] || email
+}
+
+function sessionInitials(email: string): string {
+  if (!email) return 'SX'
+  const local = sessionDisplayName(email)
+  const letters = local.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '')
+  if (letters.length >= 2) return letters.slice(0, 2).toUpperCase()
+  if (letters.length === 1) return letters.toUpperCase()
+  return 'SX'
+}
+
 function AppShell() {
   const loc = useLocation()
   const navigate = useNavigate()
   const tokenConfigured = hasApiToken()
+  const sessionEmail = getSessionEmail()
+  const emailUnverified = isSessionEmailUnverified()
   // re-check when navigating (e.g. after saving Settings)
   void loc.pathname
 
@@ -144,6 +168,10 @@ function AppShell() {
               <span className="nav-item__icon">🔌</span>
               MCP 服务
             </NavLink>
+            <NavLink to="/proxies" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <span className="nav-item__icon">🌐</span>
+              代理
+            </NavLink>
             <NavLink to="/model-providers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">🧠</span>
               模型供应商
@@ -164,23 +192,38 @@ function AppShell() {
               <span className="nav-item__icon">🏢</span>
               组织
             </NavLink>
-            <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-              <span className="nav-item__icon">⚙️</span>
-              设置{tokenConfigured ? ' ·已登录' : ' ·!'}
+          </div>
+        </nav>
+        <div className="sidebar-user">
+          <div
+            className={`sidebar-user__card${loc.pathname.startsWith('/settings') ? ' is-active' : ''}${tokenConfigured ? '' : ' needs-attn'}`}
+          >
+            <NavLink
+              to="/settings"
+              className="sidebar-user__main"
+              title={tokenConfigured ? '设置' : '设置（未配置 Token）'}
+            >
+              <div className="sidebar-user__avatar">{sessionInitials(sessionEmail)}</div>
+              <div className="sidebar-user__meta">
+                <p className="sidebar-user__name">{sessionDisplayName(sessionEmail)}</p>
+                <p className={`sidebar-user__status${emailUnverified ? '' : ' is-ok'}`}>
+                  <span className="sidebar-user__status-dot" aria-hidden />
+                  {emailUnverified ? '未验证邮箱' : sessionEmail || '本地会话'}
+                </p>
+              </div>
             </NavLink>
             <button
               type="button"
-              className="nav-item"
+              className="sidebar-user__logout"
               onClick={() => {
                 logout()
                 navigate('/login', { replace: true })
               }}
             >
-              <span className="nav-item__icon">⎋</span>
               退出
             </button>
           </div>
-        </nav>
+        </div>
       </aside>
       <header className="topbar">
         {!navOpen && (
@@ -195,13 +238,20 @@ function AppShell() {
           </button>
         )}
         <Breadcrumb />
+        <div className="topbar__actions">
+          <ThemeToggle />
+        </div>
       </header>
       <main className="content">
         <div className="content-inner">
-          {isSessionEmailUnverified() && (
-            <p className="email-unverified-banner" role="status">
-              邮箱尚未验证。请查收验证邮件，或稍后在设置中确认账号状态。
-            </p>
+          {emailUnverified && (
+            <div className="email-unverified-banner" role="status">
+              <div className="email-unverified-banner__body">
+                <div className="email-unverified-banner__icon" aria-hidden>!</div>
+                <span>邮箱尚未验证。请查收验证邮件，或稍后在设置中确认账号状态。</span>
+              </div>
+              <Link to="/settings" className="btn">去验证</Link>
+            </div>
           )}
           <Routes>
             <Route path="/" element={<ChatHome />} />
@@ -212,6 +262,9 @@ function AppShell() {
             <Route path="/mcp-servers" element={<McpServerList />} />
             <Route path="/mcp-servers/new" element={<McpServerForm />} />
             <Route path="/mcp-servers/:id/edit" element={<McpServerForm />} />
+            <Route path="/proxies" element={<ProxyList />} />
+            <Route path="/proxies/new" element={<ProxyForm />} />
+            <Route path="/proxies/:id/edit" element={<ProxyForm />} />
             <Route path="/model-providers" element={<ModelProviderList />} />
             <Route path="/model-providers/new" element={<ModelProviderForm />} />
             <Route path="/model-providers/:id" element={<ModelProviderForm />} />

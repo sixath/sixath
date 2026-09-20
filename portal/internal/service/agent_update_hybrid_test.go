@@ -16,7 +16,7 @@ type hybridAgentRepo struct {
 	agent *biz.AgentMeta
 }
 
-func (r *hybridAgentRepo) Create(context.Context, string, string, string, string, string, biz.ModelConfig, bool, string, biz.RuntimeToolsConfig, []string) (*biz.AgentMeta, error) {
+func (r *hybridAgentRepo) Create(context.Context, string, string, string, string, string, biz.ModelConfig, bool, string, string, biz.RuntimeToolsConfig, []string) (*biz.AgentMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
 func (r *hybridAgentRepo) CountByWecomChannelID(context.Context, string) (int, error) {
@@ -112,8 +112,8 @@ func newHybridUpdateAgentService(t *testing.T, stored biz.RuntimeToolsConfig) (*
 		ID: "res-1", Type: biz.ResourceTypeAgent, PayloadRef: agentID,
 		OwnerUserID: "owner", Visibility: biz.VisibilityPrivate,
 	}}
-	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), "/tmp", log.NewStdLogger(nil))
-	return NewAgentService(uc, nil, nil, nil, nil, nil, log.NewStdLogger(nil)), repo
+	uc := biz.NewAgentUsecase(repo, res, biz.NewAccessChecker(res), nil, "/tmp", log.NewStdLogger(nil))
+	return NewAgentService(uc, nil, nil, nil, nil, nil, nil, log.NewStdLogger(nil)), repo
 }
 
 func TestUpdateAgent_OmitsHybridRecall_PreservesStored(t *testing.T) {

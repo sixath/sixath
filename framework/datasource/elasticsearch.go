@@ -56,13 +56,17 @@ func NewElasticsearchDataSource(cfg Config) (*esDataSource, error) {
 		addr = "http://" + addr
 	}
 
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultESHTTPTimeout}
+	}
 	return &esDataSource{
 		id: cfg.ID,
 		http: &ESHTTP{
 			BaseURL:  strings.TrimRight(addr, "/"),
 			Username: cfg.User,
 			Password: cfg.Password,
-			Client:   &http.Client{Timeout: defaultESHTTPTimeout},
+			Client:   client,
 		},
 	}, nil
 }

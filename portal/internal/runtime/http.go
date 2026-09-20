@@ -40,6 +40,7 @@ func RegisterRoutes(srv *khttp.Server, svc *Service) {
 	r.GET("/runtime/v1/sessions/{id}/messages", svc.wrap(svc.handleMessages))
 	r.GET("/runtime/v1/sessions/{id}/result-files", svc.wrap(svc.handleResultFile))
 	r.POST("/runtime/v1/sessions/{id}/rewind", svc.wrap(svc.handleRewind))
+	r.PATCH("/runtime/v1/sessions/{id}/model", svc.wrap(svc.handlePatchModel))
 	r.POST("/runtime/v1/turns", svc.wrap(svc.handleTurns))
 }
 
@@ -274,6 +275,18 @@ func (s *Service) handleRewind(ctx context.Context, hctx khttp.Context) error {
 		return err
 	}
 	return hctx.JSON(200, out)
+}
+
+func (s *Service) handlePatchModel(ctx context.Context, hctx khttp.Context) error {
+	id := strings.TrimSpace(hctx.Vars().Get("id"))
+	var req setSessionModelRequest
+	if err := decodeJSON(hctx, &req); err != nil {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "invalid body")
+	}
+	if err := s.patchSessionModel(ctx, id, req); err != nil {
+		return err
+	}
+	return hctx.JSON(200, map[string]any{"ok": true})
 }
 
 func (s *Service) handleTurns(ctx context.Context, hctx khttp.Context) error {

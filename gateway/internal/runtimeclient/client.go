@@ -148,10 +148,18 @@ type RewindRequest struct {
 	MessageID string `json:"message_id"`
 }
 
+// SetSessionModelRequest is PATCH /runtime/v1/sessions/{id}/model body.
+type SetSessionModelRequest struct {
+	Choice          string `json:"choice,omitempty"`
+	ModelProviderID string `json:"model_provider_id,omitempty"`
+	Model           string `json:"model,omitempty"`
+}
+
 // TurnRequest is POST /runtime/v1/turns body.
 type TurnRequest struct {
 	SessionID       string          `json:"session_id"`
 	Content         string          `json:"content,omitempty"`
+	AttachmentIds   []string        `json:"attachment_ids,omitempty"`
 	ReplyMode       string          `json:"reply_mode,omitempty"`
 	ChannelID       string          `json:"channel_id,omitempty"`
 	PeerID          string          `json:"peer_id,omitempty"`
@@ -351,6 +359,12 @@ func (c *Client) SearchSessions(ctx context.Context, userID string, q SearchSess
 func (c *Client) Rewind(ctx context.Context, userID, sessionID string, req RewindRequest) (json.RawMessage, error) {
 	path := "/runtime/v1/sessions/" + url.PathEscape(sessionID) + "/rewind"
 	return c.doRawJSON(ctx, http.MethodPost, path, userID, nil, req)
+}
+
+// SetSessionModel writes or clears the session model overlay.
+func (c *Client) SetSessionModel(ctx context.Context, userID, sessionID string, req SetSessionModelRequest) (json.RawMessage, error) {
+	path := "/runtime/v1/sessions/" + url.PathEscape(sessionID) + "/model"
+	return c.doRawJSON(ctx, http.MethodPatch, path, userID, nil, req)
 }
 
 // TurnsFinal runs a turn with reply_mode=final and returns JSON.

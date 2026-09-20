@@ -3,7 +3,7 @@ package biz
 import "testing"
 
 func TestValidRCAFuncPath(t *testing.T) {
-	for _, fp := range []string{"rca_code", "rca_symbol", "jaeger_trace", "es_log_query"} {
+	for _, fp := range []string{"rca_code", "rca_symbol", "jaeger_trace", "es_log_query", "vm_run_cmd"} {
 		if !ValidRCAFuncPath(fp) {
 			t.Fatalf("%q should be valid", fp)
 		}

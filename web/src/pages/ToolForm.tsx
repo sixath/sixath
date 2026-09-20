@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { toolApi, type CreateToolRequest, type ToolConfig } from '../api/client'
+import { proxyApi, toolApi, type CreateToolRequest, type Proxy, type ToolConfig } from '../api/client'
 import { copyTool } from '../utils/toolCopy'
+import {
+  coerceEgressMode,
+  coerceMysqlNamedProxy,
+  filterProxiesForTool,
+  toolAllowsNamedProxy,
+  toolSupportsEgress,
+} from '../utils/proxyEgress'
 
 function linesToStringArray(text: string): string[] {
   return text.split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean)
@@ -32,6 +39,7 @@ export default function ToolForm() {
   const [newKvValue, setNewKvValue] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [proxies, setProxies] = useState<Proxy[]>([])
 
   const validateJson = (str: string): Record<string, unknown> | null => {
     if (!str.trim()) return {}
@@ -73,6 +81,13 @@ export default function ToolForm() {
     setConfig((c) => ({ ...c, parameters: rest }))
     syncJsonFromParams(rest)
   }
+
+  useEffect(() => {
+    proxyApi
+      .list({ page: 1, page_size: 100, bindable: true })
+      .then((res) => setProxies(res.items))
+      .catch(() => setProxies([]))
+  }, [])
 
   useEffect(() => {
     if (isEdit && id) {
@@ -160,6 +175,20 @@ export default function ToolForm() {
         },
       }
     }
+    if (toolSupportsEgress(type)) {
+      const dsType = type === 'datasource' ? (submitConfig.datasource?.type || config.datasource?.type) : undefined
+      const mode = coerceEgressMode(config.egress_mode, { toolType: type, datasourceType: dsType })
+      const named = coerceMysqlNamedProxy(mode, config.proxy_id, proxies, dsType)
+      submitConfig.egress_mode = named.mode
+      submitConfig.proxy_id = named.mode === 'proxy' ? named.proxyId : ''
+      if (named.mode === 'proxy' && !submitConfig.proxy_id) {
+        setError('指定代理时请选择一个代理')
+        return
+      }
+    } else {
+      delete submitConfig.egress_mode
+      delete submitConfig.proxy_id
+    }
     setLoading(true)
     try {
       const data: CreateToolRequest = { name: name.trim(), description: description.trim(), type, config: submitConfig }
@@ -179,7 +208,10 @@ export default function ToolForm() {
   return (
     <div>
       <div className="page-header">
-        <h1>{isEdit ? '编辑工具' : '新建工具'}</h1>
+        <div>
+          <h1>{isEdit ? '编辑工具' : '新建工具'}</h1>
+          <p className="page-sub">定义工具类型、描述与出网方式。</p>
+        </div>
         <Link to="/tools" className="btn btn-secondary">返回</Link>
       </div>
       <div className="section-card" style={{ maxWidth: 520 }}>
@@ -196,7 +228,19 @@ export default function ToolForm() {
           <label>类型 *</label>
           <select
             value={type}
-            onChange={(e) => setType(e.target.value as 'builtin' | 'mcp' | 'datasource' | 'rca')}
+            onChange={(e) => {
+              const next = e.target.value as 'builtin' | 'mcp' | 'datasource' | 'rca'
+              setType(next)
+              setConfig((c) => {
+                if (next === 'datasource' && (c.egress_mode || '') === 'proxy') {
+                  const dsType = c.datasource?.type || 'mysql'
+                  if (!toolAllowsNamedProxy(next, dsType)) {
+                    return { ...c, egress_mode: 'inherit', proxy_id: '' }
+                  }
+                }
+                return c
+              })
+            }}
           >
             <option value="builtin">内置工具</option>
             <option value="mcp">MCP 工具</option>
@@ -268,7 +312,17 @@ export default function ToolForm() {
               <label>类型</label>
               <select
                 value={config.datasource?.type || 'mysql'}
-                onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), type: e.target.value } }))}
+                onChange={(e) => {
+                  const nextType = e.target.value
+                  setConfig((c) => {
+                    const next: ToolConfig = { ...c, datasource: { ...(c.datasource || {}), type: nextType } }
+                    if ((c.egress_mode || '') === 'proxy' && !toolAllowsNamedProxy('datasource', nextType)) {
+                      next.egress_mode = 'inherit'
+                      next.proxy_id = ''
+                    }
+                    return next
+                  })
+                }}
               >
                 <option value="mysql">MySQL</option>
                 <option value="mongodb">MongoDB</option>
@@ -384,11 +438,12 @@ export default function ToolForm() {
               <label>RCA 子工具</label>
               <select
                 value={config.rca?.func_path || 'rca_code'}
-                onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), func_path: e.target.value as 'rca_code' | 'rca_symbol' | 'jaeger_trace' | 'es_log_query' } }))}
+                onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), func_path: e.target.value as 'rca_code' | 'rca_symbol' | 'jaeger_trace' | 'es_log_query' | 'vm_run_cmd' } }))}
               >
                 <option value="rca_code">代码检索 (grep/glob/read)</option>
                 <option value="rca_symbol">符号导航 (definition/references)</option>
                 <option value="jaeger_trace">Jaeger 链路</option>
+                <option value="vm_run_cmd">实例 runCmd</option>
                 {isEdit && config.rca?.func_path === 'es_log_query' ? (
                   <option value="es_log_query">ELK 日志</option>
                 ) : null}
@@ -455,6 +510,20 @@ export default function ToolForm() {
                   value={config.rca?.query_url || ''}
                   onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), query_url: e.target.value } }))}
                   placeholder="http://jaeger-host:16686"
+                />
+              </div>
+            )}
+
+            {config.rca?.func_path === 'vm_run_cmd' && (
+              <div className="form-group">
+                <p style={{ fontSize: '0.82em', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
+                  实例 :53000/runCmd 只执行 cmd.exe，不支持 PowerShell（用 type / dir / findstr / tasklist）。
+                </p>
+                <label>MySQL 工具名（可选，用于按 vmid 查 VM IP）</label>
+                <input
+                  value={config.rca?.datasource_id || ''}
+                  onChange={(e) => setConfig((c) => ({ ...c, rca: { ...(c.rca || {}), datasource_id: e.target.value } }))}
+                  placeholder="多 MySQL 时指定；空则运行时按绑定推断"
                 />
               </div>
             )}
@@ -881,6 +950,80 @@ export default function ToolForm() {
                 {openConfigError && <div className="error" style={{ marginTop: '0.25rem' }}>{openConfigError}</div>}
               </div>
             </div>
+          </>
+        )}
+        {toolSupportsEgress(type) && (
+          <>
+            <div className="form-group">
+              <label>出网</label>
+              <select
+                value={coerceEgressMode(config.egress_mode, {
+                  toolType: type,
+                  datasourceType: type === 'datasource' ? config.datasource?.type || 'mysql' : undefined,
+                })}
+                onChange={(e) => {
+                  const mode = e.target.value
+                  setConfig((c) => ({
+                    ...c,
+                    egress_mode: mode,
+                    proxy_id: mode === 'proxy' ? c.proxy_id : '',
+                  }))
+                }}
+              >
+                <option value="inherit">继承 Agent 默认代理</option>
+                <option value="off">直连</option>
+                {toolAllowsNamedProxy(
+                  type,
+                  type === 'datasource' ? config.datasource?.type || 'mysql' : undefined,
+                ) ? (
+                  <option value="proxy">指定代理</option>
+                ) : null}
+              </select>
+              {type === 'datasource' &&
+              !toolAllowsNamedProxy('datasource', config.datasource?.type || 'mysql') ? (
+                <p style={{ fontSize: '0.82em', color: 'var(--muted)', margin: '0.35rem 0 0' }}>
+                  Hive 不支持指定代理，请用继承或直连。
+                </p>
+              ) : null}
+            </div>
+            {coerceEgressMode(config.egress_mode, {
+              toolType: type,
+              datasourceType: type === 'datasource' ? config.datasource?.type || 'mysql' : undefined,
+            }) === 'proxy' &&
+            toolAllowsNamedProxy(
+              type,
+              type === 'datasource' ? config.datasource?.type || 'mysql' : undefined,
+            ) ? (
+              <div className="form-group">
+                <label>指定代理 *</label>
+                <select
+                  value={config.proxy_id || ''}
+                  onChange={(e) => setConfig((c) => ({ ...c, proxy_id: e.target.value }))}
+                >
+                  <option value="">请选择代理</option>
+                  {filterProxiesForTool(proxies, {
+                    toolType: type,
+                    datasourceType: type === 'datasource' ? config.datasource?.type || 'mysql' : undefined,
+                  }).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}（{p.type} {p.host}:{p.port}）
+                    </option>
+                  ))}
+                </select>
+                {type === 'datasource' &&
+                ['mysql', 'mongo', 'mongodb'].includes(
+                  (config.datasource?.type || 'mysql').toLowerCase(),
+                ) ? (
+                  <p style={{ fontSize: '0.82em', color: 'var(--muted)', margin: '0.35rem 0 0' }}>
+                    MySQL / MongoDB 仅支持 SOCKS5。
+                  </p>
+                ) : (
+                  <p style={{ fontSize: '0.82em', color: 'var(--muted)', margin: '0.35rem 0 0' }}>
+                    可先到 <Link to="/proxies">代理</Link> 创建。
+                  </p>
+                )}
+              </div>
+            ) : null}
           </>
         )}
         {error && <div className="error">{error}</div>}

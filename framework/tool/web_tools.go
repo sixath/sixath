@@ -16,10 +16,10 @@ import (
 
 // WebToolsConfig configures web_search and web_extract registration.
 type WebToolsConfig struct {
-	SearchBackend web.WebSearchBackend
-	DefaultCount  int
+	SearchBackend  web.WebSearchBackend
+	DefaultCount   int
 	DefaultSummary bool
-	HTTPClient    *http.Client
+	HTTPClient     *http.Client
 }
 
 // NewWebSearchBackendFromEnv selects backend from WEB_SEARCH_BACKEND (default bocha).
@@ -28,7 +28,12 @@ func NewWebSearchBackendFromEnv() web.WebSearchBackend {
 }
 
 // NewWebSearchBackend builds a search backend; empty fields fall back to env (WEB_SEARCH_BACKEND, BOCHA_API_KEY, TAVILY_API_KEY).
-func NewWebSearchBackend(searchBackend, bochaAPIKey, tavilyAPIKey string) web.WebSearchBackend {
+// Optional client is passed into BochaConfig/TavilyConfig.HTTPClient.
+func NewWebSearchBackend(searchBackend, bochaAPIKey, tavilyAPIKey string, client ...*http.Client) web.WebSearchBackend {
+	var httpClient *http.Client
+	if len(client) > 0 {
+		httpClient = client[0]
+	}
 	name := strings.ToLower(strings.TrimSpace(searchBackend))
 	if name == "" {
 		name = strings.ToLower(strings.TrimSpace(os.Getenv("WEB_SEARCH_BACKEND")))
@@ -42,13 +47,13 @@ func NewWebSearchBackend(searchBackend, bochaAPIKey, tavilyAPIKey string) web.We
 		if key == "" {
 			key = os.Getenv("TAVILY_API_KEY")
 		}
-		return web.NewTavilyBackend(web.TavilyConfig{APIKey: key})
+		return web.NewTavilyBackend(web.TavilyConfig{APIKey: key, HTTPClient: httpClient})
 	default:
 		key := strings.TrimSpace(bochaAPIKey)
 		if key == "" {
 			key = os.Getenv("BOCHA_API_KEY")
 		}
-		return web.NewBochaBackend(web.BochaConfig{APIKey: key})
+		return web.NewBochaBackend(web.BochaConfig{APIKey: key, HTTPClient: httpClient})
 	}
 }
 
@@ -57,26 +62,46 @@ func RegisterWebTools(reg *Registry, cfg *WebToolsConfig) error {
 	if reg == nil {
 		return errors.New("web tools: registry is nil")
 	}
-	var backend web.WebSearchBackend = web.NewBochaBackend(web.BochaConfig{APIKey: os.Getenv("BOCHA_API_KEY")})
+	var overlay *http.Client
 	defaultCount := web.DefaultSearchCount
 	defaultSummary := true
 	client := &http.Client{Timeout: 30 * time.Second}
 	if cfg != nil {
-		if cfg.SearchBackend != nil {
-			backend = cfg.SearchBackend
-		}
 		if cfg.DefaultCount > 0 {
 			defaultCount = cfg.DefaultCount
 		}
 		defaultSummary = cfg.DefaultSummary
 		if cfg.HTTPClient != nil {
 			client = cfg.HTTPClient
+			overlay = cfg.HTTPClient
 		}
+	}
+	var backend web.WebSearchBackend
+	if cfg != nil && cfg.SearchBackend != nil {
+		backend = cfg.SearchBackend
+		applySearchBackendHTTPClient(backend, overlay)
+	} else {
+		backend = web.NewBochaBackend(web.BochaConfig{
+			APIKey:     os.Getenv("BOCHA_API_KEY"),
+			HTTPClient: overlay,
+		})
 	}
 	if err := registerWebSearchTool(reg, backend, defaultCount, defaultSummary); err != nil {
 		return err
 	}
 	return registerWebExtractTool(reg, client)
+}
+
+func applySearchBackendHTTPClient(backend web.WebSearchBackend, client *http.Client) {
+	if backend == nil || client == nil {
+		return
+	}
+	switch b := backend.(type) {
+	case *web.BochaBackend:
+		b.SetHTTPClient(client)
+	case *web.TavilyBackend:
+		b.SetHTTPClient(client)
+	}
 }
 
 func registerWebSearchTool(reg *Registry, backend web.WebSearchBackend, defaultCount int, defaultSummary bool) error {
