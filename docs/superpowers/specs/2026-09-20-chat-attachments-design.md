@@ -127,9 +127,26 @@ Composer
 - Proto：`SendMessageRequest` 增加 `repeated string attachment_ids = 3;`
 - `MessageReply.metadata.attachments`：数组，元素与上传响应对齐（至少 id/kind/mime/name/relative_path），供刷新回放
 
-绑定规则：发消息成功后，所列 attachment 视为已绑定；重复 id 去重；空 `attachment_ids` 与今天行为一致。
+**正文与附件：**
+
+- `content` 可为空字符串，但 **`content` 与 `attachment_ids` 不能同时为空**（允许「只发图 / 只发日志」）。
+- 同请求内 `attachment_ids` 去重。
+- **已绑定**到历史消息的 `attachment_id` **允许**在后续消息再次引用（同一磁盘文件、多条消息 metadata 各存一份描述符拷贝）。DELETE 在**任意**消息仍引用该 id 时返回 409。
+- 空 `attachment_ids`（或省略）且有非空 `content`：与今天纯文本行为一致。
+
+绑定规则：发消息成功后，所列 attachment 计入「已被引用」集合（用于 DELETE 门禁）。
 
 失败原子性：校验或落库失败时**不**写入半条 user message；已上传未绑定的附件仍可再次引用或 DELETE。
+
+### 4.2.1 附件读取（一期必做）
+
+`GET /api/v1/sessions/{session_id}/attachments/{att_id}`
+
+- 鉴权同 session；仅返回属于该 session 的文件字节
+- `Content-Type` 用存储的 mime；`Content-Disposition: inline`（图片预览）或 `attachment`（文本下载，实现可选）
+- 用途：历史刷新后缩略图 / 下载；**禁止**把整图 base64 写入 `metadata`（避免撑爆消息行）
+
+验收「刷新后缩略图可回放」依赖本 GET，**不是可选**。
 
 ### 4.3 落盘与清理
 
@@ -152,10 +169,10 @@ Composer
 
 | kind | Content 脚注 | Parts |
 |------|--------------|-------|
-| image | 可选：`〔附件 image〕{relative_path}` | `{Type: image_url, URL: data:{mime};base64,…}` |
-| text | 必选：`〔附件 text〕{relative_path} — 可用 read_file 读取` | 无 |
+| image | 有 image `Parts` 时可省略脚注；**无** `Parts`（降级 / 模型不支持 vision）时**必填** `〔附件 image〕{relative_path}`（可提示 `vision_analyze`） | 支持 vision 时：`{Type: image_url, URL: data:{mime};base64,…}` |
+| text | **必填** `〔附件 text〕{relative_path} — 可用 read_file 读取` | 无 |
 
-用户原文与脚注之间空一行拼接。
+用户原文与脚注之间空一行拼接。`content` 为空时允许仅脚注（或仅 Parts）。
 
 ### 5.2 `openAIChatMessage`
 
@@ -179,8 +196,9 @@ Composer
 
 - Composer：回形针按钮 + 拖拽命中区 + `Ctrl/Cmd+V` 粘贴图片（从 clipboard 构造 `File` 走同一上传 API）
 - 发送前：缩略图（image）/ 文件名 chip（text），可单独移除（触发 DELETE 或仅从待发列表去掉；未绑定的建议 DELETE 以免占配额）
-- 历史气泡：image 缩略图；text 显示文件名；可选「打开/下载」走只读附件 GET（若一期不做 GET，至少展示 relative_path）
-- 加载态：上传中禁用发送或允许发送但须等全部 upload settle
+- 历史气泡：image 缩略图（`GET …/attachments/{id}`）；text 显示文件名，可点下载/打开（同一 GET）
+- 发送按钮：无正文且无待发附件时禁用；仅有附件或仅有正文均可发送
+- 加载态：上传中须等全部 upload settle 后再发送
 - 无附件：UI 与协议与今天一致
 
 ## 7. 错误语义
@@ -216,18 +234,23 @@ Composer
 1. Web 可附加图片与文本类文件并发送  
 2. 支持 vision 的模型收到 image `Parts`  
 3. 文本文件在 `sessions/<id>/uploads/`，可用现有文件工具读  
-4. 刷新后 metadata/缩略图可回放  
+4. 刷新后 metadata + 经附件 GET 的缩略图/下载可回放  
 5. 渠道行为不变  
+6. 允许仅附件、无正文发送；已绑定附件可被后续消息再次引用 
 
 ## 9. 实现触及面（指导，非排期）
 
 | 层 | 文件（预期） |
 |----|----------------|
-| Proto / HTTP | `portal/api/chat/v1/chat.proto`、chat HTTP 注册、multipart handler |
-| Service | `portal/internal/service/chat.go`（上传、组装 Parts、metadata） |
+| Proto / HTTP | `portal/api/chat/v1/chat.proto`、chat HTTP 注册、multipart 上传 + 附件 GET |
+| Service | `portal/internal/service/chat.go`（上传、读取、组装 Parts、metadata） |
 | Model bridge | `framework/model/openai_tools.go`（`openAIChatMessage`） |
-| Web | `ChatPage` composer、`client.ts` upload + sendMessageStream |
-| 可选 | 附件 GET、session 删除钩子清理 uploads |
+| Web | `ChatPage` composer、`client.ts` upload/GET + sendMessageStream |
+| 清理 | session 删除钩子清理 `sessions/{id}/`（若现网无钩子则计划中单列任务） |
+
+**Workspace 前置：** 上传要求 Agent 已配置非空 `workspace`；否则上传 API 返回 400（文案：请先配置 Agent workspace）。未启用 workspace 文件工具时仍允许上传与多模态；文本脚注保留，但 `read_file` 可能不可用——脚注文案不假装工具一定存在。
+
+**GIF：** 白名单包含 gif；若上游不支持该 modality，走 §5.3 降级，不单独剔除 gif。
 
 ## 10. 决议记录
 
