@@ -74,6 +74,98 @@ func (uc *ACLAPIUsecase) AddOrgMember(ctx context.Context, orgID, userID, role s
 	return uc.identities.AddMember(ctx, orgID, userID, role)
 }
 
+// ListOrgMembers returns all members of an org. Caller must be an org member.
+func (uc *ACLAPIUsecase) ListOrgMembers(ctx context.Context, orgID string) ([]OrgMemberInfo, error) {
+	caller, err := requireCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "org_id is required")
+	}
+	memberRole, err := uc.identities.MemberRole(ctx, orgID, caller)
+	if err != nil {
+		return nil, err
+	}
+	if memberRole == "" {
+		return nil, ErrForbiddenPerm
+	}
+	return uc.identities.ListOrgMembers(ctx, orgID)
+}
+
+// RemoveOrgMember removes a member from an org. Caller must be org owner.
+func (uc *ACLAPIUsecase) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
+	if _, err := uc.requireOrgOwner(ctx, orgID); err != nil {
+		return err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "user_id is required")
+	}
+	targetRole, err := uc.identities.MemberRole(ctx, orgID, userID)
+	if err != nil {
+		return err
+	}
+	if targetRole == "" {
+		return kratosErrors.NotFound("NOT_FOUND", "member not found")
+	}
+	if targetRole == "owner" {
+		members, err := uc.identities.ListOrgMembers(ctx, orgID)
+		if err != nil {
+			return err
+		}
+		ownerCount := 0
+		for _, m := range members {
+			if m.Role == "owner" {
+				ownerCount++
+			}
+		}
+		if ownerCount <= 1 {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "cannot remove the last owner")
+		}
+	}
+	return uc.identities.RemoveMember(ctx, orgID, userID)
+}
+
+// UpdateMemberRole changes a member's role. Caller must be org owner.
+func (uc *ACLAPIUsecase) UpdateMemberRole(ctx context.Context, orgID, userID, role string) error {
+	if _, err := uc.requireOrgOwner(ctx, orgID); err != nil {
+		return err
+	}
+	userID = strings.TrimSpace(userID)
+	role = strings.TrimSpace(role)
+	if userID == "" {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "user_id is required")
+	}
+	if role != "owner" && role != "member" {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "role must be owner or member")
+	}
+	targetRole, err := uc.identities.MemberRole(ctx, orgID, userID)
+	if err != nil {
+		return err
+	}
+	if targetRole == "" {
+		return kratosErrors.NotFound("NOT_FOUND", "member not found")
+	}
+	if targetRole == "owner" && role != "owner" {
+		members, err := uc.identities.ListOrgMembers(ctx, orgID)
+		if err != nil {
+			return err
+		}
+		ownerCount := 0
+		for _, m := range members {
+			if m.Role == "owner" {
+				ownerCount++
+			}
+		}
+		if ownerCount <= 1 {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "cannot demote the last owner")
+		}
+	}
+	return uc.identities.UpdateMemberRole(ctx, orgID, userID, role)
+}
+
 func (uc *ACLAPIUsecase) CreateGrant(ctx context.Context, resourceID, granteeType, granteeID string, perm Perm) error {
 	caller, err := requireCaller(ctx)
 	if err != nil {

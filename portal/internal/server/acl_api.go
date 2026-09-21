@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"strings"
+	"time"
 
 	"backend/internal/biz"
 
@@ -29,6 +30,70 @@ func AddOrgMemberHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
 		orgID := ctx.Vars().Get("id")
 		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
 			return nil, uc.AddOrgMember(c, orgID, strings.TrimSpace(body.UserID), strings.TrimSpace(body.Role))
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+type memberInfoResponse struct {
+	UserID    string `json:"user_id"`
+	UserName  string `json:"user_name"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
+}
+
+func ListOrgMembersHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		orgID := ctx.Vars().Get("id")
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			members, err := uc.ListOrgMembers(c, orgID)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]memberInfoResponse, len(members))
+			for i, m := range members {
+				items[i] = memberInfoResponse{UserID: m.UserID, UserName: m.UserName, Role: m.Role, CreatedAt: m.CreatedAt.Format(time.RFC3339)}
+			}
+			return map[string]any{"members": items}, nil
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
+
+func RemoveOrgMemberHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		orgID := ctx.Vars().Get("id")
+		userID := ctx.Vars().Get("user_id")
+		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return nil, uc.RemoveOrgMember(c, orgID, userID)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+type updateMemberRoleRequest struct {
+	Role string `json:"role"`
+}
+
+func UpdateMemberRoleHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		orgID := ctx.Vars().Get("id")
+		userID := ctx.Vars().Get("user_id")
+		var body updateMemberRoleRequest
+		if err := ctx.Bind(&body); err != nil {
+			return err
+		}
+		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return nil, uc.UpdateMemberRole(c, orgID, userID, body.Role)
 		})
 		if err != nil {
 			return err
