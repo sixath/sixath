@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { agentApi, cronApi, type Agent, type CronRun, type CronTask } from '../api/client'
+import { getResourceByPayload, type ResourceInfo } from '../api/resource'
+import ResourceGrantPanel from '../components/ResourceGrantPanel'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 
 export default function CronTaskDetail() {
@@ -12,6 +14,7 @@ export default function CronTaskDetail() {
   const [error, setError] = useState('')
   const [pendingRun, setPendingRun] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [resourceInfo, setResourceInfo] = useState<ResourceInfo | null>(null)
 
   const loadTask = () => {
     if (!id) return
@@ -26,6 +29,7 @@ export default function CronTaskDetail() {
         ])
         setRuns(runRes.items)
         setAgent(agentRes)
+        getResourceByPayload('cron', id!).then(setResourceInfo).catch(() => setResourceInfo(null))
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -81,6 +85,14 @@ export default function CronTaskDetail() {
           <div style={{ display: 'grid', gap: '0.75rem' }}>
             <p><strong>Agent：</strong>{agent?.name || task.agent_id}</p>
             <p><strong>计划：</strong><span className="badge badge-api">{task.schedule_kind}</span> <code>{task.schedule_expr}</code></p>
+            {resourceInfo ? (
+              <p><strong>可见性：</strong>
+                <span className={`badge badge-${resourceInfo.visibility === 'org' ? 'mcp' : 'builtin'}`}>
+                  {resourceInfo.visibility === 'org' ? 'Org 共享' : 'Private'}
+                </span>
+                {resourceInfo.home_org_id ? <code style={{ marginLeft: '0.5rem' }}>{resourceInfo.home_org_id}</code> : null}
+              </p>
+            ) : null}
             <p><strong>时区：</strong>{task.timezone || '-'}</p>
             <p><strong>载荷：</strong>{task.payload_kind}</p>
             <p><strong>投递：</strong>{task.delivery_mode}</p>
@@ -129,6 +141,8 @@ export default function CronTaskDetail() {
           </div>
         )}
       </section>
+
+      {id ? <ResourceGrantPanel resourceType="cron" payloadRef={id} /> : null}
 
       <ConfirmDialog
         open={pendingRun}

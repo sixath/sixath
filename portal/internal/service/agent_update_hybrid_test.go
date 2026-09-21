@@ -101,6 +101,7 @@ func (r *hybridResourceRepo) ListGrantsByResourceIDs(context.Context, []string) 
 	return map[string][]biz.ResourceGrant{}, nil
 }
 func (r *hybridResourceRepo) CreateGrant(context.Context, biz.ResourceGrant) error { return nil }
+func (r *hybridResourceRepo) DeleteGrant(context.Context, string, string, string) error { return nil }
 
 func newHybridUpdateAgentService(t *testing.T, stored biz.RuntimeToolsConfig) (*AgentService, *hybridAgentRepo) {
 	t.Helper()

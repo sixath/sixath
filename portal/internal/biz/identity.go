@@ -63,6 +63,7 @@ type ResourceRepo interface {
 	ListAllByType(ctx context.Context, resourceType ResourceType) ([]*Resource, error)
 	ListGrantsByResourceIDs(ctx context.Context, resourceIDs []string) (map[string][]ResourceGrant, error)
 	CreateGrant(ctx context.Context, grant ResourceGrant) error
+	DeleteGrant(ctx context.Context, resourceID, granteeType, granteeID string) error
 }
 
 // EnsureMember adds a membership only when the user is not already in the organization.

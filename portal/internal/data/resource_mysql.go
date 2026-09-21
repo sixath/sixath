@@ -5,6 +5,7 @@ import (
 
 	"backend/internal/biz"
 	"backend/internal/data/model"
+	pkgErrors "backend/internal/pkg/errors"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/uuid"
@@ -186,4 +187,17 @@ func (r *resourceRepo) UserOrgIDs(ctx context.Context, userID string) ([]string,
 		Order("org_id ASC").
 		Pluck("org_id", &orgIDs).Error
 	return orgIDs, err
+}
+
+func (r *resourceRepo) DeleteGrant(ctx context.Context, resourceID, granteeType, granteeID string) error {
+	result := r.db.WithContext(ctx).
+		Where("resource_id = ? AND grantee_type = ? AND grantee_id = ?", resourceID, granteeType, granteeID).
+		Delete(&model.ResourceGrant{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return pkgErrors.ErrNotFound
+	}
+	return nil
 }

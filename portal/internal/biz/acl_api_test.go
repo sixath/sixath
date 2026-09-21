@@ -272,3 +272,13 @@ func (r *aclAPIRepo) CreateGrant(_ context.Context, grant ResourceGrant) error {
 	r.grants = append(r.grants, grant)
 	return nil
 }
+
+func (r *aclAPIRepo) DeleteGrant(_ context.Context, resourceID, granteeType, granteeID string) error {
+	for i, grant := range r.grants {
+		if grant.ResourceID == resourceID && grant.GranteeType == granteeType && grant.GranteeID == granteeID {
+			r.grants = append(r.grants[:i], r.grants[i+1:]...)
+			return nil
+		}
+	}
+	return ErrGrantNotFound
+}

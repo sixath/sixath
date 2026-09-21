@@ -15,6 +15,7 @@ import {
   type Proxy,
   type RuntimeToolsConfig,
 } from '../api/client'
+import { getStoredOrgId } from '../api/auth'
 
 const emptyRuntimeTools = (): RuntimeToolsConfig => ({})
 
@@ -221,6 +222,11 @@ export default function AgentForm() {
       </div>
       <div className="section-card" style={{ maxWidth: 640 }}>
         <form onSubmit={handleSubmit}>
+          {getStoredOrgId() ? (
+            <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'var(--bg-accent)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+              当前组织: <code>{getStoredOrgId()}</code> — Agent 将归属到该组织
+            </div>
+          ) : null}
           <section className="form-section">
             <h2 className="form-section__title">基本信息</h2>
             <div className="form-group">

@@ -7,6 +7,7 @@ import {
   type ChannelRuntimeStatus,
   type CreateChannelRequest,
 } from '../api/client'
+import { getStoredOrgId } from '../api/auth'
 
 function parseList(value: string): string[] | undefined {
   const items = value
@@ -304,6 +305,11 @@ export default function ChannelForm() {
         {isEdit && type === 'wecom_bot' && <RuntimePanel status={runtimeStatus} />}
 
         <form onSubmit={handleSubmit}>
+          {getStoredOrgId() ? (
+            <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'var(--bg-accent)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+              当前组织: <code>{getStoredOrgId()}</code> — Channel 将归属到该组织
+            </div>
+          ) : null}
           <div className="form-group">
             <label>Channel ID *</label>
             <input value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="web-default" />

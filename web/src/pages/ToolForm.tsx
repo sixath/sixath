@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { proxyApi, toolApi, type CreateToolRequest, type Proxy, type ToolConfig } from '../api/client'
+import { getStoredOrgId } from '../api/auth'
 import { copyTool } from '../utils/toolCopy'
 import {
   coerceEgressMode,
@@ -216,6 +217,11 @@ export default function ToolForm() {
       </div>
       <div className="section-card" style={{ maxWidth: 520 }}>
         <form onSubmit={handleSubmit}>
+        {getStoredOrgId() ? (
+          <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'var(--bg-accent)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+            当前组织: <code>{getStoredOrgId()}</code> — 工具将归属到该组织
+          </div>
+        ) : null}
         <div className="form-group">
           <label>名称 *</label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="如 notion-search" />

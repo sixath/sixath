@@ -1,6 +1,10 @@
 package biz
 
-import "context"
+import (
+	"context"
+
+	kratosErrors "github.com/go-kratos/kratos/v2/errors"
+)
 
 type Perm string
 
@@ -72,6 +76,8 @@ type ResourceGrant struct {
 	GranteeID   string
 	Perm        Perm
 }
+
+var ErrGrantNotFound = kratosErrors.NotFound("GRANT_NOT_FOUND", "grant not found")
 
 type ResourceReader interface {
 	GetResource(ctx context.Context, id string) (*Resource, error)

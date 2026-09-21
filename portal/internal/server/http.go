@@ -89,6 +89,9 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.POST("/api/v1/sessions/{session_id}/messages/stream", SendMessageSSE(chat, logger))
 	r.POST("/api/v1/orgs/{id}/members", AddOrgMemberHandler(aclAPI))
 	r.POST("/api/v1/resources/{id}/grants", CreateResourceGrantHandler(aclAPI))
+	r.GET("/api/v1/resources/{id}/grants", ListGrantsHandler(aclAPI))
+	r.DELETE("/api/v1/resources/{id}/grants", DeleteGrantHandler(aclAPI))
+	r.GET("/api/v1/resources/by-payload/{type}/{ref}", GetResourceByPayloadHandler(aclAPI))
 	r.POST("/api/v1/users/{id}/tokens", IssueUserTokenHandler(aclAPI))
 	r.GET("/api/v1/agents/{agent_id}/transcript/search", TranscriptSearchHandler(chat))
 	// Code roots browse + agent workspace/code symlink (hand-written).

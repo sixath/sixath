@@ -94,6 +94,61 @@ func (uc *ACLAPIUsecase) CreateGrant(ctx context.Context, resourceID, granteeTyp
 	})
 }
 
+func (uc *ACLAPIUsecase) ListGrants(ctx context.Context, resourceID string) ([]ResourceGrant, error) {
+	caller, err := requireCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if resourceID == "" {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "resource_id is required")
+	}
+	canAdmin, err := uc.access.Can(ctx, caller, resourceID, PermAdmin, "")
+	if err != nil {
+		return nil, err
+	}
+	if !canAdmin {
+		return nil, ErrForbiddenPerm
+	}
+	return uc.resources.ListGrants(ctx, resourceID)
+}
+
+func (uc *ACLAPIUsecase) DeleteGrant(ctx context.Context, resourceID, granteeType, granteeID string) error {
+	caller, err := requireCaller(ctx)
+	if err != nil {
+		return err
+	}
+	if resourceID == "" || granteeID == "" || (granteeType != "user" && granteeType != "org") {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "resource_id, valid grantee_type, and grantee_id are required")
+	}
+	canAdmin, err := uc.access.Can(ctx, caller, resourceID, PermAdmin, "")
+	if err != nil {
+		return err
+	}
+	if !canAdmin {
+		return ErrForbiddenPerm
+	}
+	return uc.resources.DeleteGrant(ctx, resourceID, granteeType, granteeID)
+}
+
+func (uc *ACLAPIUsecase) GetResourceByPayload(ctx context.Context, resourceType ResourceType, payloadRef string) (*Resource, error) {
+	caller, err := requireCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if payloadRef == "" {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "payload_ref is required")
+	}
+	resource, err := uc.resources.GetByPayload(ctx, resourceType, payloadRef)
+	if err != nil {
+		return nil, ErrGrantNotFound
+	}
+	canView, err := uc.access.Can(ctx, caller, resource.ID, PermView, "")
+	if err != nil || !canView {
+		return nil, ErrGrantNotFound
+	}
+	return resource, nil
+}
+
 func (uc *ACLAPIUsecase) IssueUserToken(ctx context.Context, userID string) (string, error) {
 	caller, err := requireCaller(ctx)
 	if err != nil {

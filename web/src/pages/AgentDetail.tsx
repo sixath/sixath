@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { agentApi, toolApi, mcpServerApi, proxyApi, RUNTIME_TOOL_FIELDS, type Agent, type Tool, type McpServer, type Proxy, type SkillMeta } from '../api/client'
+import { getResourceByPayload, type ResourceInfo } from '../api/resource'
+import ResourceGrantPanel from '../components/ResourceGrantPanel'
 import { SearchableToolSelect } from '../components/SearchableToolSelect'
 
 /** 绑定下拉预拉上限；本地模糊过滤，一般足够覆盖常用环境。 */
@@ -41,6 +43,7 @@ export default function AgentDetail() {
   const [selectedProxyId, setSelectedProxyId] = useState('')
   const [proxySaving, setProxySaving] = useState(false)
   const [proxyMsg, setProxyMsg] = useState('')
+  const [resourceInfo, setResourceInfo] = useState<ResourceInfo | null>(null)
 
   const loadSkills = useCallback(async () => {
     if (!id) return
@@ -92,6 +95,7 @@ export default function AgentDetail() {
       .then(async (a) => {
         setAgent(a)
         setSelectedProxyId(a.proxy_id || '')
+        getResourceByPayload('agent', id!).then(setResourceInfo).catch(() => setResourceInfo(null))
         const mcpIds = a.mcp_server_ids ?? a.mcpServerIds ?? []
         setSelectedMcpIds(mcpIds)
         const ids = a.tool_ids ?? a.toolIds ?? []
@@ -254,6 +258,18 @@ export default function AgentDetail() {
           <div className="detail-kv">
             <div className="detail-kv__label">描述</div>
             <div className="detail-kv__value">{agent.description || '-'}</div>
+
+            {resourceInfo ? (
+              <>
+                <div className="detail-kv__label">可见性</div>
+                <div className="detail-kv__value">
+                  <span className={`badge badge-${resourceInfo.visibility === 'org' ? 'mcp' : 'builtin'}`}>
+                    {resourceInfo.visibility === 'org' ? 'Org 共享' : 'Private'}
+                  </span>
+                  {resourceInfo.home_org_id ? <code style={{ marginLeft: '0.5rem' }}>{resourceInfo.home_org_id}</code> : null}
+                </div>
+              </>
+            ) : null}
 
             <div className="detail-kv__label">Workspace</div>
             <div className="detail-kv__value"><code>{agent.workspace}</code></div>
@@ -451,6 +467,8 @@ export default function AgentDetail() {
           </div>
         </div>
       </section>
+
+      {id ? <ResourceGrantPanel resourceType="agent" payloadRef={id} /> : null}
     </div>
   )
 }

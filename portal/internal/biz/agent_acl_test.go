@@ -159,6 +159,7 @@ func (f *fakeAgentResourceRepo) ListAllByType(_ context.Context, resourceType Re
 	return resources, nil
 }
 func (f *fakeAgentResourceRepo) CreateGrant(context.Context, ResourceGrant) error { return nil }
+func (f *fakeAgentResourceRepo) DeleteGrant(context.Context, string, string, string) error { return nil }
 func (f *fakeAgentResourceRepo) ListGrantsByResourceIDs(_ context.Context, resourceIDs []string) (map[string][]ResourceGrant, error) {
 	out := make(map[string][]ResourceGrant, len(resourceIDs))
 	for _, id := range resourceIDs {

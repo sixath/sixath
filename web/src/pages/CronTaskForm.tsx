@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { agentApi, channelApi, cronApi, type Agent, type Channel, type CreateCronTaskRequest } from '../api/client'
+import { getStoredOrgId } from '../api/auth'
 
 function toNumber(value: string, fallback: number): number {
   const parsed = Number(value)
@@ -161,6 +162,11 @@ export default function CronTaskForm() {
 
       <div className="section-card" style={{ maxWidth: 760 }}>
         <form onSubmit={handleSubmit}>
+          {getStoredOrgId() ? (
+            <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'var(--bg-accent)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+              当前组织: <code>{getStoredOrgId()}</code> — 定时任务将归属到该组织
+            </div>
+          ) : null}
           <div className="form-row">
             <div className="form-group">
               <label>Name *</label>

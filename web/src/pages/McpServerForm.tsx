@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { mcpServerApi, type CreateMcpServerRequest } from '../api/client'
+import { getStoredOrgId } from '../api/auth'
 
 type EnvRow = { key: string; value: string }
 
@@ -182,6 +183,11 @@ export default function McpServerForm() {
       </div>
       <div className="section-card" style={{ maxWidth: 560 }}>
         <form onSubmit={handleSubmit}>
+          {getStoredOrgId() ? (
+            <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: 'var(--bg-accent)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}>
+              当前组织: <code>{getStoredOrgId()}</code> — MCP 服务将归属到该组织
+            </div>
+          ) : null}
           <div className="form-group">
             <label>ID *</label>
             <input

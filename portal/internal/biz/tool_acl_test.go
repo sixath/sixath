@@ -133,6 +133,7 @@ func (f *fakeToolResourceRepo) ListAllByType(_ context.Context, resourceType Res
 	return resources, nil
 }
 func (f *fakeToolResourceRepo) CreateGrant(context.Context, ResourceGrant) error { return nil }
+func (f *fakeToolResourceRepo) DeleteGrant(context.Context, string, string, string) error { return nil }
 func (f *fakeToolResourceRepo) ListGrantsByResourceIDs(_ context.Context, resourceIDs []string) (map[string][]ResourceGrant, error) {
 	out := make(map[string][]ResourceGrant, len(resourceIDs))
 	for _, id := range resourceIDs {

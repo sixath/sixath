@@ -66,3 +66,64 @@ func IssueUserTokenHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error
 		return ctx.JSON(200, map[string]string{"token": out.(string)})
 	}
 }
+
+type grantResponse struct {
+	GranteeType string `json:"grantee_type"`
+	GranteeID   string `json:"grantee_id"`
+	Perm        string `json:"perm"`
+}
+
+func ListGrantsHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		resourceID := ctx.Vars().Get("id")
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			grants, err := uc.ListGrants(c, resourceID)
+			if err != nil {
+				return nil, err
+			}
+			items := make([]grantResponse, len(grants))
+			for i, g := range grants {
+				items[i] = grantResponse{GranteeType: g.GranteeType, GranteeID: g.GranteeID, Perm: string(g.Perm)}
+			}
+			return map[string]any{"grants": items}, nil
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
+
+func DeleteGrantHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		resourceID := ctx.Vars().Get("id")
+		r, _ := kratoshttp.RequestFromServerContext(ctx)
+		granteeType := ""
+		granteeID := ""
+		if r != nil {
+			granteeType = r.URL.Query().Get("grantee_type")
+			granteeID = r.URL.Query().Get("grantee_id")
+		}
+		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return nil, uc.DeleteGrant(c, resourceID, granteeType, granteeID)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+func GetResourceByPayloadHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		resourceType := ctx.Vars().Get("type")
+		payloadRef := ctx.Vars().Get("ref")
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return uc.GetResourceByPayload(c, biz.ResourceType(resourceType), payloadRef)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
