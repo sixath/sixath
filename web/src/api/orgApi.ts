@@ -52,6 +52,13 @@ export interface CreateInviteResult extends OrgInvite {
   invite_path: string
 }
 
+export interface OrgMember {
+  user_id: string
+  user_name: string
+  role: string
+  created_at: string
+}
+
 function normalizeOrg(raw: Record<string, unknown>): OrgMembership {
   return {
     id: (raw.id as string | undefined) ?? '',
@@ -123,6 +130,39 @@ export const orgApi = {
     await orgRequest<{ ok?: boolean }>(
       `/orgs/${encodeURIComponent(orgId)}/invites/${encodeURIComponent(inviteId)}`,
       { method: 'DELETE' }
+    )
+  },
+
+  addMember: async (orgId: string, userId: string, role: string): Promise<void> => {
+    await orgRequest<{ ok?: boolean }>(
+      `/orgs/${encodeURIComponent(orgId)}/members`,
+      { method: 'POST', body: JSON.stringify({ user_id: userId, role }) }
+    )
+  },
+
+  listMembers: async (orgId: string): Promise<OrgMember[]> => {
+    const data = await orgRequest<{ members?: Record<string, unknown>[] }>(
+      `/orgs/${encodeURIComponent(orgId)}/members`
+    )
+    return (data.members ?? []).map((item) => ({
+      user_id: (item.user_id as string | undefined) ?? '',
+      user_name: (item.user_name as string | undefined) ?? '',
+      role: (item.role as string | undefined) ?? '',
+      created_at: (item.created_at as string | undefined) ?? '',
+    }))
+  },
+
+  removeMember: async (orgId: string, userId: string): Promise<void> => {
+    await orgRequest<{ ok?: boolean }>(
+      `/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' }
+    )
+  },
+
+  updateMemberRole: async (orgId: string, userId: string, role: string): Promise<void> => {
+    await orgRequest<{ ok?: boolean }>(
+      `/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify({ role }) }
     )
   },
 }
