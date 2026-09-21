@@ -8,6 +8,7 @@ import {
   orgApi,
   type CreateInviteResult,
   type OrgInvite,
+  type OrgMember,
 } from '../api/orgApi'
 import type { OrgMembership } from '../api/sessionAuth'
 
@@ -26,6 +27,12 @@ export default function OrgDetailPage() {
   const [createdInvite, setCreatedInvite] = useState<CreateInviteResult | null>(null)
   const [copied, setCopied] = useState(false)
   const [revokingId, setRevokingId] = useState<string | null>(null)
+  const [members, setMembers] = useState<OrgMember[]>([])
+  const [newUserId, setNewUserId] = useState('')
+  const [newRole, setNewRole] = useState('member')
+  const [addingMember, setAddingMember] = useState(false)
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null)
+  const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null)
 
   const isOwner = org?.role === 'owner'
   const currentOrgId = getStoredOrgId()
@@ -46,6 +53,8 @@ export default function OrgDetailPage() {
         if (found.role === 'owner') {
           const items = await orgApi.listInvites(id)
           setInvites(items)
+          const mems = await orgApi.listMembers(id)
+          setMembers(mems)
         } else {
           setInvites([])
         }
@@ -117,6 +126,56 @@ export default function OrgDetailPage() {
     }
   }
 
+  const handleAddMember = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!id || !isOwner || !newUserId.trim()) return
+    setAddingMember(true)
+    setError('')
+    try {
+      await orgApi.addMember(id, newUserId.trim(), newRole)
+      setNewUserId('')
+      setNewRole('member')
+      const mems = await orgApi.listMembers(id)
+      setMembers(mems)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '添加失败')
+    } finally {
+      setAddingMember(false)
+    }
+  }
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!id || !isOwner) return
+    setRemovingUserId(userId)
+    setError('')
+    try {
+      await orgApi.removeMember(id, userId)
+      setMembers((prev) => prev.filter((m) => m.user_id !== userId))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '移除失败')
+    } finally {
+      setRemovingUserId(null)
+    }
+  }
+
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    if (!id || !isOwner) return
+    setChangingRoleUserId(userId)
+    setError('')
+    try {
+      await orgApi.updateMemberRole(id, userId, newRole)
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.user_id === userId ? { ...m, role: newRole } : m
+        )
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更改角色失败')
+    } finally {
+      setChangingRoleUserId(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="loading">
@@ -176,6 +235,88 @@ export default function OrgDetailPage() {
         </div>
       ) : (
         <>
+          <div className="section" style={{ marginBottom: '1.5rem' }}>
+            <h2 className="section-title">成员管理</h2>
+
+            <div className="section-card" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
+              <form onSubmit={handleAddMember}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
+                    <label style={{ fontSize: '0.8rem' }}>User ID</label>
+                    <input
+                      value={newUserId}
+                      onChange={(e) => setNewUserId(e.target.value)}
+                      placeholder="输入用户 ID"
+                      disabled={addingMember}
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label style={{ fontSize: '0.8rem' }}>角色</label>
+                    <select value={newRole} onChange={(e) => setNewRole(e.target.value)} disabled={addingMember}>
+                      <option value="member">成员</option>
+                      <option value="owner">所有者</option>
+                    </select>
+                  </div>
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={addingMember || !newUserId.trim()}>
+                    {addingMember ? '添加中…' : '添加成员'}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="table-card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>用户</th>
+                    <th>User ID</th>
+                    <th>角色</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="muted">暂无成员</td>
+                    </tr>
+                  ) : (
+                    members.map((m) => {
+                      const isRemoving = removingUserId === m.user_id
+                      const isChanging = changingRoleUserId === m.user_id
+                      return (
+                        <tr key={m.user_id}>
+                          <td>{m.user_name || <span className="muted">-</span>}</td>
+                          <td><code>{m.user_id}</code></td>
+                          <td>
+                            <select
+                              value={m.role}
+                              disabled={isChanging}
+                              onChange={(e) => handleRoleChange(m.user_id, e.target.value)}
+                              style={{ fontSize: '0.85rem', padding: '0.15rem 0.4rem' }}
+                            >
+                              <option value="owner">owner</option>
+                              <option value="member">member</option>
+                            </select>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              disabled={isRemoving}
+                              onClick={() => handleRemoveMember(m.user_id)}
+                            >
+                              {isRemoving ? '移除中…' : '移除'}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="section-card" style={{ marginBottom: '1.25rem', padding: '1.25rem' }}>
             <h2 style={{ marginTop: 0, fontSize: '1.05rem' }}>创建邀请</h2>
             <form className="form-panel" onSubmit={onCreateInvite} style={{ marginBottom: 0 }}>
