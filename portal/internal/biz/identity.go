@@ -25,6 +25,14 @@ type OrgMembership struct {
 	Role  string
 }
 
+// OrgMemberInfo describes a member of an organization (for member listing).
+type OrgMemberInfo struct {
+	UserID    string
+	UserName  string
+	Role      string
+	CreatedAt time.Time
+}
+
 // Org is a collection of users that can receive resource grants.
 type Org struct {
 	ID        string
@@ -47,6 +55,9 @@ type IdentityRepo interface {
 	MemberRole(ctx context.Context, orgID, userID string) (string, error)
 	UserOrgIDs(ctx context.Context, userID string) ([]string, error)
 	ListUserOrgs(ctx context.Context, userID string) ([]OrgMembership, error)
+	ListOrgMembers(ctx context.Context, orgID string) ([]OrgMemberInfo, error)
+	RemoveMember(ctx context.Context, orgID, userID string) error
+	UpdateMemberRole(ctx context.Context, orgID, userID, role string) error
 	UpsertTokenHash(ctx context.Context, userID, tokenHash string) error
 	UserIDByTokenHash(ctx context.Context, tokenHash string) (string, error)
 	CreateVerifyToken(ctx context.Context, userID string, expiresAt time.Time) (plainToken string, err error)

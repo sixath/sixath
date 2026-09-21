@@ -224,6 +224,20 @@ func (r *aclAPIRepo) ListUserOrgs(_ context.Context, userID string) ([]OrgMember
 	}
 	return r.memberships[userID], nil
 }
+
+func (r *aclAPIRepo) ListOrgMembers(context.Context, string) ([]OrgMemberInfo, error) {
+	return nil, nil
+}
+
+func (r *aclAPIRepo) RemoveMember(_ context.Context, orgID, userID string) error {
+	delete(r.memberRoles, orgID+"/"+userID)
+	return nil
+}
+
+func (r *aclAPIRepo) UpdateMemberRole(_ context.Context, orgID, userID, role string) error {
+	r.memberRoles[orgID+"/"+userID] = role
+	return nil
+}
 func (r *aclAPIRepo) UpsertTokenHash(_ context.Context, userID, tokenHash string) error {
 	if r.tokenHashes == nil {
 		r.tokenHashes = map[string]string{}

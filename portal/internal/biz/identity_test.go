@@ -66,6 +66,18 @@ func (f *fakeIdentityRepo) ListUserOrgs(context.Context, string) ([]OrgMembershi
 	panic("not implemented")
 }
 
+func (f *fakeIdentityRepo) ListOrgMembers(context.Context, string) ([]OrgMemberInfo, error) {
+	panic("not implemented")
+}
+
+func (f *fakeIdentityRepo) RemoveMember(context.Context, string, string) error {
+	panic("not implemented")
+}
+
+func (f *fakeIdentityRepo) UpdateMemberRole(context.Context, string, string, string) error {
+	panic("not implemented")
+}
+
 func (f *fakeIdentityRepo) UpsertTokenHash(_ context.Context, userID, tokenHash string) error {
 	f.upserted[tokenHash] = userID
 	return nil

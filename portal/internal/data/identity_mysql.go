@@ -191,6 +191,59 @@ func (r *identityRepo) ListUserOrgs(ctx context.Context, userID string) ([]biz.O
 	return out, nil
 }
 
+type orgMemberInfoRow struct {
+	UserID    string
+	UserName  string
+	Role      string
+	CreatedAt time.Time
+}
+
+func (r *identityRepo) ListOrgMembers(ctx context.Context, orgID string) ([]biz.OrgMemberInfo, error) {
+	var rows []orgMemberInfoRow
+	err := r.db.WithContext(ctx).
+		Table("org_members om").
+		Select("om.user_id, u.name as user_name, om.role, om.created_at").
+		Joins("JOIN users u ON u.id = om.user_id").
+		Where("om.org_id = ?", orgID).
+		Order("om.created_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]biz.OrgMemberInfo, len(rows))
+	for i, row := range rows {
+		out[i] = biz.OrgMemberInfo{UserID: row.UserID, UserName: row.UserName, Role: row.Role, CreatedAt: row.CreatedAt}
+	}
+	return out, nil
+}
+
+func (r *identityRepo) RemoveMember(ctx context.Context, orgID, userID string) error {
+	result := r.db.WithContext(ctx).
+		Where("org_id = ? AND user_id = ?", orgID, userID).
+		Delete(&model.OrgMember{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *identityRepo) UpdateMemberRole(ctx context.Context, orgID, userID, role string) error {
+	result := r.db.WithContext(ctx).
+		Model(&model.OrgMember{}).
+		Where("org_id = ? AND user_id = ?", orgID, userID).
+		Update("role", role)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *identityRepo) UpsertTokenHash(ctx context.Context, userID, tokenHash string) error {
 	m := &model.UserToken{TokenHash: tokenHash, UserID: userID}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
