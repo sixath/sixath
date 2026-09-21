@@ -60,14 +60,14 @@ const (
 )
 
 type Resource struct {
-	ID           string
-	Type         ResourceType
-	Name         string
-	OwnerUserID  string
-	Visibility   Visibility
-	HomeOrgID    string
-	BoundAgentID string
-	PayloadRef   string
+	ID           string       `json:"id"`
+	Type         ResourceType `json:"type"`
+	Name         string       `json:"name"`
+	OwnerUserID  string       `json:"owner_user_id"`
+	Visibility   Visibility   `json:"visibility"`
+	HomeOrgID    string       `json:"home_org_id"`
+	BoundAgentID string       `json:"bound_agent_id,omitempty"`
+	PayloadRef   string       `json:"payload_ref"`
 }
 
 type ResourceGrant struct {
