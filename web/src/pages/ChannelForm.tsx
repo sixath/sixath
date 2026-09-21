@@ -8,6 +8,7 @@ import {
   type CreateChannelRequest,
 } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
+import ResourceGrantPanel from '../components/ResourceGrantPanel'
 
 function parseList(value: string): string[] | undefined {
   const items = value
@@ -564,6 +565,7 @@ export default function ChannelForm() {
           </div>
         </form>
       </div>
+      {isEdit && id ? <ResourceGrantPanel resourceType="channel" payloadRef={id} /> : null}
     </div>
   )
 }

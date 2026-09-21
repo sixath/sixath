@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { mcpServerApi, type CreateMcpServerRequest } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
+import ResourceGrantPanel from '../components/ResourceGrantPanel'
 
 type EnvRow = { key: string; value: string }
 
@@ -338,6 +339,7 @@ export default function McpServerForm() {
           </div>
         </form>
       </div>
+      {isEdit && knownId ? <ResourceGrantPanel resourceType="mcp_server" payloadRef={knownId} /> : null}
     </div>
   )
 }

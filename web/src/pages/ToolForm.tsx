@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { proxyApi, toolApi, type CreateToolRequest, type Proxy, type ToolConfig } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
+import ResourceGrantPanel from '../components/ResourceGrantPanel'
 import { copyTool } from '../utils/toolCopy'
 import {
   coerceEgressMode,
@@ -1065,6 +1066,7 @@ export default function ToolForm() {
         </div>
         </form>
       </div>
+      {isEdit && id ? <ResourceGrantPanel resourceType="tool" payloadRef={id} /> : null}
     </div>
   )
 }
