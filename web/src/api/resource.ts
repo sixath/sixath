@@ -70,6 +70,25 @@ export async function deleteGrant(resourceId: string, granteeType: string, grant
 
 // ── Project APIs ──
 
+export async function listProjects(): Promise<ProjectInfo[]> {
+  const res = await fetch(`${API_BASE}/projects`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error(`加载失败: ${res.status}`)
+  const data = await res.json()
+  return data.projects ?? []
+}
+
+export async function createProject(name: string, description = ''): Promise<ProjectInfo> {
+  const res = await fetch(`${API_BASE}/projects`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description }),
+  })
+  if (!res.ok) throw new Error(`创建失败: ${res.status}`)
+  return res.json()
+}
+
 export async function getProject(id: string): Promise<ProjectInfo> {
   const res = await fetch(`${API_BASE}/projects/${encodeURIComponent(id)}`, {
     headers: authHeaders(),
