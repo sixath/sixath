@@ -80,6 +80,10 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/auth/invites/{token}", PreviewInviteHandler(authUC))
 	r.POST("/api/v1/auth/verify-email", VerifyEmailHandler(authUC))
 	r.POST("/api/v1/auth/resend-verify-email", ResendVerifyEmailHandler(authUC, identityRepo))
+	r.GET("/api/v1/auth/wecom/status", WeComStatusHandler(authUC))
+	r.GET("/api/v1/auth/wecom/start", WeComStartHandler(authUC))
+	r.GET("/api/v1/auth/wecom/callback", WeComCallbackHandler(authUC))
+	r.POST("/api/v1/auth/wecom/exchange", WeComExchangeHandler(authUC))
 	// Gateway resolves opaque session tokens here; global Auth skips /api/v1/auth/*.
 	r.GET("/api/v1/auth/me", AuthMeHandler(identityRepo))
 	r.POST("/api/v1/orgs", CreateOrgHandler(aclAPI))

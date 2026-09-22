@@ -1,11 +1,14 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/url"
 	"strings"
 
 	"backend/internal/biz"
 
+	"github.com/go-kratos/kratos/v2/errors"
 	kratoshttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
@@ -103,6 +106,35 @@ func VerifyEmailHandler(uc *biz.AuthUsecase) func(kratoshttp.Context) error {
 			return err
 		}
 		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+// ResendVerifyEmailHandler POST /api/v1/auth/resend-verify-email — Bearer required (auth/* skips global Auth).
+func ResendVerifyEmailHandler(uc *biz.AuthUsecase, lookup meTokenLookup) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		req := ctx.Request()
+		if req == nil {
+			return errors.Unauthorized("UNAUTHORIZED", "HTTP request required")
+		}
+		token, ok := bearerTokenFromHeader(req.Header.Get("Authorization"))
+		if !ok {
+			return errors.Unauthorized("UNAUTHORIZED", "valid bearer token required")
+		}
+		sum := sha256.Sum256([]byte(token))
+		userID, err := lookup.UserIDByTokenHash(ctx, hex.EncodeToString(sum[:]))
+		if err != nil || userID == "" {
+			return errors.Unauthorized("UNAUTHORIZED", "invalid bearer token")
+		}
+		result, err := uc.ResendVerifyEmail(ctx, userID)
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{
+			"ok":                    true,
+			"sent":                  result.Sent,
+			"already_verified":      result.AlreadyVerified,
+			"verification_disabled": result.VerificationDisabled,
+		})
 	}
 }
 
