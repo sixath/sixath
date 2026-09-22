@@ -17,6 +17,9 @@ function wecomErrorMessage(code: string): string {
   return ERROR_MESSAGES[code] ?? '登录失败，请稍后重试'
 }
 
+/** Survives StrictMode remount — one exchange per ticket per page load. */
+const inflightTickets = new Set<string>()
+
 type CallbackState = 'loading' | 'error'
 
 export default function WecomCallbackPage() {
@@ -42,6 +45,9 @@ export default function WecomCallbackPage() {
 
   useEffect(() => {
     if (!ticket || error) return
+    if (inflightTickets.has(ticket)) return
+    inflightTickets.add(ticket)
+
     let cancelled = false
     exchangeWecomTicket(ticket)
       .then((session) => {
@@ -51,6 +57,7 @@ export default function WecomCallbackPage() {
       })
       .catch((err) => {
         if (cancelled) return
+        inflightTickets.delete(ticket)
         setState('error')
         setMessage(err instanceof Error ? err.message : '登录失败，请稍后重试')
       })
