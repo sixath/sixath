@@ -1,7 +1,7 @@
 # 企业微信 CorpApp SSO 登录与自动注册
 
 **日期**: 2026-09-22  
-**状态**: 设计已确认（方案 A）；实现计划见 `docs/superpowers/plans/2026-09-22-wecom-corpapp-sso.md`  
+**状态**: 实现完成（待配置启用）；实现计划见 `docs/superpowers/plans/2026-09-22-wecom-corpapp-sso.md`  
 **方案**: Portal 自建企微 CorpApp Web 登录（`login_type=CorpApp`）；首次登录自动建用户  
 **关联**:
 - [`2026-07-25-email-invite-auth-design.md`](./2026-07-25-email-invite-auth-design.md)（邮箱+邀请；**登录页信息架构由本规格覆盖**，见 §2.3）

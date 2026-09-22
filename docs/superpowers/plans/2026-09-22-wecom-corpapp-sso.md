@@ -1,6 +1,6 @@
 # WeCom CorpApp SSO Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for optional tracking — checking boxes is not required to complete the work.
 
 **Goal:** Add Portal CorpApp WeCom SSO: configure → SSO start/callback → auto-register by `userid` (no org) → ticket exchange → Bearer session; login page WeCom-primary.
 
@@ -391,9 +391,9 @@ export function wecomStartHref(next: string): string {
 ### Task 8: Spec status + smoke checklist
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-09-22-wecom-corpapp-sso-design.md` — status →「实现中」or「已规划」
+- Modify: `docs/superpowers/specs/2026-09-22-wecom-corpapp-sso-design.md` — status →「实现完成（待配置启用）」
 
-- [ ] **Step 1: Update spec status line**
+- [ ] **Step 1: Update spec status line** (→「实现完成（待配置启用）」)
 
 - [ ] **Step 2: Verify commands**
 
