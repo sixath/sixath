@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"backend/internal/biz"
@@ -196,6 +197,94 @@ type orgMemberInfoRow struct {
 	UserName  string
 	Role      string
 	CreatedAt time.Time
+}
+
+type userSummaryRow struct {
+	ID    string
+	Name  string
+	Email *string
+}
+
+func (r *identityRepo) ListUsers(ctx context.Context, q string, limit int) ([]biz.UserSummary, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	db := r.db.WithContext(ctx).Model(&model.User{}).Select("id, name, email")
+	q = strings.TrimSpace(q)
+	if q != "" {
+		like := "%" + q + "%"
+		db = db.Where("id LIKE ? OR name LIKE ? OR IFNULL(email, '') LIKE ?", like, like, like)
+	}
+	var rows []userSummaryRow
+	if err := db.Order("name ASC, id ASC").Limit(limit).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]biz.UserSummary, len(rows))
+	for i, row := range rows {
+		out[i] = biz.UserSummary{ID: row.ID, Name: row.Name}
+		if row.Email != nil {
+			out[i].Email = *row.Email
+		}
+	}
+	return out, nil
+}
+
+func (r *identityRepo) CreateUserForIdentity(ctx context.Context, name string, verifiedAt time.Time) (*biz.User, error) {
+	verifiedAtCopy := verifiedAt
+	m := &model.User{
+		ID:              uuid.NewString(),
+		Name:            name,
+		Email:           nil,
+		PasswordHash:    nil,
+		EmailVerifiedAt: &verifiedAtCopy,
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		return nil, err
+	}
+	return userModelToBiz(m), nil
+}
+
+func (r *identityRepo) DeleteUser(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Where("id = ?", userID).Delete(&model.User{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *identityRepo) GetIdentity(ctx context.Context, provider, subject string) (string, error) {
+	var m model.UserIdentity
+	if err := r.db.WithContext(ctx).Where("provider = ? AND subject = ?", provider, subject).First(&m).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return m.UserID, nil
+}
+
+func (r *identityRepo) CreateIdentity(ctx context.Context, provider, subject, userID string) error {
+	now := time.Now()
+	m := &model.UserIdentity{
+		Provider:  provider,
+		Subject:   subject,
+		UserID:    userID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		if isDuplicateKey(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *identityRepo) ListOrgMembers(ctx context.Context, orgID string) ([]biz.OrgMemberInfo, error) {

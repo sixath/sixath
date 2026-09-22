@@ -282,5 +282,7 @@ func isDuplicateKey(err error) bool {
 		return false
 	}
 	// MySQL duplicate key: Error 1062 (23000): Duplicate entry
-	return strings.Contains(err.Error(), "1062") || strings.Contains(err.Error(), "Duplicate entry")
+	// SQLite: UNIQUE constraint failed
+	msg := err.Error()
+	return strings.Contains(msg, "1062") || strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "UNIQUE constraint failed")
 }
