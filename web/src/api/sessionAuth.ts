@@ -74,3 +74,20 @@ export async function verifyEmail(token: string): Promise<{ ok: boolean }> {
     body: JSON.stringify({ token }),
   })
 }
+
+export async function wecomStatus(): Promise<{ enabled: boolean }> {
+  return authFetch<{ enabled: boolean }>('/auth/wecom/status')
+}
+
+export async function exchangeWecomTicket(ticket: string): Promise<AuthSession> {
+  return authFetch<AuthSession>('/auth/wecom/exchange', {
+    method: 'POST',
+    body: JSON.stringify({ ticket }),
+  })
+}
+
+/** Full-page navigation to Portal start (must leave SPA so 302 reaches WeCom). */
+export function wecomStartHref(next: string): string {
+  const q = new URLSearchParams({ next: next || '/' })
+  return `${API_BASE}/auth/wecom/start?${q}`
+}
