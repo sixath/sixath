@@ -22,6 +22,8 @@ import SessionHistoryPage from './pages/SessionHistoryPage'
 import SettingsPage from './pages/SettingsPage'
 import OrgListPage from './pages/OrgListPage'
 import OrgDetailPage from './pages/OrgDetailPage'
+import ProjectListPage from './pages/ProjectListPage'
+import ProjectDetailPage from './pages/ProjectDetailPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
@@ -84,6 +86,9 @@ function Breadcrumb() {
   } else if (segments[0] === 'orgs') {
     if (segments[1]) { current = '组织详情'; icon = '🏢' }
     else { current = '组织'; icon = '🏢' }
+  } else if (segments[0] === 'projects') {
+    if (segments[1]) { current = '项目详情'; icon = '📁' }
+    else { current = '项目'; icon = '📁' }
   }
 
   return (
@@ -192,6 +197,10 @@ function AppShell() {
               <span className="nav-item__icon">🏢</span>
               组织
             </NavLink>
+            <NavLink to="/projects" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <span className="nav-item__icon">📁</span>
+              项目
+            </NavLink>
           </div>
         </nav>
         <div className="sidebar-user">
@@ -283,6 +292,8 @@ function AppShell() {
             <Route path="/cron/:id/edit" element={<CronTaskForm />} />
             <Route path="/orgs" element={<OrgListPage />} />
             <Route path="/orgs/:id" element={<OrgDetailPage />} />
+            <Route path="/projects" element={<ProjectListPage />} />
+            <Route path="/projects/:id" element={<ProjectDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>
