@@ -118,14 +118,15 @@
   border-radius: var(--radius-md);
 }
 
-.login-dev-section {
-  width: 100%;
-  max-width: 420px;
-  margin-top: 1rem;
+.login-advanced {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
 }
 
+.login-advanced > summary,
 .login-dev-section summary {
-  padding: 0.75rem 1rem;
+  padding: 0.75rem 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
@@ -134,8 +135,63 @@
   text-align: center;
 }
 
+.login-advanced > summary::-webkit-details-marker,
 .login-dev-section summary::-webkit-details-marker {
   display: none;
+}
+
+.login-advanced-form {
+  margin-top: 0.5rem;
+}
+
+.login-advanced-form label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.login-advanced-form label + input {
+  margin-bottom: 1.25rem;
+}
+
+.login-advanced-form input {
+  width: 100%;
+  padding: 0.65rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color var(--duration-fast) ease;
+}
+
+.login-advanced-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.login-advanced-form .btn {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.login-advanced-form .btn-secondary {
+  margin-top: 0.75rem;
+}
+
+.login-dev-section {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.login-dev-nested {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.25rem;
 }
 
 .login-dev-card {
