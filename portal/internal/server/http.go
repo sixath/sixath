@@ -30,7 +30,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, projectUC *biz.ProjectUsecase, codeRoots []string, logger log.Logger) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -96,6 +96,16 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.DELETE("/api/v1/resources/{id}/grants", DeleteGrantHandler(aclAPI))
 	r.GET("/api/v1/resources/by-payload/{type}/{ref}", GetResourceByPayloadHandler(aclAPI))
 	r.POST("/api/v1/users/{id}/tokens", IssueUserTokenHandler(aclAPI))
+	// Project CRUD
+	r.POST("/api/v1/projects", CreateProjectHandler(projectUC))
+	r.GET("/api/v1/projects", ListProjectsHandler(aclAPI))
+	r.GET("/api/v1/projects/{id}", GetProjectHandler(projectUC))
+	r.PATCH("/api/v1/projects/{id}", UpdateProjectHandler(projectUC))
+	r.DELETE("/api/v1/projects/{id}", DeleteProjectHandler(projectUC))
+	// Resource-to-project membership
+	r.PATCH("/api/v1/resources/{id}/project", AddResourceToProjectHandler(projectUC))
+	r.DELETE("/api/v1/resources/{id}/project", RemoveResourceFromProjectHandler(projectUC))
+	r.GET("/api/v1/projects/{id}/resources", ListProjectResourcesHandler(projectUC))
 	r.GET("/api/v1/agents/{agent_id}/transcript/search", TranscriptSearchHandler(chat))
 	// Code roots browse + agent workspace/code symlink (hand-written).
 	r.GET("/api/v1/code-roots", CodeRootsListHandler(codeRoots))
