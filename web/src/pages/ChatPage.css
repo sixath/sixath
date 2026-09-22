@@ -287,6 +287,16 @@
   opacity: 0.7;
 }
 
+.chat-empty-reply-marker {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--muted, #888) 12%, transparent);
+  color: var(--muted, #6b7280);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
 .chat-welcome {
   flex: 1;
   display: flex;
@@ -1372,3 +1382,54 @@
 .plan-step-done { color: #4caf7d; }
 .plan-step-goal { flex: 1 1 auto; }
 .plan-step-tools { flex: 0 0 auto; font-size: 11px; color: var(--muted); }
+
+/* Terminal mode in chat */
+.terminal-output-area {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.terminal-line {
+  display: flex;
+  gap: 4px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-line pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.terminal-line--user .terminal-prompt { color: #569cd6; }
+.terminal-line--cmd  .terminal-prompt { color: #6a9955; }
+.terminal-line--cmd  pre              { color: #6a9955; }
+.terminal-line--stdout pre            { color: #d4d4d4; }
+.terminal-line--stderr pre            { color: #f44747; }
+.terminal-line--busy                  { color: #808080; font-style: italic; }
+
+.terminal-vmid-input {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0 4px 12px;
+}
+
+.terminal-vmid-input input {
+  width: 140px;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}

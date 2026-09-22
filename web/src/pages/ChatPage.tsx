@@ -23,9 +23,16 @@ import { SpillResultTable, useSpillTable } from '../components/SpillResultTable'
 import { isCompactBoundaryMessage, isMessageVisibleAtIndex } from '../utils/compactBoundary'
 import { applyToolCall, applyModelCall, finalizeTimeline, type TimelineNode } from './timelineReducer'
 import { toolVerb } from './toolVerbMap'
+import { sendTerminalChat, type TerminalChatResponse } from '../api/terminal'
 import './ChatPage.css'
 
 const ATTACH_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif,.txt,.log,.md,.json,.csv,image/*'
+
+type TerminalOutput = {
+  key: string
+  role: 'user' | 'cmd' | 'stdout' | 'stderr'
+  content: string
+}
 
 function formatMessageTime(iso: string): string {
   if (!iso) return ''
@@ -330,14 +337,17 @@ function AssistantReplyBody({
   nodes,
   showCursor,
   interrupted,
+  emptyReply,
 }: {
   sessionId?: string
   content: string
   nodes: TimelineNode[]
   showCursor: boolean
   interrupted: boolean
+  emptyReply?: boolean
 }) {
   const spill = useSpillTable(sessionId, content, nodes)
+  const blank = !showCursor && !(spill.displayContent ?? '').trim()
   const banner = spill.table
     ? `标题写的行数多于对话里贴出的表格；下面已加载工具落盘的完整 ${spill.table.rows.length} 行。`
     : spill.hint ?? (interrupted ? '这条回复在生成时被中断，内容可能不完整。' : null)
@@ -345,7 +355,15 @@ function AssistantReplyBody({
     <>
       {banner && <p className="chat-truncated-banner">{banner}{spill.loading ? ' 正在加载…' : ''}{spill.error ? ` ${spill.error}` : ''}</p>}
       {spill.table && <SpillResultTable columns={spill.table.columns} rows={spill.table.rows} />}
-      <MarkdownContent showCursor={showCursor}>{spill.displayContent}</MarkdownContent>
+      {blank || emptyReply ? (
+        <p className="chat-empty-reply-marker" role="status">
+          {interrupted
+            ? '本轮已取消，未生成回复。'
+            : (spill.displayContent ?? '').trim() || '本轮未生成有效回复，请重试或换个说法继续。'}
+        </p>
+      ) : (
+        <MarkdownContent showCursor={showCursor}>{spill.displayContent}</MarkdownContent>
+      )}
     </>
   )
 }
@@ -500,6 +518,12 @@ export default function ChatPage(props?: ChatPageProps) {
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([])
   const [uploadingCount, setUploadingCount] = useState(0)
   const [composerDragOver, setComposerDragOver] = useState(false)
+  // Terminal mode
+  const [terminalMode, setTerminalMode] = useState(false)
+  const [terminalVMID, setTerminalVMID] = useState('')
+  const [terminalSessionID, setTerminalSessionID] = useState<string | null>(null)
+  const [terminalBusy, setTerminalBusy] = useState(false)
+  const [terminalOutputs, setTerminalOutputs] = useState<TerminalOutput[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -827,6 +851,45 @@ export default function ChatPage(props?: ChatPageProps) {
     }
   ) => {
     const content = (overrideContent ?? input).trim()
+
+    // Terminal mode: translate NL→cmd and execute on VM
+    if (terminalMode && content && !submit) {
+      const vmid = parseInt(terminalVMID, 10)
+      if (isNaN(vmid) || vmid <= 0) return
+      setInput('')
+      setTerminalBusy(true)
+
+      const userKey = `tu-${Date.now()}`
+      setTerminalOutputs((prev) => [...prev, { key: userKey, role: 'user', content }])
+
+      try {
+        const res: TerminalChatResponse = await sendTerminalChat({
+          agent_id: agentId!,
+          vmid,
+          content,
+          session_id: terminalSessionID ?? undefined,
+        })
+        if (res.session_id) setTerminalSessionID(res.session_id)
+        const batchKey = `t-${Date.now()}`
+        const entries: TerminalOutput[] = [
+          { key: `${batchKey}-cmd`, role: 'cmd', content: res.cmd },
+          { key: `${batchKey}-out`, role: 'stdout', content: res.stdout },
+        ]
+        if (res.stderr) {
+          entries.push({ key: `${batchKey}-err`, role: 'stderr', content: res.stderr })
+        }
+        setTerminalOutputs((prev) => [...prev, ...entries])
+      } catch (err) {
+        setTerminalOutputs((prev) => [
+          ...prev,
+          { key: `terr-${Date.now()}`, role: 'stderr', content: err instanceof Error ? err.message : 'Unknown error' },
+        ])
+      } finally {
+        setTerminalBusy(false)
+      }
+      return
+    }
+
     const pendingSnapshot = pendingAttachments
     const attachmentIds = submit ? [] : pendingSnapshot.map((a) => a.id)
     if ((!content && !submit && attachmentIds.length === 0) || !agentId || streaming || uploadingCount > 0) return
@@ -1360,6 +1423,18 @@ export default function ChatPage(props?: ChatPageProps) {
             <button type="button" className="chat-error-dismiss" onClick={() => setCancelledNotice(false)}>x</button>
           </div>
         )}
+        {terminalMode && terminalOutputs.length > 0 && (
+          <div className="terminal-output-area">
+            {terminalOutputs.map((entry) => (
+              <div key={entry.key} className={`terminal-line terminal-line--${entry.role}`}>
+                {entry.role === 'user' && <span className="terminal-prompt">&gt; </span>}
+                {entry.role === 'cmd' && <span className="terminal-prompt">$ </span>}
+                <pre>{entry.content}</pre>
+              </div>
+            ))}
+            {terminalBusy && <div className="terminal-line terminal-line--busy">执行中…</div>}
+          </div>
+        )}
         <div className="chat-messages">
           <div className="chat-messages-inner">
             {!hasAgent ? (
@@ -1484,9 +1559,13 @@ export default function ChatPage(props?: ChatPageProps) {
                               content={m.content}
                               nodes={timelineNodes}
                               showCursor={streaming && idx === messages.length - 1}
-                              interrupted={timelineNodes.some((n) => n.phase === 'interrupted')}
+                              interrupted={
+                                !!m.metadata?.interrupted ||
+                                timelineNodes.some((n) => n.phase === 'interrupted')
+                              }
+                              emptyReply={!!m.metadata?.empty_reply}
                             />
-                            {m.metadata?.interrupted && (
+                            {m.metadata?.interrupted && !!(m.content ?? '').trim() && (
                               <div className="chat-interrupted-marker">Interrupted — showing the partial reply</div>
                             )}
                             {(() => {
@@ -1670,6 +1749,22 @@ export default function ChatPage(props?: ChatPageProps) {
           >
             {hasAgent ? (
               <div className="chat-composer__toolbar">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${terminalMode ? 'btn-primary' : ''}`}
+                  disabled={!hasAgent || streaming}
+                  onClick={() => {
+                    setTerminalMode((v) => !v)
+                    if (terminalMode) {
+                      setTerminalOutputs([])
+                      setTerminalVMID('')
+                      setTerminalSessionID(null)
+                    }
+                  }}
+                  title="终端模式：自然语言→CMD命令"
+                >
+                  💻 {terminalMode ? '退出终端' : '终端模式'}
+                </button>
                 <SearchableChipSelect
                   className="chat-chip--compact"
                   value={modelChoice}
@@ -1713,6 +1808,17 @@ export default function ChatPage(props?: ChatPageProps) {
                   }}
                 />
                 <span className="chat-composer__hint">Shift + Enter 换行</span>
+              </div>
+            ) : null}
+            {terminalMode ? (
+              <div className="terminal-vmid-input">
+                <input
+                  type="text"
+                  value={terminalVMID}
+                  onChange={(e) => setTerminalVMID(e.target.value)}
+                  placeholder="输入 VM ID"
+                  disabled={terminalBusy}
+                />
               </div>
             ) : null}
             {(pendingAttachments.length > 0 || uploadingCount > 0) ? (

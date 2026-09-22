@@ -42,3 +42,30 @@ export function terminalWebSocketURL(sessionId: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}${API_BASE}/terminal/sessions/${encodeURIComponent(sessionId)}/ws`
 }
+
+export interface TerminalChatRequest {
+  agent_id: string
+  vmid: number
+  content: string
+  session_id?: string
+}
+
+export interface TerminalChatResponse {
+  session_id: string
+  cmd: string
+  stdout: string
+  stderr?: string
+}
+
+export async function sendTerminalChat(req: TerminalChatRequest): Promise<TerminalChatResponse> {
+  const res = await fetch(`${API_BASE}/terminal/chat`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `terminal chat failed: ${res.status}`)
+  }
+  return res.json()
+}
