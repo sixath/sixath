@@ -26,6 +26,12 @@ auth:
   bootstrap_user_id: "bootstrap"
   bootstrap_org_id: "default"
   # email/password/token 由 SATH_BOOTSTRAP_* / secrets 注入
+  # 企微 CorpApp Web 登录
+  # wecom_corp_id: "wwxxxxxxxx"      # 企业 CorpID（SSO 的 appid）
+  # wecom_agent_id: "1000096"        # 自建应用 AgentID
+  # wecom_secret: "****"             # 该应用 Secret（gettoken）
+  # wecom_redirect_uri: "https://portal.example.com/api/v1/auth/wecom/callback"
+  # public_base_url: "https://portal.example.com"
 data:
   # Persist agent workspaces + skills across container recreate (compose mounts this path).
   data_root: /data/portal

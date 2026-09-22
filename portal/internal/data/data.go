@@ -84,6 +84,7 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 		&model.Channel{}, &model.ChannelRuntimeStatus{}, &model.ChannelPeerSession{}, &model.CronTask{}, &model.CronRun{},
 		&model.User{}, &model.Org{}, &model.OrgMember{}, &model.UserToken{},
 		&model.OrgInvite{}, &model.EmailVerifyToken{},
+		&model.UserIdentity{}, &model.AuthEphemeral{},
 		&model.Resource{}, &model.ResourceGrant{},
 		&MemoryUnit{},
 		&model.TurnTraceRow{},

@@ -29,6 +29,11 @@ message Auth {
   string smtp_from = 11;
   // public_base_url is the web origin for absolute verify-email links (e.g. https://app.example.com).
   string public_base_url = 12;
+  // WeCom CorpApp Web SSO (login_type=CorpApp).
+  string wecom_corp_id = 13;
+  string wecom_agent_id = 14;
+  string wecom_secret = 15;
+  string wecom_redirect_uri = 16;
 }
 
 // Growth 只保留 /route 分类器用的 llm（auxiliary 优先）。
