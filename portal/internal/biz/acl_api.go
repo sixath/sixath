@@ -560,7 +560,7 @@ func (uc *ACLAPIUsecase) ListVisibleResources(ctx context.Context, resourceType 
 	}
 	resources := make([]*Resource, 0, len(allowed))
 	for id := range allowed {
-		res, err := uc.resources.GetResource(ctx, id)
+		res, err := uc.resources.GetByPayload(ctx, resourceType, id)
 		if err == nil {
 			resources = append(resources, res)
 		}
