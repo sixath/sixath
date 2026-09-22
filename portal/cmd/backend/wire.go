@@ -13,6 +13,7 @@ import (
 	"backend/internal/runtime"
 	"backend/internal/server"
 	"backend/internal/service"
+	"backend/internal/terminal"
 
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
@@ -34,7 +35,8 @@ func wireApp(*conf.Server, *conf.Data, *conf.Auth, *conf.Growth, log.Logger) (*k
 		service.NewChannelService,
 		runtime.ProvideAgentRouteUsecase,
 		runtime.NewService,
-		wire.Bind(new(runtime.RewindBackend), new(*service.ChatService)),
+		terminal.NewManager,
+			wire.Bind(new(runtime.RewindBackend), new(*service.ChatService)),
 		wire.Bind(new(runtime.TurnBackend), new(*service.ChatService)),
 		wire.Bind(new(server.DBPinger), new(*data.Data)),
 		newApp,

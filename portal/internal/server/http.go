@@ -13,6 +13,7 @@ import (
 	"backend/internal/runtime"
 	"backend/internal/server/middleware"
 	"backend/internal/service"
+	"backend/internal/terminal"
 	"github.com/go-kratos/aegis/ratelimit/bbr"
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/middleware/logging"
@@ -30,7 +31,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -133,6 +134,10 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.PUT("/api/v1/proxies/{id}", UpdateProxyHandler(proxy))
 	r.DELETE("/api/v1/proxies/{id}", DeleteProxyHandler(proxy))
 	r.POST("/api/v1/proxies/{id}/test", TestProxyHandler(proxy))
+	r.POST("/api/v1/terminal/sessions", CreateTerminalSessionHandler(terminalMgr))
+	r.GET("/api/v1/terminal/sessions/{id}", GetTerminalSessionHandler(terminalMgr))
+	r.DELETE("/api/v1/terminal/sessions/{id}", DeleteTerminalSessionHandler(terminalMgr))
+	r.GET("/api/v1/terminal/sessions/{id}/ws", TerminalWSHandler(terminalMgr))
 	r.POST("/api/v1/agents/{id}/mcp-servers", BindAgentMcpServersHandler(mcpServer))
 	r.DELETE("/api/v1/agents/{id}/mcp-servers", UnbindAgentMcpServersHandler(mcpServer))
 	// Runtime (/runtime/v1): Gateway service-token surface; auth applied per-handler.
