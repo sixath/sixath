@@ -146,6 +146,14 @@ func (c *AccessChecker) EffectivePerm(ctx context.Context, callerUserID, resourc
 		return "", err
 	}
 
+	// Merge project grants for permission inheritance.
+	if res.ProjectID != "" {
+		projectGrants, err := c.r.ListGrants(ctx, res.ProjectID)
+		if err == nil {
+			grants = append(grants, projectGrants...)
+		}
+	}
+
 	return EvaluatePerm(res, orgIDs, grants, callerUserID, agentIDForBound), nil
 }
 

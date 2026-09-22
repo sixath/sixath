@@ -18,20 +18,28 @@ func VisiblePayloadRefs(ctx context.Context, repo ResourceRepo, callerUserID str
 		return nil, err
 	}
 
-	resourceIDs := make([]string, 0, len(resources))
-	for _, resource := range resources {
-		resourceIDs = append(resourceIDs, resource.ID)
+	// Collect resource IDs and their project IDs for a single batch grants query.
+	allIDs := make([]string, 0, len(resources)*2)
+	for _, r := range resources {
+		allIDs = append(allIDs, r.ID)
+		if r.ProjectID != "" {
+			allIDs = append(allIDs, r.ProjectID)
+		}
 	}
-	grantsByID, err := repo.ListGrantsByResourceIDs(ctx, resourceIDs)
+	grantsByID, err := repo.ListGrantsByResourceIDs(ctx, allIDs)
 	if err != nil {
 		return nil, err
 	}
 
 	visible := make(map[string]struct{}, len(resources))
-	for _, resource := range resources {
-		have := EvaluatePerm(resource, orgIDs, grantsByID[resource.ID], callerUserID, "")
+	for _, r := range resources {
+		combined := grantsByID[r.ID]
+		if r.ProjectID != "" {
+			combined = append(combined, grantsByID[r.ProjectID]...)
+		}
+		have := EvaluatePerm(r, orgIDs, combined, callerUserID, "")
 		if PermAtLeast(have, need) {
-			visible[resource.PayloadRef] = struct{}{}
+			visible[r.PayloadRef] = struct{}{}
 		}
 	}
 	return visible, nil
