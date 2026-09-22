@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"backend/internal/biz"
@@ -213,6 +214,39 @@ func (r *identityRepo) ListOrgMembers(ctx context.Context, orgID string) ([]biz.
 	out := make([]biz.OrgMemberInfo, len(rows))
 	for i, row := range rows {
 		out[i] = biz.OrgMemberInfo{UserID: row.UserID, UserName: row.UserName, Role: row.Role, CreatedAt: row.CreatedAt}
+	}
+	return out, nil
+}
+
+type userSummaryRow struct {
+	ID    string
+	Name  string
+	Email *string
+}
+
+func (r *identityRepo) ListUsers(ctx context.Context, q string, limit int) ([]biz.UserSummary, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	db := r.db.WithContext(ctx).Model(&model.User{}).Select("id, name, email")
+	q = strings.TrimSpace(q)
+	if q != "" {
+		like := "%" + q + "%"
+		db = db.Where("id LIKE ? OR name LIKE ? OR IFNULL(email, '') LIKE ?", like, like, like)
+	}
+	var rows []userSummaryRow
+	if err := db.Order("name ASC, id ASC").Limit(limit).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]biz.UserSummary, len(rows))
+	for i, row := range rows {
+		out[i] = biz.UserSummary{ID: row.ID, Name: row.Name}
+		if row.Email != nil {
+			out[i].Email = *row.Email
+		}
 	}
 	return out, nil
 }

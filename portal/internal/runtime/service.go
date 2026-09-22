@@ -724,7 +724,14 @@ func (s *Service) runFinalTurn(ctx context.Context, req turnRequest) (*turnFinal
 		}
 		return out, nil
 	}
-	if _, err := s.turns.SaveAssistantMessage(context.WithoutCancel(ctx), sessionID, agg.Content, nil); err != nil {
+	var meta map[string]any
+	if agg.EmptyReply {
+		meta = map[string]any{"empty_reply": true}
+		if agg.Canceled {
+			meta["interrupted"] = true
+		}
+	}
+	if _, err := s.turns.SaveAssistantMessage(context.WithoutCancel(ctx), sessionID, agg.Content, meta); err != nil {
 		out.Error = err.Error()
 		return out, nil
 	}

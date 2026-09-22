@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
 import ToolList from './pages/ToolList'
 import ToolForm from './pages/ToolForm'
@@ -25,11 +25,13 @@ import OrgDetailPage from './pages/OrgDetailPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
-import TerminalPage from './pages/TerminalPage'
 import RequireAuth from './components/RequireAuth'
 import ThemeToggle from './components/ThemeToggle'
 import { getSessionEmail, hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
 import './App.css'
+
+// Lazy: avoid pulling @xterm into the main graph so /login keeps working if deps are missing.
+const TerminalPage = lazy(() => import('./pages/TerminalPage'))
 
 function Breadcrumb() {
   const loc = useLocation()
@@ -292,7 +294,14 @@ function AppShell() {
             <Route path="/orgs" element={<OrgListPage />} />
             <Route path="/orgs/:id" element={<OrgDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/terminal" element={<TerminalPage />} />
+            <Route
+              path="/terminal"
+              element={
+                <Suspense fallback={<div className="page-loading">加载终端…</div>}>
+                  <TerminalPage />
+                </Suspense>
+              }
+            />
           </Routes>
         </div>
       </main>

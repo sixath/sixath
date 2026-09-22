@@ -190,6 +190,55 @@ func TestAuthUsecaseVerifyEmailSuccess(t *testing.T) {
 	}
 }
 
+func TestAuthUsecaseResendVerifyEmail(t *testing.T) {
+	identities := newAuthIdentityFake()
+	identities.usersByID["user-1"] = &User{ID: "user-1", Email: "ada@example.com"}
+	mailer := &authMailerCapture{}
+	uc := NewAuthUsecase(identities, newAuthInviteFake(), mailer, true)
+
+	got, err := uc.ResendVerifyEmail(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("ResendVerifyEmail: %v", err)
+	}
+	if got == nil || !got.Sent || got.AlreadyVerified || got.VerificationDisabled {
+		t.Fatalf("result = %#v", got)
+	}
+	if mailer.lastEmail != "ada@example.com" || mailer.lastToken == "" {
+		t.Fatalf("mailer = email=%q token=%q", mailer.lastEmail, mailer.lastToken)
+	}
+
+	now := time.Now()
+	identities.usersByID["user-1"].EmailVerifiedAt = &now
+	got, err = uc.ResendVerifyEmail(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("already verified: %v", err)
+	}
+	if !got.AlreadyVerified || got.Sent {
+		t.Fatalf("already verified result = %#v", got)
+	}
+
+	ucOff := NewAuthUsecase(identities, newAuthInviteFake(), mailer, false)
+	identities.usersByID["user-2"] = &User{ID: "user-2", Email: "bob@example.com"}
+	got, err = ucOff.ResendVerifyEmail(context.Background(), "user-2")
+	if err != nil {
+		t.Fatalf("disabled: %v", err)
+	}
+	if !got.VerificationDisabled {
+		t.Fatalf("disabled result = %#v", got)
+	}
+}
+
+type authMailerCapture struct {
+	lastEmail string
+	lastToken string
+}
+
+func (m *authMailerCapture) SendVerifyEmail(_ context.Context, email, verifyToken string) error {
+	m.lastEmail = email
+	m.lastToken = verifyToken
+	return nil
+}
+
 func TestAuthUsecaseRegisterConcurrentSingleUseInvite(t *testing.T) {
 	identities := newAuthIdentityFake()
 	identities.orgs["org-1"] = &Org{ID: "org-1", Name: "Acme"}
@@ -359,6 +408,10 @@ func (f *authIdentityFake) ListUserOrgs(_ context.Context, userID string) ([]Org
 }
 
 func (f *authIdentityFake) ListOrgMembers(context.Context, string) ([]OrgMemberInfo, error) {
+	panic("not implemented")
+}
+
+func (f *authIdentityFake) ListUsers(context.Context, string, int) ([]UserSummary, error) {
 	panic("not implemented")
 }
 

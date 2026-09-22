@@ -161,6 +161,41 @@ func (uc *AuthUsecase) VerifyEmail(ctx context.Context, tokenPlain string) error
 	return uc.identities.SetEmailVerified(ctx, userID, time.Now())
 }
 
+// ResendVerifyEmailResult describes a resend attempt for the settings UI.
+type ResendVerifyEmailResult struct {
+	Sent             bool
+	AlreadyVerified  bool
+	VerificationDisabled bool
+}
+
+// ResendVerifyEmail creates a fresh verify token and emails it to the user.
+// No-op (AlreadyVerified) when the mailbox is already confirmed.
+func (uc *AuthUsecase) ResendVerifyEmail(ctx context.Context, userID string) (*ResendVerifyEmailResult, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ErrUnauthorized
+	}
+	user, err := uc.identities.GetUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) {
+			return nil, ErrUnauthorized
+		}
+		return nil, err
+	}
+	if user.EmailVerifiedAt != nil {
+		return &ResendVerifyEmailResult{AlreadyVerified: true}, nil
+	}
+	if !uc.enableVerifyEmail {
+		return &ResendVerifyEmailResult{VerificationDisabled: true}, nil
+	}
+	email := strings.TrimSpace(user.Email)
+	if email == "" {
+		return nil, ErrBadRequest
+	}
+	uc.sendVerifyEmailBestEffort(ctx, email, user.ID)
+	return &ResendVerifyEmailResult{Sent: true}, nil
+}
+
 func (uc *AuthUsecase) previewInvite(ctx context.Context, invitePlain string) (*InvitePreview, error) {
 	if invitePlain == "" {
 		return &InvitePreview{Valid: false}, nil

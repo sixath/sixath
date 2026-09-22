@@ -31,6 +31,13 @@ func WriteEvent(w http.ResponseWriter, event string, data map[string]any) {
 // PersistAssistant saves the aggregated assistant message after a successful stream.
 type PersistAssistant func(ctx context.Context, sessionID, content string, metadata map[string]any) error
 
+// EmptyReplyNotice is persisted when a turn finishes with no user-visible assistant text
+// (model early-stop / blank stream). Keeps chat history from looking silently dead.
+const EmptyReplyNotice = "本轮未生成有效回复，请重试或换个说法继续。"
+
+// EmptyCancelNotice is persisted when a turn is cancelled before any assistant text arrives.
+const EmptyCancelNotice = "本轮已取消，未生成回复。"
+
 // StreamResult summarizes a drained chat stream.
 type StreamResult struct {
 	Content    string
@@ -40,6 +47,20 @@ type StreamResult struct {
 	HasContent bool
 	// Canceled 为 true 表示本轮被用户停止/断连取消（已产生的正文仍会落库）。
 	Canceled bool
+	// EmptyReply 为 true 表示 Content 是空回复兜底文案（ApplyEmptyReplyFallback）。
+	EmptyReply bool
+}
+
+// ApplyEmptyReplyFallback replaces blank non-failed assistant bodies with a readable notice.
+// Returns the content to persist and whether a fallback was applied (caller should set meta.empty_reply).
+func ApplyEmptyReplyFallback(content string, failed, canceled bool) (string, bool) {
+	if failed || strings.TrimSpace(content) != "" {
+		return content, false
+	}
+	if canceled {
+		return EmptyCancelNotice, true
+	}
+	return EmptyReplyNotice, true
 }
 
 // WriteStream drains ch onto w with chat SSE event semantics (chunk/input/confirm/tool/model/error/done).
@@ -145,6 +166,15 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 	if res.Failed && strings.TrimSpace(persistContent) == "" && res.Error != "" {
 		persistContent = "Error: " + res.Error
 	}
+	emptyFallback := false
+	if !res.Failed {
+		persistContent, emptyFallback = ApplyEmptyReplyFallback(persistContent, res.Failed, res.Canceled)
+		if emptyFallback {
+			// Keep StreamResult.Content aligned with what users see after refresh.
+			res.Content = persistContent
+			res.EmptyReply = true
+		}
+	}
 	meta := service.MetadataWithTimeline(timeline.Finalize())
 	if res.Canceled {
 		// 标记中断：UI 恢复历史时可显示"已中断"，并让后续轮次知道该回答不完整。
@@ -152,6 +182,15 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 			meta = map[string]any{}
 		}
 		meta["interrupted"] = true
+	}
+	if emptyFallback {
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["empty_reply"] = true
+		// Push notice as a chunk so the live SSE client updates before done (not only after refresh).
+		WriteEvent(w, "chunk", map[string]any{"content": persistContent, "empty_reply": true})
+		flush(w)
 	}
 	if persist != nil && (res.Failed || persistContent != "" || meta != nil) {
 		if err := persist(persistCtx, sessionID, persistContent, meta); err != nil {
@@ -235,6 +274,12 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 		}
 	}
 	res.Content = full.String()
+	if !res.Failed {
+		if filled, ok := ApplyEmptyReplyFallback(res.Content, res.Failed, res.Canceled); ok {
+			res.Content = filled
+			res.EmptyReply = true
+		}
+	}
 	return res
 }
 

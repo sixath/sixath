@@ -1,0 +1,96 @@
+[
+  {
+    "id": "0fc98365-b2d8-48a0-ae72-8022c7fb9d28",
+    "role": "user",
+    "created": "2026-08-25 11:29:11.339000",
+    "active": 1,
+    "content": "[企微] 发起人=woudFdDgAAnOIR6h1juihhoLmJ2HZ4mQ(woudFdDgAAnOIR6h1juihhoLmJ2HZ4mQ)\n问题：自建环境 trace_id=bb110c9194abc73fa8471092d989d5f7,释放下这些vm",
+    "meta_keys": [],
+    "timeline_len": null,
+    "kinds": {},
+    "timeline": [],
+    "other_meta": {}
+  },
+  {
+    "id": "8e44a22d-fa63-4929-a92a-a7740d1bed55",
+    "role": "assistant",
+    "created": "2026-08-25 11:29:19.596000",
+    "active": 1,
+    "content": "",
+    "meta_keys": [
+      "timeline"
+    ],
+    "timeline_len": 1,
+    "kinds": {
+      "model": 1
+    },
+    "timeline": [
+      {
+        "kind": "model",
+        "step": 0,
+        "phase": "responded",
+        "toolName": null,
+        "error": null,
+        "status": null,
+        "durationMs": null,
+        "keys": [
+          "seq",
+          "kind",
+          "mode",
+          "step",
+          "model",
+          "phase",
+          "messageCount"
+        ]
+      }
+    ],
+    "other_meta": {}
+  },
+  {
+    "id": "07e5db42-08c1-4591-87ab-06da1ab0e259",
+    "role": "user",
+    "created": "2026-08-25 11:30:01.731000",
+    "active": 1,
+    "content": "[企微] 发起人=woudFdDgAAnOIR6h1juihhoLmJ2HZ4mQ(woudFdDgAAnOIR6h1juihhoLmJ2HZ4mQ)\n问题：自建环境 trace_id=bb110c9194abc73fa8471092d989d5f7,释放下这些vm",
+    "meta_keys": [],
+    "timeline_len": null,
+    "kinds": {},
+    "timeline": [],
+    "other_meta": {}
+  },
+  {
+    "id": "96d1ca0c-fe6d-4ef5-97b9-01cec0dad4ad",
+    "role": "assistant",
+    "created": "2026-08-25 11:30:09.490000",
+    "active": 1,
+    "content": "让我先加载 `batchReleaseInstance` 技能，了解具体的操作流程。\n\n",
+    "meta_keys": [
+      "timeline"
+    ],
+    "timeline_len": 1,
+    "kinds": {
+      "model": 1
+    },
+    "timeline": [
+      {
+        "kind": "model",
+        "step": 0,
+        "phase": "responded",
+        "toolName": null,
+        "error": null,
+        "status": null,
+        "durationMs": null,
+        "keys": [
+          "seq",
+          "kind",
+          "mode",
+          "step",
+          "model",
+          "phase",
+          "messageCount"
+        ]
+      }
+    ],
+    "other_meta": {}
+  }
+]

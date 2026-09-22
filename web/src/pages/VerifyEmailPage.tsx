@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { markSessionEmailVerified } from '../api/auth'
 import { verifyEmail } from '../api/sessionAuth'
 import './LoginPage.css'
 import ThemeToggle from '../components/ThemeToggle'
@@ -21,8 +22,9 @@ export default function VerifyEmailPage() {
     verifyEmail(token)
       .then(() => {
         if (cancelled) return
+        markSessionEmailVerified()
         setState('success')
-        setMessage('邮箱已验证，可以登录了。')
+        setMessage('邮箱已验证，可以继续使用。')
       })
       .catch((err) => {
         if (cancelled) return
@@ -44,6 +46,8 @@ export default function VerifyEmailPage() {
         {state === 'error' && <p className="login-error">{message}</p>}
         {state !== 'loading' && (
           <p className="login-footer-link">
+            <Link to="/">返回首页</Link>
+            {' · '}
             <Link to="/login">前往登录</Link>
           </p>
         )}

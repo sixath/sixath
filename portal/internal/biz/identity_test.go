@@ -70,6 +70,10 @@ func (f *fakeIdentityRepo) ListOrgMembers(context.Context, string) ([]OrgMemberI
 	panic("not implemented")
 }
 
+func (f *fakeIdentityRepo) ListUsers(context.Context, string, int) ([]UserSummary, error) {
+	panic("not implemented")
+}
+
 func (f *fakeIdentityRepo) RemoveMember(context.Context, string, string) error {
 	panic("not implemented")
 }

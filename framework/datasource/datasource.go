@@ -98,6 +98,16 @@ func ConfigFromMap(m map[string]interface{}) Config {
 	if v, ok := m["dbname"].(string); ok {
 		c.DBName = v
 	}
+	if c.DBName == "" {
+		if v, ok := m["db_name"].(string); ok {
+			c.DBName = v
+		}
+	}
+	if c.DBName == "" {
+		if v, ok := m["database"].(string); ok {
+			c.DBName = v
+		}
+	}
 	if v, ok := m["auth_source"].(string); ok {
 		c.AuthSource = v
 	}

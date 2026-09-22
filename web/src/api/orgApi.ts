@@ -59,6 +59,12 @@ export interface OrgMember {
   created_at: string
 }
 
+export interface PortalUser {
+  id: string
+  name: string
+  email?: string
+}
+
 function normalizeOrg(raw: Record<string, unknown>): OrgMembership {
   return {
     id: (raw.id as string | undefined) ?? '',
@@ -89,6 +95,21 @@ export const orgApi = {
   list: async (): Promise<OrgMembership[]> => {
     const data = await orgRequest<{ orgs?: Record<string, unknown>[] }>('/orgs')
     return (data.orgs ?? []).map((item) => normalizeOrg(item))
+  },
+
+  listUsers: async (q = '', limit = 100): Promise<PortalUser[]> => {
+    const params = new URLSearchParams()
+    if (q.trim()) params.set('q', q.trim())
+    if (limit > 0) params.set('limit', String(limit))
+    const qs = params.toString()
+    const data = await orgRequest<{ users?: Record<string, unknown>[] }>(
+      `/users${qs ? `?${qs}` : ''}`
+    )
+    return (data.users ?? []).map((item) => ({
+      id: (item.id as string | undefined) ?? '',
+      name: (item.name as string | undefined) ?? '',
+      email: (item.email as string | undefined) || undefined,
+    })).filter((u) => u.id)
   },
 
   create: async (name: string): Promise<OrgMembership> => {

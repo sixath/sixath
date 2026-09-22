@@ -1097,6 +1097,8 @@ export interface ChatMessage {
     attachments?: ChatAttachment[]
     /** 该回复被用户中断（只保存了已生成的部分内容） */
     interrupted?: boolean
+    /** True when server filled a blank turn with EmptyReplyNotice. */
+    empty_reply?: boolean
   }
 }
 

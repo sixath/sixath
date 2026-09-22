@@ -120,6 +120,11 @@ function setSessionEmailVerified(verified: boolean): void {
   writeSession(EMAIL_VERIFIED_KEY, verified ? '1' : '0')
 }
 
+/** Mark mailbox verified after /verify-email or settings paste succeeds. */
+export function markSessionEmailVerified(): void {
+  setSessionEmailVerified(true)
+}
+
 export function clearSessionEmailVerified(): void {
   writeSession(EMAIL_VERIFIED_KEY, '')
 }

@@ -74,3 +74,25 @@ export async function verifyEmail(token: string): Promise<{ ok: boolean }> {
     body: JSON.stringify({ token }),
   })
 }
+
+export type ResendVerifyEmailResult = {
+  ok: boolean
+  sent?: boolean
+  already_verified?: boolean
+  verification_disabled?: boolean
+}
+
+/** Resend verification email for the current Bearer session. */
+export async function resendVerifyEmail(bearerToken: string): Promise<ResendVerifyEmailResult> {
+  const res = await fetch(`${API_BASE}/auth/resend-verify-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearerToken}`,
+    },
+  })
+  if (!res.ok) {
+    throw new Error(parseErrorBody(await res.text()))
+  }
+  return res.json() as Promise<ResendVerifyEmailResult>
+}

@@ -11,6 +11,7 @@ import {
   type OrgMember,
 } from '../api/orgApi'
 import type { OrgMembership } from '../api/sessionAuth'
+import { UserPicker } from '../components/UserPicker'
 
 type MaxUsesMode = 'single' | 'unlimited' | 'limited'
 
@@ -242,12 +243,13 @@ export default function OrgDetailPage() {
               <form onSubmit={handleAddMember}>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
                   <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
-                    <label style={{ fontSize: '0.8rem' }}>User ID</label>
-                    <input
+                    <label style={{ fontSize: '0.8rem' }}>用户</label>
+                    <UserPicker
                       value={newUserId}
-                      onChange={(e) => setNewUserId(e.target.value)}
-                      placeholder="输入用户 ID"
+                      onChange={setNewUserId}
                       disabled={addingMember}
+                      excludeIds={members.map((m) => m.user_id)}
+                      placeholder="选择用户…"
                     />
                   </div>
                   <div className="form-group" style={{ margin: 0 }}>

@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ['@xterm/xterm', '@xterm/addon-fit'],
+  },
   server: {
     host: true, // 0.0.0.0 — allow LAN access
     port: 5173,

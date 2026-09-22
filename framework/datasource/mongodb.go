@@ -49,13 +49,19 @@ func (m *mongoDataSource) MongoDatabase() *mongo.Database {
 // DSN 形如 mongodb://user:pass@host:port/dbname?authSource=admin；
 // 若 DSN 为空则使用 Host/Port/User/Password/DBName 组装。
 // 密码中的 @ 会做百分号编码；分字段组装时认证库默认 admin（可用 AuthSource 覆盖）。
+// DBName 为空时会尝试从 DSN path 解析库名。
 func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 	if cfg.ID == "" {
 		return nil, fmt.Errorf("mongodb datasource: missing id")
 	}
-	if cfg.DBName == "" {
+	dbName := strings.TrimSpace(cfg.DBName)
+	if dbName == "" {
+		dbName = mongoDBNameFromDSN(cfg.DSN)
+	}
+	if dbName == "" {
 		return nil, fmt.Errorf("mongodb datasource: missing dbname for id=%s", cfg.ID)
 	}
+	cfg.DBName = dbName
 
 	uri := strings.TrimSpace(cfg.DSN)
 	if uri == "" {
@@ -92,6 +98,19 @@ func NewMongoDataSource(cfg Config) (*mongoDataSource, error) {
 
 	db := client.Database(cfg.DBName)
 	return &mongoDataSource{id: cfg.ID, db: db}, nil
+}
+
+// mongoDBNameFromDSN 从 mongodb URI path 解析库名（不含前导 /）。
+func mongoDBNameFromDSN(dsn string) string {
+	uri := strings.TrimSpace(dsn)
+	if uri == "" {
+		return ""
+	}
+	u, err := url.Parse(encodeMongoURIUserinfo(uri))
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(u.Path), "/")
 }
 
 func mongoAuthSource(cfg Config) string {

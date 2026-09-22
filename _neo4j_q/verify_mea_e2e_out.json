@@ -1,0 +1,25 @@
+﻿{
+    "ok":  true,
+    "agentId":  "b880051a-a7de-4d91-afea-2ad41269191c",
+    "sessionId":  "2cb88a75-0275-43fd-8d4e-dd8dd05d4111",
+    "meaPhases":  [
+                      "started",
+                      "round",
+                      "finished"
+                  ],
+    "statePath":  "E:\\sixath\\portal-data\\mea\\2cb88a75-0275-43fd-8d4e-dd8dd05d4111.json",
+    "stateExists":  true,
+    "stateStatus":  "completed",
+    "stateHint":  "audits=1",
+    "chunkPreview":  "File `mea_e2e_marker.txt` exists and contains `mea-e2e-ok`. ✅",
+    "streamErrors":  [
+
+                     ],
+    "negativeSessionId":  "b6c15328-7007-449f-a8e6-67fe446dcb27",
+    "negativeMeaEvents":  0,
+    "expectations":  [
+                         "UI mea_enabled + mea-checks 鈫?SSE event:mea started/finished",
+                         "TaskState JSON under data_root/mea/\u003csession\u003e.json status=completed (pre-seeded marker)",
+                         "mea_enabled=false 鈫?zero mea SSE events"
+                     ]
+}

@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getResourceByPayload, listGrants, createGrant, deleteGrant, type ResourceGrant, type ResourceInfo } from '../api/resource'
+import { orgApi, type PortalUser } from '../api/orgApi'
+import type { OrgMembership } from '../api/sessionAuth'
+import { UserPicker } from './UserPicker'
 
 interface ResourceGrantPanelProps {
   resourceType: string
@@ -20,6 +23,32 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
   const [addError, setAddError] = useState('')
   const [revokingKey, setRevokingKey] = useState<string | null>(null)
 
+  const [orgs, setOrgs] = useState<OrgMembership[]>([])
+  const [users, setUsers] = useState<PortalUser[]>([])
+  const [pickerLoading, setPickerLoading] = useState(false)
+  const [pickerError, setPickerError] = useState('')
+
+  const orgNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const o of orgs) {
+      if (o.id) m.set(o.id, o.name || o.id)
+    }
+    return m
+  }, [orgs])
+
+  const userNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const u of users) {
+      if (u.id) m.set(u.id, u.name || u.id)
+    }
+    return m
+  }, [users])
+
+  const grantedUserIds = useMemo(
+    () => grants.filter((g) => g.grantee_type === 'user').map((g) => g.grantee_id),
+    [grants]
+  )
+
   const load = async () => {
     setLoading(true)
     setError('')
@@ -38,6 +67,38 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
   }
 
   useEffect(() => { load() }, [resourceType, payloadRef])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setPickerLoading(true)
+      setPickerError('')
+      try {
+        const [orgList, userList] = await Promise.all([
+          orgApi.list(),
+          orgApi.listUsers('', 200),
+        ])
+        if (!cancelled) {
+          setOrgs(orgList)
+          setUsers(userList)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setOrgs([])
+          setUsers([])
+          setPickerError(e instanceof Error ? e.message : '加载选择列表失败')
+        }
+      } finally {
+        if (!cancelled) setPickerLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    setGranteeId('')
+    setAddError('')
+  }, [granteeType])
 
   const handleAdd = async () => {
     if (!resource || !granteeId.trim()) return
@@ -70,6 +131,17 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
 
   const grantKey = (g: ResourceGrant) => `${g.grantee_type}:${g.grantee_id}`
 
+  const formatGrantee = (g: ResourceGrant) => {
+    if (g.grantee_type === 'org') {
+      const name = orgNameById.get(g.grantee_id)
+      return name && name !== g.grantee_id ? `${name} (${g.grantee_id})` : g.grantee_id
+    }
+    const name = userNameById.get(g.grantee_id)
+    return name && name !== g.grantee_id ? `${name} (${g.grantee_id})` : g.grantee_id
+  }
+
+  const homeOrgId = resource?.home_org_id?.trim() || ''
+
   if (loading) return <div className="section-card"><p>Loading grants...</p></div>
   if (error) return <div className="section-card"><p className="muted">{error}</p></div>
   if (!resource) return null
@@ -80,7 +152,7 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
       <div className="section-card" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--muted)' }}>
           <span>可见性: <strong>{resource.visibility}</strong></span>
-          {resource.home_org_id ? <span>Org: <code>{resource.home_org_id}</code></span> : null}
+          {homeOrgId ? <span>Org: <code>{homeOrgId}</code></span> : null}
           <span>Owner: <code>{resource.owner_user_id}</code></span>
         </div>
       </div>
@@ -95,16 +167,37 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
               <option value="org">Org</option>
             </select>
           </div>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label style={{ fontSize: '0.8rem' }}>{granteeType === 'user' ? 'User ID' : 'Org ID'}</label>
-            <input
-              type="text"
-              value={granteeId}
-              onChange={(e) => setGranteeId(e.target.value)}
-              placeholder={granteeType === 'user' ? 'user ID' : 'org ID'}
-              style={{ width: '12rem' }}
-            />
-          </div>
+
+          {granteeType === 'org' ? (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '0.8rem' }}>组织</label>
+              <select
+                value={granteeId}
+                onChange={(e) => setGranteeId(e.target.value)}
+                disabled={pickerLoading || orgs.length === 0}
+                style={{ minWidth: '14rem' }}
+              >
+                <option value="">{pickerLoading ? '加载中…' : orgs.length === 0 ? '暂无可用组织' : '选择组织…'}</option>
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name ? `${o.name} (${o.id})` : o.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '0.8rem' }}>用户</label>
+              <UserPicker
+                value={granteeId}
+                onChange={setGranteeId}
+                disabled={adding}
+                excludeIds={grantedUserIds}
+                placeholder="选择用户…"
+              />
+            </div>
+          )}
+
           <div className="form-group" style={{ margin: 0 }}>
             <label style={{ fontSize: '0.8rem' }}>权限</label>
             <select value={perm} onChange={(e) => setPerm(e.target.value)}>
@@ -115,6 +208,7 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
             {adding ? '添加中…' : '添加'}
           </button>
         </div>
+        {pickerError && <p className="muted" style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>{pickerError}</p>}
         {addError && <p className="error" style={{ marginTop: '0.5rem' }}>{addError}</p>}
       </div>
 
@@ -123,7 +217,7 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
           <thead>
             <tr>
               <th>类型</th>
-              <th>ID</th>
+              <th>对象</th>
               <th>权限</th>
               <th>操作</th>
             </tr>
@@ -138,7 +232,7 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
                 return (
                   <tr key={key}>
                     <td><span className={`badge badge-${g.grantee_type === 'org' ? 'mcp' : 'builtin'}`}>{g.grantee_type}</span></td>
-                    <td><code>{g.grantee_id}</code></td>
+                    <td><code title={g.grantee_id}>{formatGrantee(g)}</code></td>
                     <td><span className="badge">{g.perm}</span></td>
                     <td>
                       <button

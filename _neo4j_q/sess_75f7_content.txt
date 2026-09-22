@@ -1,0 +1,17 @@
+调度链路追踪技能已加载。我注意到环境中实际可用的是 `http_request`（访问 ES）和 `execute_read`（访问 MySQL），`jaeger_trace`/`rca_*`/`es_log_query` 工具在本会话中不可用。我将通过 ES 日志 + 数据库交叉验证来取证。
+
+先做 ES 全索引搜索定位该 flow 的日志：好的，开始排查 flow `4103_b1fcy4skt39t`。先按技能工作流从 ES 日志搜索入手根据技能指南，我将按标准流程排查这个 flow_id。先从 Jaeger 和 ES 日志两个方向并行收集证据。
+
+该 flow_id `4103_b1fcy4skt39t` 看起来属于新调度系统（cgsession 链路）。按照技能工作流，我先从 ES 全索引搜索开始收集证据。
+
+好的，我来按 `scheduling-flow-trace` 技能的工作流排查 `4103_b1fcy4skt39t`。
+
+先同时执行 **Jaeger 链路追踪**（尝试不同变体）和 **ES 全索引搜索**。
+
+正在分析流水 `4103_b1fcy4skt39t`。先并行执行 ES 全索引搜索和 Jaeger 链路追踪我来分析这个 flow_id `4103_b1fcy4skt39t`。按照技能指引，先并行执行 ES 全索引搜索和 Jaeger 链路追踪。
+
+好的，我来按照调度全链路追踪技能排查 `4103_b1fcy4skt39t` 的失败原因。
+
+**第一步：ES 全索引搜索**
+
+先搜索所有相关 ES 索引查找这个 flow_id 的日志好的，开始排查流水 `4103_b1fcy4skt39t`。按照技能工作流，先通过 Jaeger 链路追踪定位失败位置已记录：后续不会向用户索取数据库连接信息或企微 Webhook，直接使用已绑定的数据源（`pro_mysql_vm_tool`、`cgarchive`）和 `send_to_wecom`。

@@ -100,6 +100,112 @@ func TestWriteStream_PersistsTimelineOnFailedError(t *testing.T) {
 	}
 }
 
+func TestWriteStream_EmptyReplyGetsFallbackNotice(t *testing.T) {
+	ch := make(chan service.ChatStreamEvent, 8)
+	ch <- service.ChatStreamEvent{
+		Type:      service.ChatStreamEventModelCall,
+		ModelCall: &service.ModelCallPayload{Phase: "responded", Step: 0, Model: "kimi-k3"},
+	}
+	close(ch)
+
+	var persisted struct {
+		content string
+		meta    map[string]any
+		called  bool
+	}
+	rec := httptest.NewRecorder()
+	res := WriteStream(context.Background(), rec, ch, "sess-empty", func(_ context.Context, _, content string, meta map[string]any) error {
+		persisted.called = true
+		persisted.content = content
+		persisted.meta = meta
+		return nil
+	})
+	if res.Failed || res.Canceled {
+		t.Fatalf("empty success turn must not fail/cancel, got %+v", res)
+	}
+	if !persisted.called {
+		t.Fatal("must persist empty-reply fallback so UI is not blank")
+	}
+	if persisted.content != EmptyReplyNotice {
+		t.Fatalf("persist content=%q want %q", persisted.content, EmptyReplyNotice)
+	}
+	if persisted.meta["empty_reply"] != true {
+		t.Fatalf("expected empty_reply=true, meta=%#v", persisted.meta)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "empty_reply") && !strings.Contains(body, EmptyReplyNotice) {
+		// SSE still ends with done; fallback is persist-facing. Ensure done was written.
+		if !strings.Contains(body, "event: done") {
+			t.Fatalf("expected done event, body=%q", body)
+		}
+	}
+}
+
+func TestWriteStream_WhitespaceOnlyGetsFallbackNotice(t *testing.T) {
+	ch := make(chan service.ChatStreamEvent, 4)
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventChunk, Content: "  \n\t"}
+	close(ch)
+
+	var got string
+	rec := httptest.NewRecorder()
+	_ = WriteStream(context.Background(), rec, ch, "sess-ws", func(_ context.Context, _, content string, _ map[string]any) error {
+		got = content
+		return nil
+	})
+	if got != EmptyReplyNotice {
+		t.Fatalf("whitespace-only content=%q want fallback", got)
+	}
+}
+
+func TestWriteStream_CanceledEmptyGetsCancelNotice(t *testing.T) {
+	ch := make(chan service.ChatStreamEvent, 4)
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventCancelled}
+	close(ch)
+
+	var persisted struct {
+		content string
+		meta    map[string]any
+	}
+	rec := httptest.NewRecorder()
+	res := WriteStream(context.Background(), rec, ch, "sess-cancel", func(_ context.Context, _, content string, meta map[string]any) error {
+		persisted.content = content
+		persisted.meta = meta
+		return nil
+	})
+	if !res.Canceled {
+		t.Fatalf("expected Canceled, got %+v", res)
+	}
+	if persisted.content != EmptyCancelNotice {
+		t.Fatalf("content=%q want %q", persisted.content, EmptyCancelNotice)
+	}
+	if persisted.meta["interrupted"] != true {
+		t.Fatalf("expected interrupted, meta=%#v", persisted.meta)
+	}
+	if persisted.meta["empty_reply"] != true {
+		t.Fatalf("expected empty_reply, meta=%#v", persisted.meta)
+	}
+}
+
+func TestWriteStream_NonEmptyContentUnchanged(t *testing.T) {
+	ch := make(chan service.ChatStreamEvent, 4)
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventChunk, Content: "正常答复"}
+	close(ch)
+
+	var got string
+	var meta map[string]any
+	rec := httptest.NewRecorder()
+	_ = WriteStream(context.Background(), rec, ch, "sess-ok", func(_ context.Context, _, content string, m map[string]any) error {
+		got = content
+		meta = m
+		return nil
+	})
+	if got != "正常答复" {
+		t.Fatalf("content=%q", got)
+	}
+	if meta["empty_reply"] == true {
+		t.Fatalf("must not mark empty_reply for real content, meta=%#v", meta)
+	}
+}
+
 func TestAggregateFinal_OmitsDebugAndToolEvents(t *testing.T) {
 	ch := make(chan service.ChatStreamEvent, 8)
 	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventDebug, Content: "agent.tool.started[{\"tool\":\"list_tools\"}]\r\n"}
