@@ -25,6 +25,7 @@ import OrgDetailPage from './pages/OrgDetailPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
+import TerminalPage from './pages/TerminalPage'
 import RequireAuth from './components/RequireAuth'
 import ThemeToggle from './components/ThemeToggle'
 import { getSessionEmail, hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
@@ -84,6 +85,9 @@ function Breadcrumb() {
   } else if (segments[0] === 'orgs') {
     if (segments[1]) { current = '组织详情'; icon = '🏢' }
     else { current = '组织'; icon = '🏢' }
+  } else if (segments[0] === 'terminal') {
+    current = '远程终端'
+    icon = '💻'
   }
 
   return (
@@ -192,6 +196,10 @@ function AppShell() {
               <span className="nav-item__icon">🏢</span>
               组织
             </NavLink>
+            <NavLink to="/terminal" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <span className="nav-item__icon">💻</span>
+              终端
+            </NavLink>
           </div>
         </nav>
         <div className="sidebar-user">
@@ -284,6 +292,7 @@ function AppShell() {
             <Route path="/orgs" element={<OrgListPage />} />
             <Route path="/orgs/:id" element={<OrgDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/terminal" element={<TerminalPage />} />
           </Routes>
         </div>
       </main>
