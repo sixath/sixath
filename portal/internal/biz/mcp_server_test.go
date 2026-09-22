@@ -214,6 +214,13 @@ func (f *fakeMcpResourceRepo) ListGrantsByResourceIDs(_ context.Context, resourc
 	return out, nil
 }
 
+func (f *fakeMcpResourceRepo) ListByProject(context.Context, string) ([]*Resource, error) {
+	panic("not implemented")
+}
+func (f *fakeMcpResourceRepo) UpdateProjectID(context.Context, string, string) error {
+	panic("not implemented")
+}
+
 func newMcpServerACLUsecase() (*McpServerUsecase, *fakeMcpServerRepo, *fakeMcpResourceRepo) {
 	servers := &fakeMcpServerRepo{servers: map[string]*McpServerMeta{}}
 	resources := &fakeMcpResourceRepo{

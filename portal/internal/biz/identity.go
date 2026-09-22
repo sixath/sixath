@@ -73,6 +73,8 @@ type ResourceRepo interface {
 	GetByPayload(ctx context.Context, resourceType ResourceType, payloadRef string) (*Resource, error)
 	ListAllByType(ctx context.Context, resourceType ResourceType) ([]*Resource, error)
 	ListGrantsByResourceIDs(ctx context.Context, resourceIDs []string) (map[string][]ResourceGrant, error)
+	ListByProject(ctx context.Context, projectID string) ([]*Resource, error)
+	UpdateProjectID(ctx context.Context, resourceID, projectID string) error
 	CreateGrant(ctx context.Context, grant ResourceGrant) error
 	DeleteGrant(ctx context.Context, resourceID, granteeType, granteeID string) error
 }

@@ -282,6 +282,8 @@ func (r *aclAPIRepo) ListGrantsByResourceIDs(_ context.Context, resourceIDs []st
 	}
 	return out, nil
 }
+func (r *aclAPIRepo) ListByProject(context.Context, string) ([]*Resource, error) { panic("not implemented") }
+func (r *aclAPIRepo) UpdateProjectID(context.Context, string, string) error       { panic("not implemented") }
 func (r *aclAPIRepo) CreateGrant(_ context.Context, grant ResourceGrant) error {
 	r.grants = append(r.grants, grant)
 	return nil

@@ -36,6 +36,7 @@ func resourceModelToBiz(m *model.Resource) *biz.Resource {
 		OwnerUserID:  m.OwnerUserID,
 		Visibility:   biz.Visibility(m.Visibility),
 		HomeOrgID:    m.HomeOrgID,
+		ProjectID:    m.ProjectID,
 		BoundAgentID: m.BoundAgentID,
 		PayloadRef:   m.PayloadRef,
 	}
@@ -58,6 +59,7 @@ func (r *resourceRepo) CreateResource(ctx context.Context, resource *biz.Resourc
 		OwnerUserID:  resource.OwnerUserID,
 		Visibility:   string(resource.Visibility),
 		HomeOrgID:    resource.HomeOrgID,
+		ProjectID:    resource.ProjectID,
 		BoundAgentID: resource.BoundAgentID,
 		PayloadRef:   resource.PayloadRef,
 	}
@@ -76,6 +78,7 @@ func (r *resourceRepo) UpdateResource(ctx context.Context, resource *biz.Resourc
 		"owner_user_id":  resource.OwnerUserID,
 		"visibility":     string(resource.Visibility),
 		"home_org_id":    resource.HomeOrgID,
+		"project_id":     resource.ProjectID,
 		"bound_agent_id": resource.BoundAgentID,
 	})
 	if res.Error != nil {
@@ -135,6 +138,32 @@ func (r *resourceRepo) ListAllByType(ctx context.Context, resourceType biz.Resou
 		resources[i] = resourceModelToBiz(&rows[i])
 	}
 	return resources, nil
+}
+
+func (r *resourceRepo) ListByProject(ctx context.Context, projectID string) ([]*biz.Resource, error) {
+	var rows []model.Resource
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ?", projectID).
+		Order("created_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	resources := make([]*biz.Resource, len(rows))
+	for i := range rows {
+		resources[i] = resourceModelToBiz(&rows[i])
+	}
+	return resources, nil
+}
+
+func (r *resourceRepo) UpdateProjectID(ctx context.Context, resourceID, projectID string) error {
+	res := r.db.WithContext(ctx).Model(&model.Resource{}).Where("id = ?", resourceID).Update("project_id", projectID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *resourceRepo) CreateGrant(ctx context.Context, grant biz.ResourceGrant) error {
