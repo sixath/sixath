@@ -2,7 +2,10 @@ package biz
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -253,14 +256,18 @@ func TestAuthUsecaseRegisterVerifyEmailBestEffort(t *testing.T) {
 }
 
 type authIdentityFake struct {
-	usersByEmail map[string]*User
-	usersByID    map[string]*User
-	orgs         map[string]*Org
-	memberships  map[string][]OrgMembership
-	verifyByHash map[string]string
-	added        []string
-	upserted     map[string]string
-	nextUserNum  int
+	mu                  sync.Mutex
+	usersByEmail        map[string]*User
+	usersByID           map[string]*User
+	orgs                map[string]*Org
+	memberships         map[string][]OrgMembership
+	verifyByHash        map[string]string
+	identities          map[string]string // provider\0subject -> userID
+	added               []string
+	upserted            map[string]string
+	deletedUsers        []string
+	nextUserNum         int
+	getIdentityMissOnce bool
 }
 
 func newAuthIdentityFake() *authIdentityFake {
@@ -270,8 +277,13 @@ func newAuthIdentityFake() *authIdentityFake {
 		orgs:         map[string]*Org{},
 		memberships:  map[string][]OrgMembership{},
 		verifyByHash: map[string]string{},
+		identities:   map[string]string{},
 		upserted:     map[string]string{},
 	}
+}
+
+func identityKey(provider, subject string) string {
+	return provider + "\x00" + subject
 }
 
 func (f *authIdentityFake) CreateUser(context.Context, string) (*User, error) {
@@ -366,20 +378,51 @@ func (f *authIdentityFake) ListUsers(context.Context, string, int) ([]UserSummar
 	panic("not implemented")
 }
 
-func (f *authIdentityFake) CreateUserForIdentity(context.Context, string, time.Time) (*User, error) {
-	panic("not implemented")
+func (f *authIdentityFake) CreateUserForIdentity(_ context.Context, name string, verifiedAt time.Time) (*User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextUserNum++
+	id := fmt.Sprintf("user-%d", f.nextUserNum)
+	at := verifiedAt
+	user := &User{ID: id, Name: name, Email: "", EmailVerifiedAt: &at}
+	f.usersByID[id] = user
+	return user, nil
 }
 
-func (f *authIdentityFake) DeleteUser(context.Context, string) error {
-	panic("not implemented")
+func (f *authIdentityFake) DeleteUser(_ context.Context, userID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.usersByID[userID]; !ok {
+		return pkgErrors.ErrNotFound
+	}
+	delete(f.usersByID, userID)
+	f.deletedUsers = append(f.deletedUsers, userID)
+	return nil
 }
 
-func (f *authIdentityFake) GetIdentity(context.Context, string, string) (string, error) {
-	panic("not implemented")
+func (f *authIdentityFake) GetIdentity(_ context.Context, provider, subject string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getIdentityMissOnce {
+		f.getIdentityMissOnce = false
+		return "", pkgErrors.ErrNotFound
+	}
+	userID, ok := f.identities[identityKey(provider, subject)]
+	if !ok {
+		return "", pkgErrors.ErrNotFound
+	}
+	return userID, nil
 }
 
-func (f *authIdentityFake) CreateIdentity(context.Context, string, string, string) error {
-	panic("not implemented")
+func (f *authIdentityFake) CreateIdentity(_ context.Context, provider, subject, userID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := identityKey(provider, subject)
+	if _, ok := f.identities[key]; ok {
+		return pkgErrors.ErrConflict
+	}
+	f.identities[key] = userID
+	return nil
 }
 
 func (f *authIdentityFake) RemoveMember(context.Context, string, string) error {
@@ -485,4 +528,389 @@ type authMailerFake struct {
 
 func (f authMailerFake) SendVerifyEmail(context.Context, string, string) error {
 	return f.err
+}
+
+type authEphemeralFake struct {
+	mu    sync.Mutex
+	items map[string]ephemeralItem
+}
+
+type ephemeralItem struct {
+	kind     string
+	payload  string
+	expires  time.Time
+	consumed bool
+}
+
+func newAuthEphemeralFake() *authEphemeralFake {
+	return &authEphemeralFake{items: map[string]ephemeralItem{}}
+}
+
+func (f *authEphemeralFake) Put(_ context.Context, id, kind, payloadJSON string, expiresAt time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.items[id] = ephemeralItem{kind: kind, payload: payloadJSON, expires: expiresAt}
+	return nil
+}
+
+func (f *authEphemeralFake) Consume(_ context.Context, id, kind string, now time.Time) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item, ok := f.items[id]
+	if !ok || item.kind != kind || item.consumed || !item.expires.After(now) {
+		return "", pkgErrors.ErrNotFound
+	}
+	item.consumed = true
+	f.items[id] = item
+	return item.payload, nil
+}
+
+func (f *authEphemeralFake) get(id string) (ephemeralItem, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item, ok := f.items[id]
+	return item, ok
+}
+
+type fakeWeComClient struct {
+	userid string
+	err    error
+	codes  []string
+}
+
+func (f *fakeWeComClient) GetUserID(_ context.Context, code string) (string, error) {
+	f.codes = append(f.codes, code)
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.userid, nil
+}
+
+func newEnabledWeComUC(identities *authIdentityFake, ephemeral *authEphemeralFake, wecom WeComOAuthClient) *AuthUsecase {
+	return NewAuthUsecaseWithWeCom(
+		identities, newAuthInviteFake(), nil, false,
+		ephemeral, wecom,
+		"wwcorp", "1000001",
+		"https://portal.example.com/api/v1/auth/wecom/callback",
+		"https://portal.example.com",
+	)
+}
+
+func TestAuthUsecaseWeComEnabledFalseWhenIncomplete(t *testing.T) {
+	uc := NewAuthUsecase(newAuthIdentityFake(), newAuthInviteFake(), nil, false)
+	if uc.WeComEnabled() {
+		t.Fatal("WeComEnabled() = true, want false for email-only usecase")
+	}
+	uc2 := NewAuthUsecaseWithWeCom(
+		newAuthIdentityFake(), newAuthInviteFake(), nil, false,
+		newAuthEphemeralFake(), &fakeWeComClient{userid: "u"},
+		"wwcorp", "1000001", "", "https://portal.example.com",
+	)
+	if uc2.WeComEnabled() {
+		t.Fatal("WeComEnabled() = true, want false when redirectURI empty")
+	}
+}
+
+func TestAuthUsecaseStartWeComDisabled(t *testing.T) {
+	uc := NewAuthUsecase(newAuthIdentityFake(), newAuthInviteFake(), nil, false)
+	_, err := uc.StartWeCom(context.Background(), "/")
+	if !isReason(err, "WECOM_LOGIN_DISABLED") {
+		t.Fatalf("StartWeCom(disabled) error = %v, want WECOM_LOGIN_DISABLED", err)
+	}
+}
+
+func TestAuthUsecaseStartWeComPutsStateAndSSOURL(t *testing.T) {
+	identities := newAuthIdentityFake()
+	ephemeral := newAuthEphemeralFake()
+	uc := newEnabledWeComUC(identities, ephemeral, &fakeWeComClient{userid: "zhangsan"})
+
+	ssoURL, err := uc.StartWeCom(context.Background(), "//evil.com")
+	if err != nil {
+		t.Fatalf("StartWeCom() error = %v", err)
+	}
+	u, err := url.Parse(ssoURL)
+	if err != nil {
+		t.Fatalf("Parse SSO URL: %v", err)
+	}
+	if u.Scheme != "https" || u.Host != "login.work.weixin.qq.com" || u.Path != "/wwlogin/sso/login" {
+		t.Fatalf("SSO URL host/path = %s://%s%s", u.Scheme, u.Host, u.Path)
+	}
+	q := u.Query()
+	if q.Get("login_type") != "CorpApp" {
+		t.Fatalf("login_type = %q, want CorpApp", q.Get("login_type"))
+	}
+	if q.Get("appid") != "wwcorp" {
+		t.Fatalf("appid = %q, want wwcorp", q.Get("appid"))
+	}
+	if q.Get("agentid") != "1000001" {
+		t.Fatalf("agentid = %q, want 1000001", q.Get("agentid"))
+	}
+	if q.Get("redirect_uri") != "https://portal.example.com/api/v1/auth/wecom/callback" {
+		t.Fatalf("redirect_uri = %q", q.Get("redirect_uri"))
+	}
+	state := q.Get("state")
+	if state == "" {
+		t.Fatal("state is empty")
+	}
+	item, ok := ephemeral.get(state)
+	if !ok || item.kind != "wecom_state" {
+		t.Fatalf("ephemeral state = %#v, want wecom_state", item)
+	}
+	var payload struct {
+		Next string `json:"next"`
+	}
+	if err := json.Unmarshal([]byte(item.payload), &payload); err != nil {
+		t.Fatalf("unmarshal state payload: %v", err)
+	}
+	if payload.Next != "/" {
+		t.Fatalf("sanitized next = %q, want /", payload.Next)
+	}
+	if time.Until(item.expires) < 9*time.Minute || time.Until(item.expires) > 10*time.Minute+time.Second {
+		t.Fatalf("state TTL = %v, want ~10m", time.Until(item.expires))
+	}
+}
+
+func TestAuthUsecaseHandleWeComCallbackInvalidState(t *testing.T) {
+	uc := newEnabledWeComUC(newAuthIdentityFake(), newAuthEphemeralFake(), &fakeWeComClient{userid: "zhangsan"})
+	_, _, err := uc.HandleWeComCallback(context.Background(), "code", "missing-state")
+	if !isReason(err, "INVALID_STATE") {
+		t.Fatalf("HandleWeComCallback(bad state) error = %v, want INVALID_STATE", err)
+	}
+}
+
+func TestAuthUsecaseHandleWeComCallbackFirstLogin(t *testing.T) {
+	identities := newAuthIdentityFake()
+	ephemeral := newAuthEphemeralFake()
+	wecom := &fakeWeComClient{userid: "zhangsan"}
+	uc := newEnabledWeComUC(identities, ephemeral, wecom)
+
+	ssoURL, err := uc.StartWeCom(context.Background(), "/chat")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	state := mustQuery(t, ssoURL, "state")
+
+	ticket, next, err := uc.HandleWeComCallback(context.Background(), "oauth-code", state)
+	if err != nil {
+		t.Fatalf("HandleWeComCallback: %v", err)
+	}
+	if next != "/chat" {
+		t.Fatalf("next = %q, want /chat", next)
+	}
+	if ticket == "" {
+		t.Fatal("ticket is empty")
+	}
+	if len(wecom.codes) != 1 || wecom.codes[0] != "oauth-code" {
+		t.Fatalf("GetUserID codes = %v", wecom.codes)
+	}
+	if len(identities.added) != 0 {
+		t.Fatalf("AddMember called: %v", identities.added)
+	}
+	userID, err := identities.GetIdentity(context.Background(), "wecom", "zhangsan")
+	if err != nil {
+		t.Fatalf("GetIdentity: %v", err)
+	}
+	user := identities.usersByID[userID]
+	if user == nil || user.Name != "zhangsan" || user.EmailVerifiedAt == nil {
+		t.Fatalf("created user = %#v", user)
+	}
+	item, ok := ephemeral.get(ticket)
+	if !ok || item.kind != "wecom_ticket" {
+		t.Fatalf("ticket ephemeral = %#v", item)
+	}
+}
+
+func TestAuthUsecaseHandleWeComCallbackSecondLogin(t *testing.T) {
+	identities := newAuthIdentityFake()
+	at := time.Now()
+	identities.usersByID["user-existing"] = &User{ID: "user-existing", Name: "zhangsan", EmailVerifiedAt: &at}
+	identities.identities[identityKey("wecom", "zhangsan")] = "user-existing"
+	ephemeral := newAuthEphemeralFake()
+	uc := newEnabledWeComUC(identities, ephemeral, &fakeWeComClient{userid: "zhangsan"})
+
+	ssoURL, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	state := mustQuery(t, ssoURL, "state")
+
+	ticket, _, err := uc.HandleWeComCallback(context.Background(), "code", state)
+	if err != nil {
+		t.Fatalf("HandleWeComCallback: %v", err)
+	}
+	item, _ := ephemeral.get(ticket)
+	var payload struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.Unmarshal([]byte(item.payload), &payload); err != nil {
+		t.Fatalf("unmarshal ticket: %v", err)
+	}
+	if payload.UserID != "user-existing" {
+		t.Fatalf("ticket user_id = %q, want user-existing", payload.UserID)
+	}
+	if identities.nextUserNum != 0 {
+		t.Fatalf("CreateUserForIdentity called, nextUserNum=%d", identities.nextUserNum)
+	}
+}
+
+func TestAuthUsecaseHandleWeComCallbackIdentityConflictOrphan(t *testing.T) {
+	identities := newAuthIdentityFake()
+	at := time.Now()
+	identities.usersByID["user-winner"] = &User{ID: "user-winner", Name: "zhangsan", EmailVerifiedAt: &at}
+	identities.identities[identityKey("wecom", "zhangsan")] = "user-winner"
+	identities.getIdentityMissOnce = true
+	ephemeral := newAuthEphemeralFake()
+	uc := newEnabledWeComUC(identities, ephemeral, &fakeWeComClient{userid: "zhangsan"})
+
+	ssoURL, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	state := mustQuery(t, ssoURL, "state")
+
+	ticket, _, err := uc.HandleWeComCallback(context.Background(), "code", state)
+	if err != nil {
+		t.Fatalf("HandleWeComCallback: %v", err)
+	}
+	item, _ := ephemeral.get(ticket)
+	var payload struct {
+		UserID string `json:"user_id"`
+	}
+	_ = json.Unmarshal([]byte(item.payload), &payload)
+	if payload.UserID != "user-winner" {
+		t.Fatalf("ticket user_id = %q, want user-winner", payload.UserID)
+	}
+	if len(identities.deletedUsers) != 1 {
+		t.Fatalf("deletedUsers = %v, want 1 orphan delete", identities.deletedUsers)
+	}
+}
+
+func TestAuthUsecaseHandleWeComCallbackNoUserID(t *testing.T) {
+	ephemeral := newAuthEphemeralFake()
+	uc := newEnabledWeComUC(newAuthIdentityFake(), ephemeral, &fakeWeComClient{err: ErrWeComNoUserID})
+	ssoURL, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	_, _, err = uc.HandleWeComCallback(context.Background(), "code", mustQuery(t, ssoURL, "state"))
+	if !isReason(err, "INVALID_WECOM_USER") {
+		t.Fatalf("error = %v, want INVALID_WECOM_USER", err)
+	}
+}
+
+func TestAuthUsecaseHandleWeComCallbackCodeFailure(t *testing.T) {
+	ephemeral := newAuthEphemeralFake()
+	uc := newEnabledWeComUC(newAuthIdentityFake(), ephemeral, &fakeWeComClient{err: errors.New("api down")})
+	ssoURL, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	_, _, err = uc.HandleWeComCallback(context.Background(), "code", mustQuery(t, ssoURL, "state"))
+	if !isReason(err, "INVALID_CODE") {
+		t.Fatalf("error = %v, want INVALID_CODE", err)
+	}
+}
+
+func TestAuthUsecaseExchangeWeComTicket(t *testing.T) {
+	identities := newAuthIdentityFake()
+	ephemeral := newAuthEphemeralFake()
+	wecom := &fakeWeComClient{userid: "zhangsan"}
+	uc := newEnabledWeComUC(identities, ephemeral, wecom)
+
+	ssoURL, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	ticket, _, err := uc.HandleWeComCallback(context.Background(), "code", mustQuery(t, ssoURL, "state"))
+	if err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+
+	session, err := uc.ExchangeWeComTicket(context.Background(), ticket)
+	if err != nil {
+		t.Fatalf("ExchangeWeComTicket: %v", err)
+	}
+	if session.Token == "" || session.UserID == "" {
+		t.Fatalf("session = %#v", session)
+	}
+	if session.Email != "" {
+		t.Fatalf("email = %q, want empty", session.Email)
+	}
+	if !session.EmailVerified {
+		t.Fatal("email_verified = false, want true")
+	}
+	if len(session.Orgs) != 0 {
+		t.Fatalf("orgs = %#v, want empty", session.Orgs)
+	}
+
+	// After AddMember, re-login exchange should include orgs.
+	userID := session.UserID
+	identities.orgs["org-1"] = &Org{ID: "org-1", Name: "Acme"}
+	_ = identities.AddMember(context.Background(), "org-1", userID, "owner")
+
+	ssoURL2, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom2: %v", err)
+	}
+	ticket2, _, err := uc.HandleWeComCallback(context.Background(), "code2", mustQuery(t, ssoURL2, "state"))
+	if err != nil {
+		t.Fatalf("callback2: %v", err)
+	}
+	session2, err := uc.ExchangeWeComTicket(context.Background(), ticket2)
+	if err != nil {
+		t.Fatalf("Exchange2: %v", err)
+	}
+	if len(session2.Orgs) != 1 || session2.Orgs[0].OrgID != "org-1" {
+		t.Fatalf("session2 orgs = %#v, want org-1", session2.Orgs)
+	}
+}
+
+func TestAuthUsecaseExchangeWeComTicketSingleUse(t *testing.T) {
+	identities := newAuthIdentityFake()
+	ephemeral := newAuthEphemeralFake()
+	uc := newEnabledWeComUC(identities, ephemeral, &fakeWeComClient{userid: "zhangsan"})
+
+	ssoURL, err := uc.StartWeCom(context.Background(), "/")
+	if err != nil {
+		t.Fatalf("StartWeCom: %v", err)
+	}
+	ticket, _, err := uc.HandleWeComCallback(context.Background(), "code", mustQuery(t, ssoURL, "state"))
+	if err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+	if _, err := uc.ExchangeWeComTicket(context.Background(), ticket); err != nil {
+		t.Fatalf("first exchange: %v", err)
+	}
+	_, err = uc.ExchangeWeComTicket(context.Background(), ticket)
+	if !isReason(err, "INVALID_TICKET") {
+		t.Fatalf("second exchange error = %v, want INVALID_TICKET", err)
+	}
+}
+
+func mustQuery(t *testing.T, rawURL, key string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	v := u.Query().Get(key)
+	if v == "" {
+		t.Fatalf("query %q missing in %s", key, rawURL)
+	}
+	return v
+}
+
+func TestSanitizeNext(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "/"},
+		{"/chat", "/chat"},
+		{"//evil", "/"},
+		{"http://x", "/"},
+		{"  /ok  ", "/ok"},
+	}
+	for _, tc := range cases {
+		if got := sanitizeNext(tc.in); got != tc.want {
+			t.Fatalf("sanitizeNext(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

@@ -10,4 +10,10 @@ var (
 	ErrUnauthorized      = kratosErrors.Unauthorized("UNAUTHORIZED", "invalid email or password")
 	ErrConflict          = kratosErrors.Conflict("CONFLICT", "email already registered")
 	ErrBadRequest        = kratosErrors.BadRequest("INVALID_INVITE", "invalid or expired invite")
+
+	ErrWeComLoginDisabled = kratosErrors.BadRequest("WECOM_LOGIN_DISABLED", "wecom login is not configured")
+	ErrInvalidWeComUser   = kratosErrors.Forbidden("INVALID_WECOM_USER", "not a corp member")
+	ErrInvalidState       = kratosErrors.BadRequest("INVALID_STATE", "invalid or expired state")
+	ErrInvalidCode        = kratosErrors.BadRequest("INVALID_CODE", "wecom code exchange failed")
+	ErrInvalidTicket      = kratosErrors.BadRequest("INVALID_TICKET", "invalid or expired ticket")
 )
