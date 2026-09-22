@@ -1417,19 +1417,32 @@
 .terminal-line--stderr pre            { color: #f44747; }
 .terminal-line--busy                  { color: #808080; font-style: italic; }
 
-.terminal-vmid-input {
+.terminal-output-area__head {
   display: flex;
-  gap: 8px;
   align-items: center;
-  padding: 4px 0 4px 12px;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #444;
 }
 
-.terminal-vmid-input input {
-  width: 140px;
-  font-size: 13px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
+.terminal-output-area__title {
+  color: #888;
+  font-size: 12px;
+}
+
+.terminal-output-area__exit {
+  background: none;
+  border: 1px solid #555;
+  color: #999;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.terminal-output-area__exit:hover {
+  color: #f44747;
+  border-color: #f44747;
 }

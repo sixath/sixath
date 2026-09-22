@@ -28,6 +28,9 @@ import './ChatPage.css'
 
 const ATTACH_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif,.txt,.log,.md,.json,.csv,image/*'
 
+/** Detects "@打开 <vmid> 终端" pattern. Returns the numeric VMID if matched, null otherwise. */
+const TERMINAL_OPEN_RE = /@打开\s*(\d+)\s*终端/
+
 type TerminalOutput = {
   key: string
   role: 'user' | 'cmd' | 'stdout' | 'stderr'
@@ -852,7 +855,51 @@ export default function ChatPage(props?: ChatPageProps) {
   ) => {
     const content = (overrideContent ?? input).trim()
 
-    // Terminal mode: translate NL→cmd and execute on VM
+    // Terminal mode: detect "@打开 <vmid> 终端" to enter, then translate NL→cmd
+    const termMatch = content.match(TERMINAL_OPEN_RE)
+    if (termMatch && !terminalMode) {
+      const vmid = parseInt(termMatch[1], 10)
+      if (!isNaN(vmid) && vmid > 0) {
+        setTerminalMode(true)
+        setTerminalVMID(String(vmid))
+        const rest = content.replace(TERMINAL_OPEN_RE, '').trim()
+        if (!rest) {
+          setInput('')
+          return
+        }
+        const userKey = `tu-${Date.now()}`
+        setTerminalOutputs((prev) => [...prev, { key: userKey, role: 'user', content: rest }])
+        setInput('')
+        setTerminalBusy(true)
+        try {
+          const res: TerminalChatResponse = await sendTerminalChat({
+            agent_id: agentId!,
+            vmid,
+            content: rest,
+            session_id: terminalSessionID ?? undefined,
+          })
+          if (res.session_id) setTerminalSessionID(res.session_id)
+          const batchKey = `t-${Date.now()}`
+          const entries: TerminalOutput[] = [
+            { key: `${batchKey}-cmd`, role: 'cmd', content: res.cmd },
+            { key: `${batchKey}-out`, role: 'stdout', content: res.stdout },
+          ]
+          if (res.stderr) {
+            entries.push({ key: `${batchKey}-err`, role: 'stderr', content: res.stderr })
+          }
+          setTerminalOutputs((prev) => [...prev, ...entries])
+        } catch (err) {
+          setTerminalOutputs((prev) => [
+            ...prev,
+            { key: `terr-${Date.now()}`, role: 'stderr', content: err instanceof Error ? err.message : 'Unknown error' },
+          ])
+        } finally {
+          setTerminalBusy(false)
+        }
+        return
+      }
+    }
+
     if (terminalMode && content && !submit) {
       const vmid = parseInt(terminalVMID, 10)
       if (isNaN(vmid) || vmid <= 0) return
@@ -1423,8 +1470,23 @@ export default function ChatPage(props?: ChatPageProps) {
             <button type="button" className="chat-error-dismiss" onClick={() => setCancelledNotice(false)}>x</button>
           </div>
         )}
-        {terminalMode && terminalOutputs.length > 0 && (
+        {terminalMode ? (
           <div className="terminal-output-area">
+            <div className="terminal-output-area__head">
+              <span className="terminal-output-area__title">终端 VM {terminalVMID}</span>
+              <button
+                type="button"
+                className="terminal-output-area__exit"
+                onClick={() => {
+                  setTerminalMode(false)
+                  setTerminalOutputs([])
+                  setTerminalVMID('')
+                  setTerminalSessionID(null)
+                }}
+              >
+                退出终端
+              </button>
+            </div>
             {terminalOutputs.map((entry) => (
               <div key={entry.key} className={`terminal-line terminal-line--${entry.role}`}>
                 {entry.role === 'user' && <span className="terminal-prompt">&gt; </span>}
@@ -1433,8 +1495,11 @@ export default function ChatPage(props?: ChatPageProps) {
               </div>
             ))}
             {terminalBusy && <div className="terminal-line terminal-line--busy">执行中…</div>}
+            {terminalOutputs.length === 0 && !terminalBusy && (
+              <div className="terminal-line" style={{ color: '#808080' }}>输入自然语言，AI 将自动翻译为 CMD 命令执行。</div>
+            )}
           </div>
-        )}
+        ) : null}
         <div className="chat-messages">
           <div className="chat-messages-inner">
             {!hasAgent ? (
@@ -1749,22 +1814,6 @@ export default function ChatPage(props?: ChatPageProps) {
           >
             {hasAgent ? (
               <div className="chat-composer__toolbar">
-                <button
-                  type="button"
-                  className={`btn btn-sm ${terminalMode ? 'btn-primary' : ''}`}
-                  disabled={!hasAgent || streaming}
-                  onClick={() => {
-                    setTerminalMode((v) => !v)
-                    if (terminalMode) {
-                      setTerminalOutputs([])
-                      setTerminalVMID('')
-                      setTerminalSessionID(null)
-                    }
-                  }}
-                  title="终端模式：自然语言→CMD命令"
-                >
-                  💻 {terminalMode ? '退出终端' : '终端模式'}
-                </button>
                 <SearchableChipSelect
                   className="chat-chip--compact"
                   value={modelChoice}
@@ -1808,17 +1857,6 @@ export default function ChatPage(props?: ChatPageProps) {
                   }}
                 />
                 <span className="chat-composer__hint">Shift + Enter 换行</span>
-              </div>
-            ) : null}
-            {terminalMode ? (
-              <div className="terminal-vmid-input">
-                <input
-                  type="text"
-                  value={terminalVMID}
-                  onChange={(e) => setTerminalVMID(e.target.value)}
-                  placeholder="输入 VM ID"
-                  disabled={terminalBusy}
-                />
               </div>
             ) : null}
             {(pendingAttachments.length > 0 || uploadingCount > 0) ? (

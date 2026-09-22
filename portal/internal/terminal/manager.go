@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,11 +30,12 @@ type Session struct {
 }
 
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[string]*Session
-	db       *gorm.DB
-	client   *http.Client
-	idleTTL  time.Duration
+	mu           sync.Mutex
+	sessions     map[string]*Session
+	db           *gorm.DB
+	client       *http.Client
+	idleTTL      time.Duration
+	lookupIPFunc func(ctx context.Context, vmid int64) (string, error)
 }
 
 func NewManager(db *gorm.DB, idleTTL time.Duration) *Manager {
@@ -45,6 +47,29 @@ func NewManager(db *gorm.DB, idleTTL time.Duration) *Manager {
 	}
 	go m.cleanupLoop()
 	return m
+}
+
+// SetVMIPLookup sets an optional IP lookup function (e.g. backed by agent datasource tools).
+// When set, it replaces the default DB query in lookupIP.
+func (m *Manager) SetVMIPLookup(fn func(ctx context.Context, vmid int64) (string, error)) {
+	m.lookupIPFunc = fn
+}
+
+// NewDBLookup creates a VMIPLookup that queries t_game_virtual_machine_info via gorm.
+func NewDBLookup(db *gorm.DB) func(ctx context.Context, vmid int64) (string, error) {
+	return func(ctx context.Context, vmid int64) (string, error) {
+		var ip string
+		err := db.WithContext(ctx).Raw(
+			"SELECT mgr_ipv4_address FROM t_game_virtual_machine_info WHERE vmid = ?", vmid,
+		).Scan(&ip).Error
+		if err != nil {
+			return "", fmt.Errorf("VM IP lookup failed: %w", err)
+		}
+		if ip == "" {
+			return "", fmt.Errorf("VM_NOT_FOUND: no IP found for vmid %d", vmid)
+		}
+		return ip, nil
+	}
 }
 
 func (m *Manager) Create(VMID int64, port int, workdir string) (*Session, error) {
@@ -105,6 +130,9 @@ func (m *Manager) Execute(id, input string) (string, error) {
 }
 
 func (m *Manager) lookupIP(vmid int64) (string, error) {
+	if m.lookupIPFunc != nil {
+		return m.lookupIPFunc(context.Background(), vmid)
+	}
 	if m.db == nil {
 		return "", fmt.Errorf("database not available for VM IP lookup")
 	}

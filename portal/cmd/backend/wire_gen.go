@@ -49,6 +49,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	channelUsecase := biz.NewChannelUsecase(channelRepo, agentRepo, logger)
 	v := data.ProvideCodeRoots(confData)
 	terminalManager := terminal.NewManager(dataData.DB(), 30*time.Minute)
+	terminalManager.SetVMIPLookup(terminal.NewDBLookup(dataData.DB()))
 	agentService := service.NewAgentService(agentUsecase, toolUsecase, mcpServerUsecase, skillResourceUsecase, channelUsecase, proxyRepo, v, logger)
 	chatSessionRepo := data.NewChatSessionRepo(dataData, logger)
 	chatMessageRepo := data.NewChatMessageRepo(dataData, logger)
