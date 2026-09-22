@@ -33,6 +33,13 @@ type OrgMemberInfo struct {
 	CreatedAt time.Time
 }
 
+// UserSummary is a minimal user projection for pickers (no password hash).
+type UserSummary struct {
+	ID    string
+	Name  string
+	Email string
+}
+
 // Org is a collection of users that can receive resource grants.
 type Org struct {
 	ID        string
@@ -56,6 +63,8 @@ type IdentityRepo interface {
 	UserOrgIDs(ctx context.Context, userID string) ([]string, error)
 	ListUserOrgs(ctx context.Context, userID string) ([]OrgMembership, error)
 	ListOrgMembers(ctx context.Context, orgID string) ([]OrgMemberInfo, error)
+	// ListUsers returns users for ACL pickers. q matches id/name/email (case-insensitive substring); empty q lists all (capped by limit).
+	ListUsers(ctx context.Context, q string, limit int) ([]UserSummary, error)
 	RemoveMember(ctx context.Context, orgID, userID string) error
 	UpdateMemberRole(ctx context.Context, orgID, userID, role string) error
 	UpsertTokenHash(ctx context.Context, userID, tokenHash string) error
@@ -73,8 +82,6 @@ type ResourceRepo interface {
 	GetByPayload(ctx context.Context, resourceType ResourceType, payloadRef string) (*Resource, error)
 	ListAllByType(ctx context.Context, resourceType ResourceType) ([]*Resource, error)
 	ListGrantsByResourceIDs(ctx context.Context, resourceIDs []string) (map[string][]ResourceGrant, error)
-	ListByProject(ctx context.Context, projectID string) ([]*Resource, error)
-	UpdateProjectID(ctx context.Context, resourceID, projectID string) error
 	CreateGrant(ctx context.Context, grant ResourceGrant) error
 	DeleteGrant(ctx context.Context, resourceID, granteeType, granteeID string) error
 }

@@ -57,7 +57,6 @@ const (
 	ResourceTypeSkill     ResourceType = "skill"
 	ResourceTypeMcpServer ResourceType = "mcp_server"
 	ResourceTypeProxy     ResourceType = "proxy"
-	ResourceTypeProject   ResourceType = "project"
 )
 
 type Resource struct {
@@ -67,7 +66,6 @@ type Resource struct {
 	OwnerUserID  string       `json:"owner_user_id"`
 	Visibility   Visibility   `json:"visibility"`
 	HomeOrgID    string       `json:"home_org_id"`
-	ProjectID    string       `json:"project_id,omitempty"`
 	BoundAgentID string       `json:"bound_agent_id,omitempty"`
 	PayloadRef   string       `json:"payload_ref"`
 }
@@ -144,14 +142,6 @@ func (c *AccessChecker) EffectivePerm(ctx context.Context, callerUserID, resourc
 	grants, err := c.r.ListGrants(ctx, resourceID)
 	if err != nil {
 		return "", err
-	}
-
-	// Merge project grants for permission inheritance.
-	if res.ProjectID != "" {
-		projectGrants, err := c.r.ListGrants(ctx, res.ProjectID)
-		if err == nil {
-			grants = append(grants, projectGrants...)
-		}
 	}
 
 	return EvaluatePerm(res, orgIDs, grants, callerUserID, agentIDForBound), nil

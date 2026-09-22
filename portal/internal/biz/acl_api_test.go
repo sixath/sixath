@@ -2,9 +2,41 @@ package biz
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestACLAPIUsecaseListUsers(t *testing.T) {
+	repo := &aclAPIRepo{
+		usersList: []UserSummary{
+			{ID: "u1", Name: "Alice", Email: "a@example.com"},
+			{ID: "u2", Name: "Bob", Email: "b@example.com"},
+			{ID: "bootstrap", Name: "Bootstrap"},
+		},
+	}
+	uc := NewACLAPIUsecase(repo, repo, &aclAPIInviteFake{}, NewAccessChecker(repo), "bootstrap")
+
+	if _, err := uc.ListUsers(context.Background(), "", 10); err == nil {
+		t.Fatal("expected unauthenticated ListUsers to fail")
+	}
+
+	ctx := WithCallerUserID(context.Background(), "owner")
+	all, err := uc.ListUsers(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("ListUsers all = %#v, want 3", all)
+	}
+	filtered, err := uc.ListUsers(ctx, "ali", 10)
+	if err != nil {
+		t.Fatalf("ListUsers q: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != "u1" {
+		t.Fatalf("ListUsers filtered = %#v, want Alice", filtered)
+	}
+}
 
 func TestACLAPIUsecaseAddsMembersCreatesGrantsAndIssuesToken(t *testing.T) {
 	repo := &aclAPIRepo{
@@ -186,6 +218,7 @@ type aclAPIRepo struct {
 	resources   map[string]*Resource
 	grants      []ResourceGrant
 	tokenHashes map[string]string
+	usersList   []UserSummary
 }
 
 func (r *aclAPIRepo) CreateUser(context.Context, string) (*User, error) { return nil, nil }
@@ -227,6 +260,27 @@ func (r *aclAPIRepo) ListUserOrgs(_ context.Context, userID string) ([]OrgMember
 
 func (r *aclAPIRepo) ListOrgMembers(context.Context, string) ([]OrgMemberInfo, error) {
 	return nil, nil
+}
+
+func (r *aclAPIRepo) ListUsers(_ context.Context, q string, limit int) ([]UserSummary, error) {
+	if r.usersList == nil {
+		return nil, nil
+	}
+	out := make([]UserSummary, 0, len(r.usersList))
+	q = strings.ToLower(strings.TrimSpace(q))
+	for _, u := range r.usersList {
+		if q != "" {
+			hay := strings.ToLower(u.ID + " " + u.Name + " " + u.Email)
+			if !strings.Contains(hay, q) {
+				continue
+			}
+		}
+		out = append(out, u)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (r *aclAPIRepo) RemoveMember(_ context.Context, orgID, userID string) error {
@@ -282,8 +336,6 @@ func (r *aclAPIRepo) ListGrantsByResourceIDs(_ context.Context, resourceIDs []st
 	}
 	return out, nil
 }
-func (r *aclAPIRepo) ListByProject(context.Context, string) ([]*Resource, error) { panic("not implemented") }
-func (r *aclAPIRepo) UpdateProjectID(context.Context, string, string) error       { panic("not implemented") }
 func (r *aclAPIRepo) CreateGrant(_ context.Context, grant ResourceGrant) error {
 	r.grants = append(r.grants, grant)
 	return nil

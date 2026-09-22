@@ -142,11 +142,8 @@ func (f *fakeToolResourceRepo) ListGrantsByResourceIDs(_ context.Context, resour
 	return out, nil
 }
 
-func (f *fakeToolResourceRepo) ListByProject(context.Context, string) ([]*Resource, error) {
-	panic("not implemented")
-}
-func (f *fakeToolResourceRepo) UpdateProjectID(context.Context, string, string) error {
-	panic("not implemented")
+func (f *fakeToolResourceRepo) newToolACLUsecase() (*ToolUsecase, *fakeToolACLRepo, *fakeToolResourceRepo) {
+	return newToolACLUsecase()
 }
 
 func newToolACLUsecase() (*ToolUsecase, *fakeToolACLRepo, *fakeToolResourceRepo) {

@@ -102,12 +102,6 @@ func (r *hybridResourceRepo) ListGrantsByResourceIDs(context.Context, []string) 
 }
 func (r *hybridResourceRepo) CreateGrant(context.Context, biz.ResourceGrant) error { return nil }
 func (r *hybridResourceRepo) DeleteGrant(context.Context, string, string, string) error { return nil }
-func (r *hybridResourceRepo) ListByProject(context.Context, string) ([]*biz.Resource, error) {
-	panic("not implemented")
-}
-func (r *hybridResourceRepo) UpdateProjectID(context.Context, string, string) error {
-	panic("not implemented")
-}
 
 func newHybridUpdateAgentService(t *testing.T, stored biz.RuntimeToolsConfig) (*AgentService, *hybridAgentRepo) {
 	t.Helper()

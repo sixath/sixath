@@ -309,6 +309,14 @@ func (uc *ACLAPIUsecase) ListMyOrgs(ctx context.Context) ([]OrgMembership, error
 	return uc.identities.ListUserOrgs(ctx, caller)
 }
 
+// ListUsers returns portal users for grant/member pickers. Any authenticated caller may list.
+func (uc *ACLAPIUsecase) ListUsers(ctx context.Context, q string, limit int) ([]UserSummary, error) {
+	if _, err := requireCaller(ctx); err != nil {
+		return nil, err
+	}
+	return uc.identities.ListUsers(ctx, q, limit)
+}
+
 func (uc *ACLAPIUsecase) CreateInvite(ctx context.Context, orgID string, maxUses, expiresInHours int) (string, *OrgInvite, error) {
 	caller, err := uc.requireOrgOwner(ctx, orgID)
 	if err != nil {
@@ -389,181 +397,6 @@ func (uc *ACLAPIUsecase) requireOrgOwner(ctx context.Context, orgID string) (str
 	return caller, nil
 }
 
-// ProjectUsecase handles project CRUD and resource-in-project membership.
-type ProjectUsecase struct {
-	resources ResourceRepo
-	access    *AccessChecker
-}
+// ── Resource visibility listing ──
 
-func NewProjectUsecase(resources ResourceRepo, access *AccessChecker) *ProjectUsecase {
-	return &ProjectUsecase{resources: resources, access: access}
-}
-
-// Create creates a project resource owned by the caller.
-func (uc *ProjectUsecase) Create(ctx context.Context, name, description string) (*Resource, error) {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return nil, err
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "name is required")
-	}
-
-	visibility := VisibilityPrivate
-	homeOrgID := ""
-	if orgID, ok := OrgID(ctx); ok {
-		visibility = VisibilityOrg
-		homeOrgID = orgID
-	}
-
-	resource := &Resource{
-		Type:        ResourceTypeProject,
-		Name:        name,
-		OwnerUserID: caller,
-		Visibility:  visibility,
-		HomeOrgID:   homeOrgID,
-	}
-	created, err := uc.resources.CreateResource(ctx, resource)
-	if err != nil {
-		return nil, err
-	}
-	// Project's payload_ref is its own ID (self-referential).
-	if created.PayloadRef == "" {
-		created.PayloadRef = created.ID
-		_ = uc.resources.UpdateResource(ctx, created)
-	}
-	return created, nil
-}
-
-// Get returns a project by ID. Caller must have PermView.
-func (uc *ProjectUsecase) Get(ctx context.Context, id string) (*Resource, error) {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return nil, err
-	}
-	canView, err := uc.access.Can(ctx, caller, id, PermView, "")
-	if err != nil || !canView {
-		return nil, ErrGrantNotFound
-	}
-	return uc.resources.GetResource(ctx, id)
-}
-
-// Update updates a project's name. Caller must have PermEdit.
-func (uc *ProjectUsecase) Update(ctx context.Context, id, name string) (*Resource, error) {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return nil, err
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "name is required")
-	}
-	canEdit, err := uc.access.Can(ctx, caller, id, PermEdit, "")
-	if err != nil || !canEdit {
-		return nil, ErrForbiddenPerm
-	}
-	res, err := uc.resources.GetResource(ctx, id)
-	if err != nil {
-		return nil, ErrGrantNotFound
-	}
-	res.Name = name
-	if err := uc.resources.UpdateResource(ctx, res); err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
-// Delete deletes a project. Caller must have PermAdmin.
-func (uc *ProjectUsecase) Delete(ctx context.Context, id string) error {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return err
-	}
-	canAdmin, err := uc.access.Can(ctx, caller, id, PermAdmin, "")
-	if err != nil || !canAdmin {
-		return ErrForbiddenPerm
-	}
-	return uc.resources.DeleteResource(ctx, id)
-}
-
-// AddToProject sets a resource's project_id. Caller must have PermEdit on the child resource.
-// The child resource must share the same HomeOrgID as the project.
-func (uc *ProjectUsecase) AddToProject(ctx context.Context, resourceID, projectID string) error {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return err
-	}
-	if resourceID == "" || projectID == "" {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", "resource_id and project_id are required")
-	}
-	canEdit, err := uc.access.Can(ctx, caller, resourceID, PermEdit, "")
-	if err != nil || !canEdit {
-		return ErrForbiddenPerm
-	}
-	child, err := uc.resources.GetResource(ctx, resourceID)
-	if err != nil {
-		return ErrGrantNotFound
-	}
-	project, err := uc.resources.GetResource(ctx, projectID)
-	if err != nil {
-		return ErrGrantNotFound
-	}
-	if project.Type != ResourceTypeProject {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", "target is not a project")
-	}
-	if child.HomeOrgID != project.HomeOrgID {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", "resource and project must be in the same org")
-	}
-	return uc.resources.UpdateProjectID(ctx, resourceID, projectID)
-}
-
-// RemoveFromProject clears a resource's project_id. Caller must have PermEdit on the resource.
-func (uc *ProjectUsecase) RemoveFromProject(ctx context.Context, resourceID string) error {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return err
-	}
-	if resourceID == "" {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", "resource_id is required")
-	}
-	canEdit, err := uc.access.Can(ctx, caller, resourceID, PermEdit, "")
-	if err != nil || !canEdit {
-		return ErrForbiddenPerm
-	}
-	return uc.resources.UpdateProjectID(ctx, resourceID, "")
-}
-
-// ListProjectResources returns all resources belonging to a project. Caller must have PermView on the project.
-func (uc *ProjectUsecase) ListProjectResources(ctx context.Context, projectID string) ([]*Resource, error) {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return nil, err
-	}
-	canView, err := uc.access.Can(ctx, caller, projectID, PermView, "")
-	if err != nil || !canView {
-		return nil, ErrForbiddenPerm
-	}
-	return uc.resources.ListByProject(ctx, projectID)
-}
-
-// ListVisibleResources returns resources of a given type visible to the caller at the given permission level.
-// Uses VisiblePayloadRefs for batch ACL evaluation, then loads full resource objects by ID.
-func (uc *ACLAPIUsecase) ListVisibleResources(ctx context.Context, resourceType ResourceType, need Perm) ([]*Resource, error) {
-	caller, err := requireCaller(ctx)
-	if err != nil {
-		return nil, err
-	}
-	allowed, err := VisiblePayloadRefs(ctx, uc.resources, caller, resourceType, need)
-	if err != nil {
-		return nil, err
-	}
-	resources := make([]*Resource, 0, len(allowed))
-	for id := range allowed {
-		res, err := uc.resources.GetByPayload(ctx, resourceType, id)
-		if err == nil {
-			resources = append(resources, res)
-		}
-	}
-	return resources, nil
-}
+// VisiblePayloadRefs is declared in resource_list_acl.go

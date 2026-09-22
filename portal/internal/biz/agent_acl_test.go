@@ -168,11 +168,8 @@ func (f *fakeAgentResourceRepo) ListGrantsByResourceIDs(_ context.Context, resou
 	return out, nil
 }
 
-func (f *fakeAgentResourceRepo) ListByProject(context.Context, string) ([]*Resource, error) {
-	panic("not implemented")
-}
-func (f *fakeAgentResourceRepo) UpdateProjectID(context.Context, string, string) error {
-	panic("not implemented")
+func (f *fakeAgentResourceRepo) newAgentACLUsecase() (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo) {
+	return newAgentACLUsecaseAt("/portal-data")
 }
 
 func newAgentACLUsecase() (*AgentUsecase, *fakeAgentACLRepo, *fakeAgentResourceRepo) {
