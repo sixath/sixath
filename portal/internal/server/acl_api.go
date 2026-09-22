@@ -192,3 +192,134 @@ func GetResourceByPayloadHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context)
 		return ctx.JSON(200, out)
 	}
 }
+
+// ── Project handlers ──
+
+type createProjectRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func CreateProjectHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		var body createProjectRequest
+		if err := ctx.Bind(&body); err != nil {
+			return err
+		}
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return uc.Create(c, body.Name, body.Description)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
+
+func GetProjectHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		id := ctx.Vars().Get("id")
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return uc.Get(c, id)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
+
+type updateProjectRequest struct {
+	Name string `json:"name"`
+}
+
+func UpdateProjectHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		id := ctx.Vars().Get("id")
+		var body updateProjectRequest
+		if err := ctx.Bind(&body); err != nil {
+			return err
+		}
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return uc.Update(c, id, body.Name)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, out)
+	}
+}
+
+func DeleteProjectHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		id := ctx.Vars().Get("id")
+		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return nil, uc.Delete(c, id)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+type setProjectRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+func AddResourceToProjectHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		resourceID := ctx.Vars().Get("id")
+		var body setProjectRequest
+		if err := ctx.Bind(&body); err != nil {
+			return err
+		}
+		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return nil, uc.AddToProject(c, resourceID, body.ProjectID)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+func RemoveResourceFromProjectHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		resourceID := ctx.Vars().Get("id")
+		_, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return nil, uc.RemoveFromProject(c, resourceID)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"ok": true})
+	}
+}
+
+func ListProjectResourcesHandler(uc *biz.ProjectUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		projectID := ctx.Vars().Get("id")
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return uc.ListProjectResources(c, projectID)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"resources": out})
+	}
+}
+
+// ListProjectsHandler uses ACLAPIUsecase (not ProjectUsecase) because listing
+// projects goes through VisiblePayloadRefs for batch ACL evaluation.
+func ListProjectsHandler(uc *biz.ACLAPIUsecase) func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		out, err := runWithMiddleware(ctx, func(c context.Context) (any, error) {
+			return uc.ListVisibleResources(c, biz.ResourceTypeProject, biz.PermView)
+		})
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(200, map[string]any{"projects": out})
+	}
+}
