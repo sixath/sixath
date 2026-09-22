@@ -10,7 +10,7 @@ type Resource struct {
 	OwnerUserID  string    `gorm:"column:owner_user_id;size:36;not null;index"`
 	Visibility   string    `gorm:"column:visibility;size:16;not null"`
 	HomeOrgID    string    `gorm:"column:home_org_id;size:36;index"`
-	ProjectID    string    `gorm:"column:project_id;size:36;index;default:''"`
+	ProjectID    string    `gorm:"column:project_id;size:36;not null;index;default:''"`
 	BoundAgentID string    `gorm:"column:bound_agent_id;size:36;index"`
 	PayloadRef   string    `gorm:"column:payload_ref;size:36;not null;uniqueIndex:idx_resource_type_payload"`
 	CreatedAt    time.Time `gorm:"column:created_at;not null"`
