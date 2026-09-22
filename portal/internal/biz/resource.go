@@ -57,6 +57,7 @@ const (
 	ResourceTypeSkill     ResourceType = "skill"
 	ResourceTypeMcpServer ResourceType = "mcp_server"
 	ResourceTypeProxy     ResourceType = "proxy"
+	ResourceTypeProject   ResourceType = "project"
 )
 
 type Resource struct {
@@ -66,6 +67,7 @@ type Resource struct {
 	OwnerUserID  string       `json:"owner_user_id"`
 	Visibility   Visibility   `json:"visibility"`
 	HomeOrgID    string       `json:"home_org_id"`
+	ProjectID    string       `json:"project_id,omitempty"`
 	BoundAgentID string       `json:"bound_agent_id,omitempty"`
 	PayloadRef   string       `json:"payload_ref"`
 }
