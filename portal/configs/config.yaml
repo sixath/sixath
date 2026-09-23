@@ -49,3 +49,8 @@ auth:
   # Optional public origin for absolute verify-email links in outbound mail.
   # When unset, links are relative (/verify-email?token=...) for same-origin frontends.
   # public_base_url: "https://app.example.com"
+  # 企微 CorpApp Web 登录
+  # wecom_corp_id: "wwxxxxxxxx"      # 企业 CorpID（SSO 的 appid）
+  # wecom_agent_id: "1000096"        # 自建应用 AgentID
+  # wecom_secret: "****"             # 该应用 Secret（gettoken）
+  # wecom_redirect_uri: "https://portal.example.com/api/v1/auth/wecom/callback"

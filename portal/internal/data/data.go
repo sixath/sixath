@@ -26,7 +26,7 @@ const (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewProxyRepo, NewAgentRepo, NewIdentityRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChatAttachmentRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo)
+var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewProxyRepo, NewAgentRepo, NewIdentityRepo, NewAuthEphemeralRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChatAttachmentRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo)
 
 // Data .
 type Data struct {
@@ -84,6 +84,7 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 		&model.Channel{}, &model.ChannelRuntimeStatus{}, &model.ChannelPeerSession{}, &model.CronTask{}, &model.CronRun{},
 		&model.User{}, &model.Org{}, &model.OrgMember{}, &model.UserToken{},
 		&model.OrgInvite{}, &model.EmailVerifyToken{},
+		&model.UserIdentity{}, &model.AuthEphemeral{},
 		&model.Resource{}, &model.ResourceGrant{},
 		&MemoryUnit{},
 		&model.TurnTraceRow{},

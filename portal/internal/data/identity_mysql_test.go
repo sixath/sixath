@@ -19,7 +19,7 @@ func openIdentityTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.EmailVerifyToken{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerifyToken{}, &model.UserIdentity{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -127,6 +127,105 @@ func TestConsumeVerifyTokenExpired(t *testing.T) {
 
 	if _, err := repo.ConsumeVerifyToken(ctx, biz.HashTokenSHA256Hex(plain)); err != ErrNotFound {
 		t.Fatalf("ConsumeVerifyToken expired = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateUserForIdentity(t *testing.T) {
+	db := openIdentityTestDB(t)
+	repo := newIdentityRepoForTest(db)
+	ctx := context.Background()
+	verifiedAt := time.Now().Add(-time.Minute)
+
+	user, err := repo.CreateUserForIdentity(ctx, "WeCom User", verifiedAt)
+	if err != nil {
+		t.Fatalf("CreateUserForIdentity: %v", err)
+	}
+	if user.Email != "" {
+		t.Fatalf("email = %q, want empty", user.Email)
+	}
+	if user.PasswordHash != "" {
+		t.Fatalf("password_hash = %q, want empty", user.PasswordHash)
+	}
+	if user.EmailVerifiedAt == nil || !user.EmailVerifiedAt.Equal(verifiedAt) {
+		t.Fatalf("email_verified_at = %v, want %v", user.EmailVerifiedAt, verifiedAt)
+	}
+
+	got, err := repo.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if got.Email != "" || got.PasswordHash != "" {
+		t.Fatalf("GetUser = %+v, want empty email/password", got)
+	}
+}
+
+func TestCreateIdentityDuplicateConflict(t *testing.T) {
+	db := openIdentityTestDB(t)
+	repo := newIdentityRepoForTest(db)
+	ctx := context.Background()
+
+	if _, err := repo.CreateUserWithPassword(ctx, "user-wecom", "Ada", "ada@example.com", "hash"); err != nil {
+		t.Fatalf("CreateUserWithPassword: %v", err)
+	}
+	if err := repo.CreateIdentity(ctx, "wecom", "subject-1", "user-wecom"); err != nil {
+		t.Fatalf("CreateIdentity: %v", err)
+	}
+	if err := repo.CreateIdentity(ctx, "wecom", "subject-1", "user-wecom"); err != ErrConflict {
+		t.Fatalf("duplicate CreateIdentity = %v, want ErrConflict", err)
+	}
+}
+
+func TestGetIdentityHitAndMiss(t *testing.T) {
+	db := openIdentityTestDB(t)
+	repo := newIdentityRepoForTest(db)
+	ctx := context.Background()
+
+	if _, err := repo.CreateUserWithPassword(ctx, "user-wecom-2", "Bob", "bob@example.com", "hash"); err != nil {
+		t.Fatalf("CreateUserWithPassword: %v", err)
+	}
+	if err := repo.CreateIdentity(ctx, "wecom", "subject-2", "user-wecom-2"); err != nil {
+		t.Fatalf("CreateIdentity: %v", err)
+	}
+
+	userID, err := repo.GetIdentity(ctx, "wecom", "subject-2")
+	if err != nil {
+		t.Fatalf("GetIdentity hit: %v", err)
+	}
+	if userID != "user-wecom-2" {
+		t.Fatalf("userID = %q, want user-wecom-2", userID)
+	}
+
+	if _, err := repo.GetIdentity(ctx, "wecom", "missing"); err != ErrNotFound {
+		t.Fatalf("GetIdentity miss = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListUsersQueryAndLimit(t *testing.T) {
+	db := openIdentityTestDB(t)
+	repo := newIdentityRepoForTest(db)
+	ctx := context.Background()
+
+	if _, err := repo.CreateUserWithPassword(ctx, "u1", "Alice", "alice@example.com", "hash"); err != nil {
+		t.Fatalf("CreateUserWithPassword alice: %v", err)
+	}
+	if _, err := repo.CreateUserWithPassword(ctx, "u2", "Bob", "bob@example.com", "hash"); err != nil {
+		t.Fatalf("CreateUserWithPassword bob: %v", err)
+	}
+
+	all, err := repo.ListUsers(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("ListUsers all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListUsers all count = %d, want 2", len(all))
+	}
+
+	filtered, err := repo.ListUsers(ctx, "ali", 10)
+	if err != nil {
+		t.Fatalf("ListUsers filtered: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != "u1" {
+		t.Fatalf("ListUsers filtered = %#v, want Alice", filtered)
 	}
 }
 

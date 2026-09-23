@@ -25,6 +25,7 @@ import OrgDetailPage from './pages/OrgDetailPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
+import WecomCallbackPage from './pages/WecomCallbackPage'
 import RequireAuth from './components/RequireAuth'
 import ThemeToggle from './components/ThemeToggle'
 import { getSessionEmail, hasApiToken, isSessionEmailUnverified, logout } from './api/auth'
@@ -314,6 +315,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/login/wecom/callback" element={<WecomCallbackPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route

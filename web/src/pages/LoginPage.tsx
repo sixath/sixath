@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   DEV_BOOTSTRAP_TOKEN,
@@ -6,7 +6,7 @@ import {
   hasApiToken,
   saveCredentials,
 } from '../api/auth'
-import { login } from '../api/sessionAuth'
+import { login, wecomStartHref, wecomStatus } from '../api/sessionAuth'
 import './LoginPage.css'
 import ThemeToggle from '../components/ThemeToggle'
 
@@ -18,12 +18,27 @@ export default function LoginPage() {
     return n.startsWith('/') && !n.startsWith('//') ? n : '/'
   }, [params])
 
+  const [wecomEnabled, setWecomEnabled] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [token, setToken] = useState('')
   const [orgId, setOrgId] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    wecomStatus()
+      .then((s) => {
+        if (!cancelled) setWecomEnabled(!!s.enabled)
+      })
+      .catch(() => {
+        if (!cancelled) setWecomEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   if (hasApiToken()) {
     return <Navigate to={next} replace />
@@ -61,71 +76,100 @@ export default function LoginPage() {
     navigate(next, { replace: true })
   }
 
+  const onWecomLogin = () => {
+    window.location.assign(wecomStartHref(next))
+  }
+
   return (
     <div className="login-page">
       <ThemeToggle />
-      <form className="login-card" onSubmit={onEmailSubmit}>
+      <div className="login-card">
         <h1>Sixath 登录</h1>
-        <p className="login-muted">使用邮箱与密码登录</p>
-        {error && <p className="login-error">{error}</p>}
-        <label htmlFor="login-email">邮箱</label>
-        <input
-          id="login-email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          disabled={loading}
-        />
-        <label htmlFor="login-password">密码</label>
-        <input
-          id="login-password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={loading}
-        />
-        <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? '登录中…' : '登录'}
-        </button>
-        <p className="login-footer-link">
-          有邀请链接？<Link to="/register">注册账号</Link>
-        </p>
-      </form>
-
-      <details className="login-dev-section">
-        <summary>开发者 Token 登录</summary>
-        <form className="login-card login-dev-card" onSubmit={onTokenSubmit}>
-          <p className="login-muted">使用 Portal Bearer Token（Phase 1）</p>
-          <label htmlFor="login-token">API Token</label>
-          <input
-            id="login-token"
-            type="password"
-            autoComplete="off"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-          <label htmlFor="login-org">Org ID（可选）</label>
-          <input
-            id="login-org"
-            type="text"
-            autoComplete="off"
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-          />
-          <button type="submit" className="btn btn-primary">进入</button>
-          {import.meta.env.DEV && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setToken(DEV_BOOTSTRAP_TOKEN)}
-            >
-              使用本地 bootstrap
+        {wecomEnabled ? (
+          <>
+            <p className="login-muted">使用企业微信登录</p>
+            <button type="button" className="btn btn-primary" onClick={onWecomLogin}>
+              企业微信登录
             </button>
-          )}
-        </form>
-      </details>
+            <p className="login-footer-link">
+              有邀请链接？<Link to="/register">注册账号</Link>
+            </p>
+          </>
+        ) : (
+          <p className="login-muted">使用邮箱与密码登录</p>
+        )}
+
+        <details
+          key={wecomEnabled ? 'wecom-on' : 'wecom-off'}
+          className="login-advanced"
+          {...(wecomEnabled ? {} : { open: true })}
+        >
+          <summary>高级登录</summary>
+
+          <form className="login-advanced-form" onSubmit={onEmailSubmit}>
+            {error && <p className="login-error">{error}</p>}
+            <label htmlFor="login-email">邮箱</label>
+            <input
+              id="login-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={loading}
+            />
+            <label htmlFor="login-password">密码</label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+            />
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? '登录中…' : '登录'}
+            </button>
+            {!wecomEnabled && (
+              <p className="login-footer-link">
+                有邀请链接？<Link to="/register">注册账号</Link>
+              </p>
+            )}
+          </form>
+
+          <details className="login-dev-section login-dev-nested">
+            <summary>开发者 Token 登录</summary>
+            <form className="login-advanced-form" onSubmit={onTokenSubmit}>
+              <p className="login-muted">使用 Portal Bearer Token（Phase 1）</p>
+              <label htmlFor="login-token">API Token</label>
+              <input
+                id="login-token"
+                type="password"
+                autoComplete="off"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+              />
+              <label htmlFor="login-org">Org ID（可选）</label>
+              <input
+                id="login-org"
+                type="text"
+                autoComplete="off"
+                value={orgId}
+                onChange={(e) => setOrgId(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary">进入</button>
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setToken(DEV_BOOTSTRAP_TOKEN)}
+                >
+                  使用本地 bootstrap
+                </button>
+              )}
+            </form>
+          </details>
+        </details>
+      </div>
     </div>
   )
 }

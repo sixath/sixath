@@ -199,25 +199,6 @@ type orgMemberInfoRow struct {
 	CreatedAt time.Time
 }
 
-func (r *identityRepo) ListOrgMembers(ctx context.Context, orgID string) ([]biz.OrgMemberInfo, error) {
-	var rows []orgMemberInfoRow
-	err := r.db.WithContext(ctx).
-		Table("org_members om").
-		Select("om.user_id, u.name as user_name, om.role, om.created_at").
-		Joins("JOIN users u ON u.id = om.user_id").
-		Where("om.org_id = ?", orgID).
-		Order("om.created_at ASC").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	out := make([]biz.OrgMemberInfo, len(rows))
-	for i, row := range rows {
-		out[i] = biz.OrgMemberInfo{UserID: row.UserID, UserName: row.UserName, Role: row.Role, CreatedAt: row.CreatedAt}
-	}
-	return out, nil
-}
-
 type userSummaryRow struct {
 	ID    string
 	Name  string
@@ -247,6 +228,80 @@ func (r *identityRepo) ListUsers(ctx context.Context, q string, limit int) ([]bi
 		if row.Email != nil {
 			out[i].Email = *row.Email
 		}
+	}
+	return out, nil
+}
+
+func (r *identityRepo) CreateUserForIdentity(ctx context.Context, name string, verifiedAt time.Time) (*biz.User, error) {
+	verifiedAtCopy := verifiedAt
+	m := &model.User{
+		ID:              uuid.NewString(),
+		Name:            name,
+		Email:           nil,
+		PasswordHash:    nil,
+		EmailVerifiedAt: &verifiedAtCopy,
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		return nil, err
+	}
+	return userModelToBiz(m), nil
+}
+
+func (r *identityRepo) DeleteUser(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Where("id = ?", userID).Delete(&model.User{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *identityRepo) GetIdentity(ctx context.Context, provider, subject string) (string, error) {
+	var m model.UserIdentity
+	if err := r.db.WithContext(ctx).Where("provider = ? AND subject = ?", provider, subject).First(&m).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return m.UserID, nil
+}
+
+func (r *identityRepo) CreateIdentity(ctx context.Context, provider, subject, userID string) error {
+	now := time.Now()
+	m := &model.UserIdentity{
+		Provider:  provider,
+		Subject:   subject,
+		UserID:    userID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+		if isDuplicateKey(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *identityRepo) ListOrgMembers(ctx context.Context, orgID string) ([]biz.OrgMemberInfo, error) {
+	var rows []orgMemberInfoRow
+	err := r.db.WithContext(ctx).
+		Table("org_members om").
+		Select("om.user_id, u.name as user_name, om.role, om.created_at").
+		Joins("JOIN users u ON u.id = om.user_id").
+		Where("om.org_id = ?", orgID).
+		Order("om.created_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]biz.OrgMemberInfo, len(rows))
+	for i, row := range rows {
+		out[i] = biz.OrgMemberInfo{UserID: row.UserID, UserName: row.UserName, Role: row.Role, CreatedAt: row.CreatedAt}
 	}
 	return out, nil
 }

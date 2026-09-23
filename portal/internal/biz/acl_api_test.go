@@ -262,6 +262,15 @@ func (r *aclAPIRepo) ListOrgMembers(context.Context, string) ([]OrgMemberInfo, e
 	return nil, nil
 }
 
+func (r *aclAPIRepo) CreateUserForIdentity(context.Context, string, time.Time) (*User, error) {
+	return nil, nil
+}
+func (r *aclAPIRepo) DeleteUser(context.Context, string) error { return nil }
+func (r *aclAPIRepo) GetIdentity(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (r *aclAPIRepo) CreateIdentity(context.Context, string, string, string) error { return nil }
+
 func (r *aclAPIRepo) ListUsers(_ context.Context, q string, limit int) ([]UserSummary, error) {
 	if r.usersList == nil {
 		return nil, nil

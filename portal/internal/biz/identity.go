@@ -65,12 +65,24 @@ type IdentityRepo interface {
 	ListOrgMembers(ctx context.Context, orgID string) ([]OrgMemberInfo, error)
 	// ListUsers returns users for ACL pickers. q matches id/name/email (case-insensitive substring); empty q lists all (capped by limit).
 	ListUsers(ctx context.Context, q string, limit int) ([]UserSummary, error)
+	// WeCom / IdP users: email and password_hash NULL; email_verified_at set.
+	CreateUserForIdentity(ctx context.Context, name string, verifiedAt time.Time) (*User, error)
+	DeleteUser(ctx context.Context, userID string) error // orphan rollback only
+	GetIdentity(ctx context.Context, provider, subject string) (userID string, err error)
+	CreateIdentity(ctx context.Context, provider, subject, userID string) error
 	RemoveMember(ctx context.Context, orgID, userID string) error
 	UpdateMemberRole(ctx context.Context, orgID, userID, role string) error
 	UpsertTokenHash(ctx context.Context, userID, tokenHash string) error
 	UserIDByTokenHash(ctx context.Context, tokenHash string) (string, error)
 	CreateVerifyToken(ctx context.Context, userID string, expiresAt time.Time) (plainToken string, err error)
 	ConsumeVerifyToken(ctx context.Context, tokenHash string) (userID string, err error)
+}
+
+// AuthEphemeralRepo stores one-time OAuth state and exchange tickets.
+type AuthEphemeralRepo interface {
+	Put(ctx context.Context, id, kind, payloadJSON string, expiresAt time.Time) error
+	// Consume marks consumed atomically; returns payload or ErrNotFound if missing/expired/already used.
+	Consume(ctx context.Context, id, kind string, now time.Time) (payloadJSON string, err error)
 }
 
 // ResourceRepo stores resources and grants while providing the data AccessChecker needs.
