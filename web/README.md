@@ -7,6 +7,8 @@ Agent 平台前端，基于 React + Vite 构建，对接 [portal](../portal) 后
 | 模块 | 说明 |
 |------|------|
 | **对话** | 首页 Agent 选择器 + 流式对话，支持 Markdown 渲染、代码高亮 |
+| **对话内终端** | 在对话中用 `@打开 <vmid> 终端` 进入 Windows VM CMD；自然语言→命令、点选目录、文件名补全 |
+| **远程终端页** | 独立 `/terminal` 页（xterm.js），经 Portal WebSocket 连到 VM `/runCmd` |
 | **工具管理** | 工具列表、新建/编辑（内置、MCP、数据源） |
 | **Agent 管理** | Agent 列表、新建/编辑、详情、技能包上传、工具绑定、对话入口 |
 | **渠道管理** | 渠道列表、新建/编辑（web/api/webhook），Webhook 入站配置 |
@@ -85,6 +87,7 @@ npm run test:e2e:live
 | `/agents/:id` | Agent 详情 |
 | `/agents/:id/chat` | 对话页（无 session 时自动创建） |
 | `/agents/:id/chat/:sessionId` | 对话页（指定 session） |
+| `/terminal` | 远程终端（xterm.js，按 vmid 连接 Windows VM） |
 | `/channels` | 渠道列表 |
 | `/channels/new` | 新建渠道 |
 | `/channels/:id/edit` | 编辑渠道 |
@@ -99,12 +102,14 @@ npm run test:e2e:live
 web/
 ├── src/
 │   ├── api/
-│   │   └── client.ts      # API 封装（tool、agent、chat）
+│   │   ├── client.ts      # API 封装（tool、agent、chat）
+│   │   └── terminal.ts    # 终端 session / chat / WebSocket
 │   ├── components/
 │   │   └── MarkdownContent.tsx  # Markdown 渲染 + 代码高亮
 │   ├── pages/
 │   │   ├── ChatHome.tsx   # 首页：Agent 选择 + ChatPage
-│   │   ├── ChatPage.tsx   # 对话区（流式 SSE）
+│   │   ├── ChatPage.tsx   # 对话区（流式 SSE + 对话内终端）
+│   │   ├── TerminalPage.tsx  # xterm.js 远程终端
 │   │   ├── ToolList.tsx
 │   │   ├── ToolForm.tsx
 │   │   ├── AgentList.tsx
@@ -112,7 +117,7 @@ web/
 │   │   └── AgentDetail.tsx
 │   ├── App.tsx
 │   └── App.css
-├── vite.config.ts         # /api 代理到 localhost:8000
+├── vite.config.ts         # /api 代理到 localhost:8000；预构建 xterm
 └── package.json
 ```
 
@@ -167,3 +172,23 @@ docker build -t sixath-web .
 - 使用 `POST /api/v1/sessions/:id/messages/stream` 发送消息
 - 响应为 SSE：`chunk` 增量文本、`done` 结束、`error` 错误
 - 支持停止生成（AbortController）
+
+## 对话内终端
+
+在对话输入框发送（或附带后续指令）：
+
+```text
+@打开 35284 终端
+```
+
+进入终端模式后：
+
+| 操作 | 说明 |
+|------|------|
+| 自然语言 / 直接 CMD | 经 `POST /api/v1/terminal/chat` 执行；会话保持当前工作目录 |
+| 点击目录名 | `cd` 进入后自动 `dir`；文件与目录都会列出 |
+| 输入补全 | 基于最近一次 `dir` 结果；`Tab` / ↑↓ / 点击补全文件名（补全不发送） |
+| Esc | 先关补全列表，再按一次退出终端；标题栏「退出终端」吸顶可见 |
+| 日志输出 | 非 `dir` 表格会自动换行；单行 JSON 日志会 pretty-print |
+
+独立全屏终端见侧栏 **终端**（`/terminal`），API 封装在 `src/api/terminal.ts`。

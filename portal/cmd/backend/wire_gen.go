@@ -76,7 +76,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	channelPeerUsecase := biz.NewChannelPeerUsecase(channelPeerSessionRepo, chatSessionRepo, channelRepo)
 	agentRouteUsecase := runtime.ProvideAgentRouteUsecase(channelRepo, channelPeerSessionRepo, agentUsecase, growth, logger)
 	runtimeService := runtime.NewService(chatUsecase, channelPeerUsecase, channelUsecase, agentUsecase, chatSessionRepo, channelRuntimeRepo, chatService, chatService, agentRouteUsecase)
-	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, proxyService, runtimeService, dataData, agentUsecase, v, logger, terminalManager, agentRepo)
+	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, proxyService, runtimeService, dataData, agentUsecase, v, logger, terminalManager, agentRepo, toolUsecase)
 	duration := cron.ProvideSchedulerInterval()
 	scheduler := cron.NewScheduler(cronUsecase, executor, duration, logger)
 	cronServer := cron.NewServer(scheduler)

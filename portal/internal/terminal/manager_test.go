@@ -19,6 +19,9 @@ func TestParseCDCommand(t *testing.T) {
 		{"cd", "", true},
 		{"  cd  D:\\data  ", "D:\\data", true},
 		{"CD D:\\LOGS", "D:\\LOGS", true},
+		{"D:", "D:\\", true},
+		{"d:\\", "D:\\", true},
+		{"D:\\logs", "D:\\logs", true},
 	}
 
 	for _, tt := range tests {
@@ -44,6 +47,9 @@ func TestBuildCommand(t *testing.T) {
 		{"D:\\logs", "cd /d E:\\work", "cd /d E:\\work", "E:\\work"},
 		{"C:\\", "cd", "cd /d C:\\", "C:\\"},
 		{"D:\\a", "cd b", "cd /d D:\\a\\b", "D:\\a\\b"},
+		{"C:\\", "D:", "cd /d D:\\", "D:\\"},
+		{"C:\\Users", "D:\\", "cd /d D:\\", "D:\\"},
+		{"D:\\", "cd Program Files", "cd /d D:\\Program Files", "D:\\Program Files"},
 	}
 
 	for _, tt := range tests {
@@ -51,6 +57,43 @@ func TestBuildCommand(t *testing.T) {
 			got, gotDir := buildCommand(tt.workDir, tt.input)
 			if got != tt.want || gotDir != tt.wantDir {
 				t.Fatalf("buildCommand(%q, %q) = (%q, %q), want (%q, %q)", tt.workDir, tt.input, got, gotDir, tt.want, tt.wantDir)
+			}
+		})
+	}
+}
+
+func TestFormatRunCmdOutput(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "empty success",
+			raw:  `{"codeDesc":"","retCode":0}`,
+			want: "",
+		},
+		{
+			name: "tasklist table",
+			raw:   "{\"codeDesc\":\"\\r\\n映像名称                       PID\\r\\nSystem Idle Process              0\\r\\n\",\"retCode\":0}",
+			want:  "映像名称                       PID\nSystem Idle Process              0",
+		},
+		{
+			name: "nonzero exit",
+			raw:  `{"codeDesc":"The system cannot find the path specified.","retCode":1}`,
+			want: "The system cannot find the path specified.\n[exit 1]",
+		},
+		{
+			name: "plain text passthrough",
+			raw:  "hello\nworld",
+			want: "hello\nworld",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatRunCmdOutput(tt.raw)
+			if got != tt.want {
+				t.Fatalf("formatRunCmdOutput() = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { agentApi, chatApi, DEFAULT_SESSION_TITLE, modelCatalogApi, type Agent, type ChatAttachment, type ChatMessage, type ModelChoiceItem, type ModelChoiceSelected } from '../api/client'
@@ -33,8 +33,224 @@ const TERMINAL_OPEN_RE = /@打开\s*(\d+)\s*终端/
 
 type TerminalOutput = {
   key: string
-  role: 'user' | 'cmd' | 'stdout' | 'stderr'
+  role: 'user' | 'cmd' | 'stdout' | 'stderr' | 'ok'
   content: string
+  /** Working directory when this stdout listing was produced (for click-to-cd). */
+  cwd?: string
+}
+
+/** Unwrap VM /runCmd JSON if the backend still returns raw payloads; keep tables intact. */
+function formatTerminalStdout(raw: string): string {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return ''
+  let text = raw
+  if (trimmed.startsWith('{') && trimmed.includes('codeDesc')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { codeDesc?: string; retCode?: number }
+      if (typeof parsed.codeDesc === 'string') {
+        text = parsed.codeDesc.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\n+|\n+$/g, '')
+        if (parsed.retCode && parsed.retCode !== 0) {
+          text = text ? `${text}\n[exit ${parsed.retCode}]` : `[exit ${parsed.retCode}]`
+        }
+      }
+    } catch {
+      /* keep raw */
+    }
+  }
+  return prettifyTerminalText(text)
+}
+
+/** Pretty-print JSON log lines; leave dir/tasklist tables alone. */
+function prettifyTerminalText(text: string): string {
+  if (!text) return text
+  if (/的目录|Directory of/i.test(text)) return text
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  return lines.map((line) => prettifyTerminalLine(line)).join('\n')
+}
+
+function prettifyTerminalLine(line: string): string {
+  const t = line.trim()
+  if (!t) return line
+  if (!(t.startsWith('{') || t.startsWith('['))) return line
+  try {
+    const parsed = JSON.parse(t) as unknown
+    // Nested runCmd wrapper that slipped through
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'codeDesc' in parsed) {
+      const cd = (parsed as { codeDesc?: unknown }).codeDesc
+      if (typeof cd === 'string') {
+        const inner = cd.trim()
+        if (inner.startsWith('{') || inner.startsWith('[')) {
+          try {
+            return JSON.stringify(JSON.parse(inner), null, 2)
+          } catch {
+            return cd.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+          }
+        }
+        return cd.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+      }
+    }
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return line
+  }
+}
+
+function isDirListingText(text: string): boolean {
+  return /的目录|Directory of/i.test(text)
+}
+
+/** Prefer path printed by `dir` header; fall back to session cwd. */
+function extractListingCwd(stdout: string, fallback: string): string {
+  const en = stdout.match(/Directory of\s+(.+)/i)
+  if (en?.[1]) return en[1].trim().replace(/\//g, '\\')
+  const zh = stdout.match(/^(.+?)\s*的目录\s*$/m)
+  if (zh?.[1]) return zh[1].trim().replace(/\//g, '\\')
+  return fallback
+}
+
+function joinWinPath(base: string, name: string): string {
+  const n = name.trim()
+  if (!n) return base
+  if (/^[a-zA-Z]:[\\/]?/.test(n)) {
+    return n.length === 2 ? `${n.toUpperCase()}\\` : n.replace(/\//g, '\\')
+  }
+  if (n === '..') {
+    const trimmed = base.replace(/[\\/]+$/, '')
+    const i = trimmed.lastIndexOf('\\')
+    if (i <= 0) return /^[a-zA-Z]:$/i.test(trimmed) ? `${trimmed}\\` : 'C:\\'
+    if (i === 2 && trimmed[1] === ':') return `${trimmed.slice(0, 2)}\\`
+    return trimmed.slice(0, i)
+  }
+  if (n === '.') return base
+  const root = base.replace(/[\\/]+$/, '')
+  return `${root}\\${n}`
+}
+
+function terminalStdoutEntries(
+  batchKey: string,
+  stdout: string,
+  stderr?: string,
+  sessionCwd?: string
+): TerminalOutput[] {
+  const entries: TerminalOutput[] = []
+  const formatted = formatTerminalStdout(stdout)
+  if (formatted) {
+    entries.push({
+      key: `${batchKey}-out`,
+      role: 'stdout',
+      content: formatted,
+      cwd: extractListingCwd(formatted, sessionCwd || 'C:\\'),
+    })
+  } else if (!stderr) {
+    entries.push({ key: `${batchKey}-ok`, role: 'ok', content: '(成功，无输出)' })
+  }
+  if (stderr) {
+    entries.push({ key: `${batchKey}-err`, role: 'stderr', content: stderr })
+  }
+  return entries
+}
+
+const DIR_LINE_RE = /<(DIR|JUNCTION|SYMLINKD)>\s+(.+?)(?:\s+\[[^\]]*\])?\s*$/i
+const DIR_FILE_LINE_RE =
+  /^\s*\d{4}[/-]\d{2}[/-]\d{2}\s+\d{1,2}:\d{2}(?:\s*[AP]M)?\s+([\d,]+)\s+(.+?)\s*$/i
+
+type TerminalEntry = { name: string; kind: 'dir' | 'file' }
+
+/** Parse `dir` listing into clickable/completable names; null if not a listing. */
+function parseDirEntries(stdout: string): TerminalEntry[] | null {
+  if (!/的目录|Directory of/i.test(stdout)) return null
+  const entries: TerminalEntry[] = []
+  const seen = new Set<string>()
+  for (const line of stdout.split('\n')) {
+    const dirM = line.match(DIR_LINE_RE)
+    if (dirM) {
+      const name = dirM[2].trim()
+      if (!name || name === '.' || seen.has(name)) continue
+      seen.add(name)
+      entries.push({ name, kind: 'dir' })
+      continue
+    }
+    const fileM = line.match(DIR_FILE_LINE_RE)
+    if (fileM) {
+      const name = fileM[2].trim()
+      if (!name || seen.has(name)) continue
+      seen.add(name)
+      entries.push({ name, kind: 'file' })
+    }
+  }
+  return entries
+}
+
+/** Last whitespace-separated token in the composer (for path/file completion). */
+function getCompletionQuery(text: string): { query: string; replaceFrom: number } {
+  const m = /([^\s]*)$/.exec(text)
+  if (!m) return { query: '', replaceFrom: text.length }
+  const replaceFrom = m.index ?? text.length
+  let query = m[1]
+  if (/^["'「]/.test(query)) query = query.slice(1)
+  query = query.replace(/["'」]+$/, '')
+  return { query, replaceFrom }
+}
+
+function quoteCmdPath(name: string): string {
+  if (/[\s&()^]/.test(name)) return `"${name.replace(/"/g, '')}"`
+  return name
+}
+
+function TerminalStdoutView({
+  content,
+  disabled,
+  onEnterDir,
+}: {
+  content: string
+  disabled: boolean
+  onEnterDir: (name: string) => void
+}) {
+  const lines = content.split('\n')
+  const tabular = isDirListingText(content)
+  return (
+    <pre className={`terminal-stdout${tabular ? ' terminal-stdout--table' : ' terminal-stdout--wrap'}`}>
+      {lines.map((line, i) => {
+        const m = line.match(DIR_LINE_RE)
+        if (!m) {
+          return (
+            <span key={i}>
+              {line}
+              {i < lines.length - 1 ? '\n' : ''}
+            </span>
+          )
+        }
+        const name = m[2].trim()
+        if (!name || name === '.') {
+          return (
+            <span key={i}>
+              {line}
+              {i < lines.length - 1 ? '\n' : ''}
+            </span>
+          )
+        }
+        const idx = line.lastIndexOf(name)
+        const before = idx >= 0 ? line.slice(0, idx) : line
+        const after = idx >= 0 ? line.slice(idx + name.length) : ''
+        return (
+          <span key={i}>
+            {before}
+            <button
+              type="button"
+              className="terminal-dir-link"
+              title={`进入 ${name}`}
+              disabled={disabled}
+              onClick={() => onEnterDir(name)}
+            >
+              {name}
+            </button>
+            {after}
+            {i < lines.length - 1 ? '\n' : ''}
+          </span>
+        )
+      })}
+    </pre>
+  )
 }
 
 function formatMessageTime(iso: string): string {
@@ -525,9 +741,89 @@ export default function ChatPage(props?: ChatPageProps) {
   const [terminalMode, setTerminalMode] = useState(false)
   const [terminalVMID, setTerminalVMID] = useState('')
   const [terminalSessionID, setTerminalSessionID] = useState<string | null>(null)
+  const [terminalWorkDir, setTerminalWorkDir] = useState('C:\\')
   const [terminalBusy, setTerminalBusy] = useState(false)
   const [terminalOutputs, setTerminalOutputs] = useState<TerminalOutput[]>([])
+  const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([])
+  const [suggestIndex, setSuggestIndex] = useState(0)
+  const [suggestDismissed, setSuggestDismissed] = useState(false)
+  const [suggestForceAll, setSuggestForceAll] = useState(false)
+  const suggestOpenRef = useRef(false)
+  /** Avoid ghost click on Send after picking a suggestion (mousedown → list closes → mouseup on Send). */
+  const suppressSendUntilRef = useRef(0)
+
+  const exitTerminalMode = useCallback(() => {
+    setTerminalMode(false)
+    setTerminalOutputs([])
+    setTerminalEntries([])
+    setSuggestIndex(0)
+    setSuggestDismissed(false)
+    setSuggestForceAll(false)
+    setTerminalVMID('')
+    setTerminalSessionID(null)
+    setTerminalWorkDir('C:\\')
+  }, [])
+
+  const terminalSuggestions = useMemo(() => {
+    if (!terminalMode || terminalEntries.length === 0) return []
+    const { query } = getCompletionQuery(input)
+    const q = query.toLowerCase()
+    if (!q && !suggestForceAll) return []
+    const list = !q
+      ? terminalEntries.filter((e) => e.name !== '..')
+      : terminalEntries.filter((e) => e.name !== '..' && e.name.toLowerCase().includes(q))
+    return list
+      .sort((a, b) => {
+        if (!q) return a.name.localeCompare(b.name)
+        const al = a.name.toLowerCase()
+        const bl = b.name.toLowerCase()
+        const as = al.startsWith(q) ? 0 : 1
+        const bs = bl.startsWith(q) ? 0 : 1
+        if (as !== bs) return as - bs
+        return al.localeCompare(bl)
+      })
+      .slice(0, 10)
+  }, [terminalMode, terminalEntries, input, suggestForceAll])
+
+  const suggestOpen = terminalMode && !suggestDismissed && terminalSuggestions.length > 0
+  suggestOpenRef.current = suggestOpen
+
+  useEffect(() => {
+    setSuggestIndex(0)
+  }, [terminalSuggestions])
+
+  const applyTerminalSuggestion = useCallback((name: string) => {
+    setInput((prev) => {
+      const { replaceFrom } = getCompletionQuery(prev)
+      return prev.slice(0, replaceFrom) + quoteCmdPath(name)
+    })
+    setSuggestIndex(0)
+    setSuggestDismissed(true)
+    setSuggestForceAll(false)
+    suppressSendUntilRef.current = Date.now() + 400
+  }, [])
+
+  useEffect(() => {
+    if (!terminalMode) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t?.closest?.('[role="dialog"], [aria-modal="true"]')) return
+      if (suggestOpenRef.current) {
+        e.preventDefault()
+        setSuggestDismissed(true)
+        setSuggestForceAll(false)
+        return
+      }
+      e.preventDefault()
+      exitTerminalMode()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [terminalMode, exitTerminalMode])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const terminalAreaRef = useRef<HTMLDivElement>(null)
+  const terminalEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   /** 当前流式请求所属会话；用于在切换路由会话时中止旧会话的流，且避免「无 session → 首条消息」误杀同一会话的流 */
@@ -811,6 +1107,16 @@ export default function ChatPage(props?: ChatPageProps) {
     }
   }, [messages, confirmations, streaming])
 
+  useEffect(() => {
+    if (!terminalMode) return
+    const area = terminalAreaRef.current
+    if (area) {
+      area.scrollTop = area.scrollHeight
+      return
+    }
+    terminalEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+  }, [terminalMode, terminalOutputs, terminalBusy])
+
   const hasPendingConfirm = confirmations.some((c) => c.status === 'pending')
 
   const prevSessionIdRef = useRef(sessionId)
@@ -846,6 +1152,87 @@ export default function ChatPage(props?: ChatPageProps) {
     return () => clearInterval(timer)
   }, [hasPendingConfirm])
 
+  const runTerminalTurn = async (opts: {
+    vmid: number
+    userLabel: string
+    content: string
+    cmd?: string
+    /** After a successful cd, refresh directory listing. */
+    listAfter?: boolean
+  }) => {
+    setTerminalBusy(true)
+    setTerminalOutputs((prev) => [...prev, { key: `tu-${Date.now()}`, role: 'user', content: opts.userLabel }])
+    try {
+      const res: TerminalChatResponse = await sendTerminalChat({
+        agent_id: agentId!,
+        vmid: opts.vmid,
+        content: opts.content,
+        cmd: opts.cmd,
+        session_id: terminalSessionID ?? undefined,
+      })
+      if (res.session_id) setTerminalSessionID(res.session_id)
+      const nextCwd = res.workdir || terminalWorkDir
+      if (res.workdir) setTerminalWorkDir(res.workdir)
+      const batchKey = `t-${Date.now()}`
+      setTerminalOutputs((prev) => [
+        ...prev,
+        { key: `${batchKey}-cmd`, role: 'cmd', content: res.cmd },
+        ...terminalStdoutEntries(batchKey, res.stdout, res.stderr, nextCwd),
+      ])
+      {
+        const listing = parseDirEntries(formatTerminalStdout(res.stdout) || res.stdout || '')
+        if (listing) setTerminalEntries(listing)
+      }
+
+      const failed = Boolean(res.stderr) || /\[exit\s+\d+\]/i.test(res.stdout || '') || /找不到指定的路径/.test(res.stdout || '')
+      if (opts.listAfter && !failed) {
+        const listRes: TerminalChatResponse = await sendTerminalChat({
+          agent_id: agentId!,
+          vmid: opts.vmid,
+          content: '列出当前目录',
+          cmd: 'dir',
+          session_id: res.session_id || terminalSessionID || undefined,
+        })
+        if (listRes.session_id) setTerminalSessionID(listRes.session_id)
+        const listCwd = listRes.workdir || nextCwd
+        if (listRes.workdir) setTerminalWorkDir(listRes.workdir)
+        const listKey = `t-${Date.now()}-ls`
+        setTerminalOutputs((prev) => [
+          ...prev,
+          { key: `${listKey}-cmd`, role: 'cmd', content: listRes.cmd },
+          ...terminalStdoutEntries(listKey, listRes.stdout, listRes.stderr, listCwd),
+        ])
+        {
+          const listing = parseDirEntries(formatTerminalStdout(listRes.stdout) || listRes.stdout || '')
+          if (listing) setTerminalEntries(listing)
+        }
+      }
+    } catch (err) {
+      setTerminalOutputs((prev) => [
+        ...prev,
+        { key: `terr-${Date.now()}`, role: 'stderr', content: err instanceof Error ? err.message : 'Unknown error' },
+      ])
+    } finally {
+      setTerminalBusy(false)
+    }
+  }
+
+  const handleEnterTerminalDir = (name: string, listingCwd?: string) => {
+    if (terminalBusy || !agentId) return
+    const vmid = parseInt(terminalVMID, 10)
+    if (isNaN(vmid) || vmid <= 0) return
+    const base = listingCwd || terminalWorkDir || 'C:\\'
+    const target = joinWinPath(base, name)
+    const cmd = `cd /d ${quoteCmdPath(target)}`
+    void runTerminalTurn({
+      vmid,
+      userLabel: `进入 ${name}`,
+      content: `进入 ${target}`,
+      cmd,
+      listAfter: true,
+    })
+  }
+
   const handleSend = async (
     overrideContent?: string,
     submit?: {
@@ -854,6 +1241,7 @@ export default function ChatPage(props?: ChatPageProps) {
     }
   ) => {
     const content = (overrideContent ?? input).trim()
+    if (Date.now() < suppressSendUntilRef.current) return
 
     // Terminal mode: detect "@打开 <vmid> 终端" to enter, then translate NL→cmd
     const termMatch = content.match(TERMINAL_OPEN_RE)
@@ -862,40 +1250,15 @@ export default function ChatPage(props?: ChatPageProps) {
       if (!isNaN(vmid) && vmid > 0) {
         setTerminalMode(true)
         setTerminalVMID(String(vmid))
+        setTerminalWorkDir('C:\\')
+        setTerminalSessionID(null)
+        setTerminalEntries([])
+        setSuggestDismissed(false)
+        setSuggestForceAll(false)
         const rest = content.replace(TERMINAL_OPEN_RE, '').trim()
-        if (!rest) {
-          setInput('')
-          return
-        }
-        const userKey = `tu-${Date.now()}`
-        setTerminalOutputs((prev) => [...prev, { key: userKey, role: 'user', content: rest }])
         setInput('')
-        setTerminalBusy(true)
-        try {
-          const res: TerminalChatResponse = await sendTerminalChat({
-            agent_id: agentId!,
-            vmid,
-            content: rest,
-            session_id: terminalSessionID ?? undefined,
-          })
-          if (res.session_id) setTerminalSessionID(res.session_id)
-          const batchKey = `t-${Date.now()}`
-          const entries: TerminalOutput[] = [
-            { key: `${batchKey}-cmd`, role: 'cmd', content: res.cmd },
-            { key: `${batchKey}-out`, role: 'stdout', content: res.stdout },
-          ]
-          if (res.stderr) {
-            entries.push({ key: `${batchKey}-err`, role: 'stderr', content: res.stderr })
-          }
-          setTerminalOutputs((prev) => [...prev, ...entries])
-        } catch (err) {
-          setTerminalOutputs((prev) => [
-            ...prev,
-            { key: `terr-${Date.now()}`, role: 'stderr', content: err instanceof Error ? err.message : 'Unknown error' },
-          ])
-        } finally {
-          setTerminalBusy(false)
-        }
+        if (!rest) return
+        await runTerminalTurn({ vmid, userLabel: rest, content: rest })
         return
       }
     }
@@ -904,36 +1267,7 @@ export default function ChatPage(props?: ChatPageProps) {
       const vmid = parseInt(terminalVMID, 10)
       if (isNaN(vmid) || vmid <= 0) return
       setInput('')
-      setTerminalBusy(true)
-
-      const userKey = `tu-${Date.now()}`
-      setTerminalOutputs((prev) => [...prev, { key: userKey, role: 'user', content }])
-
-      try {
-        const res: TerminalChatResponse = await sendTerminalChat({
-          agent_id: agentId!,
-          vmid,
-          content,
-          session_id: terminalSessionID ?? undefined,
-        })
-        if (res.session_id) setTerminalSessionID(res.session_id)
-        const batchKey = `t-${Date.now()}`
-        const entries: TerminalOutput[] = [
-          { key: `${batchKey}-cmd`, role: 'cmd', content: res.cmd },
-          { key: `${batchKey}-out`, role: 'stdout', content: res.stdout },
-        ]
-        if (res.stderr) {
-          entries.push({ key: `${batchKey}-err`, role: 'stderr', content: res.stderr })
-        }
-        setTerminalOutputs((prev) => [...prev, ...entries])
-      } catch (err) {
-        setTerminalOutputs((prev) => [
-          ...prev,
-          { key: `terr-${Date.now()}`, role: 'stderr', content: err instanceof Error ? err.message : 'Unknown error' },
-        ])
-      } finally {
-        setTerminalBusy(false)
-      }
+      await runTerminalTurn({ vmid, userLabel: content, content })
       return
     }
 
@@ -1401,8 +1735,37 @@ export default function ChatPage(props?: ChatPageProps) {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (terminalMode && suggestOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSuggestIndex((i) => (i + 1) % terminalSuggestions.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSuggestIndex((i) => (i - 1 + terminalSuggestions.length) % terminalSuggestions.length)
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        const pick = terminalSuggestions[suggestIndex] || terminalSuggestions[0]
+        if (pick) applyTerminalSuggestion(pick.name)
+        return
+      }
+    }
+    if (e.key === 'Tab' && terminalMode && terminalEntries.length > 0) {
+      e.preventDefault()
+      if (terminalSuggestions[0]) {
+        applyTerminalSuggestion(terminalSuggestions[0].name)
+      } else {
+        setSuggestDismissed(false)
+        setSuggestForceAll(true)
+      }
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      if (Date.now() < suppressSendUntilRef.current) return
       handleSend()
     }
   }
@@ -1471,33 +1834,43 @@ export default function ChatPage(props?: ChatPageProps) {
           </div>
         )}
         {terminalMode ? (
-          <div className="terminal-output-area">
+          <div className="terminal-output-area" ref={terminalAreaRef}>
             <div className="terminal-output-area__head">
-              <span className="terminal-output-area__title">终端 VM {terminalVMID}</span>
+              <span className="terminal-output-area__title">
+                终端 VM {terminalVMID}
+                <code className="terminal-cwd" title="当前目录">{terminalWorkDir}</code>
+              </span>
               <button
                 type="button"
                 className="terminal-output-area__exit"
-                onClick={() => {
-                  setTerminalMode(false)
-                  setTerminalOutputs([])
-                  setTerminalVMID('')
-                  setTerminalSessionID(null)
-                }}
+                title="退出终端 (Esc)"
+                onClick={exitTerminalMode}
               >
-                退出终端
+                退出终端 <kbd className="terminal-kbd">Esc</kbd>
               </button>
             </div>
             {terminalOutputs.map((entry) => (
               <div key={entry.key} className={`terminal-line terminal-line--${entry.role}`}>
                 {entry.role === 'user' && <span className="terminal-prompt">&gt; </span>}
                 {entry.role === 'cmd' && <span className="terminal-prompt">$ </span>}
-                <pre>{entry.content}</pre>
+                {entry.role === 'stdout' ? (
+                  <TerminalStdoutView
+                    content={entry.content}
+                    disabled={terminalBusy}
+                    onEnterDir={(name) => handleEnterTerminalDir(name, entry.cwd)}
+                  />
+                ) : (
+                  <pre>{entry.content}</pre>
+                )}
               </div>
             ))}
             {terminalBusy && <div className="terminal-line terminal-line--busy">执行中…</div>}
             {terminalOutputs.length === 0 && !terminalBusy && (
-              <div className="terminal-line" style={{ color: '#808080' }}>输入自然语言，AI 将自动翻译为 CMD 命令执行。</div>
+              <div className="terminal-line" style={{ color: '#808080' }}>
+                输入自然语言执行命令；目录名可点击进入。按 Esc 可退出终端。
+              </div>
             )}
+            <div ref={terminalEndRef} />
           </div>
         ) : null}
         <div className="chat-messages">
@@ -1856,7 +2229,9 @@ export default function ChatPage(props?: ChatPageProps) {
                     }
                   }}
                 />
-                <span className="chat-composer__hint">Shift + Enter 换行</span>
+                <span className="chat-composer__hint">
+                  {terminalMode ? 'Tab 补全文件 · Esc 退出终端' : 'Shift + Enter 换行'}
+                </span>
               </div>
             ) : null}
             {(pendingAttachments.length > 0 || uploadingCount > 0) ? (
@@ -1919,16 +2294,56 @@ export default function ChatPage(props?: ChatPageProps) {
                   />
                 </svg>
               </button>
-              <textarea
-                className="chat-input"
-                placeholder={hasAgent ? '给 AI Agent 发送指令...' : '请先选择 Agent'}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onPaste={handleComposerPaste}
-                disabled={streaming || !hasAgent}
-                rows={1}
-              />
+              <div className="chat-input-suggest-wrap">
+                {suggestOpen ? (
+                  <ul className="terminal-suggest" role="listbox" aria-label="当前目录补全">
+                    {terminalSuggestions.map((item, idx) => (
+                      <li key={`${item.kind}:${item.name}`}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={idx === suggestIndex}
+                          className={`terminal-suggest__item${idx === suggestIndex ? ' is-active' : ''}`}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault()
+                            ev.stopPropagation()
+                            applyTerminalSuggestion(item.name)
+                          }}
+                          onClick={(ev) => {
+                            ev.preventDefault()
+                            ev.stopPropagation()
+                          }}
+                        >
+                          <span className={`terminal-suggest__kind terminal-suggest__kind--${item.kind}`}>
+                            {item.kind === 'dir' ? '目录' : '文件'}
+                          </span>
+                          <span className="terminal-suggest__name">{item.name}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <textarea
+                  className="chat-input"
+                  placeholder={
+                    terminalMode
+                      ? '输入命令或自然语言；Tab 补全当前目录文件…'
+                      : hasAgent
+                        ? '给 AI Agent 发送指令...'
+                        : '请先选择 Agent'
+                  }
+                  value={input}
+                  onChange={(e) => {
+                    setSuggestDismissed(false)
+                    setSuggestForceAll(false)
+                    setInput(e.target.value)
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handleComposerPaste}
+                  disabled={streaming || !hasAgent}
+                  rows={1}
+                />
+              </div>
               {streaming ? (
                 <button
                   type="button"
@@ -1946,7 +2361,10 @@ export default function ChatPage(props?: ChatPageProps) {
                   type="button"
                   className="chat-send"
                   aria-label="发送"
-                  onClick={() => handleSend()}
+                  onClick={() => {
+                    if (Date.now() < suppressSendUntilRef.current) return
+                    handleSend()
+                  }}
                   disabled={
                     (!input.trim() && pendingAttachments.length === 0) ||
                     !hasAgent ||

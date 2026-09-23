@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/biz"
+
+	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/executor"
 	"github.com/sixath/framework/tool"
 )
@@ -205,4 +208,83 @@ func stringSliceFromAny(v interface{}) []string {
 	default:
 		return nil
 	}
+}
+
+// BuildVMIPLookup builds a VMIPLookup from agent datasource tools.
+// It returns the lookup and the preferred datasource ID (resolved to a registered tool-name ID).
+func BuildVMIPLookup(tools []*biz.ToolMeta) (tool.VMIPLookup, string, error) {
+	var dsConfigs []datasource.Config
+	var preferredDSID string
+
+	// datasource name → tool name mapping for resolving RCA datasource_id references.
+	dsIDToRegistered := map[string]string{}
+
+	for _, t := range tools {
+		cfg := toolConfigToMap(t.Config)
+		switch t.Type {
+		case biz.ToolTypeRCA:
+			rcaMap, _ := cfg["rca"].(map[string]interface{})
+			if funcPath, _ := rcaMap["func_path"].(string); funcPath == "vm_run_cmd" {
+				if preferredDSID == "" {
+					preferredDSID, _ = rcaMap["datasource_id"].(string)
+				}
+			}
+		case biz.ToolTypeDatasource:
+			dsMap := cfg
+			if nested, ok := cfg["datasource"].(map[string]interface{}); ok {
+				dsMap = nested
+			}
+			dsCfg := datasource.ConfigFromMap(dsMap)
+			if dsCfg.Type != "" && !isElasticsearchType(dsCfg.Type) {
+				origID := dsCfg.ID
+				canon := canonicalDatasourceConfig(t.Name, dsCfg)
+				dsConfigs = append(dsConfigs, canon)
+				if origID != "" && origID != canon.ID {
+					dsIDToRegistered[origID] = canon.ID
+				}
+			}
+		}
+	}
+
+	if len(dsConfigs) == 0 {
+		return nil, "", errors.New("no datasource tools found on agent; cannot resolve VM IP")
+	}
+
+	dsReg := datasource.NewRegistry()
+	datasource.RegisterMySQL(dsReg)
+	datasource.RegisterHive(dsReg)
+	datasource.RegisterElasticsearch(dsReg)
+	datasource.RegisterMongoDB(dsReg)
+
+	var registered []datasource.Config
+	for _, cfg := range dsConfigs {
+		if _, err := dsReg.Register(cfg); err != nil {
+			slog.Warn("BuildVMIPLookup: skip datasource", "id", cfg.ID, "err", err)
+			continue
+		}
+		registered = append(registered, cfg)
+	}
+	if len(registered) == 0 {
+		return nil, "", errors.New("failed to register any datasource; cannot resolve VM IP")
+	}
+
+	exec := executor.NewMultiExecutor(
+		dsReg,
+		executor.NewMySQLExecutor(dsReg),
+		executor.NewESExecutor(dsReg),
+		executor.NewMongoExecutor(dsReg),
+	)
+
+	// Resolve preferredDSID through the mapping; fall back to first registered MySQL.
+	resolvedID := ""
+	if preferredDSID != "" {
+		if mapped, ok := dsIDToRegistered[preferredDSID]; ok {
+			resolvedID = mapped
+		}
+	}
+	if resolvedID == "" {
+		resolvedID = registered[0].ID
+	}
+
+	return vmIPLookup(exec), resolvedID, nil
 }

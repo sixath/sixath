@@ -23,9 +23,9 @@ Go AI Agent 平台工作区：可嵌入的 Agent 运行时（framework）、后�
 
 | 层 | 职责 |
 |----|------|
-| **Web** | 管理台 + 对话 UI；会话流经 Gateway；工具/模型时间线在 SSE 展示 |
+| **Web** | 管理台 + 对话 UI；会话流经 Gateway；工具/模型时间线在 SSE 展示；对话内终端 / 独立远程终端页 |
 | **Gateway** | 统一入站：Web / 通用 Webhook / 企微 `wecom_bot` 长连接；路由到 Portal Runtime |
-| **Portal** | Agent 执行与持久化；管理 API；群 Webhook **只出站**（`send_to_wecom`） |
+| **Portal** | Agent 执行与持久化；管理 API；群 Webhook **只出站**（`send_to_wecom`）；VM 远程终端（`/runCmd`） |
 | **Framework** | ReAct、Tools、Skills、MCP、上下文压缩（被 Portal 嵌入） |
 
 详细 Gateway 用法见 [`gateway/README.md`](gateway/README.md)。
@@ -176,6 +176,8 @@ powershell -File _neo4j_q/verify_inbound_gateway.ps1
 ## 相关文档
 
 - [Gateway 架构与使用](gateway/README.md)
+- [Web：对话内终端与远程终端](web/README.md#对话内终端)
+- [Portal：远程终端 API](portal/README.md#远程终端)
 - [入站 Gateway 设计](docs/superpowers/specs/2026-08-09-inbound-gateway-design.md)
 - [企微智能机器人长连接设计](docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md)
 - [Portal 架构设计](portal/docs/architecture_design.md)

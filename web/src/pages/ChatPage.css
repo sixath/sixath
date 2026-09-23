@@ -1392,43 +1392,169 @@
   padding: 12px;
   border-radius: 8px;
   margin: 8px 0;
-  max-height: 400px;
-  overflow-y: auto;
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  position: relative;
+}
+
+.terminal-output-area__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  margin: -4px 0 8px;
+  border-bottom: 1px solid #444;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #1e1e1e;
+  box-shadow: 0 8px 12px -8px rgba(0, 0, 0, 0.65);
 }
 
 .terminal-line {
+  line-height: 1.45;
+  margin-bottom: 0.35rem;
+}
+
+.terminal-line--user,
+.terminal-line--cmd {
   display: flex;
-  gap: 4px;
-  line-height: 1.5;
+  gap: 6px;
+  align-items: flex-start;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+}
+
+.terminal-line--stdout,
+.terminal-line--stderr {
+  display: block;
 }
 
 .terminal-line pre {
   margin: 0;
   font-family: inherit;
   font-size: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Keep CMD tables (tasklist/dir) column-aligned; scroll sideways if needed. */
+.terminal-line--stdout .terminal-stdout,
+.terminal-line--stderr pre {
+  display: block;
+  max-width: 100%;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+.terminal-line--stdout .terminal-stdout--table {
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
+
+/* Logs / findstr / freeform: wrap long lines so JSON isn't one endless strip. */
+.terminal-line--stdout .terminal-stdout--wrap,
+.terminal-line--stderr pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
+}
+
+.terminal-line--stdout pre:not(.terminal-stdout) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
+  display: block;
+  max-width: 100%;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+.terminal-line--ok pre {
+  color: #6a9955;
+  font-style: italic;
+  white-space: pre-wrap;
+  background: transparent;
+  padding: 0;
 }
 
 .terminal-line--user .terminal-prompt { color: #569cd6; }
-.terminal-line--cmd  .terminal-prompt { color: #6a9955; }
-.terminal-line--cmd  pre              { color: #6a9955; }
+.terminal-line--cmd  .terminal-prompt { color: #ce9178; }
+.terminal-line--cmd  pre              { color: #ce9178; }
 .terminal-line--stdout pre            { color: #d4d4d4; }
 .terminal-line--stderr pre            { color: #f44747; }
 .terminal-line--busy                  { color: #808080; font-style: italic; }
 
-.terminal-output-area__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid #444;
+.terminal-kbd {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1.4;
+  border: 1px solid #666;
+  border-radius: 3px;
+  color: #bbb;
+  font-family: inherit;
 }
 
 .terminal-output-area__title {
   color: #888;
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.terminal-cwd {
+  color: #9cdcfe;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.terminal-stdout {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+  display: block;
+  max-width: 100%;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  color: #d4d4d4;
+}
+
+.terminal-dir-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: #4fc1ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.terminal-dir-link:hover:not(:disabled) {
+  color: #9cdcfe;
+}
+
+.terminal-dir-link:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .terminal-output-area__exit {
@@ -1445,4 +1571,81 @@
 .terminal-output-area__exit:hover {
   color: #f44747;
   border-color: #f44747;
+}
+
+.chat-input-suggest-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.chat-input-suggest-wrap .chat-input {
+  width: 100%;
+}
+
+.terminal-suggest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  max-height: 240px;
+  overflow: auto;
+  z-index: 20;
+}
+
+.terminal-suggest__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #d4d4d4;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.terminal-suggest__item:hover,
+.terminal-suggest__item.is-active {
+  background: #2a2d2e;
+  color: #fff;
+}
+
+.terminal-suggest__kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid #555;
+  color: #aaa;
+}
+
+.terminal-suggest__kind--dir {
+  border-color: #569cd6;
+  color: #569cd6;
+}
+
+.terminal-suggest__kind--file {
+  border-color: #ce9178;
+  color: #ce9178;
+}
+
+.terminal-suggest__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -4,6 +4,24 @@ import { FitAddon } from '@xterm/addon-fit'
 import { createTerminalSession, deleteTerminalSession, terminalWebSocketURL, type TerminalSession } from '../api/terminal'
 import '@xterm/xterm/css/xterm.css'
 
+/** Unwrap VM /runCmd JSON payloads for xterm display. */
+function formatXtermStdout(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (!(trimmed.startsWith('{') && trimmed.includes('codeDesc'))) return raw
+  try {
+    const parsed = JSON.parse(trimmed) as { codeDesc?: string; retCode?: number }
+    if (typeof parsed.codeDesc !== 'string') return raw
+    let out = parsed.codeDesc.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\n+|\n+$/g, '')
+    if (parsed.retCode && parsed.retCode !== 0) {
+      out = out ? `${out}\n[exit ${parsed.retCode}]` : `[exit ${parsed.retCode}]`
+    }
+    return out || '\x1b[32m(ok)\x1b[0m'
+  } catch {
+    return raw
+  }
+}
+
 export default function TerminalPage() {
   const termRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
@@ -36,8 +54,14 @@ export default function TerminalPage() {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
-        if (msg.type === 'stdout' && msg.data) {
-          termInstance.current?.write(msg.data.replace(/\n/g, '\r\n'))
+        if (msg.type === 'stdout' && msg.data != null && msg.data !== '') {
+          const text = formatXtermStdout(String(msg.data))
+          if (text) {
+            termInstance.current?.write(text.replace(/\n/g, '\r\n'))
+            if (!text.endsWith('\n')) {
+              termInstance.current?.write('\r\n')
+            }
+          }
         } else if (msg.type === 'error') {
           termInstance.current?.writeln(`\r\n\x1b[31m[ERROR] ${msg.message}\x1b[0m`)
         } else if (msg.type === 'closed') {
@@ -45,7 +69,7 @@ export default function TerminalPage() {
           setDisconnected(true)
         }
       } catch {
-        termInstance.current?.write(event.data)
+        termInstance.current?.write(String(event.data))
       }
     }
 

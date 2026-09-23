@@ -9,6 +9,7 @@ Agent 平台后端服务，基于 [Kratos](https://go-kratos.dev/) 与 [sixath/f
 | **工具管理** | 内置工具、MCP 工具的 CRUD，支持 Agent 绑定 |
 | **Agent 管理** | Agent CRUD、模型配置、Workspace、技能包上传、工具绑定 |
 | **对话** | 会话管理、消息历史、流式 SSE 对话 |
+| **远程终端** | 按 vmid 解析 VM IP，经 `/runCmd` 执行 Windows CMD；会话级工作目录；对话内 NL→CMD |
 | **技能** | 技能包校验与上传、解压到 `workspace/skills` |
 | **记忆** | `MemoryStore` 门面：`memory_remember` / `memory_recall` / `memory_get`（session / agent / user）；Prefetch 围栏；见 [记忆使用指南](docs/memory-integration.md) |
 
@@ -118,6 +119,31 @@ make build
 
 流式对话使用 SSE，请求 `POST /api/v1/sessions/{session_id}/messages/stream`，响应事件：`chunk`、`done`、`error`。
 
+### 远程终端
+
+经 Agent 绑定的数据源按 `vmid` 查 VM IP，向目标机 `:53000/runCmd` 发命令；Portal 内存会话跟踪工作目录（`cd` / 盘符切换）。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/terminal/sessions` | 创建会话（`vmid`、可选 `port`/`workdir`） |
+| GET | `/api/v1/terminal/sessions/{id}` | 查询会话 |
+| DELETE | `/api/v1/terminal/sessions/{id}` | 结束会话 |
+| GET | `/api/v1/terminal/sessions/{id}/ws` | WebSocket（xterm 交互） |
+| POST | `/api/v1/terminal/chat` | 对话内终端：自然语言→CMD 或直接 `cmd` 执行 |
+
+`POST /api/v1/terminal/chat` 请求体要点：
+
+| 字段 | 说明 |
+|------|------|
+| `agent_id` / `vmid` | 必填；用于鉴权与解析主机 |
+| `content` | 自然语言或说明文案 |
+| `cmd` | 可选；有值则跳过 LLM，直接执行（点选目录、`dir` 等） |
+| `session_id` | 可选；复用工作目录 |
+
+常见短语（如「查看 xxx.log 的后 20 行」）会本地直译为 PowerShell `Get-Content -Tail`，再回退到模型翻译。返回的 `/runCmd` JSON（`codeDesc`/`retCode`）会解包成纯文本。
+
+实现：`internal/terminal`（会话与执行）、`internal/server/terminal_ws.go` / `terminal_chat.go`。
+
 ## 项目结构
 
 ```
@@ -134,8 +160,9 @@ portal/
 │   ├── chat/              # Agent 构建（BuildModel、BuildRegistry、技能等）
 │   ├── conf/              # 配置结构
 │   ├── data/              # 数据访问（MySQL）
-│   ├── server/            # HTTP/gRPC 服务、中间件、SSE
+│   ├── server/            # HTTP/gRPC、中间件、SSE、终端 handlers
 │   ├── service/           # 服务层
+│   ├── terminal/          # VM 远程终端会话（/runCmd、工作目录）
 │   └── validator/         # 技能包校验
 ├── docs/
 │   ├── architecture_design.md

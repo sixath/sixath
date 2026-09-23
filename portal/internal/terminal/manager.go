@@ -16,7 +16,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var cdRe = regexp.MustCompile(`(?i)^\s*cd(?:\s+(.*))?$`)
+var (
+	cdRe    = regexp.MustCompile(`(?i)^\s*cd(?:\s+(.*))?$`)
+	driveRe = regexp.MustCompile(`(?i)^\s*([a-z]:)(\\.*)?\s*$`)
+)
 
 type Session struct {
 	ID        string
@@ -70,6 +73,38 @@ func NewDBLookup(db *gorm.DB) func(ctx context.Context, vmid int64) (string, err
 		}
 		return ip, nil
 	}
+}
+
+// CreateWithHost creates a session with a pre-resolved host, skipping IP lookup.
+func (m *Manager) CreateWithHost(VMID int64, host string, port int, workdir string) (*Session, error) {
+	if VMID <= 0 {
+		return nil, fmt.Errorf("vmid must be positive")
+	}
+	if host == "" {
+		return nil, fmt.Errorf("host must not be empty")
+	}
+	if port < 1 || port > 65535 {
+		port = 53000
+	}
+	workdir = strings.TrimSpace(workdir)
+	if workdir == "" {
+		workdir = "C:\\"
+	}
+
+	s := &Session{
+		ID:        uuid.NewString(),
+		VMID:      VMID,
+		Host:      host,
+		Port:      port,
+		WorkDir:   workdir,
+		CreatedAt: time.Now(),
+		LastUsed:  time.Now(),
+	}
+
+	m.mu.Lock()
+	m.sessions[s.ID] = s
+	m.mu.Unlock()
+	return s, nil
 }
 
 func (m *Manager) Create(VMID int64, port int, workdir string) (*Session, error) {
@@ -172,29 +207,91 @@ func (s *Session) execute(client *http.Client, input string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
-	return string(out), nil
+	return formatRunCmdOutput(string(out)), nil
+}
+
+// runCmdResponse is the JSON shape returned by the VM agent /runCmd endpoint.
+type runCmdResponse struct {
+	CodeDesc string `json:"codeDesc"`
+	RetCode  int    `json:"retCode"`
+}
+
+// formatRunCmdOutput unwraps {"codeDesc","retCode"} into plain text for terminal display.
+// Non-JSON payloads are returned unchanged. Empty successful output becomes "".
+func formatRunCmdOutput(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	var resp runCmdResponse
+	if err := json.Unmarshal([]byte(trimmed), &resp); err != nil {
+		return raw
+	}
+	out := resp.CodeDesc
+	out = strings.ReplaceAll(out, "\r\n", "\n")
+	out = strings.ReplaceAll(out, "\r", "\n")
+	out = strings.Trim(out, "\n")
+	if resp.RetCode != 0 {
+		if out == "" {
+			return fmt.Sprintf("[exit %d]", resp.RetCode)
+		}
+		return fmt.Sprintf("%s\n[exit %d]", out, resp.RetCode)
+	}
+	return out
 }
 
 func parseCDCommand(input string) (dir string, isCD bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", false
+	}
+	// Bare drive change: "D:" / "D:\" / "D:\logs"
+	if m := driveRe.FindStringSubmatch(input); m != nil {
+		dir = strings.ToUpper(m[1][:1]) + ":"
+		if m[2] != "" {
+			dir += m[2]
+		} else {
+			dir += "\\"
+		}
+		return normalizeWorkDir(dir), true
+	}
 	m := cdRe.FindStringSubmatch(input)
 	if m == nil {
 		return "", false
 	}
 	dir = strings.TrimSpace(m[1])
 	dir = strings.TrimPrefix(dir, "/d ")
+	dir = strings.TrimPrefix(dir, "/D ")
 	dir = strings.TrimSpace(dir)
+	dir = strings.Trim(dir, `"'`)
 	return dir, true
 }
 
+func normalizeWorkDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "C:\\"
+	}
+	dir = strings.ReplaceAll(dir, "/", "\\")
+	if len(dir) == 2 && dir[1] == ':' {
+		return strings.ToUpper(dir[:1]) + ":\\"
+	}
+	if len(dir) >= 2 && dir[1] == ':' {
+		return strings.ToUpper(dir[:1]) + dir[1:]
+	}
+	return dir
+}
+
 func buildCommand(workDir, input string) (cmd, newDir string) {
+	workDir = normalizeWorkDir(workDir)
 	cdDir, isCD := parseCDCommand(input)
 	if isCD {
 		if cdDir == "" {
 			newDir = workDir
 		} else if len(cdDir) >= 2 && cdDir[1] == ':' {
-			newDir = cdDir
+			newDir = normalizeWorkDir(cdDir)
 		} else {
-			newDir = strings.TrimRight(workDir, "\\") + "\\" + cdDir
+			newDir = normalizeWorkDir(strings.TrimRight(workDir, "\\") + "\\" + cdDir)
 		}
 		return "cd /d " + newDir, newDir
 	}

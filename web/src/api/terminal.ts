@@ -48,6 +48,8 @@ export interface TerminalChatRequest {
   vmid: number
   content: string
   session_id?: string
+  /** When set, skip LLM and run this CMD directly (UI actions like click-to-cd). */
+  cmd?: string
 }
 
 export interface TerminalChatResponse {
@@ -55,6 +57,7 @@ export interface TerminalChatResponse {
   cmd: string
   stdout: string
   stderr?: string
+  workdir?: string
 }
 
 export async function sendTerminalChat(req: TerminalChatRequest): Promise<TerminalChatResponse> {
@@ -65,7 +68,29 @@ export async function sendTerminalChat(req: TerminalChatRequest): Promise<Termin
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(text || `terminal chat failed: ${res.status}`)
+    throw new Error(formatTerminalAPIError(text, res.status))
   }
   return res.json()
+}
+
+function formatTerminalAPIError(text: string, status: number): string {
+  const raw = (text || '').trim()
+  if (!raw) return `terminal chat failed: ${status}`
+  try {
+    const j = JSON.parse(raw) as {
+      message?: string
+      reason?: string
+      ret?: { code?: number; message?: string; reason?: string }
+    }
+    const reason = j.ret?.reason || j.reason || ''
+    const message = j.ret?.message || j.message || ''
+    if (reason === 'NO_CMD' || message.includes('did not produce a command')) {
+      return '无法把这句话翻译成命令，请换种说法，或直接输入 CMD（例如：powershell -Command "Get-Content cgvmagent.log -Tail 20"）'
+    }
+    if (message && reason) return `${message} (${reason})`
+    if (message) return message
+  } catch {
+    /* not JSON */
+  }
+  return raw
 }
