@@ -74,6 +74,11 @@ func SetPortalAgentExtra(extra *config.PortalAgentExtra) {
 		}
 		guardrailHaltPersist = g.PersistSystemMessage
 	}
+	if extra.Evolution != nil {
+		SetEvolutionConfig(extra.Evolution)
+	} else {
+		SetEvolutionConfig(nil)
+	}
 }
 
 // DecomposeGuardrailRunError 解析护栏硬停错误与 Portal 展示策略。
