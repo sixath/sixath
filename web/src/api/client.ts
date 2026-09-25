@@ -77,7 +77,7 @@ async function request<T>(
   return res.json() as Promise<T>
 }
 
-export { hasApiToken }
+export { hasApiToken, request, checkRet }
 
 /** 检查 ret.code，非 0 时抛出。proto3 JSON 省略 code 时视为 0（成功）。 */
 function checkRet<T extends { ret?: BaseResponse }>(data: T): T {

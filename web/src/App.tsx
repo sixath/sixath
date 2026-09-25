@@ -19,6 +19,7 @@ import CronTaskList from './pages/CronTaskList'
 import CronTaskForm from './pages/CronTaskForm'
 import CronTaskDetail from './pages/CronTaskDetail'
 import SessionHistoryPage from './pages/SessionHistoryPage'
+import EvolutionReviewPage from './pages/EvolutionReviewPage'
 import SettingsPage from './pages/SettingsPage'
 import OrgListPage from './pages/OrgListPage'
 import OrgDetailPage from './pages/OrgDetailPage'
@@ -91,6 +92,9 @@ function Breadcrumb() {
   } else if (segments[0] === 'terminal') {
     current = '远程终端'
     icon = '💻'
+  } else if (segments[0] === 'evolution-review') {
+    current = '技能进化评审'
+    icon = '🧬'
   }
 
   return (
@@ -199,6 +203,10 @@ function AppShell() {
               <span className="nav-item__icon">🏢</span>
               组织
             </NavLink>
+            <NavLink to="/evolution-review" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <span className="nav-item__icon">🧬</span>
+              技能进化
+            </NavLink>
             <NavLink to="/terminal" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">💻</span>
               终端
@@ -295,6 +303,7 @@ function AppShell() {
             <Route path="/orgs" element={<OrgListPage />} />
             <Route path="/orgs/:id" element={<OrgDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/evolution-review" element={<EvolutionReviewPage />} />
             <Route
               path="/terminal"
               element={
