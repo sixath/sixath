@@ -45,6 +45,7 @@ type ChatService struct {
 	db               *gorm.DB
 	catalog          *data.ModelCatalogStore
 	proxyRepo        biz.ProxyRepo
+	evolutionRepo    biz.EvolutionProposalRepo
 	log              *log.Helper
 }
 
@@ -60,7 +61,7 @@ func NewChatServiceWithMemoryStore(chatUC *biz.ChatUsecase, agentUC *biz.AgentUs
 }
 
 // ProvideChatServiceWithTurnTrace builds ChatService with durable memory and turn-trace store (wire).
-func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, d *data.Data, proxyRepo biz.ProxyRepo, logger log.Logger) *ChatService {
+func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, sessionUnits memory.SessionUnitsBackend, turnTraceStore turntrace.Store, codeRoots []string, d *data.Data, proxyRepo biz.ProxyRepo, evolutionRepo biz.EvolutionProposalRepo, logger log.Logger) *ChatService {
 	s := NewChatServiceWithMemoryStore(chatUC, agentUC, toolUC, mcpServerUC, skillUC, channelUC, sessionUnits, proxyRepo, logger)
 	s.SetTurnTraceStore(turnTraceStore)
 	s.SetCodeRoots(codeRoots)
@@ -69,6 +70,7 @@ func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.Agent
 		s.catalog = data.NewModelCatalogStore(d.DB())
 		s.SetDeliveryRecorder(data.NewDeliveryRecorder(d.DB()))
 	}
+	s.evolutionRepo = evolutionRepo
 	return s
 }
 
@@ -880,6 +882,17 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	go func() {
 		defer func() {
 			epBuf.Clear()
+				// 技能自进化检测（异步，不阻塞响应）
+				if chat.EvolutionEnabled() && len(priorHistory) > 0 {
+					go func() {
+						var skillNames []string
+						for _, sk := range skillsIdx.All() {
+							skillNames = append(skillNames, sk.Name)
+						}
+						ctx := context.Background()
+						chat.RunEvolutionPipeline(ctx, session.AgentID, sessionID, len(priorHistory), priorHistory, skillNames, s.evolutionRepo)
+					}()
+				}
 			// 关闭顺序（保证不丢事件、不 send-on-closed）：
 			// 1. 到此处时 `for ev := range evCh` 已经返回——框架的 RunEvents 单 goroutine
 			//    在 defer close(out) 之前完成了所有 emit（同步订阅已把事件写入 relay），
