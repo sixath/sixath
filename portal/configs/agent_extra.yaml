@@ -119,3 +119,47 @@ portal:
     # 展示：none（仅错误码）| banner（默认一句说明）| brief | full（与 trace 注入全文一致）
     display: banner
     persist_system_message: false
+
+evolution:
+  enabled: false
+  rules:
+    style_correction:
+      - "太啰嗦"
+      - "简洁"
+      - "短一点"
+      - "stop doing"
+      - "记住"
+      - "别这样"
+    workflow_correction:
+      - "应该先"
+      - "顺序不对"
+      - "下次记住"
+      - "以后"
+      - "步骤"
+      - "流程"
+    debugging_trick:
+      - "原来是这样"
+      - "找到原因"
+      - "根因"
+      - "绕过去"
+      - "换个方式"
+      - "解决了"
+    stale_skill:
+      - "这个技能"
+      - "过时"
+      - "不管用"
+      - "不对"
+      - "这个不对"
+  trial_and_error:
+    min_tool_failures: 3
+    min_occurrences: 2
+    observation_window: 50
+    similarity_threshold: 0.8
+  classifier:
+    provider: openai
+    model: gpt-4o-mini
+    max_tokens: 200
+  dedup_threshold: 0.85
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
