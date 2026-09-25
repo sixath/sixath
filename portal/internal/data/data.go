@@ -26,7 +26,7 @@ const (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewProxyRepo, NewAgentRepo, NewIdentityRepo, NewAuthEphemeralRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChatAttachmentRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewEvolutionProposalRepo)
+var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, ProvideDB, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewProxyRepo, NewAgentRepo, NewIdentityRepo, NewAuthEphemeralRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChatAttachmentRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewEvolutionProposalRepo)
 
 // Data .
 type Data struct {
@@ -120,6 +120,11 @@ func (d *Data) DB() *gorm.DB {
 		return nil
 	}
 	return d.db
+}
+
+// ProvideDB exposes *gorm.DB for wire DI (needed by terminal.Manager and terminal.NewDBLookup).
+func ProvideDB(d *Data) *gorm.DB {
+	return d.DB()
 }
 
 // Ping checks the underlying SQL connection (used by /readyz).

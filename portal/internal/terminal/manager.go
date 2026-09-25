@@ -41,12 +41,16 @@ type Manager struct {
 	lookupIPFunc func(ctx context.Context, vmid int64) (string, error)
 }
 
-func NewManager(db *gorm.DB, idleTTL time.Duration) *Manager {
+// TerminalIdleTTL is a named time.Duration type for wire DI disambiguation
+// (there is another time.Duration provider in the cron package).
+type TerminalIdleTTL time.Duration
+
+func NewManager(db *gorm.DB, idleTTL TerminalIdleTTL) *Manager {
 	m := &Manager{
 		sessions: make(map[string]*Session),
 		db:       db,
 		client:   &http.Client{Timeout: 30 * time.Second},
-		idleTTL:  idleTTL,
+		idleTTL:  time.Duration(idleTTL),
 	}
 	go m.cleanupLoop()
 	return m

@@ -14,11 +14,17 @@ import (
 	"backend/internal/server"
 	"backend/internal/service"
 	"backend/internal/terminal"
+	"time"
 
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
 )
+
+// provideTerminalIdleTTL returns the terminal session idle TTL for wire DI.
+func provideTerminalIdleTTL() terminal.TerminalIdleTTL {
+	return terminal.TerminalIdleTTL(30 * time.Minute)
+}
 
 // wireApp init kratos application.
 func wireApp(*conf.Server, *conf.Data, *conf.Auth, *conf.Growth, log.Logger) (*kratos.App, func(), error) {
@@ -36,6 +42,7 @@ func wireApp(*conf.Server, *conf.Data, *conf.Auth, *conf.Growth, log.Logger) (*k
 		runtime.ProvideAgentRouteUsecase,
 		runtime.NewService,
 		terminal.NewManager,
+		provideTerminalIdleTTL,
 			wire.Bind(new(runtime.RewindBackend), new(*service.ChatService)),
 		wire.Bind(new(runtime.TurnBackend), new(*service.ChatService)),
 		wire.Bind(new(server.DBPinger), new(*data.Data)),
