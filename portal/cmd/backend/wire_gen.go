@@ -17,11 +17,11 @@ import (
 	"backend/internal/terminal"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
+	"time"
 )
 
 import (
 	_ "go.uber.org/automaxprocs"
-	"time"
 )
 
 // Injectors from wire.go:
@@ -48,8 +48,6 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	channelRepo := data.NewChannelRepo(dataData, logger)
 	channelUsecase := biz.NewChannelUsecase(channelRepo, agentRepo, logger)
 	v := data.ProvideCodeRoots(confData)
-	terminalManager := terminal.NewManager(dataData.DB(), 30*time.Minute)
-	terminalManager.SetVMIPLookup(terminal.NewDBLookup(dataData.DB()))
 	agentService := service.NewAgentService(agentUsecase, toolUsecase, mcpServerUsecase, skillResourceUsecase, channelUsecase, proxyRepo, v, logger)
 	chatSessionRepo := data.NewChatSessionRepo(dataData, logger)
 	chatMessageRepo := data.NewChatMessageRepo(dataData, logger)
@@ -77,7 +75,12 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	channelPeerUsecase := biz.NewChannelPeerUsecase(channelPeerSessionRepo, chatSessionRepo, channelRepo)
 	agentRouteUsecase := runtime.ProvideAgentRouteUsecase(channelRepo, channelPeerSessionRepo, agentUsecase, growth, logger)
 	runtimeService := runtime.NewService(chatUsecase, channelPeerUsecase, channelUsecase, agentUsecase, chatSessionRepo, channelRuntimeRepo, chatService, chatService, agentRouteUsecase)
-	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, proxyService, runtimeService, dataData, agentUsecase, v, logger, terminalManager, agentRepo, toolUsecase)
+	db := data.ProvideDB(dataData)
+	terminalIdleTTL := provideTerminalIdleTTL()
+	manager := terminal.NewManager(db, terminalIdleTTL)
+	evolutionProposalRepo := data.NewEvolutionProposalRepo(dataData, logger)
+	evolutionUsecase := biz.NewEvolutionUsecase(evolutionProposalRepo)
+	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, proxyService, runtimeService, dataData, agentUsecase, v, logger, manager, agentRepo, toolUsecase, evolutionUsecase)
 	duration := cron.ProvideSchedulerInterval()
 	scheduler := cron.NewScheduler(cronUsecase, executor, duration, logger)
 	cronServer := cron.NewServer(scheduler)
@@ -85,4 +88,11 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	return app, func() {
 		cleanup()
 	}, nil
+}
+
+// wire.go:
+
+// provideTerminalIdleTTL returns the terminal session idle TTL for wire DI.
+func provideTerminalIdleTTL() terminal.TerminalIdleTTL {
+	return terminal.TerminalIdleTTL(30 * time.Minute)
 }
