@@ -11,10 +11,11 @@ import (
 
 // Scheduler 定时任务调度器：周期性扫描待执行任务并触发执行
 type Scheduler struct {
-	cronUC   *biz.CronUsecase
-	exec     *Executor
-	interval time.Duration
-	log      *log.Helper
+	cronUC      *biz.CronUsecase
+	exec        *Executor
+	interval    time.Duration
+	evolutionUC *biz.EvolutionUsecase
+	log         *log.Helper
 }
 
 // NewScheduler 创建调度器，interval 为扫描间隔（如 30s）
@@ -34,6 +35,8 @@ func NewScheduler(cronUC *biz.CronUsecase, exec *Executor, interval time.Duratio
 func (s *Scheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
+
+	go s.evolutionCleanupLoop(ctx)
 
 	for {
 		select {
@@ -55,5 +58,32 @@ func (s *Scheduler) tick(ctx context.Context) {
 	for _, t := range tasks {
 		task := t
 		go s.exec.Execute(ctx, task)
+	}
+}
+
+// SetEvolutionUsecase wires the evolution usecase for weekly proposal expiry cleanup.
+func (s *Scheduler) SetEvolutionUsecase(uc *biz.EvolutionUsecase) {
+	s.evolutionUC = uc
+}
+
+// evolutionCleanupLoop runs weekly expiry of old pending proposals.
+func (s *Scheduler) evolutionCleanupLoop(ctx context.Context) {
+	ticker := time.NewTicker(7 * 24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if s.evolutionUC == nil {
+				continue
+			}
+			expired, err := s.evolutionUC.ExpireOld(ctx, time.Now().Add(-30*24*time.Hour))
+			if err != nil {
+				s.log.Errorf("evolution cleanup: %v", err)
+			} else if expired > 0 {
+				s.log.Infof("evolution cleanup: expired %d proposals", expired)
+			}
+		}
 	}
 }

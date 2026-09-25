@@ -83,6 +83,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	httpServer := server.NewHTTPServer(confServer, toolService, agentService, chatService, channelService, cronService, channelUsecase, identityRepo, aclapiUsecase, authUsecase, mcpServerService, proxyService, runtimeService, dataData, agentUsecase, v, logger, manager, agentRepo, toolUsecase, evolutionUsecase)
 	duration := cron.ProvideSchedulerInterval()
 	scheduler := cron.NewScheduler(cronUsecase, executor, duration, logger)
+	scheduler.SetEvolutionUsecase(evolutionUsecase)
 	cronServer := cron.NewServer(scheduler)
 	app := newApp(logger, grpcServer, httpServer, cronServer)
 	return app, func() {
