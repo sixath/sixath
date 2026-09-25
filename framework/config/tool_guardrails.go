@@ -149,6 +149,35 @@ type PortalAgentExtra struct {
 	MemoryGraph *MemoryGraph `json:"memory_graph" yaml:"memory_graph"`
 	// Web 联网搜索（web_search / web_extract）；与 config.yaml 中 web 节同形。
 	Web *WebTools `json:"web" yaml:"web"`
+	// Evolution 技能自进化配置（默认关）。
+	Evolution *EvolutionConfig `json:"evolution" yaml:"evolution"`
+}
+
+// EvolutionConfig 技能自进化检测与提案配置。
+type EvolutionConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	Rules   struct {
+		StyleCorrection    []string `json:"style_correction" yaml:"style_correction"`
+		WorkflowCorrection []string `json:"workflow_correction" yaml:"workflow_correction"`
+		DebuggingTrick     []string `json:"debugging_trick" yaml:"debugging_trick"`
+		StaleSkill         []string `json:"stale_skill" yaml:"stale_skill"`
+	} `json:"rules" yaml:"rules"`
+	TrialAndError struct {
+		MinToolFailures     int     `json:"min_tool_failures" yaml:"min_tool_failures"`
+		MinOccurrences      int     `json:"min_occurrences" yaml:"min_occurrences"`
+		ObservationWindow   int     `json:"observation_window" yaml:"observation_window"`
+		SimilarityThreshold float64 `json:"similarity_threshold" yaml:"similarity_threshold"`
+	} `json:"trial_and_error" yaml:"trial_and_error"`
+	Classifier struct {
+		Provider  string `json:"provider" yaml:"provider"`
+		Model     string `json:"model" yaml:"model"`
+		MaxTokens int    `json:"max_tokens" yaml:"max_tokens"`
+	} `json:"classifier" yaml:"classifier"`
+	DedupThreshold float64 `json:"dedup_threshold" yaml:"dedup_threshold"`
+	Embedding      struct {
+		Provider string `json:"provider" yaml:"provider"`
+		Model    string `json:"model" yaml:"model"`
+	} `json:"embedding" yaml:"embedding"`
 }
 
 // PortalAgentExtraPortal Portal 侧 UI 与落库策略。
@@ -201,7 +230,7 @@ func LoadPortalAgentExtra(path string) (*PortalAgentExtra, error) {
 	if extra.ToolGuardrails == nil && extra.Portal == nil && extra.MemoryStore == nil &&
 		extra.MemoryOrchestratorPrefetch == nil &&
 		extra.MemoryExtraction == nil && extra.MemoryConflict == nil && extra.MemoryVector == nil &&
-		extra.MemoryGraph == nil && extra.Web == nil {
+		extra.MemoryGraph == nil && extra.Evolution == nil && extra.Web == nil {
 		return nil, nil
 	}
 	return &extra, nil
