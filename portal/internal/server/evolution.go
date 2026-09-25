@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"backend/internal/biz"
+	chat "backend/internal/chat"
+	"github.com/sixath/framework/config"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
@@ -113,6 +115,36 @@ func (h *EvolutionHandlers) CountPending() func(khttp.Context) error {
 		return ctx.JSON(200, map[string]any{
 			"ret":   map[string]any{"code": 0, "message": "ok"},
 			"count": count,
+		})
+	}
+}
+
+// GetConfig returns the current evolution config.
+func (h *EvolutionHandlers) GetConfig() func(khttp.Context) error {
+	return func(ctx khttp.Context) error {
+		cfg := chat.EvolutionConfig()
+		enabled := chat.EvolutionEnabled()
+		return ctx.JSON(200, map[string]any{
+			"ret":     map[string]any{"code": 0, "message": "ok"},
+			"enabled": enabled,
+			"config":  cfg,
+		})
+	}
+}
+
+// PutConfig updates the evolution config in memory and persists to agent_extra.yaml.
+func (h *EvolutionHandlers) PutConfig() func(khttp.Context) error {
+	return func(ctx khttp.Context) error {
+		var body config.EvolutionConfig
+		if err := ctx.Bind(&body); err != nil {
+			return ctx.JSON(400, map[string]any{"error": err.Error()})
+		}
+		if err := chat.UpdateEvolutionConfig(&body); err != nil {
+			return ctx.JSON(500, map[string]any{"error": "persist failed: " + err.Error()})
+		}
+		return ctx.JSON(200, map[string]any{
+			"ret":     map[string]any{"code": 0, "message": "ok"},
+			"enabled": body.Enabled,
 		})
 	}
 }

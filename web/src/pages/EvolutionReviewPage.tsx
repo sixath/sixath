@@ -44,6 +44,39 @@ export default function EvolutionReviewPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // Config state
+  const [configEnabled, setConfigEnabled] = useState(false)
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configFetched, setConfigFetched] = useState(false)
+
+  const fetchConfig = useCallback(async () => {
+    try {
+      const data = await evolutionApi.getConfig()
+      setConfigEnabled(data.enabled)
+    } catch {
+      // Config endpoint may not be available yet; ignore
+    } finally {
+      setConfigFetched(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchConfig()
+  }, [fetchConfig])
+
+  const toggleConfig = async () => {
+    setConfigLoading(true)
+    try {
+      const next = !configEnabled
+      await evolutionApi.putConfig({ enabled: next })
+      setConfigEnabled(next)
+    } catch (e) {
+      setError((e as Error).message || '配置更新失败')
+    } finally {
+      setConfigLoading(false)
+    }
+  }
+
   const fetchProposals = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -118,6 +151,27 @@ export default function EvolutionReviewPage() {
           </select>
         </div>
       </div>
+
+      {configFetched && (
+        <div className="section-card evolution-config-panel">
+          <div className="evolution-config-panel__row">
+            <div>
+              <h3>进化检测</h3>
+              <p className="muted">开启后，每次对话结束自动检测进化信号并生成提案。</p>
+            </div>
+            <button
+              type="button"
+              className={`toggle-switch ${configEnabled ? 'toggle-on' : 'toggle-off'}`}
+              disabled={configLoading}
+              onClick={toggleConfig}
+              aria-label={configEnabled ? '关闭进化检测' : '开启进化检测'}
+            >
+              <span className="toggle-knob" />
+              <span className="toggle-label">{configEnabled ? '已开启' : '已关闭'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error evolution-review__error">{error}</div>}
 

@@ -124,7 +124,12 @@ func main() {
 		chat.SetMemoryVectorDataRoot(bc.Data.GetDataRoot())
 	}
 
-	if portalExtra != nil {
+	// Store agent_extra path for runtime config persistence (e.g. evolution toggle).
+		if p, err := fwconfig.ResolvePortalAgentExtraPath(flagconf); err == nil {
+			chat.SetEvolutionConfigPath(p)
+		}
+
+		if portalExtra != nil {
 		chat.SetPortalAgentExtra(portalExtra)
 	} else if p, err := fwconfig.ResolvePortalAgentExtraPath(flagconf); err == nil {
 		if extra, err := fwconfig.LoadPortalAgentExtra(p); err != nil {

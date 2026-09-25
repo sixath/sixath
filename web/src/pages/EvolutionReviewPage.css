@@ -268,3 +268,78 @@
   font-size: 0.9em;
   color: var(--muted);
 }
+
+/* Config panel & toggle */
+.evolution-config-panel {
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.evolution-config-panel__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.evolution-config-panel__row h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.evolution-config-panel__row .muted {
+  margin: 0;
+  font-size: 0.85em;
+}
+
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  background: var(--card);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9em;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.toggle-switch:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.toggle-switch.toggle-on {
+  background: color-mix(in srgb, var(--success, #5cb85c) 15%, var(--card));
+  border-color: var(--success, #5cb85c);
+}
+
+.toggle-switch.toggle-off {
+  background: var(--card);
+  border-color: var(--border);
+}
+
+.toggle-knob {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background 0.15s;
+}
+
+.toggle-on .toggle-knob {
+  background: var(--success, #5cb85c);
+}
+
+.toggle-label {
+  color: var(--text-strong);
+}
+
+.toggle-on .toggle-label {
+  color: var(--success, #5cb85c);
+  font-weight: 600;
+}

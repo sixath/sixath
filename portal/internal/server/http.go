@@ -154,6 +154,8 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.POST("/api/v1/evolution/proposals/{id}/approve", evHandlers.ApproveProposal())
 	r.POST("/api/v1/evolution/proposals/{id}/reject", evHandlers.RejectProposal())
 	r.PATCH("/api/v1/evolution/proposals/{id}", evHandlers.PatchProposal())
+	r.GET("/api/v1/evolution/config", evHandlers.GetConfig())
+	r.PUT("/api/v1/evolution/config", evHandlers.PutConfig())
 	srv.Handle("/healthz", healthzHandler())
 	srv.Handle("/readyz", readyzHandler(pinger))
 	setupPrometheusEndpoint(srv)

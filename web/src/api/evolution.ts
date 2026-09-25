@@ -75,4 +75,23 @@ export const evolutionApi = {
     checkRet(data)
     return data
   },
+
+  getConfig: async () => {
+    const data = await request<{
+      ret?: BaseResponse
+      enabled: boolean
+      config: Record<string, unknown> | null
+    }>('/evolution/config')
+    checkRet(data)
+    return data
+  },
+
+  putConfig: async (body: { enabled: boolean }) => {
+    const data = await request<{ ret?: BaseResponse; enabled: boolean }>('/evolution/config', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+    checkRet(data)
+    return data
+  },
 }
