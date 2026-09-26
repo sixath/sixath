@@ -1,7 +1,7 @@
 // Package investigate 提供冷启动兜底调查工具 deep_investigate：
 // agent 同时具备代码仓库工具与日志类工具时对模型可见；模型在无线索的
 // 定位类问题中主动调用，工具内部跑子 ReAct 循环（代码优先 → 日志验证）
-// 并返回调查结论。详见 docs/superpowers/specs/2026-09-24-skill-self-evolution-design.md。
+// 并返回调查结论。详见 docs/superpowers/specs/2026-09-26-deep-investigate-design.md。
 package investigate
 
 import (

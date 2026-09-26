@@ -156,3 +156,9 @@ func (f *fakeToolModel) ChatWithTools(ctx context.Context, msgs []model.Message,
 	}
 	return &model.Generation{Text: f.finalText, Raw: model.ToolStep{Used: false}}, nil
 }
+
+func TestRegister_RejectsNilRegistry(t *testing.T) {
+	if err := Register(nil, Config{Model: &fakeToolModel{}}); err == nil {
+		t.Fatal("nil registry must be rejected")
+	}
+}
