@@ -360,6 +360,9 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	if router := chat.SkillEmbedRouterFor(ctx, skillsIdx, agentMeta); router != nil {
+		opts = append(opts, agent.WithReActSkillRouter(router))
+	}
 	a := chat.BuildAgent(m, reg, agentText, 20, agentMeta.Mode, opts...)
 
 	messages := make([]model.Message, 0, 1)

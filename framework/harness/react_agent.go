@@ -13,6 +13,7 @@ import (
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
 
@@ -111,6 +112,15 @@ type ReActConfig struct {
 	ParallelTools bool
 	// MaxParallel 并行上限；<=0 时默认 8。
 	MaxParallel int
+	// SkillRouter 可选；非空时按最新用户消息做 Skill 语义路由，
+	// 命中则把对应 SKILL.md 正文注入 system prompt 的 Skills 区块（见 prepareModelMessages）。
+	SkillRouter SkillAutoRouter
+}
+
+// SkillAutoRouter 按用户 query 返回语义最匹配的 Skill；ok=false 表示无命中或路由不可用。
+// 实现方应自行缓存 query 结果并容忍底层 embed 失败（失败一律返回 ok=false）。
+type SkillAutoRouter interface {
+	Route(ctx context.Context, query string) (skills.SkillMeta, float64, bool)
 }
 
 type ReActOption func(*ReActConfig)
@@ -186,6 +196,13 @@ func WithReActWorkspace(workspace string) ReActOption {
 func WithReActSkillsDirs(dirs []string) ReActOption {
 	return func(c *ReActConfig) {
 		c.SkillsDirs = append([]string(nil), dirs...)
+	}
+}
+
+// WithReActSkillRouter 注入 Skill 语义路由器；nil 清除。
+func WithReActSkillRouter(r SkillAutoRouter) ReActOption {
+	return func(c *ReActConfig) {
+		c.SkillRouter = r
 	}
 }
 

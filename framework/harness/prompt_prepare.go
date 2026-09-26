@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 func (a *ReActAgent) prepareModelMessages(ctx context.Context, messages []model.Message, trace *RunTrace) []model.Message {
 	in := fwctx.Input{
 		AgentSystem: a.config.SystemPrompt,
-		SkillsIndex: a.skillsIndexText(),
+		SkillsIndex: a.skillsPromptText(ctx, messages),
 		MemoryMD:    readWorkspaceMarkdown(a.config.Workspace, "MEMORY.md"),
 		UserMD:      readWorkspaceMarkdown(a.config.Workspace, "USER.md"),
 		ToolNames:   a.registryToolNames(),
@@ -69,6 +70,38 @@ func (a *ReActAgent) skillsIndexText() string {
 		return ""
 	}
 	return skills.BuildSkillsAwarePrompt(idx)
+}
+
+// skillsPromptText 返回 Skills 区块文本：技能摘要，外加语义路由自动命中的 SKILL.md 正文。
+// 路由未配置、未命中或正文读取失败时仅返回摘要（退化为模型自主 load_skill）。
+func (a *ReActAgent) skillsPromptText(ctx context.Context, messages []model.Message) string {
+	base := a.skillsIndexText()
+	meta, score, ok := a.routeSkill(ctx, messages)
+	if !ok || meta.Path == "" {
+		return base
+	}
+	data, err := os.ReadFile(meta.Path)
+	if err != nil {
+		return base
+	}
+	section := fmt.Sprintf("\n【已自动匹配 Skill：%s】（语义相似度 %.2f；正文已自动加载，无需再 load_skill / skill_view）\n%s\n",
+		meta.Name, score, strings.TrimSpace(string(data)))
+	return base + section
+}
+
+// routeSkill 用最后一条非空用户消息做语义路由；router 未配置或无用户消息时返回未命中。
+func (a *ReActAgent) routeSkill(ctx context.Context, messages []model.Message) (skills.SkillMeta, float64, bool) {
+	r := a.config.SkillRouter
+	if r == nil {
+		return skills.SkillMeta{}, 0, false
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+		if strings.EqualFold(m.Role, "user") && strings.TrimSpace(m.Content) != "" {
+			return r.Route(ctx, m.Content)
+		}
+	}
+	return skills.SkillMeta{}, 0, false
 }
 
 func skillScanDirs(workspace string, extra []string) []string {

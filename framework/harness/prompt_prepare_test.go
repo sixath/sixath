@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
 
@@ -87,5 +88,85 @@ func TestPrepareModelMessages_ReadsMemoryMD(t *testing.T) {
 	msgs := a.prepareModelMessages(context.Background(), []model.Message{{Role: "user", Content: "hi"}}, trace)
 	if !strings.Contains(msgs[0].Content, "## MEMORY.md") || !strings.Contains(msgs[0].Content, "remember X") {
 		t.Fatalf("missing MEMORY.md: %q", msgs[0].Content)
+	}
+}
+
+type fakeSkillRouter struct {
+	meta  skills.SkillMeta
+	score float64
+	ok    bool
+	calls int
+}
+
+func (f *fakeSkillRouter) Route(ctx context.Context, query string) (skills.SkillMeta, float64, bool) {
+	f.calls++
+	return f.meta, f.score, f.ok
+}
+
+func TestPrepareModelMessages_InjectsAutoMatchedSkill(t *testing.T) {
+	dir := t.TempDir()
+	skillFile := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(skillFile, []byte("---\nname: demo\n---\nDO THE DEMO THING"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeSkillRouter{meta: skills.SkillMeta{Name: "demo", Path: skillFile}, score: 0.72, ok: true}
+	fake := &fakeOpenAIClient{finalReply: "ok"}
+	a := NewReActAgent(fake, nil, nil, WithReActSystemPrompt("sys"), WithReActSkillRouter(r))
+	trace := &RunTrace{}
+	beginModelInvocation(trace, "plain")
+	msgs := a.prepareModelMessages(context.Background(), []model.Message{{Role: "user", Content: "do demo"}}, trace)
+	if len(msgs) == 0 || msgs[0].Role != "system" {
+		t.Fatalf("expected system first: %#v", msgs)
+	}
+	if !strings.Contains(msgs[0].Content, "【已自动匹配 Skill：demo】") {
+		t.Fatalf("missing auto-match marker: %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "DO THE DEMO THING") {
+		t.Fatalf("missing skill body: %q", msgs[0].Content)
+	}
+	if r.calls != 1 {
+		t.Fatalf("router should be called exactly once per prepare, got %d", r.calls)
+	}
+}
+
+func TestPrepareModelMessages_NoRouterNoInjection(t *testing.T) {
+	fake := &fakeOpenAIClient{finalReply: "ok"}
+	a := NewReActAgent(fake, nil, nil, WithReActSystemPrompt("sys"))
+	trace := &RunTrace{}
+	beginModelInvocation(trace, "plain")
+	msgs := a.prepareModelMessages(context.Background(), []model.Message{{Role: "user", Content: "hi"}}, trace)
+	if strings.Contains(msgs[0].Content, "已自动匹配") {
+		t.Fatalf("no router must not inject: %q", msgs[0].Content)
+	}
+}
+
+func TestPrepareModelMessages_RouterMissNoInjection(t *testing.T) {
+	r := &fakeSkillRouter{ok: false}
+	fake := &fakeOpenAIClient{finalReply: "ok"}
+	a := NewReActAgent(fake, nil, nil, WithReActSystemPrompt("sys"), WithReActSkillRouter(r))
+	trace := &RunTrace{}
+	beginModelInvocation(trace, "plain")
+	msgs := a.prepareModelMessages(context.Background(), []model.Message{{Role: "user", Content: "hi"}}, trace)
+	if strings.Contains(msgs[0].Content, "已自动匹配") {
+		t.Fatalf("router miss must not inject: %q", msgs[0].Content)
+	}
+	if r.calls != 1 {
+		t.Fatalf("router should still be consulted once, got %d", r.calls)
+	}
+}
+
+func TestPrepareModelMessages_RouterHitButFileMissing(t *testing.T) {
+	r := &fakeSkillRouter{
+		meta:  skills.SkillMeta{Name: "ghost", Path: filepath.Join(t.TempDir(), "nonexistent", "SKILL.md")},
+		score: 0.9,
+		ok:    true,
+	}
+	fake := &fakeOpenAIClient{finalReply: "ok"}
+	a := NewReActAgent(fake, nil, nil, WithReActSystemPrompt("sys"), WithReActSkillRouter(r))
+	trace := &RunTrace{}
+	beginModelInvocation(trace, "plain")
+	msgs := a.prepareModelMessages(context.Background(), []model.Message{{Role: "user", Content: "hi"}}, trace)
+	if strings.Contains(msgs[0].Content, "已自动匹配") {
+		t.Fatalf("unreadable skill body must not inject: %q", msgs[0].Content)
 	}
 }
