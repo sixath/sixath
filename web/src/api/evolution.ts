@@ -28,6 +28,42 @@ export interface ListProposalsResponse {
   total: number
 }
 
+export interface EvolutionConfig {
+  enabled: boolean
+  rules?: {
+    style_correction?: string[]
+    workflow_correction?: string[]
+    debugging_trick?: string[]
+    stale_skill?: string[]
+  }
+  trial_and_error?: {
+    min_tool_failures?: number
+    min_occurrences?: number
+    observation_window?: number
+    similarity_threshold?: number
+  }
+  classifier?: {
+    provider?: string
+    model?: string
+    api_key?: string
+    base_url?: string
+    max_tokens?: number
+  }
+  embedding?: {
+    provider?: string
+    model?: string
+    api_key?: string
+    base_url?: string
+  }
+  dedup_threshold?: number
+}
+
+export interface ConfigResponse {
+  ret?: BaseResponse
+  enabled: boolean
+  config: EvolutionConfig | null
+}
+
 export const evolutionApi = {
   list: async (params?: { page?: number; page_size?: number; status?: string }) => {
     const q = new URLSearchParams()
@@ -77,16 +113,12 @@ export const evolutionApi = {
   },
 
   getConfig: async () => {
-    const data = await request<{
-      ret?: BaseResponse
-      enabled: boolean
-      config: Record<string, unknown> | null
-    }>('/evolution/config')
+    const data = await request<ConfigResponse>('/evolution/config')
     checkRet(data)
     return data
   },
 
-  putConfig: async (body: { enabled: boolean }) => {
+  putConfig: async (body: EvolutionConfig) => {
     const data = await request<{ ret?: BaseResponse; enabled: boolean }>('/evolution/config', {
       method: 'PUT',
       body: JSON.stringify(body),

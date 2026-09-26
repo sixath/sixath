@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { evolutionApi, type EvolutionProposal } from '../api/evolution'
+import { evolutionApi, type EvolutionProposal, type EvolutionConfig } from '../api/evolution'
 import './EvolutionReviewPage.css'
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -31,6 +31,22 @@ const STATUS_LABELS: Record<string, string> = {
   expired: '已过期',
 }
 
+const SIGNAL_KEYS = ['style_correction', 'workflow_correction', 'debugging_trick', 'stale_skill'] as const
+type SignalKey = typeof SIGNAL_KEYS[number]
+
+const DEFAULT_CONFIG: EvolutionConfig = {
+  enabled: false,
+  rules: { style_correction: [], workflow_correction: [], debugging_trick: [], stale_skill: [] },
+  trial_and_error: { min_tool_failures: 2, min_occurrences: 3, observation_window: 50, similarity_threshold: 0.8 },
+  classifier: { provider: '', model: '', api_key: '', base_url: '', max_tokens: 2048 },
+  embedding: { provider: '', model: '', api_key: '', base_url: '' },
+  dedup_threshold: 0.85,
+}
+
+function cloneConfig(c: EvolutionConfig): EvolutionConfig {
+  return JSON.parse(JSON.stringify(c))
+}
+
 export default function EvolutionReviewPage() {
   const [proposals, setProposals] = useState<EvolutionProposal[]>([])
   const [total, setTotal] = useState(0)
@@ -44,19 +60,46 @@ export default function EvolutionReviewPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Config state
-  const [configEnabled, setConfigEnabled] = useState(false)
-  const [configLoading, setConfigLoading] = useState(false)
-  const [configFetched, setConfigFetched] = useState(false)
+  // Config form state
+  const [configExpanded, setConfigExpanded] = useState(false)
+  const [configDirty, setConfigDirty] = useState(false)
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configLoaded, setConfigLoaded] = useState(false)
+  const [formConfig, setFormConfig] = useState<EvolutionConfig>(DEFAULT_CONFIG)
+  const [newKeywords, setNewKeywords] = useState<Record<SignalKey, string>>({
+    style_correction: '',
+    workflow_correction: '',
+    debugging_trick: '',
+    stale_skill: '',
+  })
 
   const fetchConfig = useCallback(async () => {
     try {
       const data = await evolutionApi.getConfig()
-      setConfigEnabled(data.enabled)
+      if (data.config) {
+        const c = cloneConfig(DEFAULT_CONFIG)
+        const src = data.config
+        c.enabled = data.enabled
+        if (src.rules) {
+          for (const k of SIGNAL_KEYS) {
+            if (Array.isArray((src.rules as Record<string, unknown>)[k])) {
+              ;(c.rules as Record<string, string[]>)[k] = [...((src.rules as Record<string, unknown>)[k] as string[])]
+            }
+          }
+        }
+        if (src.trial_and_error) Object.assign(c.trial_and_error!, src.trial_and_error)
+        if (src.classifier) Object.assign(c.classifier!, src.classifier)
+        if (src.embedding) Object.assign(c.embedding!, src.embedding)
+        if (typeof src.dedup_threshold === 'number') c.dedup_threshold = src.dedup_threshold
+        setFormConfig(c)
+      } else {
+        setFormConfig(cloneConfig(DEFAULT_CONFIG))
+        setFormConfig(prev => ({ ...prev, enabled: data.enabled }))
+      }
     } catch {
-      // Config endpoint may not be available yet; ignore
+      // Config endpoint may not be available yet
     } finally {
-      setConfigFetched(true)
+      setConfigLoaded(true)
     }
   }, [])
 
@@ -64,16 +107,75 @@ export default function EvolutionReviewPage() {
     fetchConfig()
   }, [fetchConfig])
 
-  const toggleConfig = async () => {
-    setConfigLoading(true)
+  const updateConfig = (patch: Partial<EvolutionConfig>) => {
+    setFormConfig(prev => {
+      const next = cloneConfig(prev)
+      Object.assign(next, patch)
+      return next
+    })
+    setConfigDirty(true)
+  }
+
+  const updateTrial = (field: string, value: number) => {
+    setFormConfig(prev => {
+      const next = cloneConfig(prev)
+      ;(next.trial_and_error as Record<string, number>)[field] = value
+      return next
+    })
+    setConfigDirty(true)
+  }
+
+  const updateClassifier = (field: string, value: string | number) => {
+    setFormConfig(prev => {
+      const next = cloneConfig(prev)
+      ;(next.classifier as Record<string, unknown>)[field] = value
+      return next
+    })
+    setConfigDirty(true)
+  }
+
+  const updateEmbedding = (field: string, value: string) => {
+    setFormConfig(prev => {
+      const next = cloneConfig(prev)
+      ;(next.embedding as Record<string, string>)[field] = value
+      return next
+    })
+    setConfigDirty(true)
+  }
+
+  const addKeyword = (signal: SignalKey) => {
+    const kw = newKeywords[signal].trim()
+    if (!kw) return
+    setFormConfig(prev => {
+      const next = cloneConfig(prev)
+      const arr = (next.rules as Record<string, string[]>)[signal]
+      if (!arr.includes(kw)) arr.push(kw)
+      return next
+    })
+    setNewKeywords(prev => ({ ...prev, [signal]: '' }))
+    setConfigDirty(true)
+  }
+
+  const removeKeyword = (signal: SignalKey, kw: string) => {
+    setFormConfig(prev => {
+      const next = cloneConfig(prev)
+      const arr = (next.rules as Record<string, string[]>)[signal]
+      ;(next.rules as Record<string, string[]>)[signal] = arr.filter(k => k !== kw)
+      return next
+    })
+    setConfigDirty(true)
+  }
+
+  const handleSaveConfig = async () => {
+    setConfigSaving(true)
+    setError('')
     try {
-      const next = !configEnabled
-      await evolutionApi.putConfig({ enabled: next })
-      setConfigEnabled(next)
+      await evolutionApi.putConfig(formConfig)
+      setConfigDirty(false)
     } catch (e) {
-      setError((e as Error).message || '配置更新失败')
+      setError((e as Error).message || '配置保存失败')
     } finally {
-      setConfigLoading(false)
+      setConfigSaving(false)
     }
   }
 
@@ -128,6 +230,8 @@ export default function EvolutionReviewPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / 20))
 
+  const rules = (formConfig.rules || {}) as Record<string, string[]>
+
   return (
     <div className="evolution-review-page">
       <div className="page-header evolution-review__header">
@@ -139,6 +243,13 @@ export default function EvolutionReviewPage() {
           <p className="page-sub">评审 Agent 自动生成的技能进化提案，采纳或拒绝后生效。</p>
         </div>
         <div className="filter-bar">
+          <button
+            type="button"
+            className={`btn btn-ghost btn-sm ${configExpanded ? 'btn-active' : ''}`}
+            onClick={() => { setConfigExpanded(!configExpanded); if (!configLoaded) fetchConfig() }}
+          >
+            配置 {configDirty ? '●' : ''}
+          </button>
           <select
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
@@ -152,23 +263,146 @@ export default function EvolutionReviewPage() {
         </div>
       </div>
 
-      {configFetched && (
-        <div className="section-card evolution-config-panel">
-          <div className="evolution-config-panel__row">
-            <div>
-              <h3>进化检测</h3>
-              <p className="muted">开启后，每次对话结束自动检测进化信号并生成提案。</p>
-            </div>
+      {configExpanded && configLoaded && (
+        <div className="section-card evolution-config-form">
+          {/* Enable toggle */}
+          <div className="config-section">
+            <h3 className="config-section__title">进化检测开关</h3>
+            <p className="muted config-section__desc">开启后，每次对话结束自动检测进化信号并生成提案。</p>
             <button
               type="button"
-              className={`toggle-switch ${configEnabled ? 'toggle-on' : 'toggle-off'}`}
-              disabled={configLoading}
-              onClick={toggleConfig}
-              aria-label={configEnabled ? '关闭进化检测' : '开启进化检测'}
+              className={`toggle-switch ${formConfig.enabled ? 'toggle-on' : 'toggle-off'}`}
+              onClick={() => updateConfig({ enabled: !formConfig.enabled })}
+              aria-label={formConfig.enabled ? '关闭进化检测' : '开启进化检测'}
             >
               <span className="toggle-knob" />
-              <span className="toggle-label">{configEnabled ? '已开启' : '已关闭'}</span>
+              <span className="toggle-label">{formConfig.enabled ? '已开启' : '已关闭'}</span>
             </button>
+          </div>
+
+          {/* Keyword rules */}
+          <div className="config-section">
+            <h3 className="config-section__title">关键词规则</h3>
+            <p className="muted config-section__desc">每种信号类型的关键词触发列表。</p>
+            {SIGNAL_KEYS.map(signal => (
+              <div key={signal} className="config-field">
+                <label className="config-field__label">{SIGNAL_LABELS[signal]}</label>
+                <div className="tag-input">
+                  {(rules[signal] || []).map(kw => (
+                    <span key={kw} className="tag">
+                      {kw}
+                      <button type="button" className="tag__remove" onClick={() => removeKeyword(signal, kw)} aria-label={`移除 ${kw}`}>&times;</button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    className="tag-input__field"
+                    value={newKeywords[signal]}
+                    onChange={(e) => setNewKeywords(prev => ({ ...prev, [signal]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(signal) } }}
+                    placeholder="输入关键词，回车添加"
+                  />
+                  <button type="button" className="btn btn-ghost btn-sm tag-input__add" onClick={() => addKeyword(signal)} disabled={!newKeywords[signal].trim()}>添加</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Trial-and-Error thresholds */}
+          <div className="config-section">
+            <h3 className="config-section__title">试错检测</h3>
+            <p className="muted config-section__desc">反复试错信号检测参数。</p>
+            <div className="config-fields-grid">
+              <div className="config-field">
+                <label className="config-field__label">最小工具失败次数</label>
+                <input type="number" className="config-field__input" min={1} value={formConfig.trial_and_error?.min_tool_failures ?? 2} onChange={(e) => updateTrial('min_tool_failures', Number(e.target.value))} />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">最小出现次数</label>
+                <input type="number" className="config-field__input" min={1} value={formConfig.trial_and_error?.min_occurrences ?? 3} onChange={(e) => updateTrial('min_occurrences', Number(e.target.value))} />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">观察窗口 (轮次)</label>
+                <input type="number" className="config-field__input" min={1} value={formConfig.trial_and_error?.observation_window ?? 50} onChange={(e) => updateTrial('observation_window', Number(e.target.value))} />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">相似度阈值</label>
+                <input type="number" className="config-field__input" min={0} max={1} step={0.05} value={formConfig.trial_and_error?.similarity_threshold ?? 0.8} onChange={(e) => updateTrial('similarity_threshold', Number(e.target.value))} />
+              </div>
+            </div>
+          </div>
+
+          {/* Classifier */}
+          <div className="config-section">
+            <h3 className="config-section__title">分类器模型</h3>
+            <p className="muted config-section__desc">对进化信号分类和生成提案文本的 LLM。</p>
+            <div className="config-fields-grid">
+              <div className="config-field">
+                <label className="config-field__label">Provider</label>
+                <input type="text" className="config-field__input" value={formConfig.classifier?.provider || ''} onChange={(e) => updateClassifier('provider', e.target.value)} placeholder="如 openai" />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">Model</label>
+                <input type="text" className="config-field__input" value={formConfig.classifier?.model || ''} onChange={(e) => updateClassifier('model', e.target.value)} placeholder="如 gpt-4o-mini" />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">API Key</label>
+                <input type="password" className="config-field__input" value={formConfig.classifier?.api_key || ''} onChange={(e) => updateClassifier('api_key', e.target.value)} placeholder="sk-..." />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">Base URL</label>
+                <input type="text" className="config-field__input" value={formConfig.classifier?.base_url || ''} onChange={(e) => updateClassifier('base_url', e.target.value)} placeholder="https://api.openai.com/v1" />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">Max Tokens</label>
+                <input type="number" className="config-field__input" min={1} value={formConfig.classifier?.max_tokens ?? 2048} onChange={(e) => updateClassifier('max_tokens', Number(e.target.value))} />
+              </div>
+            </div>
+          </div>
+
+          {/* Embedding */}
+          <div className="config-section">
+            <h3 className="config-section__title">嵌入模型</h3>
+            <p className="muted config-section__desc">用于提案去重向量化的 Embedding 模型。</p>
+            <div className="config-fields-grid">
+              <div className="config-field">
+                <label className="config-field__label">Provider</label>
+                <input type="text" className="config-field__input" value={formConfig.embedding?.provider || ''} onChange={(e) => updateEmbedding('provider', e.target.value)} placeholder="如 openai" />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">Model</label>
+                <input type="text" className="config-field__input" value={formConfig.embedding?.model || ''} onChange={(e) => updateEmbedding('model', e.target.value)} placeholder="如 bge-m3" />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">API Key</label>
+                <input type="password" className="config-field__input" value={formConfig.embedding?.api_key || ''} onChange={(e) => updateEmbedding('api_key', e.target.value)} placeholder="sk-..." />
+              </div>
+              <div className="config-field">
+                <label className="config-field__label">Base URL</label>
+                <input type="text" className="config-field__input" value={formConfig.embedding?.base_url || ''} onChange={(e) => updateEmbedding('base_url', e.target.value)} placeholder="https://api.openai.com/v1" />
+              </div>
+            </div>
+          </div>
+
+          {/* Dedup threshold */}
+          <div className="config-section">
+            <h3 className="config-section__title">去重</h3>
+            <p className="muted config-section__desc">向量相似度高于此阈值的提案视为重复，自动跳过。</p>
+            <div className="config-field" style={{ maxWidth: 240 }}>
+              <label className="config-field__label">去重阈值</label>
+              <input type="number" className="config-field__input" min={0} max={1} step={0.05} value={formConfig.dedup_threshold ?? 0.85} onChange={(e) => { setFormConfig(prev => ({ ...prev, dedup_threshold: Number(e.target.value) })); setConfigDirty(true) }} />
+            </div>
+          </div>
+
+          {/* Save bar */}
+          <div className="config-form__actions">
+            <button type="button" className="btn btn-primary" disabled={!configDirty || configSaving} onClick={handleSaveConfig}>
+              {configSaving ? '保存中...' : '保存配置'}
+            </button>
+            <button type="button" className="btn btn-secondary" disabled={!configDirty || configSaving} onClick={() => { fetchConfig(); setConfigDirty(false) }}>
+              取消
+            </button>
+            {configDirty && <span className="muted" style={{ fontSize: '0.85em' }}>有未保存的更改</span>}
           </div>
         </div>
       )}

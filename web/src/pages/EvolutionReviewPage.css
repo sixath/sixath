@@ -269,12 +269,146 @@
   color: var(--muted);
 }
 
-/* Config panel & toggle */
-.evolution-config-panel {
-  padding: 1rem 1.25rem;
+/* Config form */
+.evolution-config-form {
+  padding: 1.25rem;
   margin-bottom: 1rem;
 }
 
+.config-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0;
+}
+
+.config-section__title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.config-section__desc {
+  margin: 0 0 0.75rem;
+}
+
+.config-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.config-field__label {
+  font-size: 0.85em;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.config-field__input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.9em;
+  color: var(--text-strong);
+  background: var(--card);
+}
+
+.config-field__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+/* Tag input */
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  min-height: 2.2rem;
+}
+
+.tag-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 2px 8px;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  white-space: nowrap;
+}
+
+.tag__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.tag__remove:hover {
+  opacity: 1;
+}
+
+.tag-input__field {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 0.9em;
+  color: var(--text-strong);
+  background: none;
+  padding: 0.15rem 0;
+}
+
+.tag-input__add {
+  flex-shrink: 0;
+}
+
+/* Form actions */
+.config-form__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+/* Existing toggle styles kept */
 .evolution-config-panel__row {
   display: flex;
   justify-content: space-between;
@@ -291,6 +425,12 @@
 .evolution-config-panel__row .muted {
   margin: 0;
   font-size: 0.85em;
+}
+
+.btn-active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .toggle-switch {

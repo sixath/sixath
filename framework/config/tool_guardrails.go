@@ -171,12 +171,16 @@ type EvolutionConfig struct {
 	Classifier struct {
 		Provider  string `json:"provider" yaml:"provider"`
 		Model     string `json:"model" yaml:"model"`
+		APIKey    string `json:"api_key,omitempty" yaml:"api_key,omitempty"`
+		BaseURL   string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
 		MaxTokens int    `json:"max_tokens" yaml:"max_tokens"`
 	} `json:"classifier" yaml:"classifier"`
 	DedupThreshold float64 `json:"dedup_threshold" yaml:"dedup_threshold"`
 	Embedding      struct {
 		Provider string `json:"provider" yaml:"provider"`
 		Model    string `json:"model" yaml:"model"`
+		APIKey   string `json:"api_key,omitempty" yaml:"api_key,omitempty"`
+		BaseURL  string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
 	} `json:"embedding" yaml:"embedding"`
 }
 
