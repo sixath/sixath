@@ -184,6 +184,15 @@ func NewRegistry() *Registry {
 	return reg
 }
 
+// NewEmptyRegistry 返回不预注册任何内置工具的 Registry（NewRegistry 会默认注册 http_request）。
+// 用于构建严格受限的子工具集（如 deep_investigate 的子 agent）。
+func NewEmptyRegistry() *Registry {
+	return &Registry{
+		tools:        make(map[string]Tool),
+		mcpServerIDs: make(map[string]struct{}),
+	}
+}
+
 func (r *Registry) HasTools() bool {
 	return len(r.tools) > 0
 }
