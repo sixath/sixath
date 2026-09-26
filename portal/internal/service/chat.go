@@ -17,13 +17,13 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/sixath/framework/events"
 	agent "github.com/sixath/framework/harness"
+	"github.com/sixath/framework/investigate"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/sessionsearch"
 	"github.com/sixath/framework/tool"
 	toolskill "github.com/sixath/framework/tool/skillops"
 	"github.com/sixath/framework/turntrace"
-	"github.com/sixath/framework/investigate"
 	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
 )
@@ -431,7 +431,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	}
 	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
 	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
-		s.log.Errorf("register deep_investigate failed: err=%v", err)
+		s.log.Errorf("register deep_investigate failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 	}
 	mcpServers = regResult.McpServers
 

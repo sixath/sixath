@@ -17,9 +17,9 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	agent "github.com/sixath/framework/harness"
+	"github.com/sixath/framework/investigate"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
-	"github.com/sixath/framework/investigate"
 )
 
 func baseSuccess() *common.BaseResponse {
@@ -315,7 +315,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 	}
 	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
 	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
-		s.log.Errorf("register deep_investigate failed: err=%v", err)
+		s.log.Errorf("register deep_investigate failed: agent_id=%s err=%v", agentID, err)
 	}
 	mcpServers := regResult.McpServers
 
