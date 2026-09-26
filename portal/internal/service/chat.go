@@ -23,6 +23,7 @@ import (
 	"github.com/sixath/framework/tool"
 	toolskill "github.com/sixath/framework/tool/skillops"
 	"github.com/sixath/framework/turntrace"
+	"github.com/sixath/framework/investigate"
 	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
 )
@@ -428,6 +429,10 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
+	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
+	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
+		s.log.Errorf("register deep_investigate failed: err=%v", err)
+	}
 	mcpServers = regResult.McpServers
 
 	extraSkillDirs, err := s.sharedSkillDirs(ctx, session.AgentID)
@@ -725,6 +730,10 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	if err != nil {
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
+	}
+	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
+	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
+		s.log.Errorf("register deep_investigate failed: err=%v", err)
 	}
 	mcpServers = regResult.McpServers
 	extraSkillDirs, err := s.sharedSkillDirs(ctx, session.AgentID)
