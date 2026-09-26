@@ -55,11 +55,11 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 		})
 		if err != nil {
 			return map[string]any{
-				"ok":           false,
-				"error":        err.Error(),
-				"error_code":   tool.ErrorTransient,
-				"duration_ms":  time.Since(started).Milliseconds(),
-				"steps_taken":  0,
+				"ok":          false,
+				"error":       err.Error(),
+				"error_code":  tool.ErrorTransient,
+				"duration_ms": time.Since(started).Milliseconds(),
+				"steps_taken": 0,
 			}, err
 		}
 
