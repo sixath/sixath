@@ -31,6 +31,10 @@ type Config struct {
 	MaxSteps int
 	// Timeout 整轮子调查超时；<=0 时默认 15 分钟。
 	Timeout time.Duration
+	// MaxOutputTokens 子 agent 单次回复 token 上限；<=0 时默认 4096。
+	// 不能沿用框架默认 1024：结论正文被截断会丢掉末尾状态行，
+	// 被 parseConclusion 误判为证据不足。
+	MaxOutputTokens int
 }
 
 func (c Config) maxSteps() int {
@@ -45,6 +49,13 @@ func (c Config) timeout() time.Duration {
 		return c.Timeout
 	}
 	return 15 * time.Minute
+}
+
+func (c Config) maxOutputTokens() int {
+	if c.MaxOutputTokens > 0 {
+		return c.MaxOutputTokens
+	}
+	return 4096
 }
 
 // Register 把 deep_investigate 注册进 reg。可见性由 CheckFn 门控决定：

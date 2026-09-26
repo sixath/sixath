@@ -46,6 +46,7 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 		}
 		agentOpts := []harness.ReActOption{
 			harness.WithReActMaxSteps(cfg.maxSteps()),
+			harness.WithReActMaxOutputTokens(cfg.maxOutputTokens()),
 			harness.WithReActSystemPrompt(playbookPrompt),
 		}
 		subAgent := harness.NewReActAgent(cfg.Model, nil, sub, agentOpts...)

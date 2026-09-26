@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
@@ -160,5 +161,16 @@ func (f *fakeToolModel) ChatWithTools(ctx context.Context, msgs []model.Message,
 func TestRegister_RejectsNilRegistry(t *testing.T) {
 	if err := Register(nil, Config{Model: &fakeToolModel{}}); err == nil {
 		t.Fatal("nil registry must be rejected")
+	}
+}
+
+func TestConfig_Defaults(t *testing.T) {
+	c := Config{}
+	if c.maxSteps() != 15 || c.timeout() != 15*time.Minute || c.maxOutputTokens() != 4096 {
+		t.Fatalf("bad defaults: steps=%d timeout=%v maxOut=%d", c.maxSteps(), c.timeout(), c.maxOutputTokens())
+	}
+	custom := Config{MaxSteps: 5, Timeout: 123 * time.Second, MaxOutputTokens: 2048}
+	if custom.maxSteps() != 5 || custom.maxOutputTokens() != 2048 {
+		t.Fatal("custom values must win")
 	}
 }
