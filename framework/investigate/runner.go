@@ -50,8 +50,10 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 		}
 		subAgent := harness.NewReActAgent(cfg.Model, nil, sub, agentOpts...)
 
+		parentRID, _ := ctx.Value(tool.ContextKeyRequestID).(string)
 		resp, err := subAgent.Run(ctx, &harness.Request{
-			Messages: []model.Message{{Role: "user", Content: userText}},
+			RequestID: parentRID,
+			Messages:  []model.Message{{Role: "user", Content: userText}},
 		})
 		if err != nil {
 			return map[string]any{
@@ -77,22 +79,27 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 }
 
 // parseConclusion 从子 agent 最终文本中剥离状态行，返回正文与「证据不足」标记。
-// 状态行约定见 playbookPrompt：「状态: 证据充分」或「状态: 证据不足」（全角冒号兼容）。
+// 状态行约定见 playbookPrompt：「状态: 证据充分」或「状态: 证据不足」（全角冒号、句末标点、
+// 全角空格兼容）。若全文未见状态行，则按证据不足处理。
 func parseConclusion(text string) (conclusion string, insufficient bool) {
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	keep := lines[:0]
+	seen := false
 	for _, l := range lines {
-		norm := strings.NewReplacer("：", ":", " ", "").Replace(strings.TrimSpace(l))
+		norm := strings.NewReplacer("：", ":", " ", "", "　", "").Replace(strings.TrimSpace(l))
+		norm = strings.TrimRight(norm, "。.") // 容忍句末标点
 		if norm == "状态:证据充分" {
+			seen = true
 			continue
 		}
 		if norm == "状态:证据不足" {
+			seen = true
 			insufficient = true
 			continue
 		}
 		keep = append(keep, l)
 	}
-	return strings.TrimSpace(strings.Join(keep, "\n")), insufficient
+	return strings.TrimSpace(strings.Join(keep, "\n")), insufficient || !seen
 }
 
 // collectRefs 从子 agent 的 tool 消息中提取全部 evidence_refs。

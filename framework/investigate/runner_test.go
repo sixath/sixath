@@ -124,3 +124,27 @@ func TestExecute_SubRegistryExcludesSelfAndUnrelated(t *testing.T) {
 		t.Fatal("code tools must be in sub registry")
 	}
 }
+
+func TestParseConclusion(t *testing.T) {
+	cases := []struct {
+		name         string
+		in           string
+		wantText     string
+		wantInsuffic bool
+	}{
+		{"sufficient", "结论正文\n状态: 证据充分", "结论正文", false},
+		{"insufficient", "结论正文\n状态: 证据不足", "结论正文", true},
+		{"full-width colon", "结论\n状态：证据不足", "结论", true},
+		{"trailing period", "结论\n状态: 证据充分。", "结论", false},
+		{"status not last line", "状态: 证据充分\n结论正文", "结论正文", false},
+		{"missing status line", "只有结论没有状态行", "只有结论没有状态行", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotText, gotIns := parseConclusion(c.in)
+			if gotText != c.wantText || gotIns != c.wantInsuffic {
+				t.Fatalf("parseConclusion(%q) = (%q, %v), want (%q, %v)", c.in, gotText, gotIns, c.wantText, c.wantInsuffic)
+			}
+		})
+	}
+}
