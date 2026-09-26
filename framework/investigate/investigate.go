@@ -82,9 +82,7 @@ func Register(reg *tool.Registry, cfg Config) error {
 			},
 			"required": []string{"question"},
 		},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) {
-			return nil, errors.New("not implemented") // Task 2 实现 buildExecute 后替换
-		},
+		Execute: buildExecute(reg, cfg),
 	})
 }
 
