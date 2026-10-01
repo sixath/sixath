@@ -56,4 +56,10 @@ func TestMergeRuns(t *testing.T) {
 	if m.Passed || m.Runs != 0 || m.InfraErrors != 2 || m.FailureReason != "infra_error" {
 		t.Fatalf("all lost: %+v", m)
 	}
+	lostA := TaskResult{TaskID: "a", FailureReason: "infra_error", Error: "gateway 502"}
+	lostB := TaskResult{TaskID: "a", FailureReason: "judge_error", Error: "judge output unparseable"}
+	m = mergeRuns([]TaskResult{lostA, pass, lostA, lostB})
+	if !m.Passed || len(m.LostErrors) != 2 || m.LostErrors[0] != "gateway 502" || m.LostErrors[1] != "judge output unparseable" {
+		t.Fatalf("lost errors should be kept deduplicated: %+v", m.LostErrors)
+	}
 }

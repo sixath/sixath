@@ -7,6 +7,39 @@ import (
 	"testing"
 )
 
+func TestAnswerShapeTaskSetsLoad(t *testing.T) {
+	cases := []struct {
+		dir     string
+		minSize int
+		needCI  bool
+	}{
+		{"../tasks_portal", 20, false},
+		{"../tasks_ci", 5, true},
+	}
+	for _, c := range cases {
+		tasks, err := LoadTasksFromPath(c.dir)
+		if err != nil {
+			t.Fatalf("%s: %v", c.dir, err)
+		}
+		if len(tasks) < c.minSize {
+			t.Fatalf("%s: %d tasks, want >= %d", c.dir, len(tasks), c.minSize)
+		}
+		types := map[string]int{}
+		for _, task := range tasks {
+			if task.Category != "answer_shape" {
+				t.Fatalf("%s: %s has category %q", c.dir, task.ID, task.Category)
+			}
+			if c.needCI && len(task.Fixtures) == 0 {
+				t.Fatalf("%s: %s needs fixtures for live mode", c.dir, task.ID)
+			}
+			types[task.Expect.AnswerType]++
+		}
+		if !c.needCI && (len(types) != len(ValidAnswerTypes) || types["diagnose"] < 5) {
+			t.Fatalf("%s: answer types %v, want all five and diagnose >= 5", c.dir, types)
+		}
+	}
+}
+
 func TestLoadTasks_ValidAndComments(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.jsonl")

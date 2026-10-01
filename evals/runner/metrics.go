@@ -23,7 +23,9 @@ type TaskResult struct {
 	Runs        int           `json:"runs,omitempty"`
 	Passes      int           `json:"passes,omitempty"`
 	InfraErrors int           `json:"infra_errors,omitempty"`
-	Judge       *JudgeVerdict `json:"judge,omitempty"`
+	// LostErrors 被丢弃运行的错误（去重，最多 3 条），合并后仍可追查丢失原因。
+	LostErrors []string      `json:"lost_errors,omitempty"`
+	Judge      *JudgeVerdict `json:"judge,omitempty"`
 	Trace       *TraceSummary `json:"trace,omitempty"`
 	Error       string        `json:"error,omitempty"`
 }

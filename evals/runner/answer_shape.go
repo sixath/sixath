@@ -1,6 +1,10 @@
 package main
 
-import "context"
+import (
+	"context"
+	"slices"
+	"strings"
+)
 
 // scoreAnswerShape 用 judge 判定一次运行。judge 未配置、调用失败或输出不可解析时记 judge_error（不计入通过率）。
 func scoreAnswerShape(ctx context.Context, j *Judge, task Task, answer string, ts TraceSummary) TaskResult {
@@ -53,10 +57,14 @@ func mergeRuns(runs []TaskResult) TaskResult {
 		return TaskResult{}
 	}
 	var valid []TaskResult
+	var lostErrs []string
 	lost := 0
 	for _, r := range runs {
 		if isLostRun(r) {
 			lost++
+			if e := strings.TrimSpace(r.Error); e != "" && len(lostErrs) < 3 && !slices.Contains(lostErrs, e) {
+				lostErrs = append(lostErrs, e)
+			}
 			continue
 		}
 		valid = append(valid, r)
@@ -64,6 +72,7 @@ func mergeRuns(runs []TaskResult) TaskResult {
 	if len(valid) == 0 {
 		out := runs[len(runs)-1]
 		out.Runs, out.Passes, out.InfraErrors, out.Passed = 0, 0, lost, false
+		out.LostErrors = lostErrs
 		return out
 	}
 	passes := 0
@@ -81,6 +90,7 @@ func mergeRuns(runs []TaskResult) TaskResult {
 		}
 	}
 	out.Runs, out.Passes, out.InfraErrors, out.Passed = len(valid), passes, lost, passed
+	out.LostErrors = lostErrs
 	return out
 }
 

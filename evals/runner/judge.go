@@ -18,7 +18,8 @@ const (
 	judgeMaxCalls       = 40
 	judgeMaxSuspects    = 10
 	judgeAnswerMaxRunes = 6000
-	judgeMaxTokens      = 2048
+	// 推理型 judge（如 glm-5.1）的思考过程本身约占 2000 token，上限过低会只剩空正文。
+	judgeMaxTokens = 8192
 )
 
 var (
@@ -104,6 +105,9 @@ func (j *Judge) Evaluate(ctx context.Context, task Task, answer string, ts Trace
 		v, err := parseVerdict(gen.Text)
 		if err == nil {
 			return v, nil
+		}
+		if strings.TrimSpace(gen.Text) == "" && gen.FinishReason != "" {
+			err = fmt.Errorf("%w (empty output, finish_reason=%s, max_tokens=%d)", err, gen.FinishReason, judgeMaxTokens)
 		}
 		lastErr = err
 	}

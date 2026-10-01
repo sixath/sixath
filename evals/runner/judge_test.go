@@ -164,7 +164,7 @@ func TestJudge_CanceledContext(t *testing.T) {
 func TestJudge_CallOptions(t *testing.T) {
 	m := &stubJudgeModel{replies: []string{allPass}}
 	_, _ = (&Judge{Model: m}).Evaluate(context.Background(), shapeTask, "x", TraceSummary{})
-	if m.cfgs[0].Temperature != 0 || m.cfgs[0].MaxTokens != 2048 {
+	if m.cfgs[0].Temperature != 0 || m.cfgs[0].MaxTokens != judgeMaxTokens {
 		t.Fatalf("cfg=%+v", m.cfgs[0])
 	}
 }
