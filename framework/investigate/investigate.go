@@ -27,7 +27,7 @@ var logToolNames = []string{"es_log_query", "jaeger_trace", "vm_run_cmd"}
 type Config struct {
 	// Model 子 agent 使用的模型；必须实现 harness.ToolCallingModel（通常复用父 agent 的 chat 模型）。
 	Model model.Model
-	// MaxSteps 子 ReAct 循环步数上限；<=0 时默认 15。
+	// MaxSteps 子 ReAct 循环步数上限；<=0 时默认 DefaultMaxSteps。
 	MaxSteps int
 	// Timeout 整轮子调查超时；<=0 时默认 15 分钟。
 	Timeout time.Duration
@@ -35,13 +35,22 @@ type Config struct {
 	// 不能沿用框架默认 1024：结论正文被截断会丢掉末尾状态行，
 	// 被 parseConclusion 误判为证据不足。
 	MaxOutputTokens int
+	// StopHooks 透传给子 agent（通常复用父 agent 工作区的 stop_rules）；为空则不启用。
+	StopHooks []harness.StopHook
+	// MaxStopNudges 子 agent 的 StopHook 续跑上限；<=0 用 harness 默认值。
+	MaxStopNudges int
+	// ExtraOptions 追加到子 agent 的选项（如台账证据观测 WithReActToolSuccessHook）。
+	ExtraOptions []harness.ReActOption
 }
+
+// DefaultMaxSteps 需容纳「确认时间线 → 找对照 → 证伪假设」的完整调查链。
+const DefaultMaxSteps = 40
 
 func (c Config) maxSteps() int {
 	if c.MaxSteps > 0 {
 		return c.MaxSteps
 	}
-	return 15
+	return DefaultMaxSteps
 }
 
 func (c Config) timeout() time.Duration {

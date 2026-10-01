@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/sixath/framework/events"
 	agent "github.com/sixath/framework/harness"
+	"github.com/sixath/framework/redact"
+	"github.com/sixath/framework/tool"
 	toolskill "github.com/sixath/framework/tool/skillops"
 )
 
@@ -31,6 +34,9 @@ const (
 	// 已产生的正文**照常落库**（不置 Failed），前端据此展示"已中断"。
 	ChatStreamEventCancelled ChatStreamEventType = "cancelled"
 	ChatStreamEventMEA       ChatStreamEventType = "mea"
+	// ChatStreamEventFinal 携带本轮最终答复（Done.Text / 末条 assistant），不再下发为 chunk；
+	// 落库时优先用它，避免把中间步骤的过程性文字和被 stop hook 打回的草稿拼进历史。
+	ChatStreamEventFinal ChatStreamEventType = "final"
 )
 
 const toolPayloadFieldLimit = 8 * 1024 // 单字段截断上限（字节）
@@ -116,17 +122,66 @@ func toolCallPayloadFromRecord(rec agent.ToolCallRecord, phase string) *ToolCall
 		Step:       rec.Step,
 		Phase:      phase,
 		ToolName:   rec.ToolName,
-		Error:      rec.Error,
+		Error:      redact.String(rec.Error),
 		Allowed:    rec.Allowed,
 		Decision:   rec.Decision,
 		DurationMS: rec.DurationMS,
 	}
-	args, aTrunc := truncateField(rec.Arguments)
-	res, rTrunc := truncateField(rec.Result)
+	var argsIn any
+	if rec.Arguments != nil {
+		argsIn = redact.Value(rec.Arguments)
+	}
+	args, aTrunc := truncateField(argsIn)
+	res, rTrunc := truncateField(redactResult(rec.Result))
 	p.Arguments = args
 	p.Result = res
 	p.Truncated = aTrunc || rTrunc
 	return p
+}
+
+// redactResult 把结果经 JSON 解码为通用 map/slice 后逐个字符串遮盖，覆盖结构体（SSHExecResult、QuerySpillStub.Sample）
+// 与 []map[string]any 等 redact.Value 不直接递归的类型。不能对 JSON 文本跑正则：URL 等模式会跨字段匹配、转义引号会漏遮。
+// 无凭据时返回原值，保持下游序列化不变。
+func redactResult(v any) any {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case string:
+		return redact.String(t)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var generic any
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(&generic); err != nil {
+		return v
+	}
+	red := redact.Value(generic)
+	keepPendingToken(generic, red)
+	before, err1 := json.Marshal(generic)
+	after, err2 := json.Marshal(red)
+	if err1 != nil || err2 != nil || string(before) == string(after) {
+		return v
+	}
+	return red
+}
+
+// keepPendingToken 保留待确认结果顶层的一次性 token：前端刷新后依赖 timeline 中的 result.token 重建确认 / ask_user 卡片。
+func keepPendingToken(orig, red any) {
+	om, ok := orig.(map[string]any)
+	if !ok || om["status"] != "pending" {
+		return
+	}
+	tok, ok := om["token"]
+	if !ok {
+		return
+	}
+	if rm, ok := red.(map[string]any); ok {
+		rm["token"] = tok
+	}
 }
 
 // modelCallEventFromBus 将事件总线上的 ModelInvoked/ModelResponded 事件映射为 ModelCallPayload。
@@ -205,6 +260,10 @@ func confirmationRequestsFromResponse(resp *agent.Response) []ChatConfirmationRe
 			items = append(items, *req)
 			continue
 		}
+		if req := caseSaveConfirmationFromCall(call); req != nil {
+			items = append(items, *req)
+			continue
+		}
 		if req := terminalConfirmationFromCall(call); req != nil {
 			items = append(items, *req)
 			continue
@@ -262,6 +321,34 @@ func skillManageConfirmationFromCall(call agent.ToolCallRecord) *ChatConfirmatio
 		Severity:    "danger",
 		ResourceKey: action + ":" + name,
 		ExpiresAt:   expiresAt,
+	}
+}
+
+// caseSaveConfirmationFromCall 把 case_library propose 的草稿转成确认卡片；草稿已落盘，确认后才参与召回。
+func caseSaveConfirmationFromCall(call agent.ToolCallRecord) *ChatConfirmationRequest {
+	if call.ToolName != tool.CaseLibraryToolName {
+		return nil
+	}
+	m, ok := call.Result.(map[string]any)
+	if !ok {
+		return nil
+	}
+	status, _ := m["status"].(string)
+	token, _ := m["token"].(string)
+	if status != "pending" || token == "" {
+		return nil
+	}
+	name, _ := m["name"].(string)
+	preview, _ := m["preview"].(string)
+	return &ChatConfirmationRequest{
+		ID:          fmt.Sprintf("%s:%s", call.ToolCallID, token),
+		Kind:        tool.CaseSaveConfirmKind,
+		Title:       "确认沉淀排障案例",
+		Description: fmt.Sprintf("确认后，案例「%s」会在以后遇到相似症状时被优先验证。有误可先在案例库中修改或删除。", name),
+		Token:       token,
+		DSL:         preview,
+		Severity:    "info",
+		ResourceKey: "case:" + token,
 	}
 }
 

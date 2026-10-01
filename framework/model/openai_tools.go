@@ -130,7 +130,8 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 				Used:             false,
 				ReasoningContent: msg.ReasoningContent,
 			},
-			TokenUsage: tokenUsageFromOpenAI(resp.Usage),
+			TokenUsage:   tokenUsageFromOpenAI(resp.Usage),
+			FinishReason: string(resp.Choices[0].FinishReason),
 		}, nil
 	}
 
@@ -162,7 +163,8 @@ func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []Message, re
 			ToolCalls:        calls,
 			ReasoningContent: msg.ReasoningContent,
 		},
-		TokenUsage: tokenUsageFromOpenAI(resp.Usage),
+		TokenUsage:   tokenUsageFromOpenAI(resp.Usage),
+		FinishReason: string(resp.Choices[0].FinishReason),
 	}, nil
 }
 

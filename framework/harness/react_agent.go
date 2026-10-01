@@ -115,6 +115,10 @@ type ReActConfig struct {
 	// SkillRouter 可选；非空时按最新用户消息做 Skill 语义路由，
 	// 命中则把对应 SKILL.md 正文注入 system prompt 的 Skills 区块（见 prepareModelMessages）。
 	SkillRouter SkillAutoRouter
+	// StopHooks 在模型准备结束本轮时调用，可要求继续（见 stop_hook.go）。
+	StopHooks []StopHook
+	// MaxStopNudges 单次 Run 内 StopHook 继续次数上限；<=0 时默认 DefaultMaxStopNudges。
+	MaxStopNudges int
 }
 
 // SkillAutoRouter 按用户 query 返回语义最匹配的 Skill；ok=false 表示无命中或路由不可用。
@@ -435,6 +439,11 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
+			if d, ok := a.evaluateStopHooks(ctx, gen.Text, messages, trace, emit); ok {
+				messages = continueAfterStopHook(messages, gen.Text, stepInfo, d, trace, emit, step)
+				continue
+			}
+			trace.recordEmptyFinal(gen, step)
 			lastAnswer = gen.Text
 			_ = a.storeAssistant(ctx, lastAnswer)
 			emit(events.RunCompleted, map[string]any{"text_length": len(lastAnswer), "tool_calls": len(trace.ToolCalls)})
@@ -715,6 +724,7 @@ func (a *ReActAgent) runPlainEvents(
 			sendError(err, -1)
 			return
 		}
+		trace.recordEmptyFinal(gen, -1)
 		_ = a.storeAssistant(ctx, gen.Text)
 		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1))
 		if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
@@ -770,6 +780,11 @@ func (a *ReActAgent) runToolEventsSync(
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
+			if d, ok := a.evaluateStopHooks(ctx, gen.Text, messages, trace, emit); ok {
+				messages = continueAfterStopHook(messages, gen.Text, stepInfo, d, trace, emit, step)
+				continue
+			}
+			trace.recordEmptyFinal(gen, step)
 			_ = a.storeAssistant(ctx, gen.Text)
 			if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
 				return
@@ -869,6 +884,16 @@ func (a *ReActAgent) runToolEvents(
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
+			if d, ok := a.evaluateStopHooks(ctx, gen.Text, messages, trace, emit); ok {
+				// 本步正文已流给前端，补换行把它和后续输出分段，而不是黏成一句。
+				if gen.Text != "" && !strings.HasSuffix(gen.Text, "\n") &&
+					!send(StreamEvent{Type: StreamEventDelta, Text: "\n\n", Trace: trace}) {
+					return
+				}
+				messages = continueAfterStopHook(messages, gen.Text, stepInfo, d, trace, emit, step)
+				continue
+			}
+			trace.recordEmptyFinal(gen, step)
 			_ = a.storeAssistant(ctx, gen.Text)
 			emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text), "stream": true})
 			_ = send(streamDoneEvent(trace, messages, nil, gen.Text))
@@ -1092,8 +1117,15 @@ func (a *ReActAgent) executeOneToolCall(ctx context.Context, req *Request, step 
 
 	tl, ok := a.tools.Get(effectiveName)
 	if !ok {
-		record.Error = ErrToolNotFound.Error() + ": " + effectiveName
-		return record, fmt.Errorf("%w: %s", ErrToolNotFound, effectiveName)
+		record.Error = toolNotFoundMessage(effectiveName, a.tools.Names())
+		emit(events.ToolFailed, map[string]any{
+			"tool":         effectiveName,
+			"tool_call_id": call.ID,
+			"error":        record.Error,
+			"step":         step,
+		})
+		// 模型幻觉出的工具名同样可恢复：回传错误与相近工具名，让模型下一轮改用正确名称。
+		return record, nil
 	}
 
 	hookCtx := WithRequestMetadata(ctx, nil)
@@ -1141,7 +1173,7 @@ func (a *ReActAgent) executeOneToolCall(ctx context.Context, req *Request, step 
 		toolStartedPayload["debug"] = debug
 	}
 	emit(events.ToolStarted, toolStartedPayload)
-	result, err := tl.Execute(ctx, effectiveArgs)
+	result, err := tl.Execute(tool.WithNestedToolGate(ctx, a.nestedToolGate(hookCtx)), effectiveArgs)
 	record.DurationMS = time.Since(start).Milliseconds()
 	result, err = runToolHooksAfter(hookCtx, a.config.ToolHooks, effectiveName, result, err)
 	record.Result = result
@@ -1168,6 +1200,7 @@ func (a *ReActAgent) runPlain(ctx context.Context, messages []model.Message, emi
 		emit(events.RunError, map[string]any{"error": err.Error()})
 		return nil, runError(err, trace)
 	}
+	trace.recordEmptyFinal(gen, -1)
 	_ = a.storeAssistant(ctx, gen.Text)
 	emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1))
 	emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text)})

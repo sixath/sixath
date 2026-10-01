@@ -17,7 +17,6 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	agent "github.com/sixath/framework/harness"
-	"github.com/sixath/framework/investigate"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
@@ -313,8 +312,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat build tool registry failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
-	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
-	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
+	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace); err != nil {
 		s.log.Errorf("register deep_investigate failed: agent_id=%s err=%v", agentID, err)
 	}
 	mcpServers := regResult.McpServers
@@ -364,7 +362,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
-	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptionsFor(m, agentMeta.Workspace, extraSkillDirs)...)
 	if router := chat.SkillEmbedRouterFor(ctx, skillsIdx, agentMeta); router != nil {
 		opts = append(opts, agent.WithReActSkillRouter(router))
 	}

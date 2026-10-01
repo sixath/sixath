@@ -101,7 +101,7 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []Message, opts ...Opt
 	}
 
 	text := resp.Choices[0].Message.Content
-	gen := &Generation{Text: text, Raw: resp}
+	gen := &Generation{Text: text, Raw: resp, FinishReason: string(resp.Choices[0].FinishReason)}
 	if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
 		gen.TokenUsage = &TokenUsage{
 			InputTokens:  resp.Usage.PromptTokens,

@@ -189,6 +189,6 @@ docker build -t sixath-web .
 | 点击目录名 | `cd` 进入后自动 `dir`；文件与目录都会列出 |
 | 输入补全 | 基于最近一次 `dir` 结果；`Tab` / ↑↓ / 点击补全文件名（补全不发送） |
 | Esc | 先关补全列表，再按一次退出终端；标题栏「退出终端」吸顶可见 |
-| 日志输出 | 非 `dir` 表格会自动换行；单行 JSON 日志会 pretty-print |
+| 日志输出 | 结构化 JSON 日志（`L`/`TS`/`msg`）按行摘要展示，点击展开原文；其它输出自动换行 / pretty-print |
 
 独立全屏终端见侧栏 **终端**（`/terminal`），API 封装在 `src/api/terminal.ts`。

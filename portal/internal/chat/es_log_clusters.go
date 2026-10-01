@@ -57,6 +57,9 @@ func collectESLogClusters(tools []*biz.ToolMeta, opts ...RegistryBuildOptions) (
 		c.TraceIDField = mapStringField(dsMap, "trace_id_field", "traceIdField")
 		c.Purpose = mapStringField(dsMap, "purpose")
 		c.BodyField = mapStringField(dsMap, "body_field", "bodyField")
+		c.TimeField = mapStringField(dsMap, "time_field", "timeField")
+		c.IndexPriority = mapStringListField(dsMap, "index_priority", "indexPriority")
+		c.IndexSuggestLimit = mapIntField(dsMap, "index_suggest_limit", "indexSuggestLimit")
 	}
 
 	for _, t := range tools {
@@ -90,6 +93,15 @@ func collectESLogClusters(tools []*biz.ToolMeta, opts ...RegistryBuildOptions) (
 			}
 			if c.BodyField == "" {
 				c.BodyField = mapStringField(rcaMap, "body_field", "bodyField")
+			}
+			if c.TimeField == "" {
+				c.TimeField = mapStringField(rcaMap, "time_field", "timeField")
+			}
+			if len(c.IndexPriority) == 0 {
+				c.IndexPriority = mapStringListField(rcaMap, "index_priority", "indexPriority")
+			}
+			if c.IndexSuggestLimit == 0 {
+				c.IndexSuggestLimit = mapIntField(rcaMap, "index_suggest_limit", "indexSuggestLimit")
 			}
 			if c.Purpose == "" {
 				c.Purpose = strings.TrimSpace(t.Description)
@@ -166,6 +178,47 @@ func datasourceMapFromTool(t *biz.ToolMeta) map[string]interface{} {
 		return nested
 	}
 	return m
+}
+
+// mapStringListField 读取字符串数组，也接受逗号分隔的字符串。
+func mapStringListField(m map[string]interface{}, keys ...string) []string {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case []interface{}:
+			var out []string
+			for _, item := range v {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, strings.TrimSpace(s))
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		case string:
+			var out []string
+			for _, s := range strings.Split(v, ",") {
+				if s = strings.TrimSpace(s); s != "" {
+					out = append(out, s)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+	return nil
+}
+
+func mapIntField(m map[string]interface{}, keys ...string) int {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		}
+	}
+	return 0
 }
 
 func mapStringField(m map[string]interface{}, keys ...string) string {

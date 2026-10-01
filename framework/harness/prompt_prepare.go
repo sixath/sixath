@@ -10,11 +10,12 @@ import (
 	fwctx "github.com/sixath/framework/context"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/skills"
+	"github.com/sixath/framework/tool"
 )
 
 func (a *ReActAgent) prepareModelMessages(ctx context.Context, messages []model.Message, trace *RunTrace) []model.Message {
 	in := fwctx.Input{
-		AgentSystem: a.config.SystemPrompt,
+		AgentSystem: a.agentSystemPrompt(),
 		SkillsIndex: a.skillsPromptText(ctx, messages),
 		MemoryMD:    readWorkspaceMarkdown(a.config.Workspace, "MEMORY.md"),
 		UserMD:      readWorkspaceMarkdown(a.config.Workspace, "USER.md"),
@@ -28,6 +29,21 @@ func (a *ReActAgent) prepareModelMessages(ctx context.Context, messages []model.
 	}
 	out := replaceOrInsertFirstSystem(messages, encoded)
 	return fwctx.PrepareCtx(ctx, out, a.pipelineConfig(trace))
+}
+
+// agentSystemPrompt 在装配了 investigation 台账时附加通用排障方法论（已含该文本的提示，如 deep_investigate playbook，不重复追加）。
+func (a *ReActAgent) agentSystemPrompt() string {
+	sys := a.config.SystemPrompt
+	if a.tools == nil {
+		return sys
+	}
+	if _, ok := a.tools.Get(tool.InvestigationToolName); !ok || strings.Contains(sys, tool.InvestigationMethod) {
+		return sys
+	}
+	if strings.TrimSpace(sys) == "" {
+		return tool.InvestigationMethod
+	}
+	return sys + "\n\n" + tool.InvestigationMethod
 }
 
 func (a *ReActAgent) pipelineConfig(trace *RunTrace) *fwctx.PipelineConfig {

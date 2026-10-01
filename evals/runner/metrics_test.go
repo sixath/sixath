@@ -82,3 +82,54 @@ func TestComputeSummary_Empty(t *testing.T) {
 		t.Fatalf("empty summary total = %d", s.Total)
 	}
 }
+
+func TestComputeSummary_AnswerShapeSeparated(t *testing.T) {
+	tasks := []Task{
+		{ID: "s1", Category: "answer_shape", Expect: Expectation{AnswerType: "enumerate"}},
+		{ID: "s2", Category: "answer_shape", Expect: Expectation{AnswerType: "diagnose"}},
+		{ID: "s3", Category: "answer_shape", Expect: Expectation{AnswerType: "count"}},
+		{ID: "t1", Category: "single_tool", Expect: Expectation{Tools: []string{"list_tables"}}},
+	}
+	results := []TaskResult{
+		{TaskID: "s1", Category: "answer_shape", Passed: true, Runs: 2, Passes: 2, Steps: 3,
+			Trace: &TraceSummary{Calls: []TraceCall{{Tool: "a", Hits: 1}, {Tool: "b", Empty: true}}}},
+		{TaskID: "s2", Category: "answer_shape", Runs: 2, Passes: 1, Steps: 5, Attribution: "harness", FailureReason: "shape_mismatch",
+			Judge: &JudgeVerdict{Checks: []JudgeCheck{{ID: 1, Pass: true}, {ID: 2, Pass: true}, {ID: 3, Pass: true}, {ID: 4, Pass: false}}},
+			Trace: &TraceSummary{Calls: []TraceCall{{Tool: "c", Error: "boom"}}}},
+		{TaskID: "s3", Category: "answer_shape", FailureReason: "infra_error", InfraErrors: 2},
+		{TaskID: "t1", Category: "single_tool", Passed: true, Steps: 2, ToolsUsed: []string{"list_tables"}},
+	}
+	s := ComputeSummary(results, tasks)
+	if s.Total != 1 || s.CompletionRate != 1 {
+		t.Fatalf("answer_shape must not count toward completion_rate: %+v", s)
+	}
+	if _, ok := s.ByCategory["answer_shape"]; ok || s.Attribution["harness"] != 0 {
+		t.Fatalf("answer_shape leaked into legacy by_category/attribution: %+v", s)
+	}
+	a := s.AnswerShape
+	if a == nil {
+		t.Fatal("missing answer_shape summary")
+	}
+	if a.Tasks != 3 || a.Runs != 4 || a.Passes != 3 || a.LostRuns != 2 {
+		t.Fatalf("counts %+v", a)
+	}
+	if a.PassRate != 0.75 || a.LostRate != 2.0/6 {
+		t.Fatalf("rates pass=%v lost=%v", a.PassRate, a.LostRate)
+	}
+	if a.ByAnswerType["diagnose"].Total != 2 || a.ByAnswerType["diagnose"].Passed != 1 {
+		t.Fatalf("by type %+v", a.ByAnswerType)
+	}
+	if a.Rule4Failures != 1 || a.Attribution["harness"] != 1 {
+		t.Fatalf("rule4=%d attribution=%v", a.Rule4Failures, a.Attribution)
+	}
+	if a.ToolErrorRate != 1.0/3 || a.EmptyRate != 1.0/3 {
+		t.Fatalf("tool rates err=%v empty=%v", a.ToolErrorRate, a.EmptyRate)
+	}
+}
+
+func TestComputeSummary_OnlyAnswerShapeNoNaN(t *testing.T) {
+	s := ComputeSummary([]TaskResult{{TaskID: "s1", Category: "answer_shape", Passed: true, Runs: 1, Passes: 1}}, nil)
+	if s.Total != 0 || s.CompletionRate != 0 || s.AnswerShape == nil || s.AnswerShape.PassRate != 1 {
+		t.Fatalf("s=%+v", s)
+	}
+}

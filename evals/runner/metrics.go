@@ -8,9 +8,24 @@ type TaskResult struct {
 	Steps         int      `json:"steps"`
 	ToolsUsed     []string `json:"tools_used,omitempty"`
 	Output        string   `json:"output,omitempty"`
-	FailureReason string   `json:"failure_reason,omitempty"` // wrong_tool|tool_sequence|missing_output|over_steps|refused|model_error
-	Attribution   string   `json:"attribution,omitempty"`    // prompt|tool|schema|model
+	FailureReason string   `json:"failure_reason,omitempty"` // wrong_tool|tool_sequence|missing_output|over_steps|refused|model_error|premature_stop|too_few_tool_calls|no_contrast|stopped_at_mechanism|missing_root_cause|shape_mismatch|infra_error|judge_error|timeout|run_error|hitl_required|tool_error
+	Attribution   string   `json:"attribution,omitempty"`    // prompt|tool|schema|model|harness|understanding
 	CostUSD       float64  `json:"cost_usd,omitempty"`
+	StopNudges    int      `json:"stop_nudges,omitempty"`
+	// CriticRounds 被结案审查打回的次数（-critic 开启时）。
+	CriticRounds int `json:"critic_rounds,omitempty"`
+	// HitMaxSteps 用尽步数后由强制总结收尾：此时 stop_rules / critic 都不会运行。
+	HitMaxSteps bool `json:"hit_max_steps,omitempty"`
+	// LedgerScore 台账质量（0-1，-ledger 开启时的调查任务才有）；LedgerChecks 为各检查项结果。
+	LedgerScore  *float64        `json:"ledger_score,omitempty"`
+	LedgerChecks map[string]bool `json:"ledger_checks,omitempty"`
+	// Runs / Passes answer_shape 多次运行中有效运行数与通过数；InfraErrors 为因 infra_error/judge_error 丢弃的运行数。
+	Runs        int           `json:"runs,omitempty"`
+	Passes      int           `json:"passes,omitempty"`
+	InfraErrors int           `json:"infra_errors,omitempty"`
+	Judge       *JudgeVerdict `json:"judge,omitempty"`
+	Trace       *TraceSummary `json:"trace,omitempty"`
+	Error       string        `json:"error,omitempty"`
 }
 
 // Summary 汇总指标。
@@ -23,6 +38,13 @@ type Summary struct {
 	AvgCostUSD     float64                 `json:"avg_cost_usd"`
 	ByCategory     map[string]CategoryStat `json:"by_category"`
 	Attribution    map[string]int          `json:"attribution"`
+	// LedgerScored / AvgLedgerScore 只统计带台账评分的任务。
+	LedgerScored    int     `json:"ledger_scored,omitempty"`
+	AvgLedgerScore  float64 `json:"avg_ledger_score,omitempty"`
+	AvgCriticRounds float64 `json:"avg_critic_rounds,omitempty"`
+	HitMaxSteps     int     `json:"hit_max_steps,omitempty"`
+	// AnswerShape answer_shape 任务的端到端汇总；这类任务不计入上面的 Total/CompletionRate。
+	AnswerShape *ShapeSummary `json:"answer_shape,omitempty"`
 }
 
 // CategoryStat 单类别统计。
@@ -30,6 +52,22 @@ type CategoryStat struct {
 	Total  int     `json:"total"`
 	Passed int     `json:"passed"`
 	Rate   float64 `json:"completion_rate"`
+}
+
+// ShapeSummary answer_shape 端到端汇总。ByAnswerType 中 Total/Passed 按运行次数计。
+type ShapeSummary struct {
+	Tasks         int                     `json:"tasks"`
+	Runs          int                     `json:"runs"`
+	Passes        int                     `json:"passes"`
+	PassRate      float64                 `json:"e2e_pass_rate"`
+	LostRuns      int                     `json:"lost_runs"`
+	LostRate      float64                 `json:"lost_rate"`
+	ByAnswerType  map[string]CategoryStat `json:"by_answer_type"`
+	ToolErrorRate float64                 `json:"tool_error_rate"`
+	EmptyRate     float64                 `json:"empty_rate"`
+	Rule4Failures int                     `json:"rule4_failures"`
+	AvgSteps      float64                 `json:"avg_steps"`
+	Attribution   map[string]int          `json:"attribution"`
 }
 
 // ComputeSummary 由结果与任务集计算汇总。tasks 用于工具选择 F1 的期望比对。
@@ -52,15 +90,28 @@ func ComputeSummary(results []TaskResult, tasks []Task) Summary {
 		}
 	}
 
-	var stepsSum, costSum, f1Sum float64
-	f1N := 0
+	var shapeResults []TaskResult
+	var stepsSum, costSum, f1Sum, ledgerSum float64
+	f1N, criticSum := 0, 0
 	for _, r := range results {
+		if r.Category == "answer_shape" {
+			shapeResults = append(shapeResults, r)
+			continue
+		}
 		s.Total++
 		if r.Passed {
 			s.Passed++
 		}
 		stepsSum += float64(r.Steps)
 		costSum += r.CostUSD
+		criticSum += r.CriticRounds
+		if r.HitMaxSteps {
+			s.HitMaxSteps++
+		}
+		if r.LedgerScore != nil {
+			s.LedgerScored++
+			ledgerSum += *r.LedgerScore
+		}
 
 		cs := s.ByCategory[r.Category]
 		cs.Total++
@@ -86,9 +137,15 @@ func ComputeSummary(results []TaskResult, tasks []Task) Summary {
 		}
 	}
 
-	s.CompletionRate = float64(s.Passed) / float64(s.Total)
-	s.AvgSteps = stepsSum / float64(s.Total)
-	s.AvgCostUSD = costSum / float64(s.Total)
+	if s.Total > 0 {
+		s.CompletionRate = float64(s.Passed) / float64(s.Total)
+		s.AvgSteps = stepsSum / float64(s.Total)
+		s.AvgCostUSD = costSum / float64(s.Total)
+		s.AvgCriticRounds = float64(criticSum) / float64(s.Total)
+	}
+	if s.LedgerScored > 0 {
+		s.AvgLedgerScore = ledgerSum / float64(s.LedgerScored)
+	}
 	if f1N > 0 {
 		s.ToolF1 = f1Sum / float64(f1N)
 	}
@@ -98,6 +155,7 @@ func ComputeSummary(results []TaskResult, tasks []Task) Summary {
 			s.ByCategory[k] = cs
 		}
 	}
+	s.AnswerShape = computeShapeSummary(shapeResults, tasks)
 	return s
 }
 

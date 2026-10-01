@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -266,6 +267,106 @@ func TestChatWithToolsStream_PropagatesRecvError(t *testing.T) {
 	}
 	if gen.Err == nil {
 		t.Fatalf("expected gen.Err from mid-stream Recv failure, got %#v", gen)
+	}
+}
+
+func TestChatWithToolsStream_ReportsFinishReason(t *testing.T) {
+	cases := []struct {
+		name   string
+		frames []string
+		want   string
+	}{
+		{"named stop", []string{
+			`{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}`,
+			`[DONE]`,
+		}, "content_filter"},
+		{"eof only", []string{
+			`{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+			`[DONE]`,
+		}, "eof"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeSSE(t, w, c.frames)
+			}))
+			defer ts.Close()
+			reg := tool.NewRegistry()
+			registerFakeTool(t, reg, "fake_tool")
+			textCh, genCh, err := openAITestClient(ts).ChatWithToolsStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range textCh {
+			}
+			gen := <-genCh
+			if gen == nil || gen.FinishReason != c.want {
+				t.Fatalf("gen=%#v want FinishReason %q", gen, c.want)
+			}
+		})
+	}
+}
+
+func TestChatWithToolsStream_ReportsUsageAfterFinishFrame(t *testing.T) {
+	var sawIncludeUsage bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		sawIncludeUsage = strings.Contains(string(body), `"include_usage":true`)
+		writeSSE(t, w, []string{
+			`{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":""}}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"c1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":900,"completion_tokens":40,"total_tokens":940}}`,
+			`[DONE]`,
+		})
+	}))
+	defer ts.Close()
+	reg := tool.NewRegistry()
+	registerFakeTool(t, reg, "fake_tool")
+	textCh, genCh, err := openAITestClient(ts).ChatWithToolsStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range textCh {
+	}
+	gen := <-genCh
+	if !sawIncludeUsage {
+		t.Fatal("request must ask for stream usage")
+	}
+	if gen == nil || gen.FinishReason != "stop" || gen.TokenUsage == nil ||
+		gen.TokenUsage.InputTokens != 900 || gen.TokenUsage.OutputTokens != 40 {
+		t.Fatalf("gen=%#v usage=%+v", gen, gen.TokenUsage)
+	}
+}
+
+func TestChatWithToolsStream_RetriesWithoutStreamOptions(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "stream_options") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unrecognized request argument: stream_options","type":"invalid_request_error"}}`))
+			return
+		}
+		writeSSE(t, w, []string{
+			`{"id":"c1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+			`[DONE]`,
+		})
+	}))
+	defer ts.Close()
+	reg := tool.NewRegistry()
+	registerFakeTool(t, reg, "fake_tool")
+	textCh, genCh, err := openAITestClient(ts).ChatWithToolsStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range textCh {
+	}
+	gen := <-genCh
+	if calls != 2 || gen == nil || gen.Text != "ok" {
+		t.Fatalf("calls=%d gen=%#v", calls, gen)
 	}
 }
 

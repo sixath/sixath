@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sixath/framework/tool"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,6 +19,75 @@ const HarnessHooksFileRel = "harness/hooks.yaml"
 type HarnessHooksFile struct {
 	Version int               `yaml:"version"`
 	Rules   []HarnessHookRule `yaml:"rules"`
+	// StopRules 模型准备结束本轮时的判定规则（见 harness_stop_rules.go）。
+	StopRules []HarnessStopRule `yaml:"stop_rules"`
+	// MaxStopNudges 单次 Run 内 stop_rules 最多让模型继续的次数；<=0 用 DefaultMaxStopNudges。
+	MaxStopNudges int `yaml:"max_stop_nudges"`
+	// InvestigationLedger 为 true 时装配 investigation 台账工具并登记工具输出供证据核对。
+	InvestigationLedger bool `yaml:"investigation_ledger"`
+	// Critic 结案审查配置（见 critic_hook.go）；缺省关闭。
+	Critic *CriticConfig `yaml:"critic"`
+	// Investigation 调查工具的工作区配置。
+	Investigation *InvestigationConfig `yaml:"investigation"`
+}
+
+// InvestigationConfig 是 hooks.yaml 的 investigation 段。
+//
+//	investigation:
+//	  change_sources:          # timeline 在每个变化点前后自动查询的变更记录
+//	    - label: ops-tasks
+//	      tool: es_log_query
+//	      args: {index: "ops-*", query: "RebootServer OR InstanceRestore OR ConfigUpdate"}
+type InvestigationConfig struct {
+	ChangeSources []tool.ChangeSource `yaml:"change_sources"`
+}
+
+// WorkspaceChangeSources 读取 hooks.yaml 的 investigation.change_sources；未配置时返回 nil。
+func WorkspaceChangeSources(workspace string) []tool.ChangeSource {
+	data, err := readWorkspaceHooksFile(workspace)
+	if err != nil || data == nil {
+		return nil
+	}
+	var file HarnessHooksFile
+	if yaml.Unmarshal(data, &file) != nil || file.Investigation == nil {
+		return nil
+	}
+	return file.Investigation.ChangeSources
+}
+
+// WorkspaceCriticConfig 读取 hooks.yaml 的 critic 段；未配置或 enabled=false 时 ok=false。
+func WorkspaceCriticConfig(workspace string) (cfg CriticConfig, ok bool) {
+	data, err := readWorkspaceHooksFile(workspace)
+	if err != nil || data == nil {
+		return CriticConfig{}, false
+	}
+	cfg, ok = ParseCriticConfigYAML(data)
+	if !ok || !cfg.Enabled {
+		return CriticConfig{}, false
+	}
+	return cfg, true
+}
+
+// ParseCriticConfigYAML 读取 hooks.yaml 内容中的 critic 段；缺失或解析失败时 ok=false。
+func ParseCriticConfigYAML(data []byte) (CriticConfig, bool) {
+	var file HarnessHooksFile
+	if yaml.Unmarshal(data, &file) != nil || file.Critic == nil {
+		return CriticConfig{}, false
+	}
+	return *file.Critic, true
+}
+
+// WorkspaceInvestigationLedgerEnabled 读取 hooks.yaml 的 investigation_ledger；文件缺失或解析失败视为关闭。
+func WorkspaceInvestigationLedgerEnabled(workspace string) bool {
+	data, err := readWorkspaceHooksFile(workspace)
+	if err != nil || data == nil {
+		return false
+	}
+	var file HarnessHooksFile
+	if yaml.Unmarshal(data, &file) != nil {
+		return false
+	}
+	return file.InvestigationLedger
 }
 
 // HarnessHookRule is one declarative Before rule (MVP: action=block only).
@@ -38,6 +108,15 @@ type HarnessHookMatch struct {
 // LoadWorkspaceHarnessHooks loads harness/hooks.yaml from workspace (if present).
 // Missing file → nil, nil. Invalid YAML / bad regex → error (caller may log and skip).
 func LoadWorkspaceHarnessHooks(workspace string) ([]ToolHook, error) {
+	data, err := readWorkspaceHooksFile(workspace)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	return ParseHarnessHooksYAML(data)
+}
+
+// readWorkspaceHooksFile 读取 workspace/harness/hooks.yaml；workspace 为空或文件不存在时返回 nil, nil。
+func readWorkspaceHooksFile(workspace string) ([]byte, error) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
 		return nil, nil
@@ -50,7 +129,7 @@ func LoadWorkspaceHarnessHooks(workspace string) ([]ToolHook, error) {
 		}
 		return nil, err
 	}
-	return ParseHarnessHooksYAML(data)
+	return data, nil
 }
 
 // ParseHarnessHooksYAML parses hooks YAML bytes into ToolHook implementations.

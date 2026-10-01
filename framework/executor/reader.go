@@ -1,6 +1,9 @@
 package executor
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // QueryExtras 返回 Extras，若为空则回退 Params。
 func (o QueryOptions) QueryExtras() map[string]any {
@@ -48,6 +51,8 @@ type QueryResult struct {
 	// RepairedSQL / RepairNote are set when execute_read auto-rewrote a schema error.
 	RepairedSQL string `json:"repaired_sql,omitempty"`
 	RepairNote  string `json:"repair_note,omitempty"`
+	// Aggregations ES 聚合结果原文；无聚合时为空。
+	Aggregations json.RawMessage `json:"aggregations,omitempty"`
 }
 
 func queryResultFromResult(r *Result) *QueryResult {
@@ -59,6 +64,7 @@ func queryResultFromResult(r *Result) *QueryResult {
 		Rows:           r.Rows,
 		Truncated:      r.Truncated,
 		EstimatedTotal: r.EstimatedTotal,
+		Aggregations:   r.Aggregations,
 	}
 }
 
@@ -71,5 +77,6 @@ func resultFromQueryResult(q *QueryResult) *Result {
 		Rows:           q.Rows,
 		Truncated:      q.Truncated,
 		EstimatedTotal: q.EstimatedTotal,
+		Aggregations:   q.Aggregations,
 	}
 }

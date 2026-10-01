@@ -17,6 +17,11 @@ type ESLogCluster struct {
 	TraceIDField string
 	Purpose      string
 	BodyField    string // optional log body column; empty → infer from mapping
+	TimeField    string // time_from/time_to/sort/agg_interval 的默认时间字段；空则 @timestamp
+	// IndexPriority 索引候选中优先列出的模式（按顺序），如 ["app-prod-*"]；由部署方配置，不在代码写死。
+	IndexPriority []string
+	// IndexSuggestLimit 索引不存在时返回的候选数量；<=0 用默认 30。
+	IndexSuggestLimit int
 }
 
 // ESLogConfig 为 es_log_query 的静态配置。
@@ -101,10 +106,18 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 		cfg.IndexCatalog = catalogFromReader(reader)
 	}
 	clusterIDs := make([]string, len(clusters))
-	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string or a JSON ES query clause / search body. Index must be a real index or pattern on this cluster — do not invent names from service names. Omit index to use the cluster default_index; if that is also empty the call fails and lists discovered patterns. Prefer an unfielded query or a field that exists in the index mapping; do not assume identifiers like vmid or flow_id are mapped fields. On 0 hits the tool checks that the index exists and may rewrite unknown fields once; hit_status=empty means the index and fields were valid but no documents matched. Page large totals with from (use next_from from the previous result). Per-call limit max 500. term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file)."
+	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string or a JSON ES query clause / search body. Index must be a real index or pattern on this cluster — do not invent names from service names. Omit index to use the cluster default_index; if that is also empty the call fails and lists discovered patterns. Prefer an unfielded query or a field that exists in the index mapping; do not assume identifiers like vmid or flow_id are mapped fields. On 0 hits the tool checks that the index exists and may rewrite unknown fields once; hit_status=empty means the index and fields were valid but no documents matched. Page large totals with from (use next_from from the previous result). Per-call limit max 500. term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file). Investigation primitives: sort (asc|desc on the time field, or field:asc) to find the earliest/latest event; time_from/time_to (ISO time or date math like now-2h) to compare windows; agg_field (a keyword field, e.g. level or host.keyword) for top values with counts; agg_interval (e.g. 1m, 1h) for a per-interval count timeline; fields to return only the listed columns. Aggregations come back in aggregations.{by_field,timeline}.buckets and work across all matches, not only the returned page."
 	for i, c := range clusters {
 		clusterIDs[i] = c.ID
-		line := fmt.Sprintf("\n`%s` — %s; default index `%s`", c.ID, c.Purpose, c.DefaultIndex)
+		var line string
+		if strings.TrimSpace(c.DefaultIndex) == "" {
+			line = fmt.Sprintf("\n`%s` — %s; no default index: index is REQUIRED", c.ID, c.Purpose)
+			if len(c.IndexPriority) > 0 {
+				line += fmt.Sprintf(" (known patterns: %s)", strings.Join(c.IndexPriority, ", "))
+			}
+		} else {
+			line = fmt.Sprintf("\n`%s` — %s; default index `%s`", c.ID, c.Purpose, c.DefaultIndex)
+		}
 		if strings.TrimSpace(c.BodyField) != "" {
 			line += fmt.Sprintf("; body field `%s`", c.BodyField)
 		}
@@ -121,11 +134,23 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 					"type":        "string",
 					"description": "ES cluster / datasource id to query. Required; do not omit or invent names.",
 				},
-				"trace_id": map[string]any{"type": "string", "description": "Correlate logs by trace id (matched on the configured trace id field)."},
-				"query":    map[string]any{"type": "string", "description": "Lucene query_string (unfielded value or a mapped field:value) or JSON query clause / search body when trace_id is not used."},
-				"index":    map[string]any{"type": "string", "description": "Override the default log index/pattern. Must exist on the cluster; do not invent names."},
-				"limit":    map[string]any{"type": "integer", "description": "Max hits per page (default 50, max 500)."},
-				"from":     map[string]any{"type": "integer", "description": "Offset for pagination (default 0). Use next_from from the previous page when truncated."},
+				"trace_id":     map[string]any{"type": "string", "description": "Correlate logs by trace id (matched on the configured trace id field)."},
+				"query":        map[string]any{"type": "string", "description": "Lucene query_string (unfielded value or a mapped field:value) or JSON query clause / search body when trace_id is not used."},
+				"index":        map[string]any{"type": "string", "description": "Override the default log index/pattern. Must exist on the cluster; do not invent names."},
+				"limit":        map[string]any{"type": "integer", "description": "Max hits per page (default 50, max 500)."},
+				"from":         map[string]any{"type": "integer", "description": "Offset for pagination (default 0). Use next_from from the previous page when truncated."},
+				"sort":         map[string]any{"type": "string", "description": "asc or desc on the time field (asc = earliest first), or <field>:<asc|desc>."},
+				"time_from":    map[string]any{"type": "string", "description": "Inclusive lower bound on the time field (ISO 8601 or ES date math such as now-6h)."},
+				"time_to":      map[string]any{"type": "string", "description": "Inclusive upper bound on the time field."},
+				"time_field":   map[string]any{"type": "string", "description": "Time field for sort/time range/agg_interval (default: cluster time field or @timestamp)."},
+				"agg_field":    map[string]any{"type": "string", "description": "Keyword field to count top values over all matches (terms aggregation)."},
+				"agg_size":     map[string]any{"type": "integer", "description": "Number of top values for agg_field (default 20, max 200)."},
+				"agg_interval": map[string]any{"type": "string", "description": "Bucket size for a count-over-time timeline, e.g. 1m, 5m, 1h."},
+				"fields": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Only return these source fields (reduces noise).",
+				},
 			},
 			// 不声明 required=["cluster"]：缺 cluster / 未知 cluster 由 execute 内的
 			// clusterParamError 统一报错（含已知集群列表，对模型更友好），静态 required+enum
@@ -155,7 +180,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			}
 			if strings.TrimSpace(index) == "" {
 				out := rcaErr(toolName, "index is required when cluster default_index is empty", ErrorPermanent)
-				attachSuggestedPatterns(ctx, out, cfg.IndexCatalog, cl.ID, "", "")
+				attachSuggestedPatterns(ctx, out, cfg.IndexCatalog, cl, "")
 				return stampFail(out, "", cl.ID)
 			}
 			if unresolved := indexUnresolvedPayload(ctx, cfg.IndexCatalog, cl, index); unresolved != nil {
@@ -211,6 +236,11 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			if from > 0 {
 				dslObj["from"] = from
 			}
+			qopts, optErr := parseESLogQueryOpts(params, cl.TimeField)
+			if optErr != nil {
+				return stampFail(rcaErr(toolName, optErr.Error(), ErrorPermanent), index, cl.ID)
+			}
+			qopts.apply(dslObj)
 			dslBytes, err := json.Marshal(dslObj)
 			if err != nil {
 				return stampFail(rcaErr(toolName, err.Error(), ErrorPermanent), index, cl.ID)
@@ -220,6 +250,28 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				MaxRows: limit,
 				Extras:  map[string]any{"index": index},
 			})
+			var parseRetryQuery string
+			if err != nil && body == nil && strings.TrimSpace(traceID) == "" && isESQueryParseError(err) {
+				if fixed, changed := quoteLuceneSpecialTokens(query); changed {
+					retryDSL := make(map[string]any, len(dslObj))
+					for k, v := range dslObj {
+						retryDSL[k] = v
+					}
+					retryDSL["query"] = map[string]any{"query_string": map[string]any{"query": fixed}}
+					qopts.apply(retryDSL)
+					if retryBytes, mErr := json.Marshal(retryDSL); mErr == nil {
+						retryRes, qErr := reader.Query(ctx, cl.ID, string(retryBytes), executor.QueryOptions{
+							MaxRows: limit,
+							Extras:  map[string]any{"index": index},
+						})
+						if qErr == nil {
+							res, err = retryRes, nil
+							dslObj = retryDSL
+							parseRetryQuery = fixed
+						}
+					}
+				}
+			}
 			if err != nil {
 				return stampFail(rcaErrFrom(toolName, err), index, cl.ID)
 			}
@@ -310,6 +362,11 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			if res != nil && res.Columns != nil {
 				payload["columns"] = res.Columns
 			}
+			if res != nil {
+				if aggs := summarizeESAggregations(res.Aggregations); len(aggs) > 0 {
+					payload["aggregations"] = aggs
+				}
+			}
 			if tid := strings.TrimSpace(traceID); tid != "" {
 				payload["trace_id"] = tid
 			}
@@ -320,6 +377,17 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			}
 			if rewriteReason != "" {
 				payload["rewrite_reason"] = rewriteReason
+			}
+			if parseRetryQuery != "" {
+				payload["query_rewritten"] = true
+				payload["original_query"] = query
+				payload["rewritten_query"] = parseRetryQuery
+				payload["rewrite_reason"] = "query_string parse error; special characters in bare tokens were quoted as phrases"
+			}
+			if total == 0 && body == nil {
+				if hint := queryStringRangeHint(query, cl.TimeField); hint != "" {
+					payload["time_range_hint"] = hint
+				}
 			}
 			if len(fieldHints) > 0 {
 				payload["field_hints"] = fieldHints

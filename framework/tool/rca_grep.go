@@ -18,11 +18,32 @@ const (
 	rcaGrepContextMax     = 8
 )
 
+// rcaGrepSkipDirs 为默认不搜索的目录：依赖、VCS、构建产物与并行 worktree 副本（会重复命中同一份源码）。
+var rcaGrepSkipDirs = map[string]struct{}{
+	"vendor":       {},
+	".git":         {},
+	".worktrees":   {},
+	"node_modules": {},
+	"build":        {},
+	"dist":         {},
+	"bin":          {},
+}
+
+// rcaGrepBinarySniff 为判定二进制文件时读取的前缀长度。
+const rcaGrepBinarySniff = 8 << 10
+
+func looksBinary(b []byte) bool {
+	if len(b) > rcaGrepBinarySniff {
+		b = b[:rcaGrepBinarySniff]
+	}
+	return bytes.IndexByte(b, 0) >= 0
+}
+
 func rcaGrepSkipRelPath(rel string) bool {
 	slash := filepath.ToSlash(rel)
 	parts := strings.Split(slash, "/")
-	for _, p := range parts {
-		if p == "vendor" {
+	for _, p := range parts[:len(parts)-1] {
+		if _, skip := rcaGrepSkipDirs[p]; skip {
 			return true
 		}
 	}
@@ -58,12 +79,11 @@ func searchWithRipgrepRCA(root, pattern, fileGlob string, limit int) ([]contentM
 	if _, err := exec.LookPath("rg"); err != nil {
 		return nil, err
 	}
-	args := []string{
-		"--no-heading", "--line-number", "--color=never",
-		"--glob", "!**/vendor/**",
-		"--glob", "!*_gen.go",
-		"--glob", "!*.txt",
+	args := []string{"--no-heading", "--line-number", "--color=never"}
+	for d := range rcaGrepSkipDirs {
+		args = append(args, "--glob", "!**/"+d+"/**")
 	}
+	args = append(args, "--glob", "!*_gen.go", "--glob", "!*.txt")
 	if fileGlob != "" {
 		args = append(args, "--glob", fileGlob)
 	}
@@ -92,7 +112,7 @@ func searchWithRipgrepRCA(root, pattern, fileGlob string, limit int) ([]contentM
 			rel = absPath
 		}
 		rel = filepath.ToSlash(rel)
-		if rcaGrepSkipRelPath(rel) {
+		if rcaGrepSkipRelPath(rel) || strings.IndexByte(content, 0) >= 0 {
 			continue
 		}
 		all = append(all, contentMatch{
@@ -118,6 +138,9 @@ func searchRCAFileContentsWalk(root, pattern, fileGlob string, limit int) ([]con
 			if _, skip := rcaSymbolSkipDirNames[d.Name()]; skip {
 				return fs.SkipDir
 			}
+			if _, skip := rcaGrepSkipDirs[d.Name()]; skip && path != root {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -135,7 +158,7 @@ func searchRCAFileContentsWalk(root, pattern, fileGlob string, limit int) ([]con
 			}
 		}
 		b, err := os.ReadFile(path)
-		if err != nil {
+		if err != nil || looksBinary(b) {
 			return nil
 		}
 		sc := bufio.NewScanner(bytes.NewReader(b))

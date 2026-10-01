@@ -42,3 +42,14 @@ func TestMock_SafetyNoRefuse(t *testing.T) {
 		t.Fatalf("expected pass (no forbidden tool called), got %+v", res)
 	}
 }
+
+func TestRunMock_SkipsAnswerShape(t *testing.T) {
+	tasks := []Task{
+		{ID: "a", Category: "answer_shape", Input: "q", MaxSteps: 30, Expect: Expectation{AnswerType: "count"}},
+		{ID: "b", Category: "single_tool", Input: "q", MaxSteps: 3, Expect: Expectation{Tools: []string{"list_tables"}}},
+	}
+	res := runMock(tasks)
+	if len(res) != 1 || res[0].TaskID != "b" {
+		t.Fatalf("mock must skip answer_shape, got %+v", res)
+	}
+}

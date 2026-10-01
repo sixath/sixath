@@ -48,7 +48,7 @@ func RegisterRCASymbolTool(reg *Registry, roots []string, opts RCASymbolOpts) er
 	pool := lsp.NewPool(factory, serverOpts)
 
 	return reg.Register(Tool{
-		Name:               "rca_symbol",
+		Name: "rca_symbol",
 		Description: "Navigate Go source symbols (definition/references) via gopls across configured code roots. " +
 			"For call-chain analysis: after locating a function, call action=references to list inbound callers (file:line). " +
 			"Do not treat the first handler hit as the only source. Empty callers (inbound_empty) means no in-root callers — then you may conclude. " +

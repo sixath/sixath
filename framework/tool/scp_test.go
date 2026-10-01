@@ -37,10 +37,10 @@ func TestSCP_UploadUsesExternalSCP(t *testing.T) {
 	}
 
 	out, err := tl.Execute(context.Background(), map[string]any{
-		"host":         "10.79.240.149",
-		"direction":    "upload",
-		"local_path":   localFile,
-		"remote_path":  "/data/tmp/storage_worker",
+		"host":        "10.79.240.149",
+		"direction":   "upload",
+		"local_path":  localFile,
+		"remote_path": "/data/tmp/storage_worker",
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -100,11 +100,11 @@ func TestSCP_BlockedByLocalPathPolicy(t *testing.T) {
 
 func TestSCPConfigFromMap(t *testing.T) {
 	cfg := SCPConfigFromMap(map[string]interface{}{
-		"default_user": "root",
-		"scp_path":     "scp.exe",
-		"allowed_local_path_prefixes": []any{"D:/deploy"},
+		"default_user":                 "root",
+		"scp_path":                     "scp.exe",
+		"allowed_local_path_prefixes":  []any{"D:/deploy"},
 		"allowed_remote_path_prefixes": []any{"/data/tmp"},
-		"max_file_bytes": float64(1024),
+		"max_file_bytes":               float64(1024),
 	})
 	if cfg.DefaultUser != "root" || cfg.SCPPath != "scp.exe" {
 		t.Fatalf("unexpected base config: %#v", cfg)

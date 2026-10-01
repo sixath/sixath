@@ -47,8 +47,8 @@ type QuerySpillStub struct {
 	EvidenceRefs    []EvidenceRef    `json:"evidence_refs,omitempty"`
 	SourcePath      string           `json:"source_path,omitempty"`
 	UniqueCount     int              `json:"unique_count,omitempty"`
-	ExitCode        *int            `json:"exit_code,omitempty"`
-	TimedOut        bool            `json:"timed_out,omitempty"`
+	ExitCode        *int             `json:"exit_code,omitempty"`
+	TimedOut        bool             `json:"timed_out,omitempty"`
 	GroupsTruncated bool             `json:"groups_truncated,omitempty"`
 	FileTruncated   bool             `json:"file_truncated,omitempty"`
 	Sample          []map[string]any `json:"sample"`

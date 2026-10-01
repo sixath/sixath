@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sixath/framework/harness"
 	"github.com/sixath/framework/tool"
 )
 
@@ -122,6 +123,35 @@ func TestExecute_SubRegistryExcludesSelfAndUnrelated(t *testing.T) {
 	}
 	if _, ok := m.lastReg.Get("rca_grep"); !ok {
 		t.Fatal("code tools must be in sub registry")
+	}
+	if _, ok := m.lastReg.Get(tool.InvestigationToolName); ok {
+		t.Fatal("ledger must not appear when the parent does not have it")
+	}
+}
+
+func TestExecute_SubRegistryInheritsLedgerAndExtraOptions(t *testing.T) {
+	m := &fakeToolModel{finalText: "结论\n状态: 证据充分"}
+	reg := tool.NewEmptyRegistry()
+	_ = reg.Register(rcaStubWithEvidence())
+	_ = reg.Register(stubTool("es_log_query"))
+	if err := tool.RegisterInvestigationTool(reg, tool.NewInMemoryInvestigationStore()); err != nil {
+		t.Fatal(err)
+	}
+	var observed []string
+	_ = Register(reg, Config{Model: m, ExtraOptions: []harness.ReActOption{
+		harness.WithReActToolSuccessHook(func(_ context.Context, _ *harness.Request, rec harness.ToolCallRecord) {
+			observed = append(observed, rec.ToolName)
+		}),
+	}})
+	toolEntry, _ := reg.Get(ToolName)
+	if _, err := toolEntry.Execute(context.Background(), map[string]any{"question": "q"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.lastReg.Get(tool.InvestigationToolName); !ok {
+		t.Fatal("sub agent must share the parent's ledger tool")
+	}
+	if len(observed) != 1 || observed[0] != "rca_grep" {
+		t.Fatalf("extra options must reach the sub agent: observed=%v", observed)
 	}
 }
 

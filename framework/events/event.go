@@ -28,7 +28,11 @@ const (
 	EvidenceIncomplete Kind = "agent.evidence.incomplete"
 	// CodeClaimMismatch final-answer quoted/claimed code that does not match rca_read.
 	CodeClaimMismatch Kind = "agent.code_claim.mismatch"
-	RunCompleted      Kind = "agent.run.completed"
+	// StopHookContinue 模型准备结束时 StopHook 要求继续（载荷含 rule / step / nudges）。
+	StopHookContinue Kind = "agent.stop_hook.continue"
+	// CriticVerdict 结案审查结果（载荷含 tier=rules|model、verdict=pass|revise、issues、round）。
+	CriticVerdict Kind = "agent.critic.verdict"
+	RunCompleted  Kind = "agent.run.completed"
 	RunError          Kind = "agent.run.error"
 
 	// MemoryPrefetchSkipped 记忆预取未注入（fail-open 跳过或空结果），载荷含 reason（设计 §4.6）。

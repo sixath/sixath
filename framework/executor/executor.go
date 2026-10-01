@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -77,6 +78,9 @@ type Result struct {
 	// ES: hits.total.value
 	// MySQL / Mongo: 当前默认不填(获取代价较大,后续可按需扩展)。
 	EstimatedTotal int64
+
+	// Aggregations ES 聚合结果原文（响应的 aggregations 字段）；无聚合时为空。
+	Aggregations json.RawMessage
 }
 
 // Executor 执行 DSL（如 SQL）的抽象，支持超时、最大行数、只读拦截。

@@ -76,6 +76,26 @@ func TestPrepareModelMessages_WritesHashAndTools(t *testing.T) {
 	}
 }
 
+func TestAgentSystemPrompt_AddsMethodOnlyWithLedger(t *testing.T) {
+	fake := &fakeOpenAIClient{finalReply: "ok"}
+	plain := NewReActAgent(fake, nil, tool.NewRegistry(), WithReActSystemPrompt("sys"))
+	if plain.agentSystemPrompt() != "sys" {
+		t.Fatal("no ledger, no method")
+	}
+	reg := tool.NewRegistry()
+	if err := tool.RegisterInvestigationTool(reg, tool.NewInMemoryInvestigationStore()); err != nil {
+		t.Fatal(err)
+	}
+	withLedger := NewReActAgent(fake, nil, reg, WithReActSystemPrompt("sys"))
+	if got := withLedger.agentSystemPrompt(); !strings.HasPrefix(got, "sys") || !strings.Contains(got, tool.InvestigationMethod) {
+		t.Fatalf("ledger must bring the method: %q", got)
+	}
+	already := NewReActAgent(fake, nil, reg, WithReActSystemPrompt("playbook\n"+tool.InvestigationMethod))
+	if strings.Count(already.agentSystemPrompt(), tool.InvestigationMethod) != 1 {
+		t.Fatal("method must not be duplicated")
+	}
+}
+
 func TestPrepareModelMessages_ReadsMemoryMD(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("remember X"), 0o644); err != nil {

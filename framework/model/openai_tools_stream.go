@@ -68,7 +68,12 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 		})
 	}
 
+	req.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
 	stream, err := c.client.CreateChatCompletionStream(ctx, req)
+	if err != nil && rejectsStreamOptions(err) {
+		req.StreamOptions = nil
+		stream, err = c.client.CreateChatCompletionStream(ctx, req)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -94,16 +99,42 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 		var contentAccum strings.Builder
 		var reasoningAccum strings.Builder
 		toolCallsAccum := make(map[int]*accumulatedToolCall)
+		var usage *TokenUsage
+		// usage 帧（choices 为空）在具名 finish reason 之后到达，故终止帧先暂存，读到 EOF 再发出。
+		var pending *Generation
+		emitPending := func() {
+			if pending.TokenUsage == nil {
+				pending.TokenUsage = usage
+			}
+			genCh <- pending
+		}
 
 		for {
 			select {
 			case <-ctx.Done():
+				if pending != nil {
+					emitPending()
+					return
+				}
 				sendFail(ctx.Err())
 				return
 			default:
 			}
 
 			resp, err := stream.Recv()
+			if pending != nil {
+				if err == nil && resp.Usage != nil {
+					usage = tokenUsageFromOpenAI(*resp.Usage)
+				}
+				if err != nil {
+					emitPending()
+					return
+				}
+				continue
+			}
+			if err == nil && resp.Usage != nil {
+				usage = tokenUsageFromOpenAI(*resp.Usage)
+			}
 			if err != nil {
 				if err != io.EOF {
 					// 旧逻辑直接 return 会空关闭 genCh，ReAct 误报 "missing streamed generation"。
@@ -114,6 +145,8 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 				if len(toolCallsAccum) > 0 {
 					gen := c.buildToolCallGeneration(ctx, toolCallsAccum, reg, reasoningAccum.String())
 					if gen != nil {
+						gen.FinishReason = "eof"
+						gen.TokenUsage = usage
 						genCh <- gen
 					} else {
 						sendFail(errors.New("incomplete tool call in stream"))
@@ -125,6 +158,8 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 							Used:             false,
 							ReasoningContent: reasoningAccum.String(),
 						},
+						TokenUsage:   usage,
+						FinishReason: "eof",
 					}
 				}
 				return
@@ -172,22 +207,24 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 
 			switch choice.FinishReason {
 			case openai.FinishReasonStop, openai.FinishReasonLength, openai.FinishReasonContentFilter:
-				genCh <- &Generation{
+				pending = &Generation{
 					Text: contentAccum.String(),
 					Raw: ToolStep{
 						Used:             false,
 						ReasoningContent: reasoningAccum.String(),
 					},
+					FinishReason: string(choice.FinishReason),
 				}
-				return
+				continue
 			case openai.FinishReasonToolCalls:
 				gen := c.buildToolCallGeneration(ctx, toolCallsAccum, reg, reasoningAccum.String())
-				if gen != nil {
-					genCh <- gen
-				} else {
+				if gen == nil {
 					sendFail(errors.New("incomplete tool call in stream"))
+					return
 				}
-				return
+				gen.FinishReason = string(choice.FinishReason)
+				pending = gen
+				continue
 			}
 			// FinishReason 为空（""）或 "null" 表示本 chunk 非终止帧，继续读取后续增量；
 			// 真正的终止由上述具名 finish reason 或流 EOF（见上方 stream.Recv 分支）驱动。
@@ -195,6 +232,19 @@ func (c *OpenAIClient) ChatWithToolsStream(ctx context.Context, messages []Messa
 	}()
 
 	return ch, genCh, nil
+}
+
+// rejectsStreamOptions 识别不支持 stream_options 的 OpenAI 兼容服务返回的 4xx 参数错误。
+func rejectsStreamOptions(err error) bool {
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) && apiErr.HTTPStatusCode >= 400 && apiErr.HTTPStatusCode < 500 {
+		return strings.Contains(strings.ToLower(apiErr.Message), "stream_options")
+	}
+	var reqErr *openai.RequestError
+	if errors.As(err, &reqErr) && reqErr.HTTPStatusCode >= 400 && reqErr.HTTPStatusCode < 500 {
+		return strings.Contains(strings.ToLower(string(reqErr.Body)+reqErr.Error()), "stream_options")
+	}
+	return false
 }
 
 func (c *OpenAIClient) buildToolCallGeneration(ctx context.Context, toolCallsAccum map[int]*accumulatedToolCall, reg *tool.Registry, reasoningContent string) *Generation {

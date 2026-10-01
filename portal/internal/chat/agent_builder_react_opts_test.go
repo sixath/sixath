@@ -67,6 +67,132 @@ rules:
 	if len(cfg.ToolHooks) != 1 {
 		t.Fatalf("ToolHooks=%d want 1", len(cfg.ToolHooks))
 	}
+	if len(cfg.StopHooks) != 0 {
+		t.Fatalf("StopHooks=%d want 0 without stop_rules", len(cfg.StopHooks))
+	}
+}
+
+func TestHarnessReActOptions_LoadsStopRules(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`
+version: 1
+max_stop_nudges: 3
+stop_rules:
+  - id: intent
+    match: "让我(进一步)?查"
+    message: "请直接调用工具"
+`)
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var cfg agent.ReActConfig
+	for _, o := range HarnessReActOptions(root, nil) {
+		o(&cfg)
+	}
+	if len(cfg.StopHooks) != 1 || cfg.MaxStopNudges != 3 {
+		t.Fatalf("StopHooks=%d MaxStopNudges=%d", len(cfg.StopHooks), cfg.MaxStopNudges)
+	}
+}
+
+func TestInvestigationLedgerWiring(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tool.NewRegistry()
+	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(tool.InvestigationToolName); ok {
+		t.Fatal("ledger must stay off unless the workspace enables it")
+	}
+	var cfg agent.ReActConfig
+	for _, o := range HarnessReActOptions(root, nil) {
+		o(&cfg)
+	}
+	if cfg.ToolSuccessHook != nil {
+		t.Fatal("observer must stay off unless the workspace enables the ledger")
+	}
+
+	body := []byte("investigation_ledger: true\nstop_rules:\n  - id: gaps\n    when_investigation_gaps: [open_hypotheses]\n    message: \"{{investigation_gaps}}\"\n")
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg = tool.NewRegistry()
+	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(tool.InvestigationToolName); !ok {
+		t.Fatal("ledger must be registered when investigation_ledger is true")
+	}
+	cfg = agent.ReActConfig{}
+	for _, o := range HarnessReActOptions(root, nil) {
+		o(&cfg)
+	}
+	if cfg.ToolSuccessHook == nil || len(cfg.StopHooks) != 1 {
+		t.Fatalf("observer=%v stopHooks=%d", cfg.ToolSuccessHook != nil, len(cfg.StopHooks))
+	}
+	if ic := InvestigateConfig(&builderGateFake{finalReply: "ok"}, root); len(ic.ExtraOptions) != 1 || len(ic.StopHooks) != 1 {
+		t.Fatalf("deep_investigate must inherit observer and stop rules: extra=%d stop=%d", len(ic.ExtraOptions), len(ic.StopHooks))
+	}
+}
+
+func TestCriticWiring(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("stop_rules:\n  - id: r\n    match: 'x'\n    message: m\ncritic:\n  enabled: true\n  max_rounds: 1\n")
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &builderGateFake{finalReply: "ok"}
+	var cfg agent.ReActConfig
+	for _, o := range HarnessReActOptionsFor(fake, root, nil) {
+		o(&cfg)
+	}
+	if len(cfg.StopHooks) != 2 {
+		t.Fatalf("stop rules + critic expected, got %d", len(cfg.StopHooks))
+	}
+	if _, ok := cfg.StopHooks[1].(agent.BudgetedStopHook); !ok {
+		t.Fatalf("critic must come last and carry its own budget: %T", cfg.StopHooks[1])
+	}
+	if ic := InvestigateConfig(fake, root); len(ic.StopHooks) != 2 {
+		t.Fatalf("deep_investigate must inherit the critic: %d", len(ic.StopHooks))
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), []byte("critic:\n  enabled: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg = agent.ReActConfig{}
+	for _, o := range HarnessReActOptionsFor(fake, root, nil) {
+		o(&cfg)
+	}
+	if len(cfg.StopHooks) != 1 {
+		t.Fatalf("critic alone must still be installed: %d", len(cfg.StopHooks))
+	}
+}
+
+func TestHarnessReActOptions_BadStopRulesSkipped(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("stop_rules:\n  - id: bad\n    match: '('\n    message: m\n")
+	if err := os.WriteFile(filepath.Join(root, "harness", "hooks.yaml"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var cfg agent.ReActConfig
+	for _, o := range HarnessReActOptions(root, nil) {
+		o(&cfg)
+	}
+	if len(cfg.StopHooks) != 0 || cfg.Workspace != root {
+		t.Fatalf("bad stop_rules must be skipped without breaking assembly: %+v", cfg.StopHooks)
+	}
 }
 
 func TestBuildReActAgent_jaegerDoesNotSoftInject(t *testing.T) {

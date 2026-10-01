@@ -86,6 +86,26 @@ func TestESExecutor_BasicSearch(t *testing.T) {
 	}
 }
 
+func TestESExecutor_AggregationsPassthrough(t *testing.T) {
+	client, srv := mockESBody(t, `{"hits":{"total":{"value":3},"hits":[]},"aggregations":{"by_field":{"buckets":[{"key":"ERROR","doc_count":3}]}}}`)
+	defer srv.Close()
+	ex := registerESExecutor(t, client)
+	res, err := ex.Query(context.Background(), "ds1", `{"size":0,"aggs":{"by_field":{"terms":{"field":"level"}}}}`, QueryOptions{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if !strings.Contains(string(res.Aggregations), `"ERROR"`) || res.EstimatedTotal != 3 {
+		t.Fatalf("aggregations=%s total=%d", res.Aggregations, res.EstimatedTotal)
+	}
+
+	client2, srv2 := mockESBody(t, basicSearchHits)
+	defer srv2.Close()
+	res, err = registerESExecutor(t, client2).Query(context.Background(), "ds1", `{"query":{"match_all":{}}}`, QueryOptions{})
+	if err != nil || len(res.Aggregations) != 0 {
+		t.Fatalf("no aggregations expected: %s err=%v", res.Aggregations, err)
+	}
+}
+
 func TestESExecutor_ES6TotalNoProductHeader(t *testing.T) {
 	const es6 = `{
   "hits": {

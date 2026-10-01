@@ -119,6 +119,9 @@ func (s *ChatService) streamAgentEvents(
 			return ep, errors.New(ev.Error)
 		case agent.StreamEventDone:
 			ep.FinalText = chat.FinalTextFromDone(ev.Text, ev.Messages)
+			if ep.FinalText != "" {
+				ch <- ChatStreamEvent{Type: ChatStreamEventFinal, Content: ep.FinalText}
+			}
 			ep.Trace = ev.Trace
 			if ev.Trace != nil {
 				s.persistTurnTrace(runCtx, sessionID, agentID, ev.Trace)

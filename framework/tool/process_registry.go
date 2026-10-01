@@ -37,10 +37,10 @@ type ProcessNotifyHandler func(ProcessNotifyEvent)
 
 // ProcessRegistry tracks background terminal processes for a portal/process lifetime.
 type ProcessRegistry struct {
-	mu      sync.Mutex
-	byID    map[string]*managedProcess
-	maxOut  int
-	idGen   func() (string, error)
+	mu       sync.Mutex
+	byID     map[string]*managedProcess
+	maxOut   int
+	idGen    func() (string, error)
 	onNotify ProcessNotifyHandler
 }
 

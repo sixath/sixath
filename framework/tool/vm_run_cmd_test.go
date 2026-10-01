@@ -763,6 +763,63 @@ func TestVMRunCmd_VmidLookupPostsToReturnedHost(t *testing.T) {
 	}
 }
 
+func TestVMRunCmd_RunCmdTimeOutIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("time out\r\n"))
+	}))
+	t.Cleanup(srv.Close)
+	host, port := hostPort(t, srv.URL)
+	reg := NewRegistry()
+	if err := RegisterVMRunCmd(reg, VMRunCmdConfig{HTTPClient: srv.Client()}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("vm_run_cmd")
+	out, err := tl.Execute(context.Background(), map[string]any{"host": host, "port": port, "cmd": "findstr /s x C:\\*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := out.(map[string]any)
+	if m["ok"] != false || m["timed_out"] != true || m["error_code"] != ErrorTransient {
+		t.Fatalf("runCmd 'time out' must be a transient failure, got %#v", m)
+	}
+}
+
+func TestVMRunCmd_LookupFallsBackAcrossDatasources(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(srv.Close)
+	host, port := hostPort(t, srv.URL)
+	var tried []string
+	reg := NewRegistry()
+	if err := RegisterVMRunCmd(reg, VMRunCmdConfig{
+		HTTPClient: srv.Client(),
+		MySQLIDs:   []string{"old", "new"},
+		Lookup: func(ctx context.Context, datasourceID string, vmid int64) (string, bool, error) {
+			tried = append(tried, datasourceID)
+			if datasourceID == "old" {
+				return "", false, errVMRunCmdNoIP
+			}
+			return host, false, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("vm_run_cmd")
+	out, err := tl.Execute(context.Background(), map[string]any{"vmid": 255266, "port": port, "cmd": "tasklist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := out.(map[string]any); m["ok"] != true {
+		t.Fatalf("second datasource must be tried: %#v", m)
+	}
+	if len(tried) != 2 || tried[0] != "old" || tried[1] != "new" {
+		t.Fatalf("tried=%v", tried)
+	}
+}
+
 func TestVMRunCmd_LookupZeroRowsNoPOST(t *testing.T) {
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -794,21 +851,23 @@ func TestVMRunCmd_LookupZeroRowsNoPOST(t *testing.T) {
 	}
 }
 
-func TestVMRunCmd_TwoMySQLIDsNoPreferred(t *testing.T) {
+func TestVMRunCmd_TwoMySQLIDsNoPreferredUsesFirstResolving(t *testing.T) {
 	hits := 0
-	lookupCalls := 0
+	var tried []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("ok"))
 	}))
 	t.Cleanup(srv.Close)
-	_, port := hostPort(t, srv.URL)
+	host, port := hostPort(t, srv.URL)
 	reg := NewRegistry()
 	_ = RegisterVMRunCmd(reg, VMRunCmdConfig{
 		HTTPClient: srv.Client(),
 		MySQLIDs:   []string{"ds1", "ds2"},
 		Lookup: func(ctx context.Context, datasourceID string, vmid int64) (string, bool, error) {
-			lookupCalls++
-			return "10.0.0.1", false, nil
+			tried = append(tried, datasourceID)
+			return host, false, nil
 		},
 	})
 	tl, _ := reg.Get("vm_run_cmd")
@@ -819,14 +878,11 @@ func TestVMRunCmd_TwoMySQLIDsNoPreferred(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := out.(map[string]any)
-	if m["ok"] != false || m["error_code"] != ErrorPermanent {
+	if m["ok"] != true {
 		t.Fatalf("%#v", m)
 	}
-	if lookupCalls != 0 {
-		t.Fatalf("Lookup calls=%d want 0", lookupCalls)
-	}
-	if hits != 0 {
-		t.Fatalf("hits=%d want 0", hits)
+	if len(tried) != 1 || tried[0] != "ds1" || hits != 1 {
+		t.Fatalf("tried=%v hits=%d", tried, hits)
 	}
 }
 

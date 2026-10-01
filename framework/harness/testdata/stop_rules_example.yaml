@@ -1,0 +1,68 @@
+version: 1
+max_stop_nudges: 2
+investigation_ledger: true
+stop_rules:
+  - id: intent-without-action
+    match: '(让我|我将|我会|我来|我先|我再|我这就|我现在|接下来我|下一步我|现在我)(们)?(先|再|继续|进一步|马上|立即|去|来|将|会|要)?\s*(开始|着手)?(进行)?(深入|初步|全面|详细)?\s*(查询|查看|检查|排查|调查|诊断|核查|核实|搜索|检索|查找|获取|读取|确认|分析|定位|调用|执行|对比|比对|拉取|看看|看一下|查一下|查)|(?i:\b(let me|i''ll|i will|i''m going to)\s+(now\s+)?(check|look|query|search|inspect|examine|fetch|read|run|call|investigate|verify|compare|dig))'
+    message: |
+      【继续执行】你在上一条回复末尾说要继续操作，但没有发起任何工具调用，这一轮会被当作最终回答结束。
+      请直接调用工具执行你说的下一步；如果判断已经无需再查，请直接给出完整结论，不要只描述打算。
+
+  - id: readonly-permission
+    match: '(是否需要我|需要我[^。！!\n]{0,30}[吗？?]|要不要我|要我(继续|帮)|我可以(继续|进一步|帮你|帮您|再|去)[^。！!\n]*[吗？?]|(?i:\b(do you want me to|would you like me to|shall i|should i|want me to)\b))'
+    unless: '(重启|删除|杀掉|杀死|终止|停止|关闭|修改|变更|回滚|下发|清理|清除|写入|扩容|缩容|迁移|执行修复|修复操作|还是|哪个|哪一|哪些|请提供|请告知|请告诉|请补充|(?i:restart|delete|remove|kill|drop|terminate|shutdown|rollback|deploy|which))'
+    # 只看请示所在的那一句：前文的应急建议（"重启服务"）或信息索取不应豁免后面的只读请示。
+    unless_scope: match_sentence
+    message: |
+      【只读操作无需确认】你在询问是否继续执行查询类操作（查日志、看文件、读代码等）。只读操作不需要用户批准，请直接调用工具执行，并基于结果给出结论。
+      只有会修改系统的操作（重启、删除、终止进程、修改配置等）才需要征求确认。
+
+  - id: open-todos
+    when_open_todos: true
+    message: |
+      【任务清单未完成】todo 清单中还有未完成项：
+      {{open_todos}}
+      请继续完成这些项；若某项已无必要，用 todo 工具标记为 cancelled 并说明原因，然后再给出最终回答。
+
+  - id: ledger-unused
+    when_investigation_gaps: [ledger_unused]
+    min_tool_calls: 6
+    message: |
+      【先核对证据链再下结论】本轮已多步排查，但没有用 investigation 台账梳理证据：
+      {{investigation_gaps}}
+      请先用台账记录：症状、问题开始时间及最后一次正常的时间、候选假设（至少两个）及各自的支持/反驳证据，然后再给结论。重点核对：
+      - 时间先后：你认定的"原因"是否发生在症状之前？（例如崩溃/报错是否恰好出现在超时、被杀、重启之后，属于结果而非原因）
+      - 对照：同类正常对象（另一台机器/实例/时间段）是否也有同样现象？可用 compare 工具。
+      - 变化：问题开始前后发生了什么变化（发布、重启、配置、异常中断）？
+
+  - id: ledger-gaps
+    when_investigation_gaps: [onset_missing, onset_unbounded, onset_unverified, open_hypotheses, accepted_without_change, mechanism_only]
+    message: |
+      【调查未闭环】investigation 台账还有缺口：
+      {{investigation_gaps}}
+      请继续取证：
+      - 开始时间要有上下界且有原文：最后一次正常（last_good）和第一次异常各附一行工具输出原文，必要时放宽到数天（timeline 工具）；
+      - 根因要能解释"为什么从那时开始"：找出这段时间内的变化（发布、重启、文件/配置被修改、操作中断等），用 change=true 记录；
+      - 系统自身的保护/重试/降级只是机制（kind=mechanism），继续追到系统之外的变化（kind=root），用 caused_by 串起链条；
+      - 对每个未决假设找对照证据后采纳或排除（对照要给出正常侧 quote 与故障侧 subject_quote）。
+      确实无法获得时，在台账中写明原因（unknown_reason / change_unavailable / set_root_unknown）再给出结论。
+
+# 结案审查：规则级检查台账缺口、失败调用引用、忽略的历史案例、缺少产生者证据、未解释的失败形式变化、
+# 未核实的错误码含义；模型级按 10 类问题复核；轮次预算独立于 max_stop_nudges。
+critic:
+  enabled: true
+  min_tool_calls: 6
+  max_rounds: 2
+  # 可选：审查用模型（portal 模型目录中的模型名，或 "<provider 名称>/<模型名>"）；
+  # 为空或找不到时复用当前 agent 的模型。建议用与 agent 不同的模型，避免自我认同。
+  # model: "glm-5.1"
+
+# 变更源：timeline 在每个变化点和问题开始时间前后自动查询这些记录（运维任务、重启/还原、配置变更、发布），
+# 结果在 changes_near 中；某个变化点附近没有任何记录时会提示用 field_history 追参数取值。
+# tool 省略时与 timeline 的 series 使用同一个日志工具；args 为该工具的查询参数（时间范围由 timeline 填充）。
+investigation:
+  change_sources:
+    - label: ops_task
+      args: {query: "任务下发 OR task dispatched"}
+    - label: restore
+      args: {query: "还原 OR restore OR reboot"}

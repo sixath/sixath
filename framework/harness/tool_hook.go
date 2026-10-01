@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/sixath/framework/tool"
 )
 
 // ErrToolHookBlocked Before 拒绝执行工具（与 PermissionDenied 区分：回写模型 tool 消息，不中断整步为 RunError）。
@@ -34,6 +36,29 @@ func runToolHooksBefore(ctx context.Context, hooks []ToolHook, name string, para
 		}
 	}
 	return out, nil
+}
+
+// nestedToolGate 让组合工具（如 compare）内部发起的调用同样经过工具钩子与权限策略。
+func (a *ReActAgent) nestedToolGate(hookCtx context.Context) *tool.NestedToolGate {
+	return &tool.NestedToolGate{
+		Before: func(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+			inner, ok := a.tools.Get(name)
+			if !ok {
+				return nil, fmt.Errorf("tool %q is not available to this agent", name)
+			}
+			out, err := runToolHooksBefore(hookCtx, a.config.ToolHooks, name, args)
+			if err != nil {
+				return nil, err
+			}
+			if d := a.permissionPolicy().AllowTool(ctx, inner, out); !d.Allowed {
+				return nil, fmt.Errorf("%w: %s: %s", ErrToolPermissionDenied, name, d.Reason)
+			}
+			return out, nil
+		},
+		After: func(ctx context.Context, name string, result any, err error) (any, error) {
+			return runToolHooksAfter(hookCtx, a.config.ToolHooks, name, result, err)
+		},
+	}
 }
 
 // runToolHooksAfter After 与 Before **同序**（规格写死）。

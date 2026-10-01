@@ -78,3 +78,27 @@ func TestOpenAIClient_ChatWithTools_NoUsageLeavesNil(t *testing.T) {
 		t.Fatalf("expected nil TokenUsage when provider omits usage, got %+v", gen.TokenUsage)
 	}
 }
+
+func TestOpenAIClient_ChatWithTools_ReportsFinishReason(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		resp := openai.ChatCompletionResponse{
+			Choices: []openai.ChatCompletionChoice{{
+				Message:      openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: ""},
+				FinishReason: openai.FinishReasonLength,
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	reg := tool.NewRegistry()
+	_ = tool.RegisterCalculatorTool(reg)
+	gen, err := openAITestClient(ts).ChatWithTools(context.Background(), []Message{{Role: "user", Content: "hi"}}, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gen.FinishReason != "length" {
+		t.Fatalf("FinishReason=%q want length", gen.FinishReason)
+	}
+}

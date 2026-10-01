@@ -69,6 +69,9 @@ func ResolveTurnModelConfig(ctx context.Context, loader TurnModelLoader, agent *
 	return agent.ModelConfig, nil
 }
 
+// ProviderForKind 把模型目录里的 provider kind 映射为 model 工厂的 provider 名。
+func ProviderForKind(kind string) (string, bool) { return factoryProvider(kind) }
+
 func factoryProvider(kind string) (string, bool) {
 	switch kind {
 	case "openai_compat":

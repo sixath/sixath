@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	portalchat "backend/internal/chat"
 	"backend/internal/service"
@@ -63,6 +64,32 @@ func ApplyEmptyReplyFallback(content string, failed, canceled bool) (string, boo
 	return EmptyReplyNotice, true
 }
 
+// persistableContent 选择落库正文：有最终答复时用它（中间步骤的过程性文字、被 stop hook 打回的草稿不进历史）；
+// 仅当最终答复只是一两句收尾（模型先写完报告再以一句结束）时保留全文；
+// 不能按与全文的比例判断：多轮打回后全文里是好几版草稿，完整的最终报告也只占一小部分。
+func persistableContent(streamed, final string, canceled bool) string {
+	final = strings.TrimSpace(final)
+	if canceled || final == "" {
+		return streamed
+	}
+	if utf8.RuneCountInString(final) < persistMinFinalRunes && len(final)*4 < len(strings.TrimSpace(streamed)) {
+		return streamed
+	}
+	return final
+}
+
+const persistMinFinalRunes = 200
+
+func scrubFinal(final string) string {
+	if final == "" || !portalchat.StreamMemoryFenceScrubEnabled() {
+		return final
+	}
+	s := portalchat.NewMemoryFenceStreamScrubber(portalchat.StreamMemoryFenceScrubTag())
+	out := s.Feed(final)
+	tail, _ := s.Flush()
+	return out + tail
+}
+
 // WriteStream drains ch onto w with chat SSE event semantics (chunk/input/confirm/tool/model/error/done).
 // persistCtx is used for SaveAssistantMessage (may differ from cancel-bound run context).
 func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan service.ChatStreamEvent, sessionID string, persist PersistAssistant) StreamResult {
@@ -73,10 +100,13 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 
 	var full strings.Builder
 	var timeline service.TimelineAccumulator
+	var finalText string
 	res := StreamResult{}
 
 	for event := range ch {
 		switch event.Type {
+		case service.ChatStreamEventFinal:
+			finalText = event.Content
 		case service.ChatStreamEventChunk:
 			out := event.Content
 			if fenceScrub != nil && out != "" {
@@ -161,7 +191,7 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 		_ = truncated
 	}
 
-	res.Content = full.String()
+	res.Content = persistableContent(full.String(), scrubFinal(finalText), res.Canceled)
 	persistContent := res.Content
 	if res.Failed && strings.TrimSpace(persistContent) == "" && res.Error != "" {
 		persistContent = "Error: " + res.Error
@@ -230,9 +260,12 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 	}
 
 	var full strings.Builder
+	var finalText string
 	res := StreamResult{}
 	for event := range ch {
 		switch event.Type {
+		case service.ChatStreamEventFinal:
+			finalText = event.Content
 		case service.ChatStreamEventChunk:
 			out := event.Content
 			if fenceScrub != nil && out != "" {
@@ -273,7 +306,7 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 			res.HasContent = true
 		}
 	}
-	res.Content = full.String()
+	res.Content = persistableContent(full.String(), scrubFinal(finalText), res.Canceled)
 	if !res.Failed {
 		if filled, ok := ApplyEmptyReplyFallback(res.Content, res.Failed, res.Canceled); ok {
 			res.Content = filled

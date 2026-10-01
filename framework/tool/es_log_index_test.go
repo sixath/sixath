@@ -44,6 +44,28 @@ func TestSuggestPrefersDefaultIndex(t *testing.T) {
 	}
 }
 
+func TestSuggestIndexPriorityAndLimit(t *testing.T) {
+	catalog := []string{"aaa-*", "bbb-*", "prod-vm-*", "prod-game-*", "zzz-*"}
+	got := suggestIndexPatternsWith("unknown-*", catalog, ESLogCluster{
+		DefaultIndex:  "def-*",
+		IndexPriority: []string{"prod-game-*", "prod-*"},
+	})
+	if len(got) < 4 || got[0] != "def-*" || got[1] != "prod-game-*" || got[2] != "prod-vm-*" {
+		t.Fatalf("default first, then priority patterns in configured order: %v", got)
+	}
+
+	many := make([]string, 0, 60)
+	for i := 0; i < 60; i++ {
+		many = append(many, "idx"+string(rune('a'+i%26))+string(rune('a'+i/26))+"-*")
+	}
+	if n := len(suggestIndexPatternsWith("", many, ESLogCluster{})); n != esIndexSuggestLimit {
+		t.Fatalf("default limit=%d got %d", esIndexSuggestLimit, n)
+	}
+	if n := len(suggestIndexPatternsWith("", many, ESLogCluster{IndexSuggestLimit: 50})); n != 50 {
+		t.Fatalf("configured limit 50, got %d", n)
+	}
+}
+
 func TestIndexResolvedWhenCatHits(t *testing.T) {
 	st := resolveIndexPhysical("app-logs-*", []string{"app-logs-2026.01.02"})
 	if !st.Resolved {

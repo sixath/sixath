@@ -64,7 +64,9 @@ function formatTerminalStdout(raw: string): string {
 function prettifyTerminalText(text: string): string {
   if (!text) return text
   if (/的目录|Directory of/i.test(text)) return text
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  // Prefer splitting NDJSON / stuck-together objects first so each record is one line.
+  const expanded = expandJsonChunks(text)
+  const lines = expanded.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   return lines.map((line) => prettifyTerminalLine(line)).join('\n')
 }
 
@@ -93,6 +95,167 @@ function prettifyTerminalLine(line: string): string {
   } catch {
     return line
   }
+}
+
+/** Split `{...}{...}` / NDJSON blobs into separate JSON texts. */
+function expandJsonChunks(text: string): string {
+  const objs = extractJsonValues(text)
+  if (objs.length <= 1) {
+    // Still try unescaping a quoted JSON blob
+    const unescaped = tryUnescapeJsonString(text.trim())
+    if (unescaped && unescaped !== text) return expandJsonChunks(unescaped)
+    return text
+  }
+  return objs
+    .map((v) => {
+      try {
+        return JSON.stringify(v)
+      } catch {
+        return String(v)
+      }
+    })
+    .join('\n')
+}
+
+function tryUnescapeJsonString(s: string): string | null {
+  if (!s) return null
+  try {
+    if (s.startsWith('"') && s.endsWith('"')) {
+      const inner = JSON.parse(s)
+      if (typeof inner === 'string') return inner
+    }
+  } catch {
+    /* fall through */
+  }
+  if (!s.includes('\\"') && !s.includes('\\n')) return null
+  return s.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"')
+}
+
+/** Extract top-level JSON values from a mixed text blob (brace/bracket matching). */
+function extractJsonValues(text: string): unknown[] {
+  const out: unknown[] = []
+  const s = text
+  let i = 0
+  while (i < s.length) {
+    const ch = s[i]
+    if (ch !== '{' && ch !== '[') {
+      i++
+      continue
+    }
+    const end = findJsonEnd(s, i)
+    if (end < 0) break
+    const slice = s.slice(i, end + 1)
+    try {
+      out.push(JSON.parse(slice))
+    } catch {
+      /* skip invalid */
+    }
+    i = end + 1
+  }
+  return out
+}
+
+function findJsonEnd(s: string, start: number): number {
+  const open = s[start]
+  const close = open === '{' ? '}' : ']'
+  let depth = 0
+  let inStr = false
+  let esc = false
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]
+    if (inStr) {
+      if (esc) {
+        esc = false
+        continue
+      }
+      if (c === '\\') {
+        esc = true
+        continue
+      }
+      if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') {
+      inStr = true
+      continue
+    }
+    if (c === open) depth++
+    else if (c === close) {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+type StructuredLog = {
+  level: string
+  time: string
+  file: string
+  msg: string
+  pretty: string
+}
+
+function asStructuredLog(value: unknown): StructuredLog | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const o = value as Record<string, unknown>
+  const level = String(o.L ?? o.level ?? o.Level ?? o.severity ?? '').trim()
+  const time = String(o.TS ?? o.ts ?? o.time ?? o.timestamp ?? o.Time ?? '').trim()
+  const file = String(o.LFILE ?? o.caller ?? o.file ?? o.source ?? '').trim()
+  const msg = String(o.msg ?? o.message ?? o.MSG ?? o.Message ?? '').trim()
+  // cgvmagent / zap-like: need at least level+msg or level+file+time
+  if (!level && !msg) return null
+  if (!(o.L || o.LFILE || o.msg || o.message || o.level || o.Level)) return null
+  let pretty = ''
+  try {
+    pretty = JSON.stringify(value, null, 2)
+  } catch {
+    pretty = String(value)
+  }
+  return { level: level || 'info', time, file, msg: msg || '(no message)', pretty }
+}
+
+function parseStructuredLogs(text: string): StructuredLog[] | null {
+  if (!text || /的目录|Directory of/i.test(text)) return null
+  const values = extractJsonValues(text)
+  if (values.length === 0) {
+    const unescaped = tryUnescapeJsonString(text.trim())
+    if (unescaped && unescaped !== text) return parseStructuredLogs(unescaped)
+    return null
+  }
+  // Flatten one level if we got an array of log objects
+  const flat: unknown[] = []
+  for (const v of values) {
+    if (Array.isArray(v)) flat.push(...v)
+    else flat.push(v)
+  }
+  const logs = flat.map(asStructuredLog).filter((x): x is StructuredLog => Boolean(x))
+  if (logs.length === 0) return null
+  // Only switch to log view when most parsed objects look like logs
+  if (logs.length < Math.ceil(flat.length * 0.6)) return null
+  return logs
+}
+
+function formatLogTime(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) {
+    // Already a short stamp
+    return iso.length > 19 ? iso.slice(11, 23) : iso
+  }
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  const ms = String(d.getMilliseconds()).padStart(3, '0')
+  return `${hh}:${mm}:${ss}.${ms}`
+}
+
+function logLevelClass(level: string): string {
+  const l = level.toLowerCase()
+  if (l === 'error' || l === 'fatal' || l === 'panic' || l === 'err') return 'error'
+  if (l === 'warn' || l === 'warning') return 'warn'
+  if (l === 'debug' || l === 'trace') return 'debug'
+  return 'info'
 }
 
 function isDirListingText(text: string): boolean {
@@ -197,6 +360,32 @@ function quoteCmdPath(name: string): string {
   return name
 }
 
+function TerminalLogRow({ record }: { record: StructuredLog }) {
+  const [open, setOpen] = useState(false)
+  const levelCls = logLevelClass(record.level)
+  return (
+    <div className={`terminal-log-row terminal-log-row--${levelCls}`}>
+      <button
+        type="button"
+        className="terminal-log-row__summary"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? '收起原文' : '展开完整 JSON'}
+      >
+        <span className="terminal-log-row__toggle" aria-hidden>
+          {open ? '▾' : '▸'}
+        </span>
+        <span className="terminal-log-row__time">{formatLogTime(record.time)}</span>
+        <span className={`terminal-log-row__level terminal-log-row__level--${levelCls}`}>
+          {record.level.toUpperCase()}
+        </span>
+        {record.file ? <span className="terminal-log-row__file">{record.file}</span> : null}
+        <span className="terminal-log-row__msg">{record.msg}</span>
+      </button>
+      {open ? <pre className="terminal-log-row__raw">{record.pretty}</pre> : null}
+    </div>
+  )
+}
+
 function TerminalStdoutView({
   content,
   disabled,
@@ -206,8 +395,22 @@ function TerminalStdoutView({
   disabled: boolean
   onEnterDir: (name: string) => void
 }) {
-  const lines = content.split('\n')
   const tabular = isDirListingText(content)
+  const logs = !tabular ? parseStructuredLogs(content) : null
+  if (logs && logs.length > 0) {
+    return (
+      <div className="terminal-log-list" role="list">
+        <div className="terminal-log-list__hint">
+          {logs.length} 条日志 · 点击行展开 JSON
+        </div>
+        {logs.map((rec, i) => (
+          <TerminalLogRow key={`${rec.time}-${rec.msg}-${i}`} record={rec} />
+        ))}
+      </div>
+    )
+  }
+
+  const lines = content.split('\n')
   return (
     <pre className={`terminal-stdout${tabular ? ' terminal-stdout--table' : ' terminal-stdout--wrap'}`}>
       {lines.map((line, i) => {

@@ -13,4 +13,5 @@ const (
 	OriginCompactBoundary   = "compact_boundary"
 	OriginCodeWorkset       = "code_workset"
 	OriginCodePin           = "code_pin"
+	OriginStopHook          = "stop_hook"
 )

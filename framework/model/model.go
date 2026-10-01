@@ -43,6 +43,9 @@ type Generation struct {
 	Text       string
 	Raw        any
 	TokenUsage *TokenUsage
+	// FinishReason 为 provider 返回的结束原因（stop/length/content_filter/tool_calls）；
+	// 流式无具名终止帧、靠 EOF 收尾时为 "eof"；provider 未返回时为空。
+	FinishReason string
 	// Err 非空表示流式调用在 setup 成功后失败（如 Recv 网络错误）。
 	// ChatWithToolsStream 通过 finalGenCh 传递，避免 channel 空关闭被误判为 missing generation。
 	Err error

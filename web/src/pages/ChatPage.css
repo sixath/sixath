@@ -1491,6 +1491,127 @@
 .terminal-line--stderr pre            { color: #f44747; }
 .terminal-line--busy                  { color: #808080; font-style: italic; }
 
+.terminal-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+.terminal-log-list__hint {
+  font-size: 11px;
+  color: #808080;
+  margin-bottom: 4px;
+}
+
+.terminal-log-row {
+  border-radius: 4px;
+}
+
+.terminal-log-row__summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.terminal-log-row__summary:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.terminal-log-row__toggle {
+  color: #808080;
+  width: 0.8em;
+  flex: 0 0 auto;
+}
+
+.terminal-log-row__time {
+  color: #808080;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.terminal-log-row__level {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid #555;
+}
+
+.terminal-log-row__level--info {
+  color: #9cdcfe;
+  border-color: #569cd6;
+}
+
+.terminal-log-row__level--warn {
+  color: #dcdcaa;
+  border-color: #d7ba7d;
+}
+
+.terminal-log-row__level--error {
+  color: #f48771;
+  border-color: #f44747;
+}
+
+.terminal-log-row__level--debug {
+  color: #b5cea8;
+  border-color: #6a9955;
+}
+
+.terminal-log-row__file {
+  color: #ce9178;
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-log-row__msg {
+  color: #d4d4d4;
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.terminal-log-row--warn .terminal-log-row__msg {
+  color: #e5e07a;
+}
+
+.terminal-log-row--error .terminal-log-row__msg {
+  color: #f48771;
+}
+
+.terminal-log-row__raw {
+  margin: 0 0 6px 1.2em;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  border-left: 2px solid #555;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: #cecece;
+  font-size: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
 .terminal-kbd {
   display: inline-block;
   margin-left: 4px;

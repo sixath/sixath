@@ -31,8 +31,8 @@ func RegisterProcessTool(reg *Registry, processes *ProcessRegistry, enabled bool
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
-					"type": "string",
-					"enum": []string{"list", "poll", "log", "wait", "kill", "write", "submit", "close"},
+					"type":        "string",
+					"enum":        []string{"list", "poll", "log", "wait", "kill", "write", "submit", "close"},
 					"description": "Process management action.",
 				},
 				"session_id": map[string]any{

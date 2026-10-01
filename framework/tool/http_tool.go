@@ -52,6 +52,8 @@ func RegisterHTTPTool(reg *Registry) error {
 			},
 			"required": []string{"method", "url"},
 		},
+		Effect:   EffectWrite,
+		EffectFn: HTTPMethodEffect,
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			rawMethod, _ := params["method"].(string)
 			rawURL, _ := params["url"].(string)

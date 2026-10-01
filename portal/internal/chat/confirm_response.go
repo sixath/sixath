@@ -14,7 +14,7 @@ type confirmResponseContextKey struct{}
 // ConfirmResponse is a structured confirmation from the chat UI (skill_manage / execute_write).
 // Applied server-side so the model does not need to re-call the tool with confirm_token.
 type ConfirmResponse struct {
-	Kind  string `json:"kind"`  // skill_manage | execute_write
+	Kind  string `json:"kind"`  // skill_manage | execute_write | case_save
 	Token string `json:"token"`
 }
 
@@ -41,6 +41,19 @@ func UserMessagePlaceholderForConfirm(kind string) string {
 		kind = "operation"
 	}
 	return fmt.Sprintf("[confirmed: %s]", kind)
+}
+
+// ApplyCaseConfirm 确认 case_library propose 生成的案例草稿，使其参与以后的案例召回。
+func ApplyCaseConfirm(ctx context.Context, workspace, token string) (map[string]any, error) {
+	resolve := WorkspaceCaseResolver(workspace)
+	if resolve == nil || token == "" {
+		return nil, fmt.Errorf("workspace and token are required")
+	}
+	c, err := resolve(ctx).Confirm(token, ResolveMemoryUserID(ctx, nil))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "confirmed", "case_id": c.ID, "symptom": c.Symptom}, nil
 }
 
 // ApplySkillManageConfirm executes a pending skill_manage create/delete using the shared store.

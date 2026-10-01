@@ -9,18 +9,18 @@ import (
 
 // PendingInputRequest 表示一次待用户填写的输入请求。
 type PendingInputRequest struct {
-	RequestID         string    `json:"request_id"`
-	Token             string    `json:"token"`
-	SessionID         string    `json:"session_id"`
-	ToolCallID        string    `json:"tool_call_id"`
-	ReasoningContent  string    `json:"reasoning_content,omitempty"` // thinking 模式回放必需
-	Kind              string    `json:"kind"`
-	Field             string    `json:"field"`
-	Prompt            string    `json:"prompt"`
-	Title             string    `json:"title"`
-	Options           []string  `json:"options,omitempty"`
-	Required          bool      `json:"required"`
-	CreatedAt         time.Time `json:"created_at"`
+	RequestID        string    `json:"request_id"`
+	Token            string    `json:"token"`
+	SessionID        string    `json:"session_id"`
+	ToolCallID       string    `json:"tool_call_id"`
+	ReasoningContent string    `json:"reasoning_content,omitempty"` // thinking 模式回放必需
+	Kind             string    `json:"kind"`
+	Field            string    `json:"field"`
+	Prompt           string    `json:"prompt"`
+	Title            string    `json:"title"`
+	Options          []string  `json:"options,omitempty"`
+	Required         bool      `json:"required"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // AskUserPendingStore 抽象会话内 pending 输入请求的存取。

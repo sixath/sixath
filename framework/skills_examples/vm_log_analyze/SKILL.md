@@ -1,68 +1,49 @@
 ---
 name: vm_log_analyze
-version: 1.0.0
-description: 根据 TraceId 查询 VM 日志。必须先 describe_table → execute_read → http_request，禁止跳过。
+version: 2.0.0
+description: 进入云游戏实例查 agent（cgvmagent / xagent）日志。必须先在 D 盘搜索日志文件拿到真实路径，禁止假设日志目录。
 tags: [vm, log, analyze, trace]
-allowed_tools: [list_tables, describe_table, execute_read, http_request]
+allowed_tools: [vm_run_cmd]
 ---
 
 # VM 日志分析
 
-根据 TraceId 查询相关 VM 的日志，帮助定位问题。
+根据 traceId / flow_id 查询云游戏实例上 agent 的日志，帮助定位问题。
+
+实例上的 agent 进程是 `cgvmagent.exe` 或 `xagent.exe` 之一，日志目录因实例而异
+（例如 `D:\CloudGameBundle\logs\cgvmagent\cgvmagent.log`），不能写死。
 
 ## 执行顺序（不可跳过）
 
-1. **describe_table**：获取 `t_game_virtual_machine_info` 表结构
-2. **execute_read**：查询 VM 信息，拿到 `mgr_ipv4_address`
-3. **构建HTTP请求**: 
-	   - 使用 http_request 工具发送HTTP请求
-	   - 请求URL格式: http://{ip}:49997/v1/taskmanager/exec?shell=ps
-	   - 请求方法: POST
-	   - 查询参数shell的值是PowerShell命令
-	   - **timeout_seconds=300**（日志查询可能较慢，需 5 分钟超时）
-       - 其中 {ip} 是execute_read执行返回的mgr_ipv4_address（例如: 192.101.2.23）
-	   
-4. **构建PowerShell命令**: 
-	   - 命令模板: Get-Content -Path "D:\\CloudGameBundle\\apps\\cgvmagent\\current\\logs\\cgvmagent.log" |Select-String "{traceId}" |Where-Object { $_ | Select-String "error","warn","ERROR", "Error" -Quiet } |Select-Object -Last 10
-	   - 其中 {traceId} 是用户提供的Trace ID（例如: f3264eec912651f263ab86f5ace1499a）
-	   - 注意：路径中的反斜杠需要转义为 \\\\，命令中的引号需要正确转义
+1. **定位日志文件**：在 D 盘搜索 cgvmagent.log 或 xagent.log
+   ```
+   vm_run_cmd(vmid="<vmid>", op="find", path="D:\\", patterns=["cgvmagent.log", "xagent.log"])
+   ```
+   - 输出即日志完整路径
+   - 命中多个时，对各候选目录用 `op="ls_recent"`，选修改时间最新的
+   - 找不到时如实告诉用户，不要猜路径
 
-5. **执行日志查询**: 
-	   - 将完整的PowerShell命令作为shell参数的值
-	   - URL编码处理：需要对特殊字符进行URL编码（如空格、|、引号等）
-	   - 执行HTTP请求获取日志内容
+2. **查询日志**：用第 1 步拿到的路径
+   - 按 traceId / flow_id 过滤：
+     ```
+     vm_run_cmd(vmid="<vmid>", op="grep", path="<日志路径>", patterns=["<traceId>"])
+     ```
+   - 只看错误：`patterns=["<traceId>", "error", "warn"]` 会按"任一命中"返回，需要时再对结果二次筛选
+   - 看最新内容：`vm_run_cmd(vmid="<vmid>", op="tail", path="<日志路径>", lines=200)`
+   - 看同目录的轮转 / 历史日志：`vm_run_cmd(vmid="<vmid>", op="ls_recent", path="<日志所在目录>")`
 
-**禁止**：跳过 1、2 直接调用 http_request。mgr_ipv4_address 只能从 execute_read 结果获取，禁止杜撰。
-
-## 三步调用示例
-
-```
-describe_table(table_name="t_game_virtual_machine_info", datasource_id="...")
-execute_read(dsl="SELECT mgr_ipv4_address, id, name FROM t_game_virtual_machine_info WHERE ...", datasource_id="...")
-http_request(url="http://{ip}:49997/v1/taskmanager/exec?shell=ps", method="POST", body="...")
-```
-
-第三步仅当第二步有返回结果时执行
+**禁止**：跳过第 1 步直接使用 `D:\CloudGameBundle\apps\cgvmagent\current\logs` 等固定路径。
 
 ## 参数说明
 
 | 参数 | 来源 |
 |------|------|
-| trace_id | 用户提供 |
-| mgr_ipv4_address | 必须来自 execute_read 返回的该列 |
-| timeout_seconds | http_request 超时，建议 300（5 分钟） |
+| vmid / host | 用户提供，或来自上游排查结果；只给 vmid 时工具会自动解析实例地址 |
+| trace_id / flow_id | 用户提供 |
+| 日志路径 | 必须来自第 1 步 `op=find` 的输出 |
 
-## 前置条件
+## 注意
 
-- Agent 需**绑定数据源工具**，能访问 `t_game_virtual_machine_info` 表（含 mgr_ipv4_address 列）
-- 需开启 `skills.allow_script_execution`
-- 若脚本执行被禁用，向用户说明需开启配置，不要编造结果
-
-## datasource_id 说明
-
-- 若 Agent 已绑定数据源，`describe_table` 和 `execute_read` 通常有默认 datasource_id，可直接调用，无需用户提供。
-- 若调用时报「datasource_id is required」，应向用户说明：
-
-  > 根据当前错误信息，您需要在 Agent 管理页中为该 Agent 绑定一个数据源工具，类型为 datasource，并指向包含 t_game_virtual_machine_info 表的数据库。绑定完成后，我们可以继续执行查询以获取 mgr_ipv4_address 并进一步分析日志。如果您已经绑定了数据源，请提供数据源 ID。
-- 若用户主动提供 datasource_id（如「用数据源 ds1」），则将其传入 describe_table 和 execute_read 的 datasource_id 参数。
-
+- `vm_run_cmd` 只执行 cmd.exe 命令，不要发送 PowerShell（Get-Content、Select-String 等）。
+- 查日志优先用 `op=grep` / `op=tail`，不要 `type` 整个大文件（输出过大时只能拿到文件开头的旧内容）。
+- grep 结果为空不等于没有问题，可能是关键字不对或日志已轮转，应结合 `ls_recent` 查看历史文件。

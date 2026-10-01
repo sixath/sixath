@@ -11,6 +11,8 @@
 | [01-datasource.md](./01-datasource.md) | 数据源适配层 | 6.5 / 10 |
 | [02-executor.md](./02-executor.md) | 执行器层 | 6.0 / 10 |
 | [03-middleware.md](./03-middleware.md) | 中间件链体系 | 6.5 / 10 |
+| [04-harness.md](./04-harness.md) | Harness 运行时控制(按问题类型开启) | — (2026-10-01 会话复盘) |
+| [05-tools.md](./05-tools.md) | 工具层(参数契约、空结果诊断、执行前校验) | — (2026-10-01 线上数据统计) |
 
 ## 优先级图例
 

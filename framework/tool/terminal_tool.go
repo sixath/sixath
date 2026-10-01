@@ -164,8 +164,8 @@ func RegisterTerminalTool(reg *Registry, cfg *TerminalConfig) error {
 func proposeTerminal(ctx context.Context, c *TerminalConfig, command, pattern string, params map[string]any) (any, error) {
 	if c.PendingStore == nil || c.TokenGen == nil {
 		return map[string]any{
-			"error": "confirm_required_but_unconfigured",
-			"hint":  "command matched danger patterns but pending store is not configured",
+			"error":   "confirm_required_but_unconfigured",
+			"hint":    "command matched danger patterns but pending store is not configured",
 			"pattern": pattern,
 		}, nil
 	}

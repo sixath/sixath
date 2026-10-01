@@ -46,6 +46,47 @@ func TestAggregateFinal_ScrubsMemoryFence(t *testing.T) {
 	}
 }
 
+func TestWriteStream_PersistsFinalTextNotIntermediateDeltas(t *testing.T) {
+	final := "结论：根因是 prelaunch 目录下的补丁文件在 09:58 被替换，导致校验失败。"
+	ch := make(chan service.ChatStreamEvent, 8)
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventChunk, Content: "我先查一下日志。"}
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventChunk, Content: "草稿结论：计数器保护。"}
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventChunk, Content: final}
+	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventFinal, Content: final}
+	close(ch)
+
+	var persisted string
+	rec := httptest.NewRecorder()
+	WriteStream(context.Background(), rec, ch, "s1", func(_ context.Context, _, content string, _ map[string]any) error {
+		persisted = content
+		return nil
+	})
+	if persisted != final {
+		t.Fatalf("persisted = %q, want final text only", persisted)
+	}
+	if strings.Contains(rec.Body.String(), "event: final") {
+		t.Fatalf("final event must not be emitted to the client: %s", rec.Body.String())
+	}
+}
+
+func TestPersistableContent(t *testing.T) {
+	long := strings.Repeat("报告正文", 100)
+	if got := persistableContent(long+"完成。", "完成。", false); got != long+"完成。" {
+		t.Fatal("a tiny closing line must not replace a long streamed report")
+	}
+	report := strings.Repeat("最终结论", 100)
+	drafts := strings.Repeat("草稿结论", 500) + report
+	if got := persistableContent(drafts, report, false); got != report {
+		t.Fatal("a full final report must replace superseded drafts even when much shorter")
+	}
+	if got := persistableContent("partial", "full final", true); got != "partial" {
+		t.Fatal("canceled turns keep streamed text")
+	}
+	if got := persistableContent("a b c", "", false); got != "a b c" {
+		t.Fatal("no final falls back to stream")
+	}
+}
+
 func TestAggregateFinal_DeadlineErrorNotSuppressed(t *testing.T) {
 	ch := make(chan service.ChatStreamEvent, 4)
 	ch <- service.ChatStreamEvent{Type: service.ChatStreamEventChunk, Content: "partial"}

@@ -1,11 +1,14 @@
 package harness
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sixath/framework/redact"
 )
 
 type TurnTraceMeta struct {
@@ -28,6 +31,8 @@ type TurnTrace struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 	// EstimatedCostUSD 为本 turn 估算成本（美元），由 Portal 计算并随 payload_json 持久化。
 	EstimatedCostUSD float64 `json:"estimated_cost_usd,omitempty"`
+	// EmptyFinal 终答为空时的诊断，随 payload_json 持久化。
+	EmptyFinal *EmptyFinalDiag `json:"empty_final,omitempty"`
 }
 
 type TurnToolCall struct {
@@ -49,14 +54,6 @@ const (
 	maxCalls       = 40
 )
 
-var secretKeySubstrings = []string{
-	"password",
-	"token",
-	"secret",
-	"api_key",
-	"authorization",
-}
-
 func BuildTurnTrace(meta TurnTraceMeta, tr *RunTrace) *TurnTrace {
 	if tr == nil {
 		return nil
@@ -70,6 +67,7 @@ func BuildTurnTrace(meta TurnTraceMeta, tr *RunTrace) *TurnTrace {
 		InputTokens:      tr.InputTokens,
 		OutputTokens:     tr.OutputTokens,
 		EstimatedCostUSD: tr.EstimatedCostUSD,
+		EmptyFinal:       tr.EmptyFinal,
 	}
 	recs := tr.ToolCalls
 	if len(recs) > maxCalls {
@@ -82,7 +80,7 @@ func BuildTurnTrace(meta TurnTraceMeta, tr *RunTrace) *TurnTrace {
 			ToolName:      r.ToolName,
 			Arguments:     redactArgs(r.Arguments),
 			ResultPreview: previewResult(r.Result),
-			Error:         r.Error,
+			Error:         redact.String(r.Error),
 			Blocked:       r.Blocked,
 			Decision:      r.Decision,
 			DurationMS:    r.DurationMS,
@@ -91,26 +89,16 @@ func BuildTurnTrace(meta TurnTraceMeta, tr *RunTrace) *TurnTrace {
 	return out
 }
 
-func isSecretKey(key string) bool {
-	kl := strings.ToLower(key)
-	for _, sub := range secretKeySubstrings {
-		if strings.Contains(kl, sub) {
-			return true
-		}
-	}
-	return false
-}
-
 func redactArgs(args map[string]any) map[string]any {
 	if args == nil {
 		return nil
 	}
 	out := make(map[string]any, len(args))
 	for k, v := range args {
-		if isSecretKey(k) {
+		if redact.SecretKey(k) {
 			out[k] = "[redacted]"
 		} else {
-			out[k] = v
+			out[k] = redact.Value(v)
 		}
 	}
 	return truncateArgsMap(out)
@@ -168,19 +156,40 @@ func previewResult(result any) string {
 	var s string
 	switch v := result.(type) {
 	case string:
-		s = v
+		if isLargeBase64(v) {
+			return "[omitted binary]"
+		}
+		s = redact.String(v)
 	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			s = fmt.Sprint(v)
-		} else {
-			s = string(b)
+		s = redactedJSON(v)
+		if isLargeBase64(s) {
+			return "[omitted binary]"
 		}
 	}
-	if isLargeBase64(s) {
-		return "[omitted binary]"
-	}
 	return truncateRunes(s, maxResultRunes)
+}
+
+// redactedJSON 解码为通用值后逐个字符串遮盖再序列化；不对 JSON 文本跑正则，避免跨字段匹配与转义引号漏遮。
+func redactedJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return redact.String(fmt.Sprint(v))
+	}
+	var generic any
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(&generic); err != nil {
+		return redact.String(string(b))
+	}
+	before, err1 := json.Marshal(generic)
+	after, err2 := json.Marshal(redact.Value(generic))
+	if err1 != nil || err2 != nil {
+		return redact.String(string(b))
+	}
+	if string(before) == string(after) {
+		return string(b)
+	}
+	return string(after)
 }
 
 func isLargeBase64(s string) bool {

@@ -180,6 +180,7 @@ func (e *ESExecutor) execSearch(ctx context.Context, client *datasource.ESHTTP, 
 				Source map[string]interface{} `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
+		Aggregations json.RawMessage `json:"aggregations"`
 	}
 	if err := json.Unmarshal(respBody, &out); err != nil {
 		return nil, fmt.Errorf("executor: decode search response: %w", err)
@@ -230,7 +231,11 @@ func (e *ESExecutor) execSearch(ctx context.Context, client *datasource.ESHTTP, 
 		}
 		rows = append(rows, row)
 	}
-	return &Result{Columns: columns, Rows: rows, Truncated: truncated, EstimatedTotal: estimatedTotal}, nil
+	res := &Result{Columns: columns, Rows: rows, Truncated: truncated, EstimatedTotal: estimatedTotal}
+	if aggs := bytes.TrimSpace(out.Aggregations); len(aggs) > 0 && string(aggs) != "null" {
+		res.Aggregations = aggs
+	}
+	return res, nil
 }
 
 // esSchemaErrorTypes 是 ES error.type 中代表 schema/mapping/索引不存在的类型集合

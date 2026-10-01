@@ -843,7 +843,7 @@ func TestESLogQuery_MappedEmptyStaysEmpty(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, sr, ESLogConfig{
 		DatasourceID: "es", DefaultIndex: "app-logs-*", TraceIDField: "trace_id",
-		FieldMapper:  mapFieldMapper{"vm_id": {Type: "keyword"}},
+		FieldMapper: mapFieldMapper{"vm_id": {Type: "keyword"}},
 	})
 	tl, _ := reg.Get("es_log_query")
 	out, err := tl.Execute(context.Background(), map[string]any{
@@ -905,5 +905,28 @@ func TestESLogQueryDescriptionForbidsInventingIndex(t *testing.T) {
 	}
 	if strings.Contains(tl.Description, "operation:DiscardUserArchive") {
 		t.Fatalf("must not use unmapped field:value as the sole example: %s", tl.Description)
+	}
+}
+
+func TestESLogQueryDescription_MarksIndexRequiredWithoutDefault(t *testing.T) {
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	_ = RegisterESLogTool(reg, &fakeReader{result: &executor.QueryResult{}}, ESLogConfig{Clusters: []ESLogCluster{
+		{ID: "zj-elk", Purpose: "应用", IndexPriority: []string{"backend-sched-planner-*", "vm-manager-*"}},
+		{ID: "mg-rca-es", Purpose: "RCA"},
+		{ID: "ok-elk", Purpose: "有默认", DefaultIndex: "app-*"},
+	}})
+	tl, _ := reg.Get("es_log_query")
+	d := tl.Description
+	for _, want := range []string{
+		"`zj-elk` — 应用; no default index: index is REQUIRED (known patterns: backend-sched-planner-*, vm-manager-*)",
+		"`mg-rca-es` — RCA; no default index: index is REQUIRED",
+		"`ok-elk` — 有默认; default index `app-*`",
+	} {
+		if !strings.Contains(d, want) {
+			t.Fatalf("description missing %q:\n%s", want, d)
+		}
+	}
+	if strings.Contains(d, "default index ``") {
+		t.Fatal("empty default index must not render as default index ``")
 	}
 }

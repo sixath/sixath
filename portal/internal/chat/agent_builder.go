@@ -18,6 +18,8 @@ import (
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/executor"
 	agent "github.com/sixath/framework/harness"
+	"github.com/sixath/framework/investigate"
+	"github.com/sixath/framework/investigate/cases"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/metadata"
 	"github.com/sixath/framework/model"
@@ -160,6 +162,7 @@ func BuildRegistry(tools []*biz.ToolMeta, servers []*biz.McpServerMeta, reg *too
 	}
 
 	registerESLogFromAgentTools(reg, tools, o)
+	applyPortalToolDescriptions(reg, tools)
 	applyHTTPRequestOverlay(reg, o)
 
 	return &RegistryBuildResult{McpServers: mcpServers, DatasourcePrompt: dsPrompt, DsBindings: dsBindings}, nil
@@ -445,8 +448,33 @@ func BuildEffectiveSystemPrompt(userPrompt string, skillsIdx *skills.Index) stri
 	return userPrompt
 }
 
-// HarnessReActOptions 把 workspace、额外 skills 目录与 workspace hooks 交给 Harness。
+// HarnessReActOptions 把 workspace、额外 skills 目录与 workspace hooks 交给 Harness（结案审查只做规则级）。
 func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReActOption {
+	return HarnessReActOptionsFor(nil, workspace, extraSkillDirs)
+}
+
+// ResolveCriticModel 按 hooks.yaml critic.model 解析审查模型；nil 或解析失败时复用 agent 自身模型。
+var ResolveCriticModel func(name string) (model.Model, error)
+
+// CriticStopHook 按 workspace 的 critic 配置构造结案审查；未启用时返回 nil。m 为 agent 模型（可为 nil，仅规则级）。
+func CriticStopHook(m model.Model, workspace string) agent.StopHook {
+	cfg, ok := agent.WorkspaceCriticConfig(strings.TrimSpace(workspace))
+	if !ok {
+		return nil
+	}
+	cm := m
+	if name := strings.TrimSpace(cfg.Model); name != "" && ResolveCriticModel != nil {
+		if resolved, err := ResolveCriticModel(name); err == nil && resolved != nil {
+			cm = resolved
+		} else {
+			slog.Warn("harness critic: fall back to agent model", "model", name, "err", err)
+		}
+	}
+	return agent.NewCriticHook(cfg, tool.DefaultInvestigationStore, cm)
+}
+
+// HarnessReActOptionsFor 同 HarnessReActOptions；m 非 nil 时结案审查可做模型级复核。
+func HarnessReActOptionsFor(m model.Model, workspace string, extraSkillDirs []string) []agent.ReActOption {
 	opts := []agent.ReActOption{agent.WithReActWorkspace(workspace)}
 	if len(extraSkillDirs) > 0 {
 		opts = append(opts, agent.WithReActSkillsDirs(extraSkillDirs))
@@ -455,6 +483,20 @@ func HarnessReActOptions(workspace string, extraSkillDirs []string) []agent.ReAc
 	if ws := strings.TrimSpace(workspace); ws != "" {
 		if loaded, err := agent.LoadWorkspaceHarnessHooks(ws); err == nil {
 			hooks = append(hooks, loaded...)
+		}
+		stopHooks, maxNudges, err := agent.LoadWorkspaceStopHooks(ws, workspaceStopHookOptions())
+		if err != nil {
+			slog.Warn("harness hooks: skip stop_rules", "workspace", ws, "err", err)
+			stopHooks = nil
+		}
+		if critic := CriticStopHook(m, ws); critic != nil {
+			stopHooks = append(stopHooks, critic)
+		}
+		if len(stopHooks) > 0 {
+			opts = append(opts, agent.WithReActStopHooks(stopHooks...), agent.WithReActMaxStopNudges(maxNudges))
+		}
+		if agent.WorkspaceInvestigationLedgerEnabled(ws) {
+			opts = append(opts, agent.WithReActToolSuccessHook(agent.InvestigationObserver(tool.DefaultInvestigationStore)))
 		}
 	}
 	if len(hooks) > 0 {
@@ -478,6 +520,77 @@ func ReActOptionsFromAgent(meta biz.AgentMeta) []agent.ReActOption {
 		opts = append(opts, agent.WithReActMaxOutputTokens(n))
 	}
 	return opts
+}
+
+func workspaceStopHookOptions() agent.StopHookOptions {
+	return agent.StopHookOptions{Todos: tool.DefaultTodoStore, Investigations: tool.DefaultInvestigationStore}
+}
+
+// InvestigateConfig 组装 deep_investigate 配置：子 agent 复用父 agent 工作区的 stop_rules 与台账观测。
+func InvestigateConfig(m model.Model, workspace string) investigate.Config {
+	cfg := investigate.Config{Model: m}
+	if ws := strings.TrimSpace(workspace); ws != "" {
+		if hooks, n, err := agent.LoadWorkspaceStopHooks(ws, workspaceStopHookOptions()); err == nil {
+			cfg.StopHooks, cfg.MaxStopNudges = hooks, n
+		}
+		if critic := CriticStopHook(m, ws); critic != nil {
+			cfg.StopHooks = append(cfg.StopHooks, critic)
+		}
+		if agent.WorkspaceInvestigationLedgerEnabled(ws) {
+			cfg.ExtraOptions = append(cfg.ExtraOptions,
+				agent.WithReActToolSuccessHook(agent.InvestigationObserver(tool.DefaultInvestigationStore)))
+		}
+	}
+	return cfg
+}
+
+// WorkspaceCaseResolver 返回 agent 工作区下 cases/ 案例库的解析函数；工作区为空时返回 nil。
+func WorkspaceCaseResolver(workspace string) tool.CaseStoreResolver {
+	ws := strings.TrimSpace(workspace)
+	if ws == "" {
+		return nil
+	}
+	store := cases.ForWorkspace(ws)
+	return func(context.Context) cases.Store { return store }
+}
+
+// RegisterInvestigationTools 注册调查类工具：工作区开启 investigation_ledger 时注册台账，
+// 门控可见的 compare（有探测类工具才进 schema）、timeline（有日志类工具才进 schema），以及 deep_investigate（代码+日志工具都配置才进 schema）。
+func RegisterInvestigationTools(reg *tool.Registry, m model.Model, workspace string) error {
+	if agent.WorkspaceInvestigationLedgerEnabled(workspace) {
+		resolve := WorkspaceCaseResolver(workspace)
+		if err := tool.RegisterInvestigationToolWithOptions(reg, tool.DefaultInvestigationStore, tool.InvestigationToolOptions{Cases: resolve}); err != nil {
+			return err
+		}
+		if resolve != nil {
+			if _, exists := reg.Get(tool.CaseLibraryToolName); !exists {
+				if err := tool.RegisterCaseLibraryTool(reg, tool.DefaultInvestigationStore, resolve); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if _, exists := reg.Get(tool.CompareToolName); !exists {
+		if err := tool.RegisterCompareTool(reg); err != nil {
+			return err
+		}
+	}
+	if _, exists := reg.Get(tool.TimelineToolName); !exists {
+		if err := tool.RegisterTimelineToolWithOptions(reg, tool.TimelineOptions{ChangeSources: agent.WorkspaceChangeSources(workspace)}); err != nil {
+			return err
+		}
+	}
+	if _, exists := reg.Get(tool.FieldHistoryToolName); !exists {
+		if err := tool.RegisterFieldHistoryTool(reg); err != nil {
+			return err
+		}
+	}
+	if _, exists := reg.Get(tool.FsCompareToolName); !exists {
+		if err := tool.RegisterFsCompareTool(reg); err != nil {
+			return err
+		}
+	}
+	return investigate.Register(reg, InvestigateConfig(m, workspace))
 }
 
 // BuildReActAgent 构建 ReActAgent。extra 在默认选项之后应用，可覆盖例如 MaxSteps、EventBus，或注入 WithReActToolSuccessHook。

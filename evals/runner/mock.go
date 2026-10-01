@@ -91,6 +91,10 @@ func runMock(tasks []Task) []TaskResult {
 	reg := buildMockRegistry()
 	results := make([]TaskResult, 0, len(tasks))
 	for _, task := range tasks {
+		// answer_shape 需要真实模型与 judge，脚本化回放没有意义。
+		if task.Category == "answer_shape" {
+			continue
+		}
 		results = append(results, runMockTask(task, reg))
 	}
 	return results

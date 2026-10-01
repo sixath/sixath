@@ -598,6 +598,25 @@ func TestRCAGrep_SkipsVendorGenAndTxt(t *testing.T) {
 	}
 }
 
+func TestRCAGrep_SkipsWorktreesBuildAndBinaries(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "service-a")
+	writeFile(t, filepath.Join(repoA, "pkg", "a.go"), "package a\nconst Token = \"UniqueTokenXYZ\"\n")
+	writeFile(t, filepath.Join(repoA, ".worktrees", "feat", "pkg", "a.go"), "package a\nconst Token = \"UniqueTokenXYZ\"\n")
+	writeFile(t, filepath.Join(repoA, "build", "out", "gen.go"), "package out\nconst Token = \"UniqueTokenXYZ\"\n")
+	writeFile(t, filepath.Join(repoA, "tools", "blob.dat"), "ELF\x00\x01UniqueTokenXYZ\x00\n")
+	reg := newRCARegistry(t, []string{repoA})
+	tl, _ := reg.Get("rca_grep")
+	out, err := tl.Execute(context.Background(), map[string]any{"pattern": "UniqueTokenXYZ"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	matches := out.(map[string]any)["matches"].([]map[string]any)
+	if len(matches) != 1 || matches[0]["file"] != "pkg/a.go" {
+		t.Fatalf("want only pkg/a.go, got %#v", matches)
+	}
+}
+
 func TestRCAGrep_DescriptionSaysQuotedErrorFirst(t *testing.T) {
 	reg := newRCARegistry(t, []string{t.TempDir()})
 	tl, ok := reg.Get("rca_grep")

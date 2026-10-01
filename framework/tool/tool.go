@@ -52,6 +52,11 @@ type Tool struct {
 	//   - <0 ：不追加超时，由工具自行管理（如显式配置为「无限制」的数据源查询）
 	// 工具内部更短的超时依然生效（嵌套 context 取最短）。
 	Timeout time.Duration
+	// Effect 静态副作用级别；为空时 Register 按内置工具名填默认值（见 effect.go）。
+	Effect Effect
+	// EffectFn 按单次调用参数判定副作用（如 http_request 按 method、vm_run_cmd 按命令），
+	// 返回 EffectUnknown 时回退到 Effect。
+	EffectFn func(args map[string]any) Effect
 }
 
 // DefaultToolTimeout 为工具执行的全局超时上限。
@@ -285,6 +290,9 @@ func (r *Registry) Register(t Tool) error {
 			t.RequiresSequential = seq
 		}
 	}
+	if t.Effect == EffectUnknown {
+		t.Effect = builtinDefaultEffect[t.Name]
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.tools[t.Name]; exists {
@@ -385,6 +393,31 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	return t, ok
+}
+
+// AppendDescription 在已注册工具的 Description 末尾追加一段说明（如 Portal 配置的部署说明）。
+// 工具不存在或 extra 为空时返回 false。
+func (r *Registry) AppendDescription(name, extra string) bool {
+	extra = strings.TrimSpace(extra)
+	if r == nil || extra == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tools[name]
+	if !ok {
+		return false
+	}
+	if strings.Contains(t.Description, extra) {
+		return true
+	}
+	if strings.TrimSpace(t.Description) == "" {
+		t.Description = extra
+	} else {
+		t.Description = strings.TrimRight(t.Description, "\n") + "\n\n" + extra
+	}
+	r.tools[name] = t
+	return true
 }
 
 // List 返回当前注册的所有工具。

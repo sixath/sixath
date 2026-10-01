@@ -75,15 +75,16 @@ type SSHExecRunResult struct {
 }
 
 type SSHExecResult struct {
-	OK            bool   `json:"ok"`
-	Host          string `json:"host"`
-	User          string `json:"user"`
-	Command       string `json:"command"`
-	ExitCode      int    `json:"exit_code"`
-	Stdout        string `json:"stdout"`
-	Stderr        string `json:"stderr"`
-	ErrorCategory string `json:"error_category,omitempty"`
-	DurationMS    int64  `json:"duration_ms"`
+	OK            bool       `json:"ok"`
+	Host          string     `json:"host"`
+	User          string     `json:"user"`
+	Command       string     `json:"command"`
+	ExitCode      int        `json:"exit_code"`
+	Stdout        string     `json:"stdout"`
+	Stderr        string     `json:"stderr"`
+	ErrorCategory string     `json:"error_category,omitempty"`
+	DurationMS    int64      `json:"duration_ms"`
+	Spill         *TextSpill `json:"spill,omitempty"`
 }
 
 type osSSHExecRunner struct{}
@@ -128,45 +129,81 @@ func RegisterSSHExecTool(reg *Registry, cfg *SSHExecConfig, opts ...*RegisterToo
 	if len(opts) > 0 && opts[0] != nil && opts[0].Description != "" {
 		desc = opts[0].Description
 	}
+	desc += "\nFor logs you may pass op instead of command: op=ls_recent (newest files in a directory), op=tail (last N lines), op=grep (last N lines matching a keyword). The generated command is still checked against the command policy."
+	props := map[string]any{
+		"host": map[string]any{
+			"type":        "string",
+			"description": "SSH target host or IP; must match allowed_hosts when configured. If the tool is configured with default_host or exactly one concrete allowed host, you may omit this and the server will apply that default.",
+		},
+		"user": map[string]any{
+			"type":        "string",
+			"description": "SSH login user. If omitted, default_user is used.",
+		},
+		"command": map[string]any{
+			"type":        "string",
+			"description": "Remote command to execute. Must match allowed_command_prefixes and denied_command_patterns policies when configured.",
+		},
+		"timeout_sec": map[string]any{
+			"type":        "integer",
+			"description": "Overall command timeout in seconds. Defaults to tool policy.",
+		},
+		"strict_host_key_checking": map[string]any{
+			"type":        "string",
+			"description": "OpenSSH StrictHostKeyChecking value: yes, accept-new, or no. Defaults to tool policy.",
+		},
+		"working_dir": map[string]any{
+			"type":        "string",
+			"description": "Optional remote working directory. The tool will cd into it before running command.",
+		},
+	}
+	for k, v := range remoteOpSchema() {
+		props[k] = v
+	}
+	base := buildSSHExecExecute(cfg)
 	return reg.Register(Tool{
 		Name:        "ssh_exec",
 		Description: desc,
+		// host/command 均不列入 required：host 支持 default_host / 单条 allowed_hosts 隐式默认
+		// 及 ip/hostname/server 等同义参数（见 hostFromParams）；command 可由 op 生成。
+		// 缺失时由 buildSSHExecExecute 报明确错误，静态 required 会误杀这些合法用法。
 		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"host": map[string]any{
-					"type":        "string",
-					"description": "SSH target host or IP; must match allowed_hosts when configured. If the tool is configured with default_host or exactly one concrete allowed host, you may omit this and the server will apply that default.",
-				},
-				"user": map[string]any{
-					"type":        "string",
-					"description": "SSH login user. If omitted, default_user is used.",
-				},
-				"command": map[string]any{
-					"type":        "string",
-					"description": "Remote command to execute. Must match allowed_command_prefixes and denied_command_patterns policies when configured.",
-				},
-				"timeout_sec": map[string]any{
-					"type":        "integer",
-					"description": "Overall command timeout in seconds. Defaults to tool policy.",
-				},
-				"strict_host_key_checking": map[string]any{
-					"type":        "string",
-					"description": "OpenSSH StrictHostKeyChecking value: yes, accept-new, or no. Defaults to tool policy.",
-				},
-				"working_dir": map[string]any{
-					"type":        "string",
-					"description": "Optional remote working directory. The tool will cd into it before running command.",
-				},
-			},
-			// host 不列入 required：既支持 default_host / 单条 allowed_hosts 隐式默认，
-			// 也支持 ip/hostname/server 等同义参数（见 hostFromParams）。缺失时由
-			// buildSSHExecExecute 报明确错误，静态 required 会误杀这两种合法用法。
-			"required": []string{"command"},
+			"type":       "object",
+			"properties": props,
 		},
-		Execute: buildSSHExecExecute(cfg),
+		EffectFn: func(args map[string]any) Effect {
+			if remoteOpRequested(args, sshExecCommandKeys...) {
+				return EffectRead
+			}
+			return EffectUnknown
+		},
+		Execute: func(ctx context.Context, params map[string]any) (any, error) {
+			if !remoteOpRequested(params, sshExecCommandKeys...) {
+				return base(ctx, params)
+			}
+			op, err := parseRemoteOp(params)
+			if err != nil {
+				return nil, fmt.Errorf("ssh_exec: %w", err)
+			}
+			cmd, err := op.posixCmd()
+			if err != nil {
+				return nil, fmt.Errorf("ssh_exec: %w", err)
+			}
+			p := make(map[string]any, len(params))
+			for k, v := range params {
+				p[k] = v
+			}
+			p["command"] = cmd
+			out, err := base(ctx, p)
+			if res, ok := out.(SSHExecResult); ok && err == nil && res.Spill == nil {
+				res.Stdout, _ = op.trimOutput(res.Stdout)
+				return res, nil
+			}
+			return out, err
+		},
 	})
 }
+
+var sshExecCommandKeys = []string{"command", "cmd", "shell", "script"}
 
 func buildSSHExecExecute(cfg *SSHExecConfig) ExecuteFunc {
 	return func(ctx context.Context, params map[string]any) (any, error) {
@@ -202,16 +239,21 @@ func buildSSHExecExecute(cfg *SSHExecConfig) ExecuteFunc {
 		if maxOut <= 0 {
 			maxOut = terminalDefaultMaxOutput
 		}
+		stdout, spill := MaybeSpillText(ctx, "ssh_exec", run.Stdout)
+		if spill == nil {
+			stdout = truncateOutput(run.Stdout, maxOut)
+		}
 		return SSHExecResult{
 			OK:            cat == "",
 			Host:          req.host,
 			User:          req.user,
 			Command:       req.command,
 			ExitCode:      run.ExitCode,
-			Stdout:        truncateOutput(run.Stdout, maxOut),
+			Stdout:        stdout,
 			Stderr:        truncateOutput(run.Stderr, maxOut),
 			ErrorCategory: cat,
 			DurationMS:    run.Duration.Milliseconds(),
+			Spill:         spill,
 		}, nil
 	}
 }

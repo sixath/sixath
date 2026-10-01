@@ -257,9 +257,9 @@ func TestHitContractFromResult_SpillStub(t *testing.T) {
 func TestCollectEvidenceRefs_SpillStub(t *testing.T) {
 	stub := &QuerySpillStub{
 		Spilled: true, Path: "tmp/results/s/1.jsonl", Count: 51, OK: true,
-		HitStatus: HitStatusHits,
+		HitStatus:    HitStatusHits,
 		EvidenceRefs: []EvidenceRef{{Kind: "es_log_query", TraceID: "t1"}},
-		Sample: []map[string]any{{"i": 1}},
+		Sample:       []map[string]any{{"i": 1}},
 	}
 	refs := CollectEvidenceRefs(stub)
 	if len(refs) != 1 || refs[0].Kind != "es_log_query" || refs[0].Summary == "no hits" {

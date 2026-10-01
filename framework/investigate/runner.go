@@ -39,6 +39,13 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 			err := errors.New("investigate: no investigation tools available")
 			return map[string]any{"ok": false, "error": err.Error(), "error_code": tool.ErrorPermanent}, err
 		}
+		if t, ok := parent.Get(tool.InvestigationToolName); ok {
+			_ = sub.Register(t)
+		}
+		_ = tool.RegisterCompareTool(sub)
+		_ = tool.RegisterTimelineTool(sub)
+		_ = tool.RegisterFieldHistoryTool(sub)
+		_ = tool.RegisterFsCompareTool(sub)
 
 		userText := question
 		if h := strings.TrimSpace(hints); h != "" {
@@ -49,6 +56,13 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 			harness.WithReActMaxOutputTokens(cfg.maxOutputTokens()),
 			harness.WithReActSystemPrompt(playbookPrompt),
 		}
+		if len(cfg.StopHooks) > 0 {
+			agentOpts = append(agentOpts, harness.WithReActStopHooks(cfg.StopHooks...))
+			if cfg.MaxStopNudges > 0 {
+				agentOpts = append(agentOpts, harness.WithReActMaxStopNudges(cfg.MaxStopNudges))
+			}
+		}
+		agentOpts = append(agentOpts, cfg.ExtraOptions...)
 		subAgent := harness.NewReActAgent(cfg.Model, nil, sub, agentOpts...)
 
 		parentRID, _ := ctx.Value(tool.ContextKeyRequestID).(string)

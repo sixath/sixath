@@ -42,6 +42,7 @@ export default function ToolForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [proxies, setProxies] = useState<Proxy[]>([])
+  const isESDatasource = config.datasource?.type === 'elasticsearch' || config.datasource?.type === 'es'
 
   const validateJson = (str: string): Record<string, unknown> | null => {
     if (!str.trim()) return {}
@@ -144,8 +145,11 @@ export default function ToolForm() {
       const ds = config.datasource ?? {}
       const dsType = ds.type || 'mysql'
       if (dsType === 'elasticsearch' || dsType === 'es') {
-        if (!(ds.default_index || '').trim() || !(ds.purpose || '').trim()) {
-          setError('请填写默认索引和用途')
+        const missing: string[] = []
+        if (!(ds.default_index || '').trim()) missing.push('默认索引')
+        if (!(ds.purpose || '').trim()) missing.push('用途')
+        if (missing.length > 0) {
+          setError(`请填写${missing.join('和')}`)
           return
         }
       }
@@ -342,7 +346,7 @@ export default function ToolForm() {
               <input
                 value={config.datasource?.dsn || ''}
                 onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), dsn: e.target.value } }))}
-                placeholder="user:pass@tcp(localhost:3306)/dbname"
+                placeholder={isESDatasource ? 'http://localhost:9200' : 'user:pass@tcp(localhost:3306)/dbname'}
               />
             </div>
             <div className="form-group" style={{ display: 'flex', gap: '0.5rem' }}>
@@ -358,9 +362,9 @@ export default function ToolForm() {
                 <label>Port</label>
                 <input
                   type="number"
-                  value={config.datasource?.port ?? ''}
+                  value={config.datasource?.port || ''}
                   onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), port: parseInt(e.target.value) || 0 } }))}
-                  placeholder="3306"
+                  placeholder={isESDatasource ? '9200' : '3306'}
                 />
               </div>
             </div>
@@ -370,7 +374,7 @@ export default function ToolForm() {
                 <input
                   value={config.datasource?.user || ''}
                   onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), user: e.target.value } }))}
-                  placeholder="root"
+                  placeholder={isESDatasource ? 'elastic' : 'root'}
                 />
               </div>
               <div style={{ flex: 1 }}>
@@ -383,14 +387,16 @@ export default function ToolForm() {
                 />
               </div>
             </div>
-            <div className="form-group">
-              <label>DB Name</label>
-              <input
-                value={config.datasource?.dbname || ''}
-                onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), dbname: e.target.value } }))}
-                placeholder="mydb"
-              />
-            </div>
+            {!isESDatasource && (
+              <div className="form-group">
+                <label>DB Name</label>
+                <input
+                  value={config.datasource?.dbname || ''}
+                  onChange={(e) => setConfig((c) => ({ ...c, datasource: { ...(c.datasource || {}), dbname: e.target.value } }))}
+                  placeholder="mydb"
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>
                 <input
@@ -401,7 +407,7 @@ export default function ToolForm() {
                 {' '}只读
               </label>
             </div>
-            {(config.datasource?.type === 'elasticsearch' || config.datasource?.type === 'es') && (
+            {isESDatasource && (
               <>
                 <div className="form-group">
                   <label>默认索引 *</label>

@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	esIndexCatalogTTL         = 5 * time.Minute
-	esIndexSuggestLimit       = 15
-	esIndexErrorUnresolved    = "unresolved"
-	esIndexStar               = "*"
-	esIndexAll                = "_all"
+	esIndexCatalogTTL      = 5 * time.Minute
+	esIndexSuggestLimit    = 30
+	esIndexErrorUnresolved = "unresolved"
+	esIndexStar            = "*"
+	esIndexAll             = "_all"
 )
 
 // ESIndexCatalog lists physical index names for a cluster (injected in tests).
@@ -63,7 +63,29 @@ func filterPhysicalIndexNames(names []string) []string {
 }
 
 func suggestIndexPatterns(requested string, catalog []string, defaultIndex string) []string {
-	def := strings.TrimSpace(defaultIndex)
+	return suggestIndexPatternsWith(requested, catalog, ESLogCluster{DefaultIndex: defaultIndex})
+}
+
+// indexPriorityBoost 让集群配置的 index_priority 排在相似度打分之前，且按配置顺序。
+const indexPriorityBoost = 1000
+
+func indexPriorityScore(priority []string, pattern string) int {
+	pb := indexPatternBase(pattern)
+	for i, p := range priority {
+		base := indexPatternBase(p)
+		if base != "" && strings.HasPrefix(pb, base) {
+			return indexPriorityBoost - i
+		}
+	}
+	return 0
+}
+
+func suggestIndexPatternsWith(requested string, catalog []string, cl ESLogCluster) []string {
+	limit := cl.IndexSuggestLimit
+	if limit <= 0 {
+		limit = esIndexSuggestLimit
+	}
+	def := strings.TrimSpace(cl.DefaultIndex)
 	seen := map[string]struct{}{}
 	var out []string
 	add := func(p string) {
@@ -90,7 +112,7 @@ func suggestIndexPatterns(requested string, catalog []string, defaultIndex strin
 		if p == "" || p == def {
 			continue
 		}
-		rest = append(rest, scored{p: p, score: scoreIndexPattern(reqBase, p)})
+		rest = append(rest, scored{p: p, score: scoreIndexPattern(reqBase, p) + indexPriorityScore(cl.IndexPriority, p)})
 	}
 	sort.SliceStable(rest, func(i, j int) bool {
 		if rest[i].score != rest[j].score {
@@ -108,7 +130,7 @@ func suggestIndexPatterns(requested string, catalog []string, defaultIndex strin
 	if !hasPositive {
 		for _, s := range rest {
 			add(s.p)
-			if len(out) >= esIndexSuggestLimit {
+			if len(out) >= limit {
 				return out
 			}
 		}
@@ -119,14 +141,14 @@ func suggestIndexPatterns(requested string, catalog []string, defaultIndex strin
 			continue
 		}
 		add(s.p)
-		if len(out) >= esIndexSuggestLimit {
+		if len(out) >= limit {
 			break
 		}
 	}
-	if len(out) < esIndexSuggestLimit {
+	if len(out) < limit {
 		for _, s := range rest {
 			add(s.p)
-			if len(out) >= esIndexSuggestLimit {
+			if len(out) >= limit {
 				break
 			}
 		}
@@ -295,15 +317,15 @@ func groupedPatterns(physical []string) []string {
 	return metadata.GroupIndicesByPattern(filterPhysicalIndexNames(physical))
 }
 
-func attachSuggestedPatterns(ctx context.Context, payload map[string]any, cat ESIndexCatalog, clusterID, requested, defaultIndex string) {
+func attachSuggestedPatterns(ctx context.Context, payload map[string]any, cat ESIndexCatalog, cl ESLogCluster, requested string) {
 	if payload == nil || cat == nil {
 		return
 	}
-	all, err := cat.ListIndexNames(ctx, clusterID, "")
+	all, err := cat.ListIndexNames(ctx, cl.ID, "")
 	if err != nil || len(all) == 0 {
 		return
 	}
-	sugs := suggestIndexPatterns(requested, groupedPatterns(all), defaultIndex)
+	sugs := suggestIndexPatternsWith(requested, groupedPatterns(all), cl)
 	if len(sugs) == 0 {
 		return
 	}
@@ -335,7 +357,7 @@ func indexUnresolvedPayload(ctx context.Context, cat ESIndexCatalog, cl ESLogClu
 	}
 	out := rcaErr("es_log_query", "index pattern matched no physical indices; 0 hits are not evidence of missing logs. Use a real index pattern from suggested_index_patterns.", ErrorPermanent)
 	out["index_error"] = esIndexErrorUnresolved
-	attachSuggestedPatterns(ctx, out, cat, cl.ID, index, cl.DefaultIndex)
+	attachSuggestedPatterns(ctx, out, cat, cl, index)
 	return out
 }
 

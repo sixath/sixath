@@ -41,7 +41,7 @@ func TestListTools_QueryFilter(t *testing.T) {
 		Name: "send_to_wecom", Toolset: ToolsetCore,
 		Description: "Push message to WeCom group",
 		SearchHints: []string{"企微", "企业微信"},
-		Execute: func(ctx context.Context, params map[string]any) (any, error) { return nil, nil },
+		Execute:     func(ctx context.Context, params map[string]any) (any, error) { return nil, nil },
 	})
 	cat := BuildToolCatalog(context.Background(), reg, &BuiltinHintProvider{})
 	if err := RegisterListToolsTool(reg, nil); err != nil {

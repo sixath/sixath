@@ -344,10 +344,10 @@ func RegisterBrowserToolsWithConfig(reg *Registry, store *browser.SessionStore, 
 			},
 		},
 		{
-			Name: "browser_console",
+			Name:        "browser_console",
 			Description: "Read browser console logs/JS exceptions. When expression is set, evaluate JavaScript in page context.",
-			Toolset: ToolsetBrowser,
-			CheckFn: checkFn,
+			Toolset:     ToolsetBrowser,
+			CheckFn:     checkFn,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

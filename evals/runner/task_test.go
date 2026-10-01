@@ -97,3 +97,20 @@ func TestLoadResults(t *testing.T) {
 		t.Fatalf("results[1] = %+v", results[1])
 	}
 }
+
+func TestValidate_AnswerShape(t *testing.T) {
+	ok := Task{ID: "s1", Category: "answer_shape", Input: "q", MaxSteps: 30, Expect: Expectation{AnswerType: "enumerate"}}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid answer_shape rejected: %v", err)
+	}
+	bad := ok
+	bad.Expect.AnswerType = "list"
+	if err := bad.Validate(); err == nil {
+		t.Fatal("invalid answer_type must be rejected")
+	}
+	noSteps := ok
+	noSteps.MaxSteps = 0
+	if err := noSteps.Validate(); err == nil {
+		t.Fatal("answer_shape still requires max_steps")
+	}
+}

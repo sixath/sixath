@@ -166,7 +166,7 @@ func TestRegister_RejectsNilRegistry(t *testing.T) {
 
 func TestConfig_Defaults(t *testing.T) {
 	c := Config{}
-	if c.maxSteps() != 15 || c.timeout() != 15*time.Minute || c.maxOutputTokens() != 4096 {
+	if c.maxSteps() != DefaultMaxSteps || c.timeout() != 15*time.Minute || c.maxOutputTokens() != 4096 {
 		t.Fatalf("bad defaults: steps=%d timeout=%v maxOut=%d", c.maxSteps(), c.timeout(), c.maxOutputTokens())
 	}
 	custom := Config{MaxSteps: 5, Timeout: 123 * time.Second, MaxOutputTokens: 2048}

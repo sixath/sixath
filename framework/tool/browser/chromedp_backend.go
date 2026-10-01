@@ -30,8 +30,8 @@ type chromedpBackend struct {
 	consoleLogs []string
 	consoleErrs []string
 
-	dialogMu sync.Mutex
-	dialogs  []DialogInfo
+	dialogMu  sync.Mutex
+	dialogs   []DialogInfo
 	dialogSeq int
 }
 

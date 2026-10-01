@@ -85,6 +85,8 @@ type RunTrace struct {
 	EmptyHitNudges int `json:"empty_hit_nudges,omitempty"`
 	// EmptyIdleNudges 工具已跑但终答空白时的回压次数（最多 1）。
 	EmptyIdleNudges int `json:"empty_idle_nudges,omitempty"`
+	// EmptyFinal 终答正文为空时的诊断（只记录不重试）。
+	EmptyFinal *EmptyFinalDiag `json:"empty_final,omitempty"`
 	// TruncatedPageNudges es_log_query 未翻完就总结时的回压次数。
 	TruncatedPageNudges int `json:"truncated_page_nudges,omitempty"`
 	// GoalDriftNudges idle 改题回压次数（最多 1）。
@@ -93,6 +95,8 @@ type RunTrace struct {
 	IdentLockNudges int `json:"ident_lock_nudges,omitempty"`
 	// HTTPUngroundedNudges ungrounded http_request 回压次数（最多 1）。
 	HTTPUngroundedNudges int `json:"http_ungrounded_nudges,omitempty"`
+	// StopHookContinues 本 Run 内 StopHook 要求继续的规则 ID（按发生顺序）。
+	StopHookContinues []string `json:"stop_hook_continues,omitempty"`
 	// DroppedProposals 本轮被 family/drift/intake 丢掉的工具提议。
 	DroppedProposals []DroppedProposal `json:"dropped_proposals,omitempty"`
 

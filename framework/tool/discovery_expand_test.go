@@ -7,9 +7,9 @@ import (
 )
 
 type stubExpand struct {
-	cat       ToolCatalog
-	calls     []string
-	onExpand  func(query string) []string
+	cat      ToolCatalog
+	calls    []string
+	onExpand func(query string) []string
 }
 
 func (s *stubExpand) CurrentCatalog() ToolCatalog { return s.cat }

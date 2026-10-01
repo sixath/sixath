@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +18,6 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/sixath/framework/events"
 	agent "github.com/sixath/framework/harness"
-	"github.com/sixath/framework/investigate"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/sessionsearch"
@@ -69,6 +69,7 @@ func ProvideChatServiceWithTurnTrace(chatUC *biz.ChatUsecase, agentUC *biz.Agent
 	if d != nil {
 		s.db = d.DB()
 		s.catalog = data.NewModelCatalogStore(d.DB())
+		chat.ResolveCriticModel = criticModelResolver(s.catalog, chat.BuildModel)
 		s.SetDeliveryRecorder(data.NewDeliveryRecorder(d.DB()))
 	}
 	s.evolutionRepo = evolutionRepo
@@ -429,8 +430,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
-	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
-	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
+	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace); err != nil {
 		s.log.Errorf("register deep_investigate failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 	}
 	mcpServers = regResult.McpServers
@@ -488,7 +488,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	maxHistory := 20
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
-	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptionsFor(m, agentMeta.Workspace, extraSkillDirs)...)
 	a := chat.BuildAgent(m, reg, agentText, maxHistory, agentMeta.Mode, opts...)
 
 	// 加载历史（含刚写入的 user）；组装时剔除当前 user，改用 modelContent+Parts
@@ -644,6 +644,9 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	if cr != nil && cr.Kind == "skill_manage" && cr.Token != "" {
 		return s.streamSkillManageConfirm(ctx, sessionID, agentMeta.Workspace, *cr)
 	}
+	if cr != nil && cr.Kind == tool.CaseSaveConfirmKind && cr.Token != "" {
+		return s.streamCaseConfirm(ctx, sessionID, agentMeta.Workspace, *cr)
+	}
 
 	tools, err := s.toolUC.ListByAgentForSession(ctx, session.AgentID)
 	if err != nil {
@@ -731,8 +734,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
 	}
-	// deep_investigate 兜底调查工具：门控可见（代码+日志工具都配置才进 schema）。
-	if err := investigate.Register(reg, investigate.Config{Model: m}); err != nil {
+	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace); err != nil {
 		s.log.Errorf("register deep_investigate failed: err=%v", err)
 	}
 	mcpServers = regResult.McpServers
@@ -788,7 +790,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	maxHistory := 20
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
-	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptions(agentMeta.Workspace, extraSkillDirs)...)
+	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptionsFor(m, agentMeta.Workspace, extraSkillDirs)...)
 	opts = append(opts, agent.WithReActEventBus(turnBus))
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，
 	// 覆盖 BuildReActAgent 内部默认注入的全局 DefaultBus，使本轮事件只发布到 turnBus。
@@ -984,6 +986,27 @@ func (s *ChatService) streamSkillManageConfirm(ctx context.Context, sessionID, w
 			Type:          ChatStreamEventConfirmResult,
 			ConfirmResult: confirmResultFromSkillManageMap(cr.Token, result),
 		}
+	}()
+	return ch, sessionID, nil
+}
+
+// streamCaseConfirm 应用案例草稿确认，不经过模型。
+func (s *ChatService) streamCaseConfirm(ctx context.Context, sessionID, workspace string, cr chat.ConfirmResponse) (<-chan ChatStreamEvent, string, error) {
+	if _, err := s.chatUC.CreateMessage(ctx, sessionID, "user", chat.UserMessagePlaceholderForConfirm(cr.Kind)); err != nil {
+		return nil, "", err
+	}
+	result, err := chat.ApplyCaseConfirm(ctx, workspace, cr.Token)
+	ch := make(chan ChatStreamEvent, 2)
+	go func() {
+		defer close(ch)
+		payload := &ConfirmResultPayload{OK: err == nil, Kind: cr.Kind, Token: cr.Token}
+		if err != nil {
+			payload.Error = err.Error()
+			ch <- ChatStreamEvent{Type: ChatStreamEventError, Error: err.Error()}
+		} else {
+			ch <- ChatStreamEvent{Type: ChatStreamEventChunk, Content: fmt.Sprintf("案例已确认（%v），以后遇到相似症状会优先验证它。", result["case_id"])}
+		}
+		ch <- ChatStreamEvent{Type: ChatStreamEventConfirmResult, ConfirmResult: payload}
 	}()
 	return ch, sessionID, nil
 }

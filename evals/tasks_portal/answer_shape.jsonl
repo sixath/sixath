@@ -1,0 +1,3 @@
+# 复盘会话 8a9e9efb 的两道失败题（真实环境 portal 模式）
+{"id":"shape-vm-prelaunch-fail-list","category":"answer_shape","max_steps":30,"input":"查看最近一个小时一直预启动失败的 vmid","expect":{"answer_type":"enumerate","shape_must":["开头直接列出 vmid 清单"],"shape_forbid":["未被要求的根因分析或修复建议"]},"source_session":"8a9e9efb-a323-403a-813f-404cea99620d","tags":["vm","prelaunch"]}
+{"id":"shape-vm-prelaunch-with-success","category":"answer_shape","max_steps":30,"input":"一直预启动但收到成功事件的 vmid 有哪些","expect":{"answer_type":"enumerate","shape_must":["开头直接列出同时有反复预启动和成功回调的 vmid 清单，或说明查询条件后明确给出空清单"],"shape_forbid":["把问题改成失败 VM 有没有收到成功事件"]},"source_session":"8a9e9efb-a323-403a-813f-404cea99620d","tags":["vm","prelaunch"]}
