@@ -57,6 +57,14 @@ type Tool struct {
 	// EffectFn 按单次调用参数判定副作用（如 http_request 按 method、vm_run_cmd 按命令），
 	// 返回 EffectUnknown 时回退到 Effect。
 	EffectFn func(args map[string]any) Effect
+	// ArgAliases 别名 -> 正式参数名，在校验前改写；正式名已存在时丢弃别名。
+	ArgAliases map[string]string
+	// ArgChecks 执行前的声明式规则（见 argcheck.go），在 JSON Schema 校验之后运行。
+	ArgChecks []ArgCheck
+	// EmptyProbe 结果为 hit_status=empty 时的放宽探测（见 empty_probe.go）。
+	EmptyProbe *EmptyProbe
+	// checked 表示 Execute 已含校验中间件；同一工具注册到多个 Registry（如 investigate 子代理）时不重复包装。
+	checked bool
 }
 
 // DefaultToolTimeout 为工具执行的全局超时上限。
@@ -298,6 +306,11 @@ func (r *Registry) Register(t Tool) error {
 	if _, exists := r.tools[t.Name]; exists {
 		return errors.New("tool already registered: " + t.Name)
 	}
+	// 包装顺序（外→内）：超时 → 事件/trace → 校验中间件 → 原 Execute；被拒调用同样产生事件。
+	if !t.checked {
+		t.Execute = wrapChecks(t)
+		t.checked = true
+	}
 	bus := r.eventBus
 	name := t.Name
 	orig := t.Execute
@@ -353,33 +366,6 @@ func (r *Registry) Register(t Tool) error {
 				return result, fmt.Errorf("tool %q: timeout after %s", name, timeout)
 			}
 			return result, err
-		}
-	}
-
-	// 入参 schema 校验：fail-open（schema 超出支持子集则跳过），失败按可恢复的
-	// tool error 交回模型重试。
-	if toolArgValidationEnabled() {
-		inner := t.Execute
-		schema := t.Parameters
-		t.Execute = func(ctx context.Context, params map[string]any) (any, error) {
-			if err := ValidateArguments(name, schema, params); err != nil {
-				// 结果沿用仓库既有约定（如 vision.go 缺 path）：
-				// {"ok":false,"error":…,"error_code":permanent}，保证依赖结果结构的
-				// 调用方（RCA evidence 契约、UI 时间线）仍能拿到可解析的 payload；
-				// 同时仍返回 error，使 Agent 记为工具失败而非成功。
-				var iae *InvalidArgumentsError
-				result := map[string]any{
-					"ok":         false,
-					"tool":       name,
-					"error":      err.Error(),
-					"error_code": ErrorPermanent,
-				}
-				if errors.As(err, &iae) {
-					result["invalid_arguments"] = iae.Errors
-				}
-				return result, err
-			}
-			return inner(ctx, params)
 		}
 	}
 
