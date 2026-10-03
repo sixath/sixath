@@ -3,6 +3,7 @@ package tool
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // Suggest 返回与 input 最接近的至多 n 个候选：精确（忽略大小写）> 前缀 > 子串 > 编辑距离。
@@ -34,7 +35,7 @@ func Suggest(input string, candidates []string, n int) []string {
 		case lc == in:
 			picks = append(picks, scored{c, 0, 0, i})
 		case strings.HasPrefix(lc, in):
-			picks = append(picks, scored{c, 1, len(lc) - len(in), i})
+			picks = append(picks, scored{c, 1, utf8.RuneCountInString(lc) - utf8.RuneCountInString(in), i})
 		case strings.Contains(lc, in) || strings.Contains(in, lc):
 			picks = append(picks, scored{c, 2, Levenshtein(lc, in), i})
 		default:

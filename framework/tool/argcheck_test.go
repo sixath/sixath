@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,15 @@ func TestOneOf(t *testing.T) {
 	}}
 	if errs, _ := norm.Check(ctx, map[string]any{"datasource_id": "default"}); len(errs) != 0 {
 		t.Fatalf("normalized: %v", errs)
+	}
+	rewrite := OneOf{Param: "datasource_id", Source: src, Normalize: func(_ map[string]any, v string) string { return "ds_" + v }}
+	errs, _ = rewrite.Check(ctx, map[string]any{"datasource_id": "mysq1"})
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, `"mysq1"`) || strings.Contains(errs[0].Message, "ds_") {
+		t.Fatalf("message must quote the original value: %+v", errs)
+	}
+	blank := OneOf{Param: "datasource_id", Source: src, Normalize: func(map[string]any, string) string { return "" }}
+	if errs, err := blank.Check(ctx, map[string]any{"datasource_id": "whatever"}); err != nil || len(errs) != 0 {
+		t.Fatalf("empty normalized value must skip: %v %v", errs, err)
 	}
 
 	when := OneOf{Param: "name", Source: src, When: func(p map[string]any) bool { return p["action"] != "create" }}
@@ -106,6 +116,34 @@ func TestFieldRefs(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("unknown field must trigger exactly one forced refresh, calls=%d", calls)
+	}
+
+	calls = 0
+	refreshed := FieldRefs{
+		Extract: func(map[string]any) []FieldRef { return []FieldRef{{Param: "query", Field: "message"}} },
+		Fields: func(_ context.Context, _ map[string]any, refresh bool) ([]string, error) {
+			calls++
+			if refresh {
+				return []string{"service", "message"}, nil
+			}
+			return []string{"service"}, nil
+		},
+	}
+	if errs, err := refreshed.Check(context.Background(), nil); err != nil || errs != nil || calls != 2 {
+		t.Fatalf("field only in refreshed catalog must pass: errs=%+v err=%v calls=%d", errs, err, calls)
+	}
+
+	refreshFails := FieldRefs{
+		Extract: func(map[string]any) []FieldRef { return []FieldRef{{Param: "query", Field: "message"}} },
+		Fields: func(_ context.Context, _ map[string]any, refresh bool) ([]string, error) {
+			if refresh {
+				return nil, errors.New("timeout")
+			}
+			return []string{"service"}, nil
+		},
+	}
+	if errs, err := refreshFails.Check(context.Background(), nil); err == nil || errs != nil {
+		t.Fatalf("refresh error must surface as check error, not judge stale catalog: errs=%+v err=%v", errs, err)
 	}
 
 	noCatalog := FieldRefs{

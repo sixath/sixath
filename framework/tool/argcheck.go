@@ -42,12 +42,15 @@ func (c OneOf) Check(ctx context.Context, params map[string]any) ([]SchemaError,
 	if c.When != nil && !c.When(params) {
 		return nil, nil
 	}
-	v := trimmedStringParam(params, c.Param)
-	if v == "" || c.Source == nil {
+	raw := trimmedStringParam(params, c.Param)
+	if raw == "" || c.Source == nil {
 		return nil, nil
 	}
+	v := raw
 	if c.Normalize != nil {
-		v = c.Normalize(params, v)
+		if v = c.Normalize(params, raw); v == "" {
+			return nil, nil
+		}
 	}
 	cands, err := c.Source(ctx, params)
 	if err != nil {
@@ -73,7 +76,7 @@ func (c OneOf) Check(ctx context.Context, params map[string]any) ([]SchemaError,
 	return []SchemaError{{
 		Path:       c.Param,
 		Keyword:    KeywordOneOf,
-		Message:    fmt.Sprintf("argument %q: unknown value %q", c.Param, v),
+		Message:    fmt.Sprintf("argument %q: unknown value %q", c.Param, raw),
 		Candidates: sugg,
 		Hint:       c.Hint,
 	}}, nil
@@ -165,7 +168,11 @@ func (c FieldRefs) Check(ctx context.Context, params map[string]any) ([]SchemaEr
 	if len(unknown) == 0 {
 		return nil, nil
 	}
-	if fresh, err := c.Fields(ctx, params, true); err == nil && len(fresh) > 0 {
+	fresh, err := c.Fields(ctx, params, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(fresh) > 0 {
 		catalog = fresh
 		unknown = c.unknown(refs, catalog)
 		if len(unknown) == 0 {

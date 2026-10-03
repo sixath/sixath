@@ -32,9 +32,11 @@ type SchemaError struct {
 	// 或中间件规则（one_of|pattern|reject|unknown_field）。
 	Keyword string `json:"keyword"`
 	// Message 为面向模型的完整说明。
-	Message    string   `json:"message"`
+	Message string `json:"message"`
+	// Candidates 为建议模型改用的合法取值（按相近程度排序）。
 	Candidates []string `json:"candidates,omitempty"`
-	Hint       string   `json:"hint,omitempty"`
+	// Hint 为附加的修正指引，如应改用的工具或参数写法。
+	Hint string `json:"hint,omitempty"`
 }
 
 const (
