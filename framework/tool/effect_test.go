@@ -39,11 +39,14 @@ func TestEffectForHTTPMethod(t *testing.T) {
 	if !ok {
 		t.Fatal("http_request missing")
 	}
-	cases := map[string]Effect{"GET": EffectRead, "head": EffectRead, "POST": EffectWrite, "": EffectWrite}
+	cases := map[string]Effect{"GET": EffectRead, "head": EffectRead, "POST": EffectWrite, "": EffectRead}
 	for method, want := range cases {
 		if got := h.EffectFor(map[string]any{"method": method}); got != want {
 			t.Fatalf("method %q effect=%q want %q", method, got, want)
 		}
+	}
+	if got := HTTPMethodEffect(map[string]any{"url": "http://x"}); got != EffectRead {
+		t.Fatalf("missing method effect=%q want read", got)
 	}
 }
 

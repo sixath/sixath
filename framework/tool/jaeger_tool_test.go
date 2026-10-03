@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +33,7 @@ func TestJaegerTrace_ByTraceID(t *testing.T) {
 	if !ok {
 		t.Fatal("jaeger_trace not registered")
 	}
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abcdef0123456789"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -58,8 +59,8 @@ func TestJaegerTrace_ByTraceID(t *testing.T) {
 
 	assertRCAEvidenceOK(t, m, "jaeger_trace")
 	refs := m["evidence_refs"].([]EvidenceRef)
-	if refs[0].TraceID != "abc" {
-		t.Fatalf("evidence_refs[0].TraceID=%q, want abc", refs[0].TraceID)
+	if refs[0].TraceID != "abcdef0123456789" {
+		t.Fatalf("evidence_refs[0].TraceID=%q, want abcdef0123456789", refs[0].TraceID)
 	}
 }
 
@@ -74,7 +75,7 @@ func TestJaegerTrace_StringErrorTag(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterJaegerTool(reg, srv.URL)
 	tl, _ := reg.Get("jaeger_trace")
-	out, _ := tl.Execute(context.Background(), map[string]any{"trace_id": "t"})
+	out, _ := tl.Execute(context.Background(), map[string]any{"trace_id": "0123456789abcdef"})
 	errs := out.(map[string]any)["errors"].([]map[string]any)
 	if len(errs) != 1 {
 		t.Fatalf("string 'true' error tag should be detected, got %d error spans", len(errs))
@@ -105,7 +106,7 @@ func TestJaegerTrace_TimeoutTransient(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	out, err := tl.Execute(ctx, map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(ctx, map[string]any{"trace_id": "abcdef0123456789"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestJaegerTrace_HTTP5xxTransient(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterJaegerTool(reg, srv.URL)
 	tl, _ := reg.Get("jaeger_trace")
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abcdef0123456789"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -139,11 +140,29 @@ func TestJaegerTrace_HTTP4xxPermanent(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterJaegerTool(reg, srv.URL)
 	tl, _ := reg.Get("jaeger_trace")
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "missing"})
+	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "ffffffffffffffff"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	assertRCAEvidenceError(t, out.(map[string]any), ErrorPermanent)
+}
+
+func TestJaegerTrace_RejectsMalformedTraceID(t *testing.T) {
+	reg := newTestRegistry()
+	if err := RegisterJaegerTool(reg, "http://127.0.0.1:1"); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("jaeger_trace")
+	_, err := tl.Execute(context.Background(), map[string]any{"trace_id": "req-123"})
+	var iae *InvalidArgumentsError
+	if !errors.As(err, &iae) || iae.Errors[0].Keyword != KeywordPattern {
+		t.Fatalf("got %v", err)
+	}
+	for _, ok := range []string{"0123456789abcdef", "0123456789ABCDEF0123456789abcdef"} {
+		if errs, _ := (Pattern{Param: "trace_id", Regex: jaegerTraceIDPattern}).Check(context.Background(), map[string]any{"trace_id": ok}); len(errs) != 0 {
+			t.Fatalf("%q must be accepted: %v", ok, errs)
+		}
+	}
 }
 
 func TestJaegerTrace_EmptyDataOK(t *testing.T) {
@@ -155,7 +174,7 @@ func TestJaegerTrace_EmptyDataOK(t *testing.T) {
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterJaegerTool(reg, srv.URL)
 	tl, _ := reg.Get("jaeger_trace")
-	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	out, err := tl.Execute(context.Background(), map[string]any{"trace_id": "abcdef0123456789"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

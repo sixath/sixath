@@ -45,3 +45,25 @@ func TestHTTPRequest_UsesRegistryHTTPClient(t *testing.T) {
 		t.Fatal("request did not hit proxy")
 	}
 }
+
+func TestHTTPRequest_DefaultsToGET(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	reg := NewRegistry()
+	tl, _ := reg.Get("http_request")
+	out, err := tl.Execute(context.Background(), map[string]any{"url": srv.URL + "/x"})
+	if err != nil {
+		t.Fatalf("method must be optional: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Fatalf("server saw %q, want GET", gotMethod)
+	}
+	if out.(map[string]any)["status_code"] != http.StatusOK {
+		t.Fatalf("got %v", out)
+	}
+}

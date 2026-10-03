@@ -291,7 +291,7 @@ func TestRegisterRCATools_InjectsProxyClient(t *testing.T) {
 	if !ok {
 		t.Fatal("jaeger_trace should register")
 	}
-	_, _ = tl.Execute(context.Background(), map[string]any{"trace_id": "abc"})
+	_, _ = tl.Execute(context.Background(), map[string]any{"trace_id": "abcdef0123456789"})
 	if !saw {
 		t.Fatal("jaeger client must be injected from Config.Proxies/ProxyID")
 	}

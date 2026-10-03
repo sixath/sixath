@@ -28,7 +28,7 @@ func RegisterHTTPTool(reg *Registry) error {
 			"properties": map[string]any{
 				"method": map[string]any{
 					"type":        "string",
-					"description": "HTTP method, e.g. GET, POST, PUT, DELETE, PATCH.",
+					"description": "HTTP method, e.g. GET, POST, PUT, DELETE, PATCH (default GET).",
 				},
 				"url": map[string]any{
 					"type":        "string",
@@ -50,16 +50,13 @@ func RegisterHTTPTool(reg *Registry) error {
 					"description": "Optional overall timeout in seconds (default 20s, max 60s). Dial fails fast (~5s) on unreachable hosts.",
 				},
 			},
-			"required": []string{"method", "url"},
+			"required": []string{"url"},
 		},
 		Effect:   EffectWrite,
 		EffectFn: HTTPMethodEffect,
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			rawMethod, _ := params["method"].(string)
 			rawURL, _ := params["url"].(string)
-			if rawMethod == "" {
-				return nil, errors.New("http_request: method is required")
-			}
 			if rawURL == "" {
 				return nil, errors.New("http_request: url is required")
 			}

@@ -77,14 +77,12 @@ func (t Tool) EffectFor(args map[string]any) Effect {
 	return t.Effect
 }
 
-// HTTPMethodEffect 按 HTTP 方法判定副作用：GET/HEAD/OPTIONS 为只读，其余为写。
+// HTTPMethodEffect 按 HTTP 方法判定副作用：GET/HEAD/OPTIONS 为只读（缺省按 GET），其余为写。
 func HTTPMethodEffect(args map[string]any) Effect {
 	m, _ := args["method"].(string)
 	switch strings.ToUpper(strings.TrimSpace(m)) {
-	case "GET", "HEAD", "OPTIONS":
+	case "", "GET", "HEAD", "OPTIONS":
 		return EffectRead
-	case "":
-		return EffectUnknown
 	default:
 		return EffectWrite
 	}
