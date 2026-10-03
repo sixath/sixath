@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func RegisterExecuteReadTool(r *tool.Registry, cfg *ExecuteReadConfig, opts ...*
 	if len(opts) > 0 && opts[0] != nil && opts[0].Description != "" {
 		desc = opts[0].Description
 	}
-	return r.Register(tool.Tool{
+	t := tool.Tool{
 		Name:        "execute_read",
 		Description: desc,
 		Parameters: map[string]any{
@@ -43,11 +44,7 @@ func RegisterExecuteReadTool(r *tool.Registry, cfg *ExecuteReadConfig, opts ...*
 			"properties": map[string]any{
 				"dsl": map[string]any{
 					"type":        "string",
-					"description": "Read-only DSL to execute (e.g. SQL SELECT). If omitted, `query` will be used.",
-				},
-				"query": map[string]any{
-					"type":        "string",
-					"description": "Alias of `dsl`.",
+					"description": "SQL statement (MySQL/Hive) or the native query of the datasource; for Elasticsearch use es_log_query",
 				},
 				"datasource_id": map[string]any{
 					"type":        "string",
@@ -61,10 +58,6 @@ func RegisterExecuteReadTool(r *tool.Registry, cfg *ExecuteReadConfig, opts ...*
 					"type":        "integer",
 					"description": "Maximum number of rows to return; non-negative.",
 				},
-				"index": map[string]any{
-					"type":        "string",
-					"description": "Optional. Elasticsearch: target index, comma-separated indices, or index pattern (e.g. vm-manager-*). Omit to search all indices.",
-				},
 				"positional_params": map[string]any{
 					"type":        "array",
 					"description": "Optional. Values for ? placeholders in SQL (safer than string interpolation).",
@@ -74,10 +67,217 @@ func RegisterExecuteReadTool(r *tool.Registry, cfg *ExecuteReadConfig, opts ...*
 					"description": "Optional. Map of :name placeholders to values (converted to ? for MySQL).",
 				},
 			},
-			"required": []string{},
+			"required": []string{"dsl"},
 		},
-		Execute: buildExecuteReadExecute(cfg),
-	})
+		ArgAliases: map[string]string{"query": "dsl"},
+		Execute:    buildExecuteReadExecute(cfg),
+	}
+	if cfg != nil {
+		t.ArgChecks = []tool.ArgCheck{
+			DatasourceIDCheck(cfg.Registry, cfg.DefaultDatasourceID),
+			tool.Reject{
+				Label:    "non_sql",
+				Redirect: "for Elasticsearch logs use es_log_query (query_string / DSL go there)",
+				Detect: func(params map[string]any) (string, string, bool) {
+					id := ResolveDatasourceID(params, cfg.DefaultDatasourceID, cfg.Registry)
+					if !isSQLDatasource(datasourceType(cfg.Registry, id)) {
+						return "", "", false
+					}
+					if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
+						return "index", "execute_read does not take an index (SQL datasource)", true
+					}
+					dsl, _ := params["dsl"].(string)
+					if reason, hit := nonSQLReason(dsl); hit {
+						return "dsl", reason, true
+					}
+					return "", "", false
+				},
+			},
+			sqlSchemaRule{cfg: cfg},
+		}
+		t.EmptyProbe = sqlEmptyProbe(cfg)
+	}
+	return r.Register(t)
+}
+
+var sqlSchemaRefresh = metadata.RefreshFromRegistry
+
+// sqlSchemaRule 对 MySQL 单表 SELECT 校验表名与列名；表结构来自 metadata store，有缺失时强制刷新一次再判定。
+type sqlSchemaRule struct{ cfg *ExecuteReadConfig }
+
+func (sqlSchemaRule) Name() string { return "sql_schema" }
+
+func (r sqlSchemaRule) Check(ctx context.Context, params map[string]any) ([]tool.SchemaError, error) {
+	cfg := r.cfg
+	if cfg == nil || cfg.Store == nil || cfg.Registry == nil {
+		return nil, nil
+	}
+	id := ResolveDatasourceID(params, cfg.DefaultDatasourceID, cfg.Registry)
+	if datasourceType(cfg.Registry, id) != datasource.TypeMySQL {
+		return nil, nil
+	}
+	dsl, _ := params["dsl"].(string)
+	refs, ok := parseSingleTableSQL(dsl)
+	if !ok || refs.Qualified {
+		return nil, nil
+	}
+	tables, err := r.tables(ctx, id, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(tables) == 0 {
+		return nil, nil
+	}
+	tbl, found := findTable(tables, refs.Table)
+	if !found || len(missingColumns(tbl, refs.Columns)) > 0 {
+		fresh, err := r.tables(ctx, id, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(fresh) == 0 {
+			return nil, nil
+		}
+		tables = fresh
+		tbl, found = findTable(tables, refs.Table)
+	}
+	if !found {
+		names := make([]string, 0, len(tables))
+		for _, t := range tables {
+			names = append(names, t.Name)
+		}
+		return []tool.SchemaError{{
+			Path:       "dsl",
+			Keyword:    tool.KeywordUnknownField,
+			Message:    fmt.Sprintf("table %q does not exist in datasource %q", refs.Table, id),
+			Candidates: tool.Suggest(refs.Table, names, 3),
+			Hint:       "use list_tables / describe_table to find the right table",
+		}}, nil
+	}
+	missing := missingColumns(tbl, refs.Columns)
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	cols := make([]string, 0, len(tbl.Columns))
+	for _, c := range tbl.Columns {
+		cols = append(cols, c.Name)
+	}
+	errs := make([]tool.SchemaError, 0, len(missing))
+	for _, c := range missing {
+		errs = append(errs, tool.SchemaError{
+			Path:       "dsl",
+			Keyword:    tool.KeywordUnknownField,
+			Message:    fmt.Sprintf("column %q does not exist in table %q", c, tbl.Name),
+			Candidates: tool.Suggest(c, cols, 3),
+			Hint:       "use describe_table " + tbl.Name + " to see columns",
+		})
+	}
+	return errs, nil
+}
+
+func (r sqlSchemaRule) tables(ctx context.Context, id string, refresh bool) ([]metadata.Table, error) {
+	var (
+		s   *metadata.Schema
+		err error
+	)
+	if refresh {
+		s, err = sqlSchemaRefresh(ctx, r.cfg.Registry, r.cfg.Store, id)
+	} else {
+		s, err = metadata.EnsureSchemaForDatasource(ctx, r.cfg.Registry, r.cfg.Store, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return nil, nil
+	}
+	return s.Tables, nil
+}
+
+func findTable(tables []metadata.Table, name string) (metadata.Table, bool) {
+	for _, t := range tables {
+		if strings.EqualFold(t.Name, name) {
+			return t, true
+		}
+	}
+	return metadata.Table{}, false
+}
+
+// missingColumns 在表没有列信息时返回空（无法判定）。
+func missingColumns(tbl metadata.Table, refs []string) []string {
+	if len(tbl.Columns) == 0 {
+		return nil
+	}
+	var out []string
+	for _, r := range refs {
+		found := false
+		for _, c := range tbl.Columns {
+			if strings.EqualFold(c.Name, r) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// sqlEmptyProbe 对 SQL 单表带条件查询的 0 行结果做一次主表 COUNT(*)。
+func sqlEmptyProbe(cfg *ExecuteReadConfig) *tool.EmptyProbe {
+	return &tool.EmptyProbe{
+		Relax: func(params map[string]any) []tool.ProbeVariant {
+			id := ResolveDatasourceID(params, cfg.DefaultDatasourceID, cfg.Registry)
+			if !isSQLDatasource(datasourceType(cfg.Registry, id)) {
+				return nil
+			}
+			dsl, _ := params["dsl"].(string)
+			refs, ok := parseSingleTableSQL(dsl)
+			if !ok || !refs.HasCondition {
+				return nil
+			}
+			return []tool.ProbeVariant{{Label: "table_total", Params: map[string]any{
+				"datasource_id": id,
+				"dsl":           "SELECT COUNT(*) FROM " + quoteSQLTable(refs.Table),
+			}}}
+		},
+		Count: func(ctx context.Context, v tool.ProbeVariant) (int64, error) {
+			reader := executor.CoalesceReader(cfg.Reader, cfg.Exec)
+			if reader == nil {
+				return 0, errors.New("reader not configured")
+			}
+			id, _ := v.Params["datasource_id"].(string)
+			dsl, _ := v.Params["dsl"].(string)
+			res, err := reader.Query(ctx, id, dsl, executor.QueryOptions{MaxRows: 1})
+			if err != nil {
+				return 0, err
+			}
+			if res == nil || len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
+				return 0, errors.New("empty count result")
+			}
+			return toInt64(res.Rows[0][0])
+		},
+	}
+}
+
+func toInt64(v any) (int64, error) {
+	switch x := v.(type) {
+	case int64:
+		return x, nil
+	case int:
+		return int64(x), nil
+	case int32:
+		return int64(x), nil
+	case uint64:
+		return int64(x), nil
+	case float64:
+		return int64(x), nil
+	case []byte:
+		return strconv.ParseInt(string(x), 10, 64)
+	case string:
+		return strconv.ParseInt(x, 10, 64)
+	}
+	return 0, fmt.Errorf("unexpected count type %T", v)
 }
 
 func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
@@ -88,7 +288,7 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 			obs.ObserveDataQueryTool("execute_read", status, time.Since(start))
 		}()
 
-		if cfg == nil || cfg.Exec == nil {
+		if cfg == nil || (cfg.Reader == nil && cfg.Exec == nil) {
 			status = "error"
 			return nil, errors.New("execute_read: not configured (missing executor)")
 		}
@@ -103,23 +303,10 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 			return nil, err
 		}
 
-		// dsl 或 query 至少需要一个
-		var dsl string
-		if v, ok := params["dsl"]; ok {
-			if s, ok := v.(string); ok {
-				dsl = s
-			}
-		}
-		if dsl == "" {
-			if v, ok := params["query"]; ok {
-				if s, ok := v.(string); ok {
-					dsl = s
-				}
-			}
-		}
+		dsl, _ := params["dsl"].(string)
 		if dsl == "" {
 			status = "error"
-			return nil, errors.New("execute_read: dsl (or query) is required and must be a string")
+			return nil, errors.New("execute_read: dsl is required and must be a string")
 		}
 
 		timeout := cfg.DefaultTimeoutSec
@@ -181,13 +368,7 @@ func buildExecuteReadExecute(cfg *ExecuteReadConfig) tool.ExecuteFunc {
 		if res == nil {
 			return res, nil
 		}
-		n := len(res.Rows)
-		idx := ""
-		if v, _ := params["index"].(string); strings.TrimSpace(v) != "" {
-			idx = strings.TrimSpace(v)
-		}
-		res.HitStatus = tool.HitStatusFromCount(true, n)
-		res.QueriedIndex = idx
+		res.HitStatus = tool.HitStatusFromCount(true, len(res.Rows))
 		return res, nil
 	}
 }

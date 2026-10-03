@@ -1,10 +1,12 @@
 package tooldata
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/sixath/framework/datasource"
+	"github.com/sixath/framework/tool"
 )
 
 // ResolveDatasourceID 从工具参数解析 datasource_id，并与配置的默认 ID 合并。
@@ -37,6 +39,45 @@ func ResolveDatasourceID(params map[string]any, cfgDefault string, reg *datasour
 		return cfgDefault
 	}
 	return id
+}
+
+// DatasourceIDs 返回注册表中的数据源 id；reg 为空返回空（规则不适用）。
+func DatasourceIDs(reg *datasource.Registry) []string {
+	if reg == nil {
+		return nil
+	}
+	list := reg.List()
+	ids := make([]string, 0, len(list))
+	for _, ds := range list {
+		ids = append(ids, ds.ID())
+	}
+	return ids
+}
+
+// DatasourceIDCheck 是数据源 id 的候选规则；先按 ResolveDatasourceID 解析 "default" 等别名。
+func DatasourceIDCheck(reg *datasource.Registry, cfgDefault string) tool.OneOf {
+	return tool.OneOf{
+		Param:  "datasource_id",
+		Source: func(context.Context, map[string]any) ([]string, error) { return DatasourceIDs(reg), nil },
+		Normalize: func(params map[string]any, _ string) string {
+			return ResolveDatasourceID(params, cfgDefault, reg)
+		},
+	}
+}
+
+func datasourceType(reg *datasource.Registry, id string) string {
+	if reg == nil || id == "" {
+		return ""
+	}
+	ds, err := reg.Get(id)
+	if err != nil || ds == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(ds.Type()))
+}
+
+func isSQLDatasource(typ string) bool {
+	return typ == datasource.TypeMySQL || typ == datasource.TypeHive
 }
 
 // RejectElasticsearchDatasource returns an error when datasourceID resolves to Elasticsearch.
