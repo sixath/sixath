@@ -181,7 +181,7 @@ func scoreIndexPattern(reqBase, pattern string) int {
 	rt := splitIndexTokens(reqBase)
 	pt := splitIndexTokens(pb)
 	if len(rt) == 0 || len(pt) == 0 {
-		if levenshtein(reqBase, pb) <= 3 {
+		if Levenshtein(reqBase, pb) <= 3 {
 			return 20
 		}
 		return 0
@@ -197,7 +197,7 @@ func scoreIndexPattern(reqBase, pattern string) int {
 		}
 	}
 	if inter == 0 {
-		if levenshtein(reqBase, pb) <= 3 {
+		if Levenshtein(reqBase, pb) <= 3 {
 			return 20
 		}
 		return 0

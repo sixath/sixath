@@ -3,6 +3,8 @@ package harness
 import (
 	"sort"
 	"strings"
+
+	"github.com/sixath/framework/tool"
 )
 
 const maxToolNameSuggestions = 3
@@ -29,7 +31,7 @@ func suggestToolNames(name string, available []string) []string {
 	var cands []cand
 	for _, n := range available {
 		lower := strings.ToLower(n)
-		d := levenshtein(target, lower)
+		d := tool.Levenshtein(target, lower)
 		if d <= threshold || strings.Contains(lower, target) || strings.Contains(target, lower) {
 			cands = append(cands, cand{name: n, dist: d})
 		}
@@ -48,25 +50,4 @@ func suggestToolNames(name string, available []string) []string {
 		out = append(out, c.name)
 	}
 	return out
-}
-
-func levenshtein(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	prev := make([]int, len(rb)+1)
-	cur := make([]int, len(rb)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(ra); i++ {
-		cur[0] = i
-		for j := 1; j <= len(rb); j++ {
-			cost := 1
-			if ra[i-1] == rb[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(rb)]
 }

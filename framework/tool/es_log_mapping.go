@@ -1068,7 +1068,7 @@ func suggestSimilarMappedFields(unknown string, catalog []string) []string {
 			add(f)
 			continue
 		}
-		if len(want) >= 4 && levenshtein(n, want) <= 2 {
+		if len(want) >= 4 && Levenshtein(n, want) <= 2 {
 			add(f)
 		}
 	}
@@ -1087,44 +1087,6 @@ func normalizeMappedField(s string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
-}
-
-func levenshtein(a, b string) int {
-	if a == b {
-		return 0
-	}
-	if a == "" {
-		return len(b)
-	}
-	if b == "" {
-		return len(a)
-	}
-	prev := make([]int, len(b)+1)
-	cur := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			del := prev[j] + 1
-			ins := cur[j-1] + 1
-			sub := prev[j-1] + cost
-			cur[j] = del
-			if ins < cur[j] {
-				cur[j] = ins
-			}
-			if sub < cur[j] {
-				cur[j] = sub
-			}
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(b)]
 }
 
 func unknownFieldsNote(unknown []string) string {
