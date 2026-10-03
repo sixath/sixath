@@ -27,7 +27,7 @@ func RegisterDescribeTableTool(r *tool.Registry, cfg *DescribeTableConfig, opts 
 	if len(opts) > 0 && opts[0] != nil && opts[0].Description != "" {
 		desc = opts[0].Description
 	}
-	return r.Register(tool.Tool{
+	t := tool.Tool{
 		Name:        "describe_table",
 		Description: desc,
 		Parameters: map[string]any{
@@ -45,7 +45,11 @@ func RegisterDescribeTableTool(r *tool.Registry, cfg *DescribeTableConfig, opts 
 			"required": []string{"table_name"},
 		},
 		Execute: buildDescribeTableExecute(cfg),
-	})
+	}
+	if cfg != nil {
+		t.ArgChecks = []tool.ArgCheck{DatasourceIDCheck(cfg.Registry, cfg.DefaultDatasourceID)}
+	}
+	return r.Register(t)
 }
 
 func buildDescribeTableExecute(cfg *DescribeTableConfig) tool.ExecuteFunc {

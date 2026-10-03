@@ -28,7 +28,7 @@ func RegisterListTablesTool(r *tool.Registry, cfg *ListTablesConfig, opts ...*to
 	if len(opts) > 0 && opts[0] != nil && opts[0].Description != "" {
 		desc = opts[0].Description
 	}
-	return r.Register(tool.Tool{
+	t := tool.Tool{
 		Name:        "list_tables",
 		Description: desc,
 		Parameters: map[string]any{
@@ -46,7 +46,11 @@ func RegisterListTablesTool(r *tool.Registry, cfg *ListTablesConfig, opts ...*to
 			"required": []string{},
 		},
 		Execute: buildListTablesExecute(cfg),
-	})
+	}
+	if cfg != nil {
+		t.ArgChecks = []tool.ArgCheck{DatasourceIDCheck(cfg.Registry, cfg.DefaultDatasourceID)}
+	}
+	return r.Register(t)
 }
 
 func buildListTablesExecute(cfg *ListTablesConfig) tool.ExecuteFunc {
