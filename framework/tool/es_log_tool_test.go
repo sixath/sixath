@@ -508,23 +508,41 @@ func TestESLogQuery_EmptyHitUnknownTermsField(t *testing.T) {
 		"limit":   5,
 	})
 	if err != nil {
-		t.Fatalf("execute: %v", err)
+		t.Fatalf("JSON clauses are not field-checked, must execute: %v", err)
 	}
 	m := out.(map[string]any)
-	unknown, _ := m["unknown_fields"].([]string)
-	if !containsStr(unknown, "flowId") {
-		t.Fatalf("empty terms hit must check mapping for flowId, got %#v", m["unknown_fields"])
+	for _, k := range []string{"unknown_fields", "similar_fields", "mapping_error", "rewrite_reason"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("post-hoc unknown-field rewrite removed, got %s in %#v", k, m)
+		}
 	}
-	note, _ := m["mapping_error"].(string)
-	if !strings.Contains(note, "flowId") {
-		t.Fatalf("mapping_error=%q", note)
+	if len(sr.calls) != 1 || m["hit_status"] != HitStatusEmpty {
+		t.Fatalf("calls=%d status=%v", len(sr.calls), m["hit_status"])
 	}
-	if m["query_rewritten"] != true || m["rewrite_reason"] != "body_field" {
-		t.Fatalf("unknown field should rewrite onto mapped body column, got %#v", m)
+}
+
+func assertUnknownFieldRejected(t *testing.T, err error, calls int, field, wantCandidate, hintPart string) {
+	t.Helper()
+	var iae *InvalidArgumentsError
+	if !errors.As(err, &iae) {
+		t.Fatalf("want InvalidArgumentsError, got %v", err)
 	}
-	if len(sr.calls) != 2 {
-		t.Fatalf("want rewrite retry, calls=%d %v", len(sr.calls), sr.calls)
+	if calls != 0 {
+		t.Fatalf("query must not run, calls=%d", calls)
 	}
+	for _, e := range iae.Errors {
+		if e.Keyword != KeywordUnknownField || !strings.Contains(e.Message, `"`+field+`"`) {
+			continue
+		}
+		if wantCandidate != "" && !containsStr(e.Candidates, wantCandidate) {
+			t.Fatalf("candidates %v want %s", e.Candidates, wantCandidate)
+		}
+		if !strings.Contains(e.Hint, hintPart) {
+			t.Fatalf("hint %q want %q", e.Hint, hintPart)
+		}
+		return
+	}
+	t.Fatalf("no unknown_field error for %s: %+v", field, iae.Errors)
 }
 
 func TestESLogQuery_EmptyHitUnknownFieldNotInvented(t *testing.T) {
@@ -542,38 +560,16 @@ func TestESLogQuery_EmptyHitUnknownFieldNotInvented(t *testing.T) {
 		},
 	})
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{
+	_, err := tl.Execute(context.Background(), map[string]any{
 		"cluster": "es",
 		"query":   "flow_id: 4103_j0qjifnv99pq",
 		"limit":   5,
 	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if len(sr.calls) != 2 {
-		t.Fatalf("similar mapped field must retry rewrite, calls=%d %v", len(sr.calls), sr.calls)
-	}
-	m := out.(map[string]any)
-	unknown, _ := m["unknown_fields"].([]string)
-	if !containsStr(unknown, "flow_id") {
-		t.Fatalf("want unknown_fields flow_id, got %#v", m["unknown_fields"])
-	}
-	similar, _ := m["similar_fields"].([]string)
-	if !containsStr(similar, "flowId") {
-		t.Fatalf("want similar flowId, got %#v", m["similar_fields"])
-	}
-	if containsStr(similar, "trace_id") {
-		t.Fatalf("must not suggest unrelated _id fields: %v", similar)
-	}
-	if m["query_rewritten"] != true || m["rewrite_reason"] != "similar_field" {
-		t.Fatalf("flow_id should rewrite to similar flowId, got %#v", m)
-	}
-	if !strings.Contains(sr.calls[1], "flowId") {
-		t.Fatalf("retry query should use flowId, got %s", sr.calls[1])
-	}
-	note, _ := m["mapping_error"].(string)
-	if note == "" || !strings.Contains(note, "flow_id") {
-		t.Fatalf("want mapping_error naming flow_id, got %#v", m["mapping_error"])
+	assertUnknownFieldRejected(t, err, len(sr.calls), "flow_id", "flowId", "drop the field prefix")
+	var iae *InvalidArgumentsError
+	errors.As(err, &iae)
+	if containsStr(iae.Errors[0].Candidates, "trace_id") {
+		t.Fatalf("must not suggest unrelated _id fields: %v", iae.Errors[0].Candidates)
 	}
 }
 
@@ -806,34 +802,19 @@ func TestESLogQuery_MissingIndexListsPatterns(t *testing.T) {
 	}
 }
 
-func TestESLogQuery_UnknownVmidRewritesToSimilar(t *testing.T) {
-	sr := &seqReader{results: []*executor.QueryResult{
-		{Columns: []string{"M"}, Rows: nil},
-		{Columns: []string{"M"}, Rows: [][]any{{"alloc 199306"}}},
-	}}
+func TestESLogQuery_UnknownVmidRejectedWithSimilar(t *testing.T) {
+	sr := &seqReader{}
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, sr, ESLogConfig{
 		DatasourceID: "es", DefaultIndex: "app-logs-*", TraceIDField: "trace_id",
 		FieldMapper: mapFieldMapper{"vm_id": {Type: "text"}, "M": {Type: "text"}},
 	})
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{
+	_, err := tl.Execute(context.Background(), map[string]any{
 		"cluster": "es",
 		"query":   "vmid:199306",
 	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	m := out.(map[string]any)
-	if m["query_rewritten"] != true || m["rewrite_reason"] != "similar_field" {
-		t.Fatalf("want similar_field rewrite, got %#v", m)
-	}
-	if m["hit_status"] != HitStatusHits {
-		t.Fatalf("hit_status=%v", m["hit_status"])
-	}
-	if !strings.Contains(sr.calls[1], "vm_id") {
-		t.Fatalf("retry must query vm_id, got %s", sr.calls[1])
-	}
+	assertUnknownFieldRejected(t, err, len(sr.calls), "vmid", "vm_id", "drop the field prefix")
 }
 
 func TestESLogQuery_MappedEmptyStaysEmpty(t *testing.T) {
@@ -865,11 +846,8 @@ func TestESLogQuery_MappedEmptyStaysEmpty(t *testing.T) {
 	}
 }
 
-func TestESLogQuery_BodyFieldConfigWins(t *testing.T) {
-	sr := &seqReader{results: []*executor.QueryResult{
-		{Columns: []string{"text"}, Rows: nil},
-		{Columns: []string{"text"}, Rows: [][]any{{"hit"}}},
-	}}
+func TestESLogQuery_BodyFieldConfigInHint(t *testing.T) {
+	sr := &seqReader{}
 	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
 	_ = RegisterESLogTool(reg, sr, ESLogConfig{
 		Clusters: []ESLogCluster{{
@@ -878,20 +856,11 @@ func TestESLogQuery_BodyFieldConfigWins(t *testing.T) {
 		FieldMapper: mapFieldMapper{"text": {Type: "text"}, "message": {Type: "text"}},
 	})
 	tl, _ := reg.Get("es_log_query")
-	out, err := tl.Execute(context.Background(), map[string]any{
+	_, err := tl.Execute(context.Background(), map[string]any{
 		"cluster": "es",
 		"query":   "foo:bar",
 	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	m := out.(map[string]any)
-	if m["rewrite_reason"] != "body_field" {
-		t.Fatalf("want body_field, got %#v", m)
-	}
-	if !strings.Contains(sr.calls[1], `"default_field":"text"`) && !strings.Contains(sr.calls[1], `"default_field": "text"`) {
-		t.Fatalf("retry must use configured body field text, got %s", sr.calls[1])
-	}
+	assertUnknownFieldRejected(t, err, len(sr.calls), "foo", "", "use text:<text>")
 }
 
 func TestESLogQueryDescriptionForbidsInventingIndex(t *testing.T) {

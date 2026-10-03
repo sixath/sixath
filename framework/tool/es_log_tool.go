@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sixath/framework/executor"
 )
@@ -106,7 +109,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 		cfg.IndexCatalog = catalogFromReader(reader)
 	}
 	clusterIDs := make([]string, len(clusters))
-	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string or a JSON ES query clause / search body. Index must be a real index or pattern on this cluster — do not invent names from service names. Omit index to use the cluster default_index; if that is also empty the call fails and lists discovered patterns. Prefer an unfielded query or a field that exists in the index mapping; do not assume identifiers like vmid or flow_id are mapped fields. On 0 hits the tool checks that the index exists and may rewrite unknown fields once; hit_status=empty means the index and fields were valid but no documents matched. Page large totals with from (use next_from from the previous result). Per-call limit max 500. term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file). Investigation primitives: sort (asc|desc on the time field, or field:asc) to find the earliest/latest event; time_from/time_to (ISO time or date math like now-2h) to compare windows; agg_field (a keyword field, e.g. level or host.keyword) for top values with counts; agg_interval (e.g. 1m, 1h) for a per-interval count timeline; fields to return only the listed columns. Aggregations come back in aggregations.{by_field,timeline}.buckets and work across all matches, not only the returned page."
+	desc := "Query ELK application logs (read-only). Prefer trace_id. query is Lucene query_string or a JSON ES query clause / search body. Index must be a real index or pattern on this cluster — do not invent names from service names. Omit index to use the cluster default_index; if that is also empty the call fails and lists discovered patterns. Prefer an unfielded query or a field that exists in the index mapping; do not assume identifiers like vmid or flow_id are mapped fields. Fields referenced in query/sort/agg_field/fields/time_field are checked against the index mapping before the search; unknown fields are rejected with candidate names. hit_status=empty means the index and fields were valid but no documents matched; suspect = 0 hits but relaxed probes found data (see diagnosis); fix the condition before concluding there is no data. Page large totals with from (use next_from from the previous result). Per-call limit max 500. term/match may be rewritten once to the clause that type supports (term on .keyword for text+keyword; match_phrase for text-only). Large pages are written to workspace tmp/results/*.jsonl; use result_stats on path instead of read_file. Complex transforms: run_result_script (not read_file). Investigation primitives: sort (asc|desc on the time field, or field:asc) to find the earliest/latest event; time_from/time_to (ISO time or date math like now-2h) to compare windows; agg_field (a keyword field, e.g. level or host.keyword) for top values with counts; agg_interval (e.g. 1m, 1h) for a per-interval count timeline; fields to return only the listed columns. Aggregations come back in aggregations.{by_field,timeline}.buckets and work across all matches, not only the returned page."
 	for i, c := range clusters {
 		clusterIDs[i] = c.ID
 		var line string
@@ -123,7 +126,85 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 		}
 		desc += line
 	}
+
+	mappers := newESMapperCache(cfg.FieldMapper, func(cluster string) ESFieldMapper {
+		return mapperFromReader(reader, cluster)
+	}, esMappingCacheTTL)
+
+	resolveIndex := func(params map[string]any) (ESLogCluster, string, bool) {
+		cl, ok := lookupCluster(clusters, trimmedStringParam(params, "cluster"))
+		if !ok {
+			return cl, "", false
+		}
+		index := cl.DefaultIndex
+		if v := trimmedStringParam(params, "index"); v != "" {
+			index = v
+		}
+		return cl, index, strings.TrimSpace(index) != ""
+	}
+
+	fieldCheck := FieldRefs{
+		Label:   "es_fields",
+		Extract: esLogFieldRefs,
+		Fields: func(ctx context.Context, params map[string]any, refresh bool) ([]string, error) {
+			cl, index, ok := resolveIndex(params)
+			if !ok {
+				return nil, nil
+			}
+			m := mappers.For(cl.ID)
+			if m == nil {
+				return nil, nil
+			}
+			if refresh {
+				return m.Refresh(ctx, index), nil
+			}
+			return m.ListFields(ctx, index), nil
+		},
+		Known: func(field string, catalog []string) bool {
+			return len(unknownQueryFields([]string{field}, catalog)) == 0
+		},
+		Similar: suggestSimilarMappedFields,
+		BodyHint: func(params map[string]any) string {
+			cl, _, _ := resolveIndex(params)
+			body := strings.TrimSpace(cl.BodyField)
+			if body == "" {
+				return "for free-text search drop the field prefix (plain words search the log body)"
+			}
+			return fmt.Sprintf("for free-text search drop the field prefix or use %s:<text>", body)
+		},
+	}
+
+	probe := &EmptyProbe{
+		Relax: esLogRelax,
+		Count: func(ctx context.Context, v ProbeVariant) (int64, error) {
+			cl, index, ok := resolveIndex(v.Params)
+			if !ok {
+				return 0, errors.New("no index")
+			}
+			dsl, _, _, err := buildESLogDSL(v.Params, cl, esLogTraceField(cl), 0, 0)
+			if err != nil {
+				return 0, err
+			}
+			dsl["size"] = 0
+			delete(dsl, "aggs")
+			delete(dsl, "aggregations")
+			delete(dsl, "sort")
+			dsl["track_total_hits"] = true
+			b, err := json.Marshal(dsl)
+			if err != nil {
+				return 0, err
+			}
+			res, err := reader.Query(ctx, cl.ID, string(b), executor.QueryOptions{Extras: map[string]any{"index": index}})
+			if err != nil {
+				return 0, err
+			}
+			return int64(totalFromResult(res)), nil
+		},
+	}
+
 	return reg.Register(Tool{
+		ArgChecks:   []ArgCheck{fieldCheck},
+		EmptyProbe:  probe,
 		Name:        "es_log_query",
 		Description: desc,
 		Toolset:     ToolsetRCA,
@@ -204,43 +285,16 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				from = 0
 			}
 
-			traceField := cl.TraceIDField
-			if traceField == "" {
-				traceField = "trace_id"
-			}
-			mapper := cfg.FieldMapper
-			if mapper == nil {
-				mapper = mapperFromReader(reader, cl.ID)
+			traceField := esLogTraceField(cl)
+			mapper := ESFieldMapper(nil)
+			if m := mappers.For(cl.ID); m != nil {
+				mapper = m
 			}
 
-			var inner map[string]any
-			var body map[string]any
-			if strings.TrimSpace(traceID) != "" {
-				inner = map[string]any{"term": map[string]any{traceField: traceID}}
-			} else {
-				var buildErr error
-				inner, body, buildErr = parseESLogQuery(query)
-				if buildErr != nil {
-					return stampFail(rcaErr(toolName, buildErr.Error(), ErrorPermanent), index, cl.ID)
-				}
+			dslObj, qopts, isBody, buildErr := buildESLogDSL(params, cl, traceField, limit, from)
+			if buildErr != nil {
+				return stampFail(rcaErr(toolName, buildErr.Error(), ErrorPermanent), index, cl.ID)
 			}
-			var dslObj map[string]any
-			if body != nil {
-				dslObj = body
-				if _, ok := dslObj["size"]; !ok {
-					dslObj["size"] = limit
-				}
-			} else {
-				dslObj = map[string]any{"size": limit, "query": inner}
-			}
-			if from > 0 {
-				dslObj["from"] = from
-			}
-			qopts, optErr := parseESLogQueryOpts(params, cl.TimeField)
-			if optErr != nil {
-				return stampFail(rcaErr(toolName, optErr.Error(), ErrorPermanent), index, cl.ID)
-			}
-			qopts.apply(dslObj)
 			dslBytes, err := json.Marshal(dslObj)
 			if err != nil {
 				return stampFail(rcaErr(toolName, err.Error(), ErrorPermanent), index, cl.ID)
@@ -251,7 +305,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				Extras:  map[string]any{"index": index},
 			})
 			var parseRetryQuery string
-			if err != nil && body == nil && strings.TrimSpace(traceID) == "" && isESQueryParseError(err) {
+			if err != nil && !isBody && strings.TrimSpace(traceID) == "" && isESQueryParseError(err) {
 				if fixed, changed := quoteLuceneSpecialTokens(query); changed {
 					retryDSL := make(map[string]any, len(dslObj))
 					for k, v := range dslObj {
@@ -280,45 +334,16 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				rewrittenQuery any
 				fieldHints     []ESFieldHint
 				queryRewritten bool
-				rewriteReason  string
-				unknownFields  []string
-				similarFields  []string
 			)
 			if totalFromResult(res) == 0 && from == 0 && mapper != nil {
-				names := collectQueryFieldNames(dslObj)
-				catalog := mapper.ListFields(ctx, index)
-				unknownFields = unknownQueryFields(names, catalog)
-				seenSimilar := map[string]struct{}{}
-				for _, u := range unknownFields {
-					for _, s := range suggestSimilarMappedFields(u, catalog) {
-						if _, ok := seenSimilar[s]; ok {
-							continue
-						}
-						seenSimilar[s] = struct{}{}
-						similarFields = append(similarFields, s)
-					}
-				}
-				work := dslObj
-				if rewrittenUnk, changed, reason := rewriteUnknownQueryFields(work, catalog, cl.BodyField); changed {
-					origQuery = dslObj["query"]
-					work = rewrittenUnk
-					rewrittenQuery = work["query"]
-					queryRewritten = true
-					rewriteReason = reason
-				}
-				fields := lookupQueryFields(ctx, mapper, index, work)
-				rewritten, changed, hints := rewriteEmptyHitQuery(work, fields)
+				fields := lookupQueryFields(ctx, mapper, index, dslObj)
+				rewritten, changed, hints := rewriteEmptyHitQuery(dslObj, fields)
 				fieldHints = hints
 				if changed {
-					if origQuery == nil {
-						origQuery = dslObj["query"]
-					}
-					work = rewritten
-					rewrittenQuery = work["query"]
+					origQuery = dslObj["query"]
+					rewrittenQuery = rewritten["query"]
 					queryRewritten = true
-				}
-				if queryRewritten {
-					retryBytes, mErr := json.Marshal(work)
+					retryBytes, mErr := json.Marshal(rewritten)
 					if mErr != nil {
 						return stampFail(rcaErr(toolName, mErr.Error(), ErrorPermanent), index, cl.ID)
 					}
@@ -375,29 +400,19 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				payload["original_query"] = origQuery
 				payload["rewritten_query"] = rewrittenQuery
 			}
-			if rewriteReason != "" {
-				payload["rewrite_reason"] = rewriteReason
-			}
 			if parseRetryQuery != "" {
 				payload["query_rewritten"] = true
 				payload["original_query"] = query
 				payload["rewritten_query"] = parseRetryQuery
 				payload["rewrite_reason"] = "query_string parse error; special characters in bare tokens were quoted as phrases"
 			}
-			if total == 0 && body == nil {
+			if total == 0 && !isBody {
 				if hint := queryStringRangeHint(query, cl.TimeField); hint != "" {
 					payload["time_range_hint"] = hint
 				}
 			}
 			if len(fieldHints) > 0 {
 				payload["field_hints"] = fieldHints
-			}
-			if len(unknownFields) > 0 {
-				payload["unknown_fields"] = unknownFields
-				if len(similarFields) > 0 {
-					payload["similar_fields"] = similarFields
-				}
-				payload["mapping_error"] = unknownFieldsNote(unknownFields)
 			}
 			n := len(hits)
 			if t := total; t > n {
@@ -412,6 +427,164 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			return rcaOK(toolName, payload), nil
 		},
 	})
+}
+
+func esLogTraceField(cl ESLogCluster) string {
+	if cl.TraceIDField != "" {
+		return cl.TraceIDField
+	}
+	return "trace_id"
+}
+
+var (
+	luceneQuoted = regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
+	// 字段名前只能是行首、空白或左括号（可再跟一个 !+- 运算符），所以 url:http://x、msg:pre-start 中值里的片段不会被当成字段。
+	luceneFieldRef = regexp.MustCompile(`(?:^|[\s(])[!+\-]?([A-Za-z@][\w.@-]*)\s*:`)
+)
+
+// esLogFieldRefs 抽取参数中显式引用的字段：query_string 的 field: 前缀、agg_field、fields、
+// sort 的 <field>:<order>、显式 time_field。trace_id 查询与 JSON body 查询不抽取；
+// 含通配符或以 _ 开头的元字段（_id/_score/_exists_）不校验。
+func esLogFieldRefs(params map[string]any) []FieldRef {
+	if trimmedStringParam(params, "trace_id") != "" {
+		return nil
+	}
+	var refs []FieldRef
+	add := func(param, field string) {
+		field = strings.TrimSpace(field)
+		if field == "" || strings.HasPrefix(field, "_") || strings.Contains(field, "*") {
+			return
+		}
+		refs = append(refs, FieldRef{Param: param, Field: baseFieldName(field)})
+	}
+	if q := trimmedStringParam(params, "query"); q != "" && !strings.HasPrefix(q, "{") {
+		for _, m := range luceneFieldRef.FindAllStringSubmatch(luceneQuoted.ReplaceAllString(q, `""`), -1) {
+			add("query", m[1])
+		}
+	}
+	add("agg_field", trimmedStringParam(params, "agg_field"))
+	add("time_field", trimmedStringParam(params, "time_field"))
+	if s := trimmedStringParam(params, "sort"); s != "" {
+		if i := strings.LastIndex(s, ":"); i > 0 {
+			add("sort", s[:i])
+		}
+	}
+	if o, err := parseESLogQueryOpts(map[string]any{"fields": params["fields"]}, ""); err == nil {
+		for _, f := range o.fields {
+			add("fields", f)
+		}
+	}
+	return refs
+}
+
+// esLogRelax 生成放宽变体（有序）：只保留时间窗、逐个去掉顶层 AND 子句、时间窗放宽到 24h。
+func esLogRelax(params map[string]any) []ProbeVariant {
+	if trimmedStringParam(params, "trace_id") != "" {
+		return nil
+	}
+	q := trimmedStringParam(params, "query")
+	if strings.HasPrefix(q, "{") {
+		return nil
+	}
+	hasWindow := trimmedStringParam(params, "time_from") != "" || trimmedStringParam(params, "time_to") != ""
+	with := func(mut func(p map[string]any)) map[string]any {
+		p := make(map[string]any, len(params))
+		for k, v := range params {
+			p[k] = v
+		}
+		mut(p)
+		return p
+	}
+	var out []ProbeVariant
+	if hasWindow && q != "" && q != "*" {
+		out = append(out, ProbeVariant{Label: "time_window_only", Params: with(func(p map[string]any) { p["query"] = "*" })})
+	}
+	if clauses := splitTopLevelAND(q); len(clauses) > 1 {
+		for i, c := range clauses {
+			rest := append(append([]string{}, clauses[:i]...), clauses[i+1:]...)
+			out = append(out, ProbeVariant{Label: "without:" + c, Params: with(func(p map[string]any) { p["query"] = strings.Join(rest, " AND ") })})
+		}
+	}
+	if relativeWindowUnder24h(trimmedStringParam(params, "time_from")) {
+		out = append(out, ProbeVariant{Label: "time_window_24h", Params: with(func(p map[string]any) {
+			p["time_from"] = "now-24h"
+			delete(p, "time_to")
+		})})
+	}
+	return out
+}
+
+var relativeNow = regexp.MustCompile(`^now-(\d+)([smh])$`)
+
+// relativeWindowUnder24h 仅对 now-<N><s|m|h> 且短于 24h 的起点返回 true；绝对时间或更长窗口不放宽，避免反而收窄/平移窗口。
+func relativeWindowUnder24h(from string) bool {
+	m := relativeNow.FindStringSubmatch(strings.TrimSpace(from))
+	if m == nil {
+		return false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return false
+	}
+	unit := map[string]time.Duration{"s": time.Second, "m": time.Minute, "h": time.Hour}[m[2]]
+	return time.Duration(n)*unit < 24*time.Hour
+}
+
+// splitTopLevelAND 按顶层 AND（大写，括号与引号外）切分 query_string。
+func splitTopLevelAND(q string) []string {
+	var parts []string
+	depth, inQuote, start := 0, false, 0
+	for i := 0; i < len(q); i++ {
+		switch c := q[i]; {
+		case c == '"' && (i == 0 || q[i-1] != '\\'):
+			inQuote = !inQuote
+		case inQuote:
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case depth == 0 && strings.HasPrefix(q[i:], " AND "):
+			parts = append(parts, strings.TrimSpace(q[start:i]))
+			start = i + len(" AND ")
+			i += len(" AND ") - 1
+		}
+	}
+	parts = append(parts, strings.TrimSpace(q[start:]))
+	out := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// buildESLogDSL 按参数构造查询 DSL；size/from 由调用方传入。isBody 表示 query 是带 "query" 键的完整 search body。
+func buildESLogDSL(params map[string]any, cl ESLogCluster, traceField string, size, from int) (dsl map[string]any, qopts esLogQueryOpts, isBody bool, err error) {
+	traceID, _ := params["trace_id"].(string)
+	query, _ := params["query"].(string)
+	var inner, body map[string]any
+	if strings.TrimSpace(traceID) != "" {
+		inner = map[string]any{"term": map[string]any{traceField: traceID}}
+	} else if inner, body, err = parseESLogQuery(query); err != nil {
+		return nil, qopts, false, err
+	}
+	if body != nil {
+		dsl = body
+		if _, ok := dsl["size"]; !ok {
+			dsl["size"] = size
+		}
+	} else {
+		dsl = map[string]any{"size": size, "query": inner}
+	}
+	if from > 0 {
+		dsl["from"] = from
+	}
+	if qopts, err = parseESLogQueryOpts(params, cl.TimeField); err != nil {
+		return nil, qopts, false, err
+	}
+	qopts.apply(dsl)
+	return dsl, qopts, body != nil, nil
 }
 
 // parseESLogQuery turns query into an ES query clause, or a full search body when

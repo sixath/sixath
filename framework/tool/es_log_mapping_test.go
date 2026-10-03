@@ -2,8 +2,6 @@ package tool
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -131,36 +129,6 @@ func TestParseLuceneQueryFields_SkipsQuotedColons(t *testing.T) {
 	}
 }
 
-func TestCollectQueryFieldNames_QueryString(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "flow_id: 4103_j0qjifnv99pq"}}}
-	got := collectQueryFieldNames(dsl)
-	if len(got) != 1 || got[0] != "flow_id" {
-		t.Fatalf("got %v", got)
-	}
-}
-
-func TestCollectQueryFieldNames_TermsQuery(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"terms": map[string]any{"flowId": []any{"4103_a", "4103_b"}}}}
-	got := collectQueryFieldNames(dsl)
-	if !containsStr(got, "flowId") {
-		t.Fatalf("terms query must expose flowId for mapping check, got %v", got)
-	}
-}
-
-func TestCollectQueryFieldNames_AggsAndExists(t *testing.T) {
-	dsl := map[string]any{
-		"query": map[string]any{"exists": map[string]any{"field": "flowId"}},
-		"aggs":  map[string]any{"by_gid": map[string]any{"terms": map[string]any{"field": "gid", "size": 50}}},
-	}
-	got := collectQueryFieldNames(dsl)
-	if !containsStr(got, "flowId") || !containsStr(got, "gid") {
-		t.Fatalf("exists + aggs fields must be checked against mapping, got %v", got)
-	}
-	if containsStr(got, "field") || containsStr(got, "size") {
-		t.Fatalf("meta keys must not look like mapped fields: %v", got)
-	}
-}
-
 func TestRewriteEmptyHit_TermsOnTextWithKeyword(t *testing.T) {
 	dsl := map[string]any{"query": map[string]any{"terms": map[string]any{"flowId": []any{"4103_a"}}}}
 	got, changed, _ := rewriteEmptyHitQuery(dsl, map[string]ESFieldMapping{
@@ -215,79 +183,5 @@ func TestRewriteEmptyHit_RoundTripJSON(t *testing.T) {
 	b, _ := json.Marshal(got)
 	if string(b) == orig {
 		t.Fatal("dsl should differ")
-	}
-}
-
-func TestRewriteUnknownLuceneFields_SimilarField(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "vmid:199306"}}}
-	got, changed, reason := rewriteUnknownQueryFields(dsl, []string{"vm_id", "M", "L"}, "")
-	if !changed || reason != "similar_field" {
-		t.Fatalf("changed=%v reason=%q", changed, reason)
-	}
-	qs := got["query"].(map[string]any)["query_string"].(map[string]any)
-	if qs["query"] != "vm_id:199306" {
-		t.Fatalf("want vm_id rewrite, got %#v", qs)
-	}
-}
-
-func TestRewriteUnknownLuceneFields_BodyCandidateMessage(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "foo:bar"}}}
-	got, changed, reason := rewriteUnknownQueryFields(dsl, []string{"message"}, "")
-	if !changed || reason != "body_field" {
-		t.Fatalf("changed=%v reason=%q", changed, reason)
-	}
-	qs := got["query"].(map[string]any)["query_string"].(map[string]any)
-	if qs["default_field"] != "message" {
-		t.Fatalf("want default_field message, got %#v", qs)
-	}
-	if !strings.Contains(fmt.Sprint(qs["query"]), "bar") {
-		t.Fatalf("want value bar kept, got %#v", qs)
-	}
-}
-
-func TestRewriteUnknownLuceneFields_BodyCandidateM(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "foo:bar"}}}
-	got, changed, reason := rewriteUnknownQueryFields(dsl, []string{"M", "L"}, "")
-	if !changed || reason != "body_field" {
-		t.Fatalf("changed=%v reason=%q", changed, reason)
-	}
-	qs := got["query"].(map[string]any)["query_string"].(map[string]any)
-	if qs["default_field"] != "M" {
-		t.Fatalf("want default_field M from candidate list, got %#v", qs)
-	}
-}
-
-func TestRewriteUnknownLuceneFields_Unfielded(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "foo:bar"}}}
-	got, changed, reason := rewriteUnknownQueryFields(dsl, []string{"L"}, "")
-	if !changed || reason != "unfielded" {
-		t.Fatalf("changed=%v reason=%q", changed, reason)
-	}
-	qs := got["query"].(map[string]any)["query_string"].(map[string]any)
-	if _, ok := qs["default_field"]; ok {
-		t.Fatalf("unfielded must not set default_field: %#v", qs)
-	}
-	if !strings.Contains(fmt.Sprint(qs["query"]), "bar") {
-		t.Fatalf("want value bar kept, got %#v", qs)
-	}
-}
-
-func TestRewriteUnknownLuceneFields_MappedUnchanged(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "vm_id:199306"}}}
-	_, changed, reason := rewriteUnknownQueryFields(dsl, []string{"vm_id", "M"}, "")
-	if changed || reason != "" {
-		t.Fatalf("mapped field must not rewrite, changed=%v reason=%q", changed, reason)
-	}
-}
-
-func TestRewriteUnknownLuceneFields_ConfiguredBodyFieldWins(t *testing.T) {
-	dsl := map[string]any{"query": map[string]any{"query_string": map[string]any{"query": "foo:bar"}}}
-	got, changed, reason := rewriteUnknownQueryFields(dsl, []string{"text", "message"}, "text")
-	if !changed || reason != "body_field" {
-		t.Fatalf("changed=%v reason=%q", changed, reason)
-	}
-	qs := got["query"].(map[string]any)["query_string"].(map[string]any)
-	if qs["default_field"] != "text" {
-		t.Fatalf("configured body_field must win over message candidate, got %#v", qs)
 	}
 }
