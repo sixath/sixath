@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sixath/framework/executor"
 	fwws "github.com/sixath/framework/workspace"
 )
 
@@ -28,38 +29,39 @@ var (
 )
 
 type QuerySpillStub struct {
-	Spilled         bool             `json:"spilled"`
-	Path            string           `json:"path"`
-	Count           int              `json:"count"`
-	OK              bool             `json:"ok"`
-	HitStatus       string           `json:"hit_status,omitempty"`
-	Cluster         string           `json:"cluster,omitempty"`
-	QueriedIndex    string           `json:"queried_index,omitempty"`
-	HasMore         bool             `json:"has_more,omitempty"`
-	ContinueFrom    int              `json:"continue_from,omitempty"`
-	NextFrom        int              `json:"next_from,omitempty"`
-	From            int              `json:"from,omitempty"`
-	Returned        int              `json:"returned,omitempty"`
-	Truncated       bool             `json:"truncated,omitempty"`
-	Total           int              `json:"total,omitempty"`
-	Columns         []string         `json:"columns,omitempty"`
-	ExtractedIDs    []string         `json:"extracted_ids,omitempty"`
-	EvidenceRefs    []EvidenceRef    `json:"evidence_refs,omitempty"`
-	SourcePath      string           `json:"source_path,omitempty"`
-	UniqueCount     int              `json:"unique_count,omitempty"`
-	ExitCode        *int             `json:"exit_code,omitempty"`
-	TimedOut        bool             `json:"timed_out,omitempty"`
-	GroupsTruncated bool             `json:"groups_truncated,omitempty"`
-	FileTruncated   bool             `json:"file_truncated,omitempty"`
-	Sample          []map[string]any `json:"sample"`
-	UnknownFields   any              `json:"unknown_fields,omitempty"`
-	SimilarFields   any              `json:"similar_fields,omitempty"`
-	MappingError    string           `json:"mapping_error,omitempty"`
-	QueryRewritten  bool             `json:"query_rewritten,omitempty"`
-	FieldHints      any              `json:"field_hints,omitempty"`
-	TraceID         string           `json:"trace_id,omitempty"`
-	SpillError      string           `json:"spill_error,omitempty"`
-	SkippedBadLines int              `json:"skipped_bad_lines,omitempty"`
+	Spilled         bool                `json:"spilled"`
+	Path            string              `json:"path"`
+	Count           int                 `json:"count"`
+	OK              bool                `json:"ok"`
+	HitStatus       string              `json:"hit_status,omitempty"`
+	Cluster         string              `json:"cluster,omitempty"`
+	QueriedIndex    string              `json:"queried_index,omitempty"`
+	HasMore         bool                `json:"has_more,omitempty"`
+	ContinueFrom    int                 `json:"continue_from,omitempty"`
+	NextFrom        int                 `json:"next_from,omitempty"`
+	From            int                 `json:"from,omitempty"`
+	Returned        int                 `json:"returned,omitempty"`
+	Truncated       bool                `json:"truncated,omitempty"`
+	Total           int                 `json:"total,omitempty"`
+	Columns         []string            `json:"columns,omitempty"`
+	ExtractedIDs    []string            `json:"extracted_ids,omitempty"`
+	EvidenceRefs    []EvidenceRef       `json:"evidence_refs,omitempty"`
+	SourcePath      string              `json:"source_path,omitempty"`
+	UniqueCount     int                 `json:"unique_count,omitempty"`
+	ExitCode        *int                `json:"exit_code,omitempty"`
+	TimedOut        bool                `json:"timed_out,omitempty"`
+	GroupsTruncated bool                `json:"groups_truncated,omitempty"`
+	FileTruncated   bool                `json:"file_truncated,omitempty"`
+	Sample          []map[string]any    `json:"sample"`
+	UnknownFields   any                 `json:"unknown_fields,omitempty"`
+	SimilarFields   any                 `json:"similar_fields,omitempty"`
+	MappingError    string              `json:"mapping_error,omitempty"`
+	QueryRewritten  bool                `json:"query_rewritten,omitempty"`
+	FieldHints      any                 `json:"field_hints,omitempty"`
+	TraceID         string              `json:"trace_id,omitempty"`
+	SpillError      string              `json:"spill_error,omitempty"`
+	SkippedBadLines int                 `json:"skipped_bad_lines,omitempty"`
+	Diagnosis       *executor.Diagnosis `json:"diagnosis,omitempty"`
 }
 
 type SpillView struct {
@@ -276,6 +278,7 @@ func stubFromPayload(payload map[string]any, rel string, count int, sample []map
 	stub.QueryRewritten = spillTruthy(payload["query_rewritten"])
 	stub.FieldHints = payload["field_hints"]
 	stub.TraceID = evidenceStringVal(payload["trace_id"])
+	stub.Diagnosis = DiagnosisFromResult(payload)
 	if len(refs) > 0 {
 		stub.EvidenceRefs = refs
 	} else if v, ok := payload["evidence_refs"]; ok {

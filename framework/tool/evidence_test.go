@@ -266,3 +266,64 @@ func TestCollectEvidenceRefs_SpillStub(t *testing.T) {
 		t.Fatalf("%#v", refs)
 	}
 }
+
+func TestHitStatusSuspectRoundTrip(t *testing.T) {
+	m := map[string]any{"hit_status": HitStatusSuspect}
+	if st, _, _ := HitContractFromResult(m); st != HitStatusSuspect {
+		t.Fatalf("map: %q", st)
+	}
+	qr := &executor.QueryResult{HitStatus: HitStatusSuspect}
+	if st, _, _ := HitContractFromResult(qr); st != HitStatusSuspect {
+		t.Fatalf("QueryResult: %q", st)
+	}
+}
+
+func TestMarkSuspectAndDiagnosisFromResult(t *testing.T) {
+	d := &executor.Diagnosis{Hint: "without:service:foo has 57"}
+
+	m := MarkSuspect(map[string]any{"hit_status": HitStatusEmpty}, d)
+	if m.(map[string]any)["hit_status"] != HitStatusSuspect || DiagnosisFromResult(m).Hint != d.Hint {
+		t.Fatalf("map: %+v", m)
+	}
+
+	qr := MarkSuspect(&executor.QueryResult{HitStatus: HitStatusEmpty}, d).(*executor.QueryResult)
+	if qr.HitStatus != HitStatusSuspect || DiagnosisFromResult(qr) != d {
+		t.Fatalf("QueryResult: %+v", qr)
+	}
+
+	stub := MarkSuspect(&QuerySpillStub{HitStatus: HitStatusEmpty}, d).(*QuerySpillStub)
+	if stub.HitStatus != HitStatusSuspect || DiagnosisFromResult(stub) != d {
+		t.Fatalf("stub: %+v", stub)
+	}
+
+	attachOnly := AttachDiagnosis(map[string]any{"hit_status": HitStatusEmpty}, d).(map[string]any)
+	if attachOnly["hit_status"] != HitStatusEmpty || attachOnly["diagnosis"] != d {
+		t.Fatalf("AttachDiagnosis must not change status: %+v", attachOnly)
+	}
+
+	if DiagnosisFromResult("text") != nil {
+		t.Fatal("unknown result type must give nil")
+	}
+	decoded := map[string]any{"diagnosis": map[string]any{"hint": "h", "probes": []any{map[string]any{"label": "a", "count": 3.0}}}}
+	if got := DiagnosisFromResult(decoded); got == nil || got.Hint != "h" || got.Probes[0].Count != 3 {
+		t.Fatalf("decoded map: %+v", got)
+	}
+}
+
+func TestStubFromPayloadCopiesDiagnosis(t *testing.T) {
+	d := &executor.Diagnosis{Hint: "h"}
+	stub := stubFromPayload(map[string]any{"hit_status": HitStatusSuspect, "diagnosis": d}, "tmp/results/s/x.jsonl", 1, nil, nil)
+	if stub.Diagnosis != d || stub.HitStatus != HitStatusSuspect {
+		t.Fatalf("stub %+v", stub)
+	}
+}
+
+func TestDecodeJSONResult(t *testing.T) {
+	m, ok := DecodeJSONResult(`{"hit_status":"suspect"}`).(map[string]any)
+	if !ok || m["hit_status"] != "suspect" {
+		t.Fatalf("got %#v", m)
+	}
+	if DecodeJSONResult("plain text") != "plain text" {
+		t.Fatal("non-JSON string must pass through")
+	}
+}

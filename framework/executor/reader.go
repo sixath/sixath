@@ -40,6 +40,19 @@ type QueryOptions struct {
 	Params map[string]any // Deprecated: use Extras.
 }
 
+// Diagnosis 是零结果探测的结论：放宽条件后的计数，用于区分"条件写错"与"确实无数据"。
+type Diagnosis struct {
+	Probes    []ProbeCount `json:"probes,omitempty"`
+	Truncated bool         `json:"truncated,omitempty"`
+	Hint      string       `json:"hint,omitempty"`
+	Errors    []string     `json:"errors,omitempty"`
+}
+
+type ProbeCount struct {
+	Label string `json:"label"`
+	Count int64  `json:"count"`
+}
+
 // QueryResult 只读查询结果。
 type QueryResult struct {
 	Columns        []string
@@ -53,6 +66,7 @@ type QueryResult struct {
 	RepairNote  string `json:"repair_note,omitempty"`
 	// Aggregations ES 聚合结果原文；无聚合时为空。
 	Aggregations json.RawMessage `json:"aggregations,omitempty"`
+	Diagnosis    *Diagnosis      `json:"diagnosis,omitempty"`
 }
 
 func queryResultFromResult(r *Result) *QueryResult {

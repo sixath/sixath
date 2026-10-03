@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/sixath/framework/executor"
@@ -18,6 +19,9 @@ const (
 	HitStatusHits  = "hits"
 	HitStatusEmpty = "empty"
 	HitStatusError = "error"
+	// HitStatusSuspect 表示 0 条但有证据显示是查询条件问题（放宽后有数据、搜索根不存在等），
+	// 不能据此断言"没有数据"。
+	HitStatusSuspect = "suspect"
 )
 
 type HitStamp struct {
@@ -88,7 +92,7 @@ func HitContractFromResult(v any) (status, queriedIndex, repo string) {
 func hitStatusString(v any) string {
 	s := strings.TrimSpace(evidenceStringVal(v))
 	switch s {
-	case HitStatusHits, HitStatusEmpty, HitStatusError:
+	case HitStatusHits, HitStatusEmpty, HitStatusError, HitStatusSuspect:
 		return s
 	default:
 		return ""
@@ -513,4 +517,89 @@ func rcaErr(tool string, errMsg string, code string) map[string]any {
 
 func rcaErrFrom(tool string, err error) map[string]any {
 	return rcaErr(tool, err.Error(), classifyRCAError(err))
+}
+
+// DiagnosisFromResult 读取结果上的零结果诊断；兼容经 JSON 往返后的 map 形式。不支持的结果类型返回 nil。
+func DiagnosisFromResult(v any) *executor.Diagnosis {
+	switch x := v.(type) {
+	case map[string]any:
+		switch d := x["diagnosis"].(type) {
+		case *executor.Diagnosis:
+			return d
+		case map[string]any:
+			b, err := json.Marshal(d)
+			if err != nil {
+				return nil
+			}
+			var out executor.Diagnosis
+			if json.Unmarshal(b, &out) != nil {
+				return nil
+			}
+			return &out
+		}
+		return nil
+	case *executor.QueryResult:
+		if x != nil {
+			return x.Diagnosis
+		}
+	case *QuerySpillStub:
+		if x != nil {
+			return x.Diagnosis
+		}
+	}
+	return nil
+}
+
+// DecodeJSONResult 把 JSON 对象字符串形式的结果（如 eval 夹具、MCP 文本结果）解码为 map；其他值原样返回。
+func DecodeJSONResult(v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return v
+	}
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "{") {
+		return v
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(t), &m) != nil {
+		return v
+	}
+	return m
+}
+
+// AttachDiagnosis 把诊断写到结果上，不改变 hit_status。
+func AttachDiagnosis(v any, d *executor.Diagnosis) any {
+	switch x := v.(type) {
+	case map[string]any:
+		x["diagnosis"] = d
+	case *executor.QueryResult:
+		if x != nil {
+			x.Diagnosis = d
+		}
+	case *QuerySpillStub:
+		if x != nil {
+			x.Diagnosis = d
+		}
+	}
+	return v
+}
+
+// MarkSuspect 写入诊断（可为 nil）并把 hit_status 置为 suspect。
+func MarkSuspect(v any, d *executor.Diagnosis) any {
+	if d != nil {
+		v = AttachDiagnosis(v, d)
+	}
+	switch x := v.(type) {
+	case map[string]any:
+		x["hit_status"] = HitStatusSuspect
+	case *executor.QueryResult:
+		if x != nil {
+			x.HitStatus = HitStatusSuspect
+		}
+	case *QuerySpillStub:
+		if x != nil {
+			x.HitStatus = HitStatusSuspect
+		}
+	}
+	return v
 }
