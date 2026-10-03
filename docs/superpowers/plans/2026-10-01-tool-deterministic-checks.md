@@ -2648,8 +2648,8 @@ Run: `go test -p 1 ./tool/ -run "TestJaegerTrace_RejectsMalformedTraceID|HTTP" -
 ```go
 	ArgChecks: []ArgCheck{Pattern{
 		Param: "trace_id",
-		Regex: regexp.MustCompile(`^([0-9a-fA-F]{16}|[0-9a-fA-F]{32})$`),
-		Hint:  "trace_id must be 16 or 32 hex characters (copy it from a log line's trace field)",
+		Regex: regexp.MustCompile(`^[0-9a-fA-F]{1,32}$`),
+		Hint:  "trace_id must be up to 32 hex characters (copy it from a log line's trace field)",
 	}},
 ```
 

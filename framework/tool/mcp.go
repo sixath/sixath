@@ -646,6 +646,8 @@ func derefString(s *string) string {
 
 // normalizeMCPSchema 把 MCP 工具的 InputSchema（结构体或任意 JSON 值）转为 map[string]any，
 // 使 ValidateArguments 能识别；raw（RawInputSchema）非空时优先。失败时原样返回（校验 fail-open）。
+// 注意：mark3labs 客户端反序列化到 ToolArgumentsSchema 时只保留 type/properties/required/$defs，
+// 根级 additionalProperties、anyOf/oneOf 等约束已丢失，因此不会被校验。
 func normalizeMCPSchema(schema any, raw json.RawMessage) any {
 	if len(raw) > 0 {
 		var m map[string]any

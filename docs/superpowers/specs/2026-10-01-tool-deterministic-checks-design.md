@@ -162,7 +162,7 @@ type Diagnosis struct {
 |------|------|
 | `execute_read` | `ArgAliases{query: dsl}`；schema 删除 `query`、`index`，`dsl` 设为 required，描述写明"SQL 语句"；`Reject`（**仅当数据源类型为 mysql/hive**；MongoDB 等原生 JSON 查询不受影响）：传入 `index` 参数，或 `dsl` 内容为 Lucene（`field:value`、`AND/OR` 且不以 `SELECT/SHOW/DESC/DESCRIBE/EXPLAIN/WITH` 开头）、JSON DSL（以 `{` 开头）→ hint 指向 `es_log_query`；`OneOf(datasource_id)`，`Normalize` 用 `ResolveDatasourceID`（`"default"` 等别名先解析再判定）；表列校验（仅 mysql）：仅单表 `SELECT ... FROM t [WHERE ...] [ORDER BY ...]`，校验表名与列名，含 JOIN/子查询/CTE 或解析失败一律放行；`EmptyProbe`（主表 COUNT）。修复：有 Reader 而 `cfg.Exec==nil` 时不再报"未配置"。 |
 | `es_log_query` | 索引校验沿用现有实现（`es_log_tool.go:186` + `es_log_index.go` 缓存与候选），不另加 `OneOf`；`FieldRefs` 覆盖 query_string 中的 `field:` 引用、`agg_field`、`fields`、`sort`、`time_field`，mapping 来自 `schemacache`，`BodyHint` 给出 message/log 等正文字段名；保留 `rewriteEmptyHitQuery` 的类型改写（字段存在但类型不匹配）；删除"0 条后发现 unknown_fields"分支（执行前已拦截）；`EmptyProbe`。 |
-| `jaeger_trace` | `Pattern(trace_id, ^([0-9a-fA-F]{16}\|[0-9a-fA-F]{32})$)`；"trace_id 与 service 至少一个"已有运行时校验，不改。 |
+| `jaeger_trace` | `Pattern(trace_id, ^[0-9a-fA-F]{1,32}$)`（jaeger-client 省略前导零，长度不固定）；"trace_id 与 service 至少一个"已有运行时校验，不改。 |
 | `rca_*` | `OneOf(repo)`，修正描述中误导的 repo 说明；`rca_read` 路径不存在时，用 `Suggest` 在同目录文件名中给候选，同目录无匹配再在仓库内按文件名匹配（遍历上限 2000 个文件）。 |
 | `skill_view` / `load_skill` / `read_skill_file` | `OneOf(name)`，候选来自已加载 skill 索引。 |
 | `skill_manage` | 仅 `action` 为非 `create` 时 `OneOf(name)`；其配置当前无 skill 索引，`Source` 取不到时按 fail-open 跳过。 |

@@ -37,7 +37,8 @@ type jaegerSpan struct {
 	} `json:"tags"`
 }
 
-var jaegerTraceIDPattern = regexp.MustCompile(`^([0-9a-fA-F]{16}|[0-9a-fA-F]{32})$`)
+// jaeger-client 输出 trace_id 时省略前导零，长度可短于 16/32。
+var jaegerTraceIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{1,32}$`)
 
 // RegisterJaegerTool 注册 jaeger_trace 工具。queryURL 为 Jaeger Query 基址(无鉴权)。
 // 可选 client：省略或 nil 时保持现网 30s 直连 Client。
@@ -66,7 +67,7 @@ func RegisterJaegerTool(reg *Registry, queryURL string, client ...*http.Client) 
 		ArgChecks: []ArgCheck{Pattern{
 			Param: "trace_id",
 			Regex: jaegerTraceIDPattern,
-			Hint:  "trace_id must be 16 or 32 hex characters (copy it from a log line's trace field)",
+			Hint:  "trace_id must be up to 32 hex characters (copy it from a log line's trace field)",
 		}},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			const toolName = "jaeger_trace"

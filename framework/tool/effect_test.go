@@ -48,6 +48,12 @@ func TestEffectForHTTPMethod(t *testing.T) {
 	if got := HTTPMethodEffect(map[string]any{"url": "http://x"}); got != EffectRead {
 		t.Fatalf("missing method effect=%q want read", got)
 	}
+	if got := HTTPMethodEffect(map[string]any{"url": "http://x", "body": `{"a":1}`}); got != EffectWrite {
+		t.Fatalf("missing method with body effect=%q want write", got)
+	}
+	if got := HTTPMethodEffect(map[string]any{"method": "", "url": "http://x", "body": ""}); got != EffectRead {
+		t.Fatalf("missing method with empty body effect=%q want read", got)
+	}
 }
 
 func TestEffectForVMRunCmd(t *testing.T) {

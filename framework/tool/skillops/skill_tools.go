@@ -74,7 +74,7 @@ func skillNameCheck(idx func() *skills.Index, when func(map[string]any) bool, ex
 	return tool.OneOf{
 		Param: "name",
 		When:  when,
-		Source: func(ctx context.Context, _ map[string]any) ([]string, error) {
+		Source: func(ctx context.Context, params map[string]any) ([]string, error) {
 			var names []string
 			if ix := idx(); ix != nil {
 				for _, m := range ix.All() {
@@ -83,6 +83,14 @@ func skillNameCheck(idx func() *skills.Index, when func(map[string]any) bool, ex
 			}
 			if extra != nil {
 				names = append(names, extra(ctx)...)
+			}
+			// OneOf 按精确值比较；技能名大小写不敏感，命中 EqualFold 时把原值并入候选以放行。
+			raw, _ := params["name"].(string)
+			raw = strings.TrimSpace(raw)
+			for _, n := range names {
+				if raw != "" && strings.EqualFold(n, raw) {
+					return append(names, raw), nil
+				}
 			}
 			return names, nil
 		},

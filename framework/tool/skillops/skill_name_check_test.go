@@ -70,6 +70,17 @@ func TestSkillTools_UnknownNameSuggests(t *testing.T) {
 	}
 }
 
+func TestSkillNameCheck_CaseInsensitive(t *testing.T) {
+	idx := newNameCheckIndex(t)
+	c := skillNameCheck(staticSkillIndex(idx), nil, nil)
+	if errs, err := c.Check(context.Background(), map[string]any{"name": "RCA-Flow"}); err != nil || len(errs) != 0 {
+		t.Fatalf("case-only difference must pass: errs=%v err=%v", errs, err)
+	}
+	if errs, _ := c.Check(context.Background(), map[string]any{"name": "rca-flw"}); len(errs) != 1 {
+		t.Fatalf("typo must still be rejected: %v", errs)
+	}
+}
+
 func TestSkillManage_NameCheckSkipsCreate(t *testing.T) {
 	root := t.TempDir()
 	cfg := skillManageTestConfig(nil, false)

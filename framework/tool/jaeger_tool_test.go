@@ -158,7 +158,12 @@ func TestJaegerTrace_RejectsMalformedTraceID(t *testing.T) {
 	if !errors.As(err, &iae) || iae.Errors[0].Keyword != KeywordPattern {
 		t.Fatalf("got %v", err)
 	}
-	for _, ok := range []string{"0123456789abcdef", "0123456789ABCDEF0123456789abcdef"} {
+	for _, bad := range []string{"0123456789abcdef0123456789abcdef0", "xyz"} {
+		if errs, _ := (Pattern{Param: "trace_id", Regex: jaegerTraceIDPattern}).Check(context.Background(), map[string]any{"trace_id": bad}); len(errs) != 1 {
+			t.Fatalf("%q must be rejected", bad)
+		}
+	}
+	for _, ok := range []string{"0123456789abcdef", "0123456789ABCDEF0123456789abcdef", "123456789abcdef", "123456789abcdef0123456789abcdef"} {
 		if errs, _ := (Pattern{Param: "trace_id", Regex: jaegerTraceIDPattern}).Check(context.Background(), map[string]any{"trace_id": ok}); len(errs) != 0 {
 			t.Fatalf("%q must be accepted: %v", ok, errs)
 		}
