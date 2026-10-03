@@ -1213,6 +1213,13 @@ func (a *ReActAgent) executeOneToolCall(ctx context.Context, req *Request, step 
 	record.DurationMS = time.Since(start).Milliseconds()
 	result, err = runToolHooksAfter(hookCtx, a.config.ToolHooks, effectiveName, result, err)
 	record.Result = result
+	record.HitStatus, _, _ = tool.HitContractFromResult(tool.DecodeJSONResult(result))
+	var iae *tool.InvalidArgumentsError
+	if errors.As(err, &iae) {
+		for _, e := range iae.Errors {
+			record.CheckRejects = append(record.CheckRejects, e.Keyword)
+		}
+	}
 	if err != nil {
 		record.Error = err.Error()
 		emit(events.ToolFailed, map[string]any{"tool": effectiveName, "tool_call_id": call.ID, "error": err.Error(), "step": step})

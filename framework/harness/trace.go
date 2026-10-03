@@ -184,6 +184,10 @@ type ToolCallRecord struct {
 	Blocked    bool `json:"blocked,omitempty"`
 	Decision   string
 	DurationMS int64
+	// HitStatus 为结果上的命中契约（hits/empty/suspect/error），无契约时为空。
+	HitStatus string `json:"hit_status,omitempty"`
+	// CheckRejects 为参数被拒时命中的规则 keyword（required/one_of/unknown_field…）。
+	CheckRejects []string `json:"check_rejects,omitempty"`
 }
 
 type StreamEventType string
