@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1059,6 +1060,41 @@ func receiveStreamGeneration(ctx context.Context, genCh <-chan *model.Generation
 	}
 }
 
+var (
+	toolCallLeadingName = regexp.MustCompile(`^\s*\{\s*"name"\s*:\s*"([^"]+)"`)
+	toolCallAnyName     = regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`)
+)
+
+// argsParseErrorHint 为参数 JSON 解析失败补充该工具的参数摘要；tool_call 包装时从原始参数中提取内层工具名
+// （优先取对象开头的顶层 "name"，否则取首个已注册工具名的 "name"）。
+func argsParseErrorHint(reg *tool.Registry, name, rawPreview string) string {
+	const generic = "; arguments must be a valid JSON object"
+	if reg == nil {
+		return generic
+	}
+	if name == tool.ToolCallName {
+		name = ""
+		if m := toolCallLeadingName.FindStringSubmatch(rawPreview); m != nil {
+			name = m[1]
+		} else {
+			for _, m := range toolCallAnyName.FindAllStringSubmatch(rawPreview, -1) {
+				if _, ok := reg.Get(m[1]); ok {
+					name = m[1]
+					break
+				}
+			}
+		}
+	}
+	t, ok := reg.Get(name)
+	if !ok {
+		return generic
+	}
+	if s := tool.RequiredArgsSummary(t.Parameters); s != "" {
+		return generic + "; " + name + " " + s
+	}
+	return generic
+}
+
 func (a *ReActAgent) executeOneToolCall(ctx context.Context, req *Request, step int, call model.ToolCall, emit func(events.Kind, map[string]any)) (ToolCallRecord, error) {
 	args := cloneArgs(call.Arguments)
 	record := ToolCallRecord{
@@ -1068,7 +1104,7 @@ func (a *ReActAgent) executeOneToolCall(ctx context.Context, req *Request, step 
 		Arguments:  args,
 	}
 	if call.RawArgumentsParseError != "" {
-		record.Error = "invalid tool arguments json: " + call.RawArgumentsParseError
+		record.Error = "invalid tool arguments json: " + call.RawArgumentsParseError + argsParseErrorHint(a.tools, call.Name, call.RawArgumentsPreview)
 		emit(events.ToolFailed, map[string]any{
 			"tool":         call.Name,
 			"tool_call_id": call.ID,
