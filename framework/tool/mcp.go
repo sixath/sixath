@@ -464,7 +464,7 @@ func (a *metoroClientAdapter) ListTools(ctx context.Context) ([]Tool, error) {
 		out = append(out, Tool{
 			Name:        t.Name,
 			Description: derefString(t.Description),
-			Parameters:  t.InputSchema,
+			Parameters:  normalizeMCPSchema(t.InputSchema, nil),
 		})
 	}
 	return out, nil
@@ -599,7 +599,7 @@ func (a *mark3labsClientAdapter) ListTools(ctx context.Context) ([]Tool, error) 
 		out = append(out, Tool{
 			Name:        t.Name,
 			Description: t.Description,
-			Parameters:  t.InputSchema,
+			Parameters:  normalizeMCPSchema(t.InputSchema, t.RawInputSchema),
 		})
 	}
 	return out, nil
@@ -642,4 +642,27 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// normalizeMCPSchema 把 MCP 工具的 InputSchema（结构体或任意 JSON 值）转为 map[string]any，
+// 使 ValidateArguments 能识别；raw（RawInputSchema）非空时优先。失败时原样返回（校验 fail-open）。
+func normalizeMCPSchema(schema any, raw json.RawMessage) any {
+	if len(raw) > 0 {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil && len(m) > 0 {
+			return m
+		}
+	}
+	if m, ok := schema.(map[string]any); ok {
+		return m
+	}
+	b, err := json.Marshal(schema)
+	if err != nil {
+		return schema
+	}
+	var m map[string]any
+	if json.Unmarshal(b, &m) != nil || len(m) == 0 {
+		return schema
+	}
+	return m
 }
