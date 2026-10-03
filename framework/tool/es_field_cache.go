@@ -12,18 +12,22 @@ const (
 	esMappingCacheMaxEntries = 256
 	// esMappingRefreshMinInterval 内对同一索引的强制刷新直接返回缓存，避免未知字段反复触发拉 mapping。
 	esMappingRefreshMinInterval = 30 * time.Second
+	// esMappingFailureTTL 内同一索引拉取失败的结果直接复用，避免每次调用都等满拉取超时。
+	esMappingFailureTTL = 30 * time.Second
 )
 
-// cachedFieldMapper 为 ListFields 加 TTL 缓存；空结果（mapping 拉取失败）不缓存。
-// 同一索引的并发未命中合并为一次拉取。
+// cachedFieldMapper 为 ListFields 加 TTL 缓存；空结果不缓存，拉取失败（inner 实现 ESFieldListerErr 且返回 error）
+// 按 failureTTL 负缓存。同一索引的并发未命中合并为一次拉取。
 type cachedFieldMapper struct {
 	inner      ESFieldMapper
 	ttl        time.Duration
 	maxEntries int
 	minRefresh time.Duration
+	failureTTL time.Duration
 	now        func() time.Time
 	mu         sync.Mutex
 	lists      map[string]cachedFieldList
+	failures   map[string]cachedFieldFailure
 	inflight   map[string]*fieldFetch
 }
 
@@ -32,9 +36,15 @@ type cachedFieldList struct {
 	at     time.Time
 }
 
+type cachedFieldFailure struct {
+	err error
+	at  time.Time
+}
+
 type fieldFetch struct {
 	done   chan struct{}
 	fields []string
+	err    error
 }
 
 func newCachedFieldMapper(inner ESFieldMapper, ttl time.Duration) *cachedFieldMapper {
@@ -43,8 +53,10 @@ func newCachedFieldMapper(inner ESFieldMapper, ttl time.Duration) *cachedFieldMa
 		ttl:        ttl,
 		maxEntries: esMappingCacheMaxEntries,
 		minRefresh: esMappingRefreshMinInterval,
+		failureTTL: esMappingFailureTTL,
 		now:        time.Now,
 		lists:      map[string]cachedFieldList{},
+		failures:   map[string]cachedFieldFailure{},
 		inflight:   map[string]*fieldFetch{},
 	}
 }
@@ -54,35 +66,65 @@ func (m *cachedFieldMapper) Lookup(ctx context.Context, index, field string) (ES
 }
 
 func (m *cachedFieldMapper) ListFields(ctx context.Context, index string) []string {
+	fields, _ := m.ListFieldsErr(ctx, index)
+	return fields
+}
+
+func (m *cachedFieldMapper) ListFieldsErr(ctx context.Context, index string) ([]string, error) {
 	m.mu.Lock()
 	c, ok := m.lists[index]
+	err := m.recentFailureLocked(index)
 	m.mu.Unlock()
 	if ok && m.now().Sub(c.at) < m.ttl {
-		return c.fields
+		return c.fields, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	return m.fetch(ctx, index)
 }
 
 // Refresh 绕过缓存重新拉取，非空时写回；距上次成功拉取不足 minRefresh 时直接返回缓存。
 func (m *cachedFieldMapper) Refresh(ctx context.Context, index string) []string {
+	fields, _ := m.RefreshErr(ctx, index)
+	return fields
+}
+
+func (m *cachedFieldMapper) RefreshErr(ctx context.Context, index string) ([]string, error) {
 	m.mu.Lock()
 	c, ok := m.lists[index]
+	err := m.recentFailureLocked(index)
 	m.mu.Unlock()
 	if ok && m.now().Sub(c.at) < m.minRefresh {
-		return c.fields
+		return c.fields, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	return m.fetch(ctx, index)
 }
 
-func (m *cachedFieldMapper) fetch(ctx context.Context, index string) []string {
+func (m *cachedFieldMapper) recentFailureLocked(index string) error {
+	f, ok := m.failures[index]
+	if !ok {
+		return nil
+	}
+	if m.now().Sub(f.at) < m.failureTTL {
+		return f.err
+	}
+	delete(m.failures, index)
+	return nil
+}
+
+func (m *cachedFieldMapper) fetch(ctx context.Context, index string) ([]string, error) {
 	m.mu.Lock()
 	if f, ok := m.inflight[index]; ok {
 		m.mu.Unlock()
 		select {
 		case <-f.done:
-			return f.fields
+			return f.fields, f.err
 		case <-ctx.Done():
-			return nil
+			return nil, ctx.Err()
 		}
 	}
 	f := &fieldFetch{done: make(chan struct{})}
@@ -92,14 +134,37 @@ func (m *cachedFieldMapper) fetch(ctx context.Context, index string) []string {
 	defer func() {
 		m.mu.Lock()
 		delete(m.inflight, index)
-		if len(f.fields) > 0 {
+		switch {
+		case f.err != nil:
+			m.storeFailureLocked(index, f.err)
+		case len(f.fields) > 0:
+			delete(m.failures, index)
 			m.storeLocked(index, f.fields)
 		}
 		m.mu.Unlock()
 		close(f.done)
 	}()
-	f.fields = m.inner.ListFields(ctx, index)
-	return f.fields
+	if le, ok := m.inner.(ESFieldListerErr); ok {
+		f.fields, f.err = le.ListFieldsErr(ctx, index)
+	} else {
+		f.fields = m.inner.ListFields(ctx, index)
+	}
+	return f.fields, f.err
+}
+
+func (m *cachedFieldMapper) storeFailureLocked(index string, err error) {
+	now := m.now()
+	if _, exists := m.failures[index]; !exists && m.maxEntries > 0 && len(m.failures) >= m.maxEntries {
+		for k, v := range m.failures {
+			if now.Sub(v.at) >= m.failureTTL {
+				delete(m.failures, k)
+			}
+		}
+		if len(m.failures) >= m.maxEntries {
+			return
+		}
+	}
+	m.failures[index] = cachedFieldFailure{err: err, at: now}
 }
 
 func (m *cachedFieldMapper) storeLocked(index string, fields []string) {

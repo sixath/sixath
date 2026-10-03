@@ -18,8 +18,8 @@ import (
 // 两条硬性设计约束：
 //  1. **fail-open**：只校验我们确认支持的 JSON Schema 子集；schema 若使用了不支持
 //     的关键字（oneOf/anyOf/$ref/pattern/format…），整个工具跳过校验，绝不误杀。
-//  2. **可关闭**：SATH_TOOL_ARG_VALIDATION=0/off/false 时完全不注册校验包装，
-//     线上可秒级回退。
+//  2. **可关闭**：SATH_TOOL_ARG_VALIDATION=0/off/false/no/disable 时跳过全部执行前校验；
+//     开关由校验中间件每次调用读取，线上改环境变量即时回退。
 
 // EnvToolArgValidation 控制是否启用工具入参校验（默认启用）。
 const EnvToolArgValidation = "SATH_TOOL_ARG_VALIDATION"

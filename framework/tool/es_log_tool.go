@@ -36,6 +36,8 @@ type ESLogConfig struct {
 	FieldMapper  ESFieldMapper  // 空击时查 mapping；nil 则按本次 cluster 从 Reader 推断
 	IndexCatalog ESIndexCatalog // 物理索引探测；nil 则按 Reader 推断，测中可注入
 	Clusters     []ESLogCluster
+	// DisableEmptyProbe 为 true 时本工具不做零结果放宽探测（spec「empty_probe: false」）；全局开关见 SATH_TOOL_EMPTY_PROBE。
+	DisableEmptyProbe bool
 }
 
 func (cfg ESLogConfig) resolvedClusters() []ESLogCluster {
@@ -177,9 +179,9 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 				return nil, nil
 			}
 			if refresh {
-				return m.Refresh(ctx, index), nil
+				return m.RefreshErr(ctx, index)
 			}
-			return m.ListFields(ctx, index), nil
+			return m.ListFieldsErr(ctx, index)
 		},
 		Known: func(field string, catalog []string) bool {
 			return len(unknownQueryFields([]string{field}, catalog)) == 0
@@ -195,6 +197,7 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 		},
 	}
 
+	// 探测变体基于调用方原始参数，不继承 Execute 内 rewriteEmptyHitQuery 的 term/match 改写。
 	probe := &EmptyProbe{
 		Relax: esLogRelax,
 		Count: func(ctx context.Context, v ProbeVariant) (int64, error) {
@@ -218,6 +221,9 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			}
 			return n, err
 		},
+	}
+	if cfg.DisableEmptyProbe {
+		probe = nil
 	}
 
 	return reg.Register(Tool{

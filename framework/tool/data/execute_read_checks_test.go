@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sixath/framework/datasource"
 	"github.com/sixath/framework/executor"
@@ -42,6 +43,12 @@ func newStubDSRegistry(t *testing.T, ids map[string]string) *datasource.Registry
 func primedStore(t *testing.T, reg *datasource.Registry, dsID string, schema *metadata.Schema) *metadata.InMemoryStore {
 	t.Helper()
 	store := metadata.NewInMemoryStore(nil)
+	primeStore(t, reg, store, dsID, schema)
+	return store
+}
+
+func primeStore(t *testing.T, reg *datasource.Registry, store *metadata.InMemoryStore, dsID string, schema *metadata.Schema) {
+	t.Helper()
 	metaReg := metadata.NewRegistry(reg)
 	metaReg.Register(datasource.TypeMySQL, func(datasource.DataSource) (func(context.Context) (*metadata.Schema, error), error) {
 		return func(context.Context) (*metadata.Schema, error) { return schema, nil }, nil
@@ -49,7 +56,6 @@ func primedStore(t *testing.T, reg *datasource.Registry, dsID string, schema *me
 	if _, err := metadata.RefreshWithRegistry(context.Background(), metaReg, store, dsID); err != nil {
 		t.Fatal(err)
 	}
-	return store
 }
 
 func withSchemaRefresh(t *testing.T, fn func(context.Context, *datasource.Registry, *metadata.InMemoryStore, string) (*metadata.Schema, error)) {
@@ -57,6 +63,16 @@ func withSchemaRefresh(t *testing.T, fn func(context.Context, *datasource.Regist
 	prev := sqlSchemaRefresh
 	sqlSchemaRefresh = fn
 	t.Cleanup(func() { sqlSchemaRefresh = prev })
+}
+
+// withSchemaClock 固定 sqlSchemaNow，返回推进时钟的函数。
+func withSchemaClock(t *testing.T) func(time.Duration) {
+	t.Helper()
+	prev := sqlSchemaNow
+	now := time.Unix(1_000_000, 0)
+	sqlSchemaNow = func() time.Time { return now }
+	t.Cleanup(func() { sqlSchemaNow = prev })
+	return func(d time.Duration) { now = now.Add(d) }
 }
 
 type scriptReader struct {
@@ -230,6 +246,7 @@ func TestExecuteReadChecks(t *testing.T) {
 		cfg := newCfg(r)
 		cfg.Store = primedStore(t, dsReg, "mysql1", vmAssignSchema())
 		tl := registerExecuteRead(t, cfg)
+		advance := withSchemaClock(t)
 		refreshed := 0
 		withSchemaRefresh(t, func(context.Context, *datasource.Registry, *metadata.InMemoryStore, string) (*metadata.Schema, error) {
 			refreshed++
@@ -244,6 +261,7 @@ func TestExecuteReadChecks(t *testing.T) {
 			t.Fatalf("column err=%+v", e)
 		}
 
+		advance(31 * time.Second)
 		_, err = tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id FROM vm_asign"})
 		e = wantInvalidArg(t, err, core.KeywordUnknownField)
 		if e.Path != "dsl" || !slices.Contains(e.Candidates, "vm_assign") {
@@ -288,6 +306,73 @@ func TestExecuteReadChecks(t *testing.T) {
 		}
 		if _, ok := out.(*executor.QueryResult); !ok {
 			t.Fatalf("type %T", out)
+		}
+	})
+
+	t.Run("schema refresh rate limited per datasource", func(t *testing.T) {
+		dsReg2 := newStubDSRegistry(t, map[string]string{"mysql1": "mysql", "mysql2": "mysql"})
+		r := oneRowReader()
+		cfg := &ExecuteReadConfig{Reader: r, Registry: dsReg2, DefaultDatasourceID: "mysql1"}
+		cfg.Store = primedStore(t, dsReg2, "mysql2", vmAssignSchema())
+		tl := registerExecuteRead(t, cfg)
+		advance := withSchemaClock(t)
+		if _, err := tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id FROM vm_assign", "datasource_id": "mysql2"}); err != nil {
+			t.Fatal(err)
+		}
+		// store 换成 mysql1 后，mysql2 的结构仍由规则按数据源缓存，无需再整库刷新。
+		primeStore(t, dsReg2, cfg.Store, "mysql1", vmAssignSchema())
+		r.calls = nil
+		refreshed := map[string]int{}
+		withSchemaRefresh(t, func(_ context.Context, _ *datasource.Registry, _ *metadata.InMemoryStore, id string) (*metadata.Schema, error) {
+			refreshed[id]++
+			return vmAssignSchema(), nil
+		})
+
+		_, err := tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id, stat FROM vm_assign"})
+		wantInvalidArg(t, err, core.KeywordUnknownField)
+		_, err = tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id, stat FROM vm_assign"})
+		wantInvalidArg(t, err, core.KeywordUnknownField)
+		if refreshed["mysql1"] != 1 {
+			t.Fatalf("refresh within window must be skipped, got %v", refreshed)
+		}
+
+		if _, err := tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id FROM brand_new_table"}); err != nil {
+			t.Fatalf("missing table within window must not be rejected: %v", err)
+		}
+		if refreshed["mysql1"] != 1 || len(r.calls) != 1 {
+			t.Fatalf("refreshed=%v calls=%v", refreshed, r.calls)
+		}
+
+		_, err = tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id, stat FROM vm_assign", "datasource_id": "mysql2"})
+		wantInvalidArg(t, err, core.KeywordUnknownField)
+		if refreshed["mysql2"] != 1 {
+			t.Fatalf("limiter must be per datasource, got %v", refreshed)
+		}
+
+		advance(31 * time.Second)
+		_, err = tl.Execute(context.Background(), map[string]any{"dsl": "SELECT id FROM vm_asign"})
+		wantInvalidArg(t, err, core.KeywordUnknownField)
+		if refreshed["mysql1"] != 2 {
+			t.Fatalf("refresh after window must run, got %v", refreshed)
+		}
+	})
+
+	t.Run("disable empty probe", func(t *testing.T) {
+		r := &scriptReader{fn: func(string) (*executor.QueryResult, error) {
+			return &executor.QueryResult{Columns: []string{"id"}}, nil
+		}}
+		cfg := newCfg(r)
+		cfg.DisableEmptyProbe = true
+		tl := registerExecuteRead(t, cfg)
+		if tl.EmptyProbe != nil {
+			t.Fatal("EmptyProbe must be nil when disabled")
+		}
+		out, err := tl.Execute(context.Background(), map[string]any{"dsl": "SELECT * FROM vm_assign WHERE state = 9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res := out.(*executor.QueryResult); res.HitStatus != core.HitStatusEmpty || len(r.calls) != 1 {
+			t.Fatalf("hit=%q calls=%v", res.HitStatus, r.calls)
 		}
 	})
 

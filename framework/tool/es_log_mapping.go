@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,6 +29,12 @@ type ESFieldHint struct {
 type ESFieldMapper interface {
 	Lookup(ctx context.Context, index, field string) (ESFieldMapping, bool)
 	ListFields(ctx context.Context, index string) []string
+}
+
+// ESFieldListerErr 是 ESFieldMapper 的可选扩展：区分「拉取失败」(err) 与「无字段/不适用」(nil, nil)。
+// 未实现时 ListFields 的空结果一律按不适用处理。
+type ESFieldListerErr interface {
+	ListFieldsErr(ctx context.Context, index string) ([]string, error)
 }
 
 func (m ESFieldMapping) SuggestedQueries(field string) []string {
@@ -438,16 +445,25 @@ func (m mapFieldMapper) ListFields(_ context.Context, _ string) []string {
 }
 
 func (m *esRegistryFieldMapper) ListFields(ctx context.Context, index string) []string {
+	fields, _ := m.ListFieldsErr(ctx, index)
+	return fields
+}
+
+// ListFieldsErr 中索引不存在（404）返回 (nil, nil)，交给执行阶段报 index 不存在；其余失败返回 error。
+func (m *esRegistryFieldMapper) ListFieldsErr(ctx context.Context, index string) ([]string, error) {
 	if m == nil || m.reg == nil {
-		return nil
+		return nil, nil
 	}
 	ds, err := m.reg.Get(m.dsID)
-	if err != nil || ds == nil {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("es mapping: datasource %q: %w", m.dsID, err)
+	}
+	if ds == nil {
+		return nil, nil
 	}
 	ep, ok := ds.(datasource.ESHTTPProvider)
 	if !ok || ep.ESHTTP() == nil {
-		return nil
+		return nil, nil
 	}
 	idx := strings.TrimSpace(index)
 	if idx == "" {
@@ -455,10 +471,16 @@ func (m *esRegistryFieldMapper) ListFields(ctx context.Context, index string) []
 	}
 	path := "/" + strings.Trim(idx, "/") + "/_mapping"
 	status, body, err := ep.ESHTTP().Do(ctx, http.MethodGet, path, nil)
-	if err != nil || status >= 400 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("es mapping %s: %w", path, err)
 	}
-	return flattenMappingFieldNames(body)
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("es mapping %s: http %d", path, status)
+	}
+	return flattenMappingFieldNames(body), nil
 }
 
 func parseLuceneQueryFields(q string) []string {

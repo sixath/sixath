@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sixath/framework/datasource"
@@ -28,6 +29,8 @@ type ExecuteReadConfig struct {
 	DefaultTimeoutSec int
 	// DefaultMaxRows 默认最大行数，0 表示无限制。
 	DefaultMaxRows int
+	// DisableEmptyProbe 为 true 时不做 0 行结果的 COUNT(*) 探测（spec「empty_probe: false」）；全局开关见 SATH_TOOL_EMPTY_PROBE。
+	DisableEmptyProbe bool
 }
 
 // RegisterExecuteReadTool 向注册表中注册 execute_read 工具。
@@ -94,17 +97,69 @@ func RegisterExecuteReadTool(r *tool.Registry, cfg *ExecuteReadConfig, opts ...*
 					return "", "", false
 				},
 			},
-			sqlSchemaRule{cfg: cfg},
+			sqlSchemaRule{cfg: cfg, cache: newSQLSchemaCache()},
 		}
-		t.EmptyProbe = sqlEmptyProbe(cfg)
+		if !cfg.DisableEmptyProbe {
+			t.EmptyProbe = sqlEmptyProbe(cfg)
+		}
 	}
 	return r.Register(t)
 }
 
-var sqlSchemaRefresh = metadata.RefreshFromRegistry
+var (
+	sqlSchemaRefresh = metadata.RefreshFromRegistry
+	sqlSchemaNow     = time.Now
+)
 
-// sqlSchemaRule 对 MySQL 单表 SELECT 校验表名与列名；表结构来自 metadata store，有缺失时强制刷新一次再判定。
-type sqlSchemaRule struct{ cfg *ExecuteReadConfig }
+// sqlSchemaRefreshMinInterval 限制同一数据源因表/列未命中触发的强制刷新频率。
+const sqlSchemaRefreshMinInterval = 30 * time.Second
+
+// sqlSchemaCache 按数据源保存本规则最近拿到的表结构与上次强制刷新时间。
+// metadata.InMemoryStore 只缓存一个数据源，多数据源交替时 EnsureSchemaForDatasource 每次都会整库刷新，
+// 这里按数据源各存一份，规则只在首次或未命中（且不在限速窗口内）时回源。
+type sqlSchemaCache struct {
+	mu          sync.Mutex
+	schemas     map[string]*metadata.Schema
+	lastRefresh map[string]time.Time
+}
+
+func newSQLSchemaCache() *sqlSchemaCache {
+	return &sqlSchemaCache{schemas: map[string]*metadata.Schema{}, lastRefresh: map[string]time.Time{}}
+}
+
+func (c *sqlSchemaCache) get(id string) *metadata.Schema {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.schemas[id]
+}
+
+func (c *sqlSchemaCache) put(id string, s *metadata.Schema) {
+	if s == nil {
+		return
+	}
+	c.mu.Lock()
+	c.schemas[id] = s
+	c.mu.Unlock()
+}
+
+// tryRefresh 在限速窗口外占用一次刷新名额并返回 true；失败的刷新同样计入窗口。
+func (c *sqlSchemaCache) tryRefresh(id string) bool {
+	now := sqlSchemaNow()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if last, ok := c.lastRefresh[id]; ok && now.Sub(last) < sqlSchemaRefreshMinInterval {
+		return false
+	}
+	c.lastRefresh[id] = now
+	return true
+}
+
+// sqlSchemaRule 对 MySQL 单表 SELECT 校验表名与列名；表/列缺失时按数据源限速强制刷新一次再判定。
+// 限速窗口内不刷新：列缺失按现有结构判定，表缺失视为不适用（可能是窗口内新建的表，避免误拒）。
+type sqlSchemaRule struct {
+	cfg   *ExecuteReadConfig
+	cache *sqlSchemaCache
+}
 
 func (sqlSchemaRule) Name() string { return "sql_schema" }
 
@@ -131,15 +186,19 @@ func (r sqlSchemaRule) Check(ctx context.Context, params map[string]any) ([]tool
 	}
 	tbl, found := findTable(tables, refs.Table)
 	if !found || len(missingColumns(tbl, refs.Columns)) > 0 {
-		fresh, err := r.tables(ctx, id, true)
-		if err != nil {
-			return nil, err
-		}
-		if len(fresh) == 0 {
+		if r.cache.tryRefresh(id) {
+			fresh, err := r.tables(ctx, id, true)
+			if err != nil {
+				return nil, err
+			}
+			if len(fresh) == 0 {
+				return nil, nil
+			}
+			tables = fresh
+			tbl, found = findTable(tables, refs.Table)
+		} else if !found {
 			return nil, nil
 		}
-		tables = fresh
-		tbl, found = findTable(tables, refs.Table)
 	}
 	if !found {
 		names := make([]string, 0, len(tables))
@@ -182,7 +241,7 @@ func (r sqlSchemaRule) tables(ctx context.Context, id string, refresh bool) ([]m
 	)
 	if refresh {
 		s, err = sqlSchemaRefresh(ctx, r.cfg.Registry, r.cfg.Store, id)
-	} else {
+	} else if s = r.cache.get(id); s == nil {
 		s, err = metadata.EnsureSchemaForDatasource(ctx, r.cfg.Registry, r.cfg.Store, id)
 	}
 	if err != nil {
@@ -191,6 +250,7 @@ func (r sqlSchemaRule) tables(ctx context.Context, id string, refresh bool) ([]m
 	if s == nil {
 		return nil, nil
 	}
+	r.cache.put(id, s)
 	return s.Tables, nil
 }
 

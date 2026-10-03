@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -164,6 +165,42 @@ func TestESMapperCache_SameIndexIsolatedPerCluster(t *testing.T) {
 	}
 	if fixed.For("a") == fixed.For("b") {
 		t.Fatal("clusters must have separate caches")
+	}
+}
+
+type failingMapper struct {
+	countingMapper
+	err error
+}
+
+func (m *failingMapper) ListFieldsErr(context.Context, string) ([]string, error) {
+	m.calls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.fields, nil
+}
+
+func TestCachedFieldMapper_FailureNegativeCached(t *testing.T) {
+	inner := &failingMapper{err: errors.New("es down")}
+	now := time.Unix(0, 0)
+	c := newCachedFieldMapper(inner, 5*time.Minute)
+	c.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	if _, err := c.ListFieldsErr(ctx, "i"); err == nil {
+		t.Fatal("fetch failure must surface as error")
+	}
+	if _, err := c.ListFieldsErr(ctx, "i"); err == nil || inner.calls != 1 {
+		t.Fatalf("failure within window must be reused: err=%v calls=%d", err, inner.calls)
+	}
+	if _, err := c.RefreshErr(ctx, "i"); err == nil || inner.calls != 1 {
+		t.Fatalf("refresh within failure window must not refetch: err=%v calls=%d", err, inner.calls)
+	}
+	now = now.Add(31 * time.Second)
+	inner.err, inner.fields = nil, []string{"a"}
+	if got, err := c.ListFieldsErr(ctx, "i"); err != nil || len(got) != 1 || inner.calls != 2 {
+		t.Fatalf("after window must refetch: %v err=%v calls=%d", got, err, inner.calls)
 	}
 }
 

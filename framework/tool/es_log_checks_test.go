@@ -84,6 +84,43 @@ func TestESLog_NoMapperFailsOpen(t *testing.T) {
 	}
 }
 
+func TestESLog_MappingFailureSkipsCheckAndIsNegativeCached(t *testing.T) {
+	r := &fakeReader{result: &executor.QueryResult{}}
+	m := &failingMapper{err: errors.New("mapping timeout")}
+	tl := esCheckRegistry(t, r, m)
+	for i := 0; i < 2; i++ {
+		r.gotDSL = ""
+		res, err := tl.Execute(context.Background(), map[string]any{"cluster": "es", "query": "servcie:foo"})
+		if err != nil {
+			t.Fatalf("call %d: mapping failure must not reject: %v", i, err)
+		}
+		if r.gotDSL == "" {
+			t.Fatalf("call %d: query must execute", i)
+		}
+		out, _ := res.(map[string]any)
+		if skipped, _ := out["check_skipped"].([]string); len(skipped) != 1 || skipped[0] != "field_refs:es_fields" {
+			t.Fatalf("call %d: check_skipped=%v", i, out["check_skipped"])
+		}
+		if st, _, _ := HitContractFromResult(res); st != HitStatusSuspect {
+			t.Fatalf("call %d: empty result with skipped check must be suspect, got %q", i, st)
+		}
+	}
+	if m.calls != 1 {
+		t.Fatalf("second call within 30s must not refetch mapping, calls=%d", m.calls)
+	}
+}
+
+func TestESLog_DisableEmptyProbe(t *testing.T) {
+	reg := newTestRegistry()
+	if err := RegisterESLogTool(reg, &fakeReader{}, ESLogConfig{DatasourceID: "es", DefaultIndex: "i", DisableEmptyProbe: true}); err != nil {
+		t.Fatal(err)
+	}
+	tl, _ := reg.Get("es_log_query")
+	if tl.EmptyProbe != nil {
+		t.Fatal("EmptyProbe must be nil when disabled")
+	}
+}
+
 type scriptedReader struct {
 	calls []string
 	reply func(dsl string) *executor.QueryResult
