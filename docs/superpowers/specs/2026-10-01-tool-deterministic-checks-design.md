@@ -57,7 +57,7 @@
 
 - 开关**每次调用时读取**（现状在 Register 时读一次，需改）：
   - `SATH_TOOL_ARG_VALIDATION=off`：跳过 `ValidateArguments` 与 `ArgChecks`；`ArgAliases` 仍执行（保证 schema 变更后的兼容）。
-  - `SATH_TOOL_EMPTY_PROBE=off`：跳过 `EmptyProbe`；工具配置 `empty_probe: false` 对单个工具生效。
+  - `SATH_TOOL_EMPTY_PROBE=off`：跳过 `EmptyProbe`；工具配置 `empty_probe: false` 对单个工具生效（落地为 `ESLogConfig.DisableEmptyProbe` / `ExecuteReadConfig.DisableEmptyProbe`）。
 - **防重复包装**：`Tool` 增加未导出字段 `checked bool`，中间件包装后置为 true；`Register` 遇到 `checked` 为 true 的工具不再包装中间件（investigate 子代理 `investigate/runner.go:30-43` 会把已包装工具重新注册到子 registry，否则探测会执行两次并覆盖 `diagnosis`）。超时与事件包装维持现状。
 
 ### 3.2 `Tool` 新增字段
@@ -107,6 +107,10 @@ Hint       string   `json:"hint,omitempty"`
 ### 3.6 fail-open
 
 规则约定：`(nil, nil)` 表示通过或不适用（未配置候选源、无 mapper、候选集为空）；`(nil, err)` 表示本应判定但失败（拉取出错、超时，单条上限 2s）。后者跳过该规则、记日志，并在结果 map 上写 `check_skipped`，不拒绝调用。
+
+`check_skipped` 只写在 map 结果上；`execute_read` 返回 `*executor.QueryResult`，没有该字段——结果为 0 条时由 `MarkSuspect` 把 `arg checks skipped: <规则名>` 追加进 `diagnosis.hint`，非 0 条时不额外标注。
+
+拉取失败的限流：ES mapping 拉取失败（`ESFieldListerErr` 返回 error，404 视为不适用）按「集群 + 索引」负缓存 30s，窗口内直接返回同一错误不再回源；MySQL 表/列未命中触发的强制刷新按数据源限速 30s，窗口内按已有结构判定，表不存在视为不适用（不拒绝）。`InMemoryStore` 只缓存一个数据源，`sql_schema` 规则另按数据源保存最近一次表结构，避免多数据源交替时每次整库刷新。
 
 ### 3.7 MCP schema 归一化
 
