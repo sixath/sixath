@@ -3,6 +3,7 @@ package tooldata
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -109,6 +110,18 @@ func wantInvalidArg(t *testing.T, err error, keyword string) core.SchemaError {
 	return core.SchemaError{}
 }
 
+func TestToInt64(t *testing.T) {
+	if _, err := toInt64(uint64(math.MaxUint64)); err == nil {
+		t.Fatal("uint64 overflow must error")
+	}
+	if n, err := toInt64(uint64(120)); err != nil || n != 120 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if n, err := toInt64([]byte("7")); err != nil || n != 7 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+}
+
 func TestExecuteReadChecks(t *testing.T) {
 	dsReg := newStubDSRegistry(t, map[string]string{"mysql1": "mysql", "mongo1": "mongodb", "hive1": "hive"})
 	newCfg := func(r executor.Reader) *ExecuteReadConfig {
@@ -155,8 +168,26 @@ func TestExecuteReadChecks(t *testing.T) {
 	t.Run("index rejected on mysql", func(t *testing.T) {
 		_, err := registerExecuteRead(t, newCfg(oneRowReader())).Execute(context.Background(), map[string]any{"dsl": "SELECT 1", "index": "logs-*"})
 		e := wantInvalidArg(t, err, core.KeywordReject)
-		if e.Path != "index" {
-			t.Fatalf("path=%q", e.Path)
+		if e.Path != "index" || !strings.Contains(e.Hint, "es_log_query") {
+			t.Fatalf("err=%+v", e)
+		}
+		var iae *core.InvalidArgumentsError
+		errors.As(err, &iae)
+		if len(iae.Errors) != 1 {
+			t.Fatalf("schema validation must not pre-empt the redirect: %+v", iae.Errors)
+		}
+	})
+
+	t.Run("no probe on hive", func(t *testing.T) {
+		r := &scriptReader{fn: func(string) (*executor.QueryResult, error) {
+			return &executor.QueryResult{Columns: []string{"id"}}, nil
+		}}
+		out, err := registerExecuteRead(t, newCfg(r)).Execute(context.Background(), map[string]any{"dsl": "SELECT * FROM t WHERE a = 1", "datasource_id": "hive1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res := out.(*executor.QueryResult); res.HitStatus != core.HitStatusEmpty || len(r.calls) != 1 {
+			t.Fatalf("hit=%q calls=%v", res.HitStatus, r.calls)
 		}
 	})
 
@@ -226,6 +257,9 @@ func TestExecuteReadChecks(t *testing.T) {
 		for _, ok := range []string{
 			"SELECT id, state FROM vm_assign WHERE state = 3",
 			"SELECT id FROM vm_assign ORDER BY created_at DESC",
+			"SELECT state, COUNT(*) AS N FROM vm_assign GROUP BY state ORDER BY n DESC",
+			"SELECT state, COUNT(*) FROM vm_assign GROUP BY state ORDER BY COUNT(*) DESC",
+			"SELECT id FROM vm_assign WHERE state = 1 -- stat = 2",
 			"SELECT name FROM otherdb.users",
 			"SELECT a.id FROM vm_assign a JOIN pool_config p ON a.id = p.id",
 		} {
@@ -233,7 +267,7 @@ func TestExecuteReadChecks(t *testing.T) {
 				t.Fatalf("%q: %v", ok, err)
 			}
 		}
-		if len(r.calls) != 4 {
+		if len(r.calls) != 7 {
 			t.Fatalf("calls=%v", r.calls)
 		}
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -228,7 +229,8 @@ func sqlEmptyProbe(cfg *ExecuteReadConfig) *tool.EmptyProbe {
 	return &tool.EmptyProbe{
 		Relax: func(params map[string]any) []tool.ProbeVariant {
 			id := ResolveDatasourceID(params, cfg.DefaultDatasourceID, cfg.Registry)
-			if !isSQLDatasource(datasourceType(cfg.Registry, id)) {
+			// Hive 上 COUNT(*) 是全表扫描作业，不适合作为探测。
+			if datasourceType(cfg.Registry, id) != datasource.TypeMySQL {
 				return nil
 			}
 			dsl, _ := params["dsl"].(string)
@@ -269,6 +271,9 @@ func toInt64(v any) (int64, error) {
 	case int32:
 		return int64(x), nil
 	case uint64:
+		if x > math.MaxInt64 {
+			return 0, fmt.Errorf("count %d overflows int64", x)
+		}
 		return int64(x), nil
 	case float64:
 		return int64(x), nil

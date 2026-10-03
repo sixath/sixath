@@ -26,6 +26,16 @@ func TestParseSingleTableSQL(t *testing.T) {
 		{"WITH x AS (SELECT 1) SELECT * FROM x", "", false, nil, false, false},
 		{"SHOW TABLES", "", false, nil, false, false},
 		{"SELECT a FROM t WHERE note = 'x = y'", "t", false, []string{"a", "note"}, true, true},
+		{"SELECT state, COUNT(*) FROM t GROUP BY state ORDER BY COUNT(*) DESC", "t", false, []string{"state"}, false, true},
+		{"SELECT a FROM t ORDER BY DATE (created_at)", "t", false, []string{"a"}, false, true},
+		{"SELECT COUNT(*) AS N FROM t GROUP BY a ORDER BY n", "t", false, nil, false, true},
+		{"SELECT a, COUNT(*) AS `Cnt` FROM t GROUP BY a ORDER BY cnt", "t", false, []string{"a"}, false, true},
+		{`SELECT a, COUNT(*) AS "total" FROM t GROUP BY a ORDER BY total`, "t", false, []string{"a"}, false, true},
+		{"SELECT a, COUNT(*) AS 'k' FROM t GROUP BY a ORDER BY k", "t", false, []string{"a"}, false, true},
+		{"SELECT a -- pick a\nFROM t # trailing\nWHERE b = 1 /* note: c = 2 */", "t", false, []string{"a", "b"}, true, true},
+		{"SELECT a FROM t WHERE note = '-- not a comment' AND flag = TRUE", "t", false, []string{"a", "note", "flag"}, true, true},
+		{"SELECT a FROM t WHERE created_at > CURRENT_DATE - INTERVAL 1 DAY AND x IS NOT NULL", "t", false, []string{"a", "created_at", "x"}, true, true},
+		{"/* SELECT 1 */ SELECT a FROM t", "t", false, []string{"a"}, false, true},
 	}
 	for _, tc := range cases {
 		got, ok := parseSingleTableSQL(tc.sql)
@@ -48,7 +58,8 @@ func TestNonSQLReason(t *testing.T) {
 		}
 	}
 	for _, s := range []string{"SELECT 1", "  show tables", "DESC t", "WITH x AS (SELECT 1) SELECT * FROM x", "(SELECT 1)", "explain select 1",
-		"/* q1 */ SELECT a FROM t WHERE x = 1 AND y = 2", "-- note\nSELECT a FROM t WHERE x = 1 AND y = 2", ""} {
+		"/* q1 */ SELECT a FROM t WHERE x = 1 AND y = 2", "-- note\nSELECT a FROM t WHERE x = 1 AND y = 2", "",
+		"# note\nSELECT a FROM t WHERE x = 1 AND y = 2", "((SELECT a FROM t WHERE x = 1 AND y = 2))", "( select a from t where x = 1 AND y = 2)"} {
 		if r, hit := nonSQLReason(s); hit {
 			t.Errorf("%q wrongly rejected: %s", s, r)
 		}
