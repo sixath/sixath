@@ -28,10 +28,31 @@ const EnvToolArgValidation = "SATH_TOOL_ARG_VALIDATION"
 type SchemaError struct {
 	// Path 为参数路径，如 "limit"、"items[2].url"；根对象为空串。
 	Path string `json:"path"`
-	// Keyword 为命中的 schema 关键字：required|type|enum|minimum|maximum|additionalProperties。
+	// Keyword 为命中的规则：JSON Schema 关键字（required|type|enum|minimum|maximum|additionalProperties）
+	// 或中间件规则（one_of|pattern|reject|unknown_field）。
 	Keyword string `json:"keyword"`
 	// Message 为面向模型的完整说明。
-	Message string `json:"message"`
+	Message    string   `json:"message"`
+	Candidates []string `json:"candidates,omitempty"`
+	Hint       string   `json:"hint,omitempty"`
+}
+
+const (
+	KeywordOneOf        = "one_of"
+	KeywordPattern      = "pattern"
+	KeywordReject       = "reject"
+	KeywordUnknownField = "unknown_field"
+)
+
+func (se SchemaError) render() string {
+	s := se.Message
+	if len(se.Candidates) > 0 {
+		s += " (did you mean: " + strings.Join(se.Candidates, ", ") + ")"
+	}
+	if se.Hint != "" {
+		s += "; " + se.Hint
+	}
+	return s
 }
 
 // InvalidArgumentsError 表示入参未通过工具声明的 schema 校验。
@@ -55,7 +76,7 @@ func (e *InvalidArgumentsError) Error() string {
 	}
 	parts := make([]string, 0, len(shown))
 	for _, se := range shown {
-		parts = append(parts, se.Message)
+		parts = append(parts, se.render())
 	}
 	if len(parts) == 0 {
 		return fmt.Sprintf("tool %q: invalid arguments", e.Tool)
@@ -160,6 +181,43 @@ func ValidateArguments(toolName string, schema any, params map[string]any) error
 		return nil
 	}
 	return &InvalidArgumentsError{Tool: toolName, Errors: errs}
+}
+
+// RequiredArgsSummary 生成面向模型的参数摘要："required: a(string), b(integer)"；
+// 无 required 时列出全部参数（按名排序，至多 8 个）："params: ..."。schema 不可解析时返回空串。
+func RequiredArgsSummary(schema any) string {
+	root, ok := schemaObject(schema)
+	if !ok {
+		return ""
+	}
+	props, _ := schemaObject(root["properties"])
+	describe := func(name string) string {
+		if p, ok := schemaObject(props[name]); ok {
+			if typ, _ := p["type"].(string); typ != "" {
+				return name + "(" + typ + ")"
+			}
+		}
+		return name
+	}
+	if req := stringSlice(root["required"]); len(req) > 0 {
+		parts := make([]string, 0, len(req))
+		for _, n := range req {
+			parts = append(parts, describe(n))
+		}
+		return "required: " + strings.Join(parts, ", ")
+	}
+	names := sortedKeys(props)
+	if len(names) == 0 {
+		return ""
+	}
+	if len(names) > 8 {
+		names = names[:8]
+	}
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		parts = append(parts, describe(n))
+	}
+	return "params: " + strings.Join(parts, ", ")
 }
 
 func validateSchema(schema map[string]any, value any, path string) []SchemaError {

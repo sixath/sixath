@@ -384,3 +384,40 @@ func TestRegistryExecute_ParentCancellationIsNotRewrittenAsToolTimeout(t *testin
 		t.Fatalf("parent cancellation must propagate as-is, got %v", err)
 	}
 }
+
+func TestInvalidArgumentsError_RendersCandidatesAndHint(t *testing.T) {
+	e := &InvalidArgumentsError{Tool: "execute_read", Errors: []SchemaError{{
+		Path: "datasource_id", Keyword: KeywordOneOf,
+		Message:    `argument "datasource_id": unknown value "mysq1"`,
+		Candidates: []string{"mysql1", "mysql2"},
+		Hint:       "use one of the configured datasources",
+	}}}
+	got := e.Error()
+	for _, want := range []string{`unknown value "mysq1"`, "did you mean: mysql1, mysql2", "use one of the configured datasources"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestRequiredArgsSummary(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"dsl":           map[string]any{"type": "string"},
+			"datasource_id": map[string]any{"type": "string"},
+			"max_rows":      map[string]any{"type": "integer"},
+		},
+		"required": []any{"dsl"},
+	}
+	if got := RequiredArgsSummary(schema); got != "required: dsl(string)" {
+		t.Fatalf("got %q", got)
+	}
+	delete(schema, "required")
+	if got := RequiredArgsSummary(schema); got != "params: datasource_id(string), dsl(string), max_rows(integer)" {
+		t.Fatalf("got %q", got)
+	}
+	if got := RequiredArgsSummary(nil); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
