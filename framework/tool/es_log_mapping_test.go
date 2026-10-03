@@ -170,6 +170,40 @@ func TestFlattenMappingFieldNames(t *testing.T) {
 	}
 }
 
+func TestFlattenMappingFieldNames_RuntimeAndOpenObjects(t *testing.T) {
+	raw := []byte(`{
+	  "idx-1": {
+	    "mappings": {
+	      "runtime": {"day_of_week": {"type": "keyword"}},
+	      "properties": {
+	        "labels": {"type": "flattened"},
+	        "payload": {"type": "object", "enabled": false},
+	        "meta": {"properties": {"host": {"type": "keyword"}}}
+	      }
+	    }
+	  },
+	  "idx-legacy": {
+	    "mappings": {"_doc": {"runtime": {"legacy_rt": {"type": "long"}}, "properties": {"x": {"type": "keyword"}}}}
+	  }
+	}`)
+	catalog := flattenMappingFieldNames(raw)
+	for _, want := range []string{"day_of_week", "legacy_rt", "labels", "labels.*", "payload.*", "meta.host"} {
+		if !containsStr(catalog, want) {
+			t.Fatalf("catalog %v missing %s", catalog, want)
+		}
+	}
+	if containsStr(catalog, "meta.*") {
+		t.Fatalf("regular object must not be open: %v", catalog)
+	}
+	got := unknownQueryFields([]string{"day_of_week", "labels.app.tier", "payload.a", "meta.host", "meta.nope", "labelsx.a"}, catalog)
+	if len(got) != 2 || got[0] != "meta.nope" || got[1] != "labelsx.a" {
+		t.Fatalf("unknown %v", got)
+	}
+	if sim := suggestSimilarMappedFields("lables", catalog); containsStr(sim, "labels.*") {
+		t.Fatalf("open-prefix markers must not be suggested: %v", sim)
+	}
+}
+
 func TestRewriteEmptyHit_RoundTripJSON(t *testing.T) {
 	orig := `{"query":{"term":{"operation":"x"}}}`
 	var dsl map[string]any

@@ -127,6 +127,27 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 		desc += line
 	}
 
+	countESLog := func(ctx context.Context, params map[string]any, cl ESLogCluster, index string) (int64, error) {
+		dsl, _, _, err := buildESLogDSL(params, cl, esLogTraceField(cl), 0, 0)
+		if err != nil {
+			return 0, err
+		}
+		dsl["size"] = 0
+		delete(dsl, "aggs")
+		delete(dsl, "aggregations")
+		delete(dsl, "sort")
+		dsl["track_total_hits"] = true
+		b, err := json.Marshal(dsl)
+		if err != nil {
+			return 0, err
+		}
+		res, err := reader.Query(ctx, cl.ID, string(b), executor.QueryOptions{Extras: map[string]any{"index": index}})
+		if err != nil {
+			return 0, err
+		}
+		return int64(totalFromResult(res)), nil
+	}
+
 	mappers := newESMapperCache(cfg.FieldMapper, func(cluster string) ESFieldMapper {
 		return mapperFromReader(reader, cluster)
 	}, esMappingCacheTTL)
@@ -181,24 +202,21 @@ func RegisterESLogTool(reg *Registry, reader executor.Reader, cfg ESLogConfig) e
 			if !ok {
 				return 0, errors.New("no index")
 			}
-			dsl, _, _, err := buildESLogDSL(v.Params, cl, esLogTraceField(cl), 0, 0)
-			if err != nil {
-				return 0, err
+			n, err := countESLog(ctx, v.Params, cl, index)
+			// 原查询若靠 quoteLuceneSpecialTokens 重试才解析成功，变体继承了同样的裸特殊字符，按同一规则改写后再计数。
+			if err != nil && isESQueryParseError(err) && trimmedStringParam(v.Params, "trace_id") == "" {
+				if q, _ := v.Params["query"].(string); !strings.HasPrefix(strings.TrimSpace(q), "{") {
+					if fixed, changed := quoteLuceneSpecialTokens(q); changed {
+						p := make(map[string]any, len(v.Params))
+						for k, val := range v.Params {
+							p[k] = val
+						}
+						p["query"] = fixed
+						return countESLog(ctx, p, cl, index)
+					}
+				}
 			}
-			dsl["size"] = 0
-			delete(dsl, "aggs")
-			delete(dsl, "aggregations")
-			delete(dsl, "sort")
-			dsl["track_total_hits"] = true
-			b, err := json.Marshal(dsl)
-			if err != nil {
-				return 0, err
-			}
-			res, err := reader.Query(ctx, cl.ID, string(b), executor.QueryOptions{Extras: map[string]any{"index": index}})
-			if err != nil {
-				return 0, err
-			}
-			return int64(totalFromResult(res)), nil
+			return n, err
 		},
 	}
 
@@ -438,17 +456,31 @@ func esLogTraceField(cl ESLogCluster) string {
 
 var (
 	luceneQuoted = regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
+	// Lucene 正则字面量只能出现在词首（行首、空白、左括号或 field: 之后）；内容非空，因此 http:// 里的 // 不算。
+	luceneRegexLiteral = regexp.MustCompile(`(^|[\s(:])/(?:[^/\\\n]|\\.)+/`)
 	// 字段名前只能是行首、空白或左括号（可再跟一个 !+- 运算符），所以 url:http://x、msg:pre-start 中值里的片段不会被当成字段。
 	luceneFieldRef = regexp.MustCompile(`(?:^|[\s(])[!+\-]?([A-Za-z@][\w.@-]*)\s*:`)
 )
 
-// esLogFieldRefs 抽取参数中显式引用的字段：query_string 的 field: 前缀、agg_field、fields、
-// sort 的 <field>:<order>、显式 time_field。trace_id 查询与 JSON body 查询不抽取；
-// 含通配符或以 _ 开头的元字段（_id/_score/_exists_）不校验。
-func esLogFieldRefs(params map[string]any) []FieldRef {
-	if trimmedStringParam(params, "trace_id") != "" {
-		return nil
+// luceneQueryFieldNames 抽取 query_string 中的 field: 前缀；引号短语与 /regex/ 字面量先抹掉，
+// 冒号后紧跟 // 的（url: http://x 里的 http）视为 URL 值而非字段。
+func luceneQueryFieldNames(q string) []string {
+	s := luceneQuoted.ReplaceAllString(q, `""`)
+	s = luceneRegexLiteral.ReplaceAllString(s, `${1}""`)
+	var out []string
+	for _, m := range luceneFieldRef.FindAllStringSubmatchIndex(s, -1) {
+		if strings.HasPrefix(s[m[1]:], "//") {
+			continue
+		}
+		out = append(out, s[m[2]:m[3]])
 	}
+	return out
+}
+
+// esLogFieldRefs 抽取参数中显式引用的字段：query_string 的 field: 前缀、agg_field、fields、
+// sort 字段、显式 time_field。trace_id 查询只跳过 query（query 被忽略），其余参数照常校验；
+// JSON body 查询不抽取；含通配符或以 _ 开头的元字段（_id/_score/_exists_）不校验。
+func esLogFieldRefs(params map[string]any) []FieldRef {
 	var refs []FieldRef
 	add := func(param, field string) {
 		field = strings.TrimSpace(field)
@@ -457,9 +489,9 @@ func esLogFieldRefs(params map[string]any) []FieldRef {
 		}
 		refs = append(refs, FieldRef{Param: param, Field: baseFieldName(field)})
 	}
-	if q := trimmedStringParam(params, "query"); q != "" && !strings.HasPrefix(q, "{") {
-		for _, m := range luceneFieldRef.FindAllStringSubmatch(luceneQuoted.ReplaceAllString(q, `""`), -1) {
-			add("query", m[1])
+	if q := trimmedStringParam(params, "query"); q != "" && !strings.HasPrefix(q, "{") && trimmedStringParam(params, "trace_id") == "" {
+		for _, f := range luceneQueryFieldNames(q) {
+			add("query", f)
 		}
 	}
 	add("agg_field", trimmedStringParam(params, "agg_field"))
@@ -467,6 +499,8 @@ func esLogFieldRefs(params map[string]any) []FieldRef {
 	if s := trimmedStringParam(params, "sort"); s != "" {
 		if i := strings.LastIndex(s, ":"); i > 0 {
 			add("sort", s[:i])
+		} else if o := strings.ToLower(s); o != "asc" && o != "desc" {
+			add("sort", s)
 		}
 	}
 	if o, err := parseESLogQueryOpts(map[string]any{"fields": params["fields"]}, ""); err == nil {
@@ -478,6 +512,9 @@ func esLogFieldRefs(params map[string]any) []FieldRef {
 }
 
 // esLogRelax 生成放宽变体（有序）：只保留时间窗、逐个去掉顶层 AND 子句、时间窗放宽到 24h。
+// 顺序即优先级：探测最多跑 emptyProbeMaxVariants(3) 个，子句较多时排在最后的 time_window_24h
+// 常被截掉（Diagnosis.Truncated=true）。子句切分只认大写 AND（splitTopLevelAND），
+// && 与小写 and 不切分，整串作为一个子句。
 func esLogRelax(params map[string]any) []ProbeVariant {
 	if trimmedStringParam(params, "trace_id") != "" {
 		return nil
@@ -530,7 +567,7 @@ func relativeWindowUnder24h(from string) bool {
 	return time.Duration(n)*unit < 24*time.Hour
 }
 
-// splitTopLevelAND 按顶层 AND（大写，括号与引号外）切分 query_string。
+// splitTopLevelAND 按顶层 AND（大写，括号与引号外）切分 query_string；不识别 && 与小写 and。
 func splitTopLevelAND(q string) []string {
 	var parts []string
 	depth, inQuote, start := 0, false, 0

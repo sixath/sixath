@@ -132,6 +132,39 @@ func TestESLog_EmptyProbeMarksSuspect(t *testing.T) {
 	}
 }
 
+type parseErrReader struct {
+	calls []string
+}
+
+func (p *parseErrReader) Query(_ context.Context, _ string, dsl string, _ executor.QueryOptions) (*executor.QueryResult, error) {
+	p.calls = append(p.calls, dsl)
+	if strings.Contains(dsl, `path:/a/b[1]`) {
+		return nil, errors.New("search_phase_execution_exception: parse_exception: Cannot parse")
+	}
+	if strings.Contains(dsl, `"size":0`) {
+		return &executor.QueryResult{EstimatedTotal: 9}, nil
+	}
+	return &executor.QueryResult{}, nil
+}
+
+func TestESLog_ProbeUsesQuotedRetryQuery(t *testing.T) {
+	pr := &parseErrReader{}
+	tl := esCheckRegistry(t, pr, mapFieldMapper{"path": {Type: "keyword"}, "level": {Type: "keyword"}, "@timestamp": {Type: "date"}})
+	res, err := tl.Execute(context.Background(), map[string]any{
+		"cluster": "es", "query": "path:/a/b[1] AND level:ERROR",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _, _ := HitContractFromResult(res); st != HitStatusSuspect {
+		t.Fatalf("status %q res %+v", st, res)
+	}
+	d := DiagnosisFromResult(res)
+	if d == nil || len(d.Errors) != 0 || len(d.Probes) == 0 {
+		t.Fatalf("probes must retry with quoted query, diag %+v", d)
+	}
+}
+
 func TestESLogFieldRefs(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -153,7 +186,12 @@ func TestESLogFieldRefs(t *testing.T) {
 		{"plain sort", map[string]any{"sort": "desc"}, nil},
 		{"agg and time field", map[string]any{"agg_field": "host.keyword", "time_field": "ts"}, []string{"host", "ts"}},
 		{"json query", map[string]any{"query": `{"term":{"x":1}}`}, nil},
-		{"trace id", map[string]any{"trace_id": "abc", "query": "x:1", "agg_field": "y"}, nil},
+		{"trace id skips only query", map[string]any{"trace_id": "abc", "query": "x:1", "agg_field": "y", "sort": "z:desc", "time_field": "ts", "fields": []any{"f"}}, []string{"y", "ts", "z", "f"}},
+		{"bare sort field", map[string]any{"sort": "levle"}, []string{"levle"}},
+		{"bare sort order upper", map[string]any{"sort": "ASC"}, nil},
+		{"url after space", map[string]any{"query": "url: http://x AND level:e"}, []string{"url", "level"}},
+		{"regex literal", map[string]any{"query": `path:/api\/v1:x/ AND level:e`}, []string{"path", "level"}},
+		{"regex with field-like text", map[string]any{"query": `/foo bar:baz/ AND host:a`}, []string{"host"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

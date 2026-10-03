@@ -573,8 +573,36 @@ func flattenMappingFieldNames(raw []byte) []string {
 			}
 		}
 		walkMappingFieldNames("", props, add)
+		runtime, _ := mappings["runtime"].(map[string]any)
+		if runtime == nil {
+			for _, inner := range mappings {
+				if m, ok := inner.(map[string]any); ok {
+					if r, ok := m["runtime"].(map[string]any); ok {
+						runtime = r
+						break
+					}
+				}
+			}
+		}
+		for name := range runtime {
+			add(name)
+		}
 	}
 	return out
+}
+
+// openFieldSuffix 标记任意子路径都合法的前缀（flattened 字段、enabled:false 的对象），
+// 目录里写成 "<prefix>.*"，由 mappedFieldInSet 按前缀匹配。
+const openFieldSuffix = ".*"
+
+func isOpenMappingDef(def map[string]any) bool {
+	if typ, _ := def["type"].(string); strings.EqualFold(typ, "flattened") {
+		return true
+	}
+	if enabled, ok := def["enabled"].(bool); ok && !enabled {
+		return true
+	}
+	return false
 }
 
 func walkMappingFieldNames(prefix string, props map[string]any, add func(string)) {
@@ -591,6 +619,9 @@ func walkMappingFieldNames(prefix string, props map[string]any, add func(string)
 			full = prefix + "." + name
 		}
 		add(full)
+		if isOpenMappingDef(def) {
+			add(full + openFieldSuffix)
+		}
 		if fields, ok := def["fields"].(map[string]any); ok {
 			for sub := range fields {
 				add(full + "." + sub)
@@ -646,6 +677,16 @@ func mappedFieldInSet(field string, have map[string]struct{}) bool {
 	if _, ok := have[field+".keyword"]; ok {
 		return true
 	}
+	for i := strings.IndexByte(field, '.'); i > 0; {
+		if _, ok := have[field[:i]+openFieldSuffix]; ok {
+			return true
+		}
+		next := strings.IndexByte(field[i+1:], '.')
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
 	return false
 }
 
@@ -673,6 +714,9 @@ func suggestSimilarMappedFields(unknown string, catalog []string) []string {
 	for _, f := range catalog {
 		if len(out) >= 5 {
 			break
+		}
+		if strings.HasSuffix(f, openFieldSuffix) {
+			continue
 		}
 		n := normalizeMappedField(baseFieldName(f))
 		if n == "" {
