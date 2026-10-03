@@ -220,6 +220,14 @@ func (t Task) Validate() error {
 	return nil
 }
 
+// jsonlLine 去掉首行的 UTF-8 BOM（Windows 编辑器、PowerShell 5 的 utf8 输出会带）与首尾空白。
+func jsonlLine(raw string, lineNo int) string {
+	if lineNo == 1 {
+		raw = strings.TrimPrefix(raw, "\ufeff")
+	}
+	return strings.TrimSpace(raw)
+}
+
 // LoadTasks 从单个 JSONL 文件加载并校验任务；空行与 # 注释行忽略。
 func LoadTasks(path string) ([]Task, error) {
 	f, err := os.Open(path)
@@ -234,7 +242,7 @@ func LoadTasks(path string) ([]Task, error) {
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
-		line := strings.TrimSpace(sc.Text())
+		line := jsonlLine(sc.Text(), lineNo)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -292,7 +300,7 @@ func LoadResults(path string) ([]TaskResult, error) {
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
-		line := strings.TrimSpace(sc.Text())
+		line := jsonlLine(sc.Text(), lineNo)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}

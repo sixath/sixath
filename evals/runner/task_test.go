@@ -65,6 +65,18 @@ func TestLoadTasks_ValidAndComments(t *testing.T) {
 	}
 }
 
+func TestLoadTasks_StripsUTF8BOM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bom.jsonl")
+	line := `{"id":"s","category":"answer_shape","input":"q","max_steps":3,"expect":{"answer_type":"count"}}`
+	if err := os.WriteFile(path, []byte("\ufeff"+line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := LoadTasks(path)
+	if err != nil || len(tasks) != 1 || tasks[0].ID != "s" {
+		t.Fatalf("tasks=%+v err=%v", tasks, err)
+	}
+}
+
 func TestLoadTasks_ValidationErrors(t *testing.T) {
 	cases := map[string]string{
 		"missing id":       `{"category":"single_tool","input":"x","expect":{"tools":["a"]},"max_steps":1}`,
