@@ -99,8 +99,49 @@ func RegisterSkillManageTool(reg *tool.Registry, cfg *SkillManageConfig) error {
 			},
 			"required": []string{"action", "name"},
 		},
+		ArgChecks: []tool.ArgCheck{skillNameCheck(
+			func() *skills.Index {
+				if cfg == nil {
+					return nil
+				}
+				return cfg.Index
+			},
+			skillManageNameCheckApplies,
+			workspaceSkillNames,
+		)},
 		Execute: buildSkillManageExecute(cfg, lease, requireConfirm, requirePatchConfirm, ttl),
 	})
+}
+
+// skillManageNameCheckApplies：create 的名字本来就不存在；带 confirm_token 的调用以挂起记录为准。
+func skillManageNameCheckApplies(p map[string]any) bool {
+	if tok, _ := p["confirm_token"].(string); strings.TrimSpace(tok) != "" {
+		return false
+	}
+	a, _ := p["action"].(string)
+	return a != "" && a != "create"
+}
+
+// workspaceSkillNames 列出工作区 skills/<name>/SKILL.md；索引只在代际刷新时重建，本轮刚创建的技能需从磁盘补齐。
+func workspaceSkillNames(ctx context.Context) []string {
+	ws, _ := ctx.Value(tool.ContextKeyWorkspaceRoot).(string)
+	if strings.TrimSpace(ws) == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(ws, "skills"))
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if st, err := os.Stat(filepath.Join(ws, "skills", e.Name(), "SKILL.md")); err == nil && !st.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
 }
 
 func buildSkillManageExecute(cfg *SkillManageConfig, lease *RuntimeWriteLease, requireConfirm, requirePatchConfirm bool, ttl int) tool.ExecuteFunc {

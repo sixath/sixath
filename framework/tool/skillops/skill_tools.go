@@ -69,6 +69,31 @@ type McpServerEntry struct {
 	Env       map[string]string
 }
 
+// skillNameCheck 是技能工具 name 参数的候选规则。extra 返回索引之外的已知技能名（可为 nil）。
+func skillNameCheck(idx func() *skills.Index, when func(map[string]any) bool, extra func(context.Context) []string) tool.OneOf {
+	return tool.OneOf{
+		Param: "name",
+		When:  when,
+		Source: func(ctx context.Context, _ map[string]any) ([]string, error) {
+			var names []string
+			if ix := idx(); ix != nil {
+				for _, m := range ix.All() {
+					names = append(names, m.Name)
+				}
+			}
+			if extra != nil {
+				names = append(names, extra(ctx)...)
+			}
+			return names, nil
+		},
+		Hint: "use skills_list to see available skills",
+	}
+}
+
+func staticSkillIndex(idx *skills.Index) func() *skills.Index {
+	return func() *skills.Index { return idx }
+}
+
 // RegisterLoadSkillTool 向 Registry 注册用于加载 Skill 正文的工具。当某 Skill 被加载且其 frontmatter 声明了 mcp_servers 时，
 // 会按 mcpServers 配置将该 Skill 声明的 MCP 能力注册到当前 Registry，使后续步骤可调用对应 MCP 工具。
 // mcpServers 可为 nil/空，此时仅加载正文，不注册 MCP。
@@ -95,6 +120,7 @@ func RegisterLoadSkillTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 			},
 			"required": []string{"name"},
 		},
+		ArgChecks: []tool.ArgCheck{skillNameCheck(staticSkillIndex(idx), nil, nil)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			raw, ok := params["name"]
 			if !ok {
@@ -150,6 +176,7 @@ func RegisterReadSkillFileTool(reg *tool.Registry, idx *skills.Index) error {
 			},
 			"required": []string{"name", "path"},
 		},
+		ArgChecks: []tool.ArgCheck{skillNameCheck(staticSkillIndex(idx), nil, nil)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			name, _ := params["name"].(string)
 			if name == "" {
@@ -440,6 +467,7 @@ func registerSkillViewTool(reg *tool.Registry, idx *skills.Index, mcpServers []M
 			},
 			"required": []string{"name"},
 		},
+		ArgChecks: []tool.ArgCheck{skillNameCheck(staticSkillIndex(idx), nil, nil)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			name, _ := params["name"].(string)
 			if name == "" {
