@@ -32,7 +32,7 @@ const playbookPrompt = `你是一个冷启动问题定位调查器。用户的�
 ## 纪律
 - 每个结论必须来自工具返回的证据；禁止编造日志内容、文件内容或代码行号。
 - 工具返回 ok:false 且 error_code=transient 时可换更窄的条件重试一次；permanent 错误换路径，不要纠缠。
-- es_log_query 返回 hit_status=empty 表示查询有效但无匹配（不是没有日志）；index_error=unresolved 表示索引不存在，用返回的 suggested_index_patterns 重试。
+- es_log_query 返回 hit_status=empty 表示查询有效但无匹配（不是没有日志）；hit_status=suspect 表示 0 条但放宽条件后有数据（见 diagnosis），先修正条件再下结论；index_error=unresolved 表示索引不存在，用返回的 suggested_index_patterns 重试；参数被拒（invalid_arguments）时按 candidates 修正后重试。
 - vm_run_cmd 返回 output_empty:true 表示命令成功但无输出，不是日志缺失；返回 timed_out:true 表示命令被截断，不是"零匹配"，必须缩小范围重跑。
 - 做完诚实的尝试后仍无证据，明确说明证据不足，不要硬凑结论。
 

@@ -23,7 +23,7 @@ es_log_query(cluster="<elasticsearch tool name>", trace_id=...)
 
 只绑一套也必须传 `cluster`。漏传会永久错误并列出可用集群，不会默认打第一套。同一 Agent 可绑多套；同一任务可再调一次不同的 `cluster`。
 
-`index` 必须是本集群真实索引或 pattern。匹配不到任何物理索引时返回 `ok: false`、`hit_status=error`、`index_error=unresolved`，并带 `suggested_index_patterns`——这不是「没日志」。`hit_status=empty` 才表示索引和字段都合法但仍无文档。未知 Lucene 字段会改写一次（`query_rewritten` / `rewrite_reason`）。
+`index` 必须是本集群真实索引或 pattern。匹配不到任何物理索引时返回 `ok: false`、`hit_status=error`、`index_error=unresolved`，并带 `suggested_index_patterns`——这不是「没日志」。`hit_status=empty` 才表示索引和字段都合法但仍无文档；`hit_status=suspect` 表示 0 条但放宽条件后有数据（`diagnosis.probes` 给出各放宽变体的计数），应先修正条件。query / sort / agg_field / fields / time_field 引用了 mapping 里不存在的字段时，执行前即返回 `ok: false` 与 `invalid_arguments`（`keyword=unknown_field`，附 `candidates` 与 `hint`），不会发起查询。字段存在但类型不匹配时仍会改写一次（`query_rewritten` / `rewrite_reason`）。
 
 ## 过渡：已有 RCA 内联 / datasource_id
 
