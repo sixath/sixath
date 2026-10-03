@@ -480,24 +480,28 @@ func HarnessReActOptionsFor(m model.Model, workspace string, extraSkillDirs []st
 		opts = append(opts, agent.WithReActSkillsDirs(extraSkillDirs))
 	}
 	var hooks []agent.ToolHook
+	stopHooks := agent.DefaultStopHooks()
+	maxNudges := 0
 	if ws := strings.TrimSpace(workspace); ws != "" {
 		if loaded, err := agent.LoadWorkspaceHarnessHooks(ws); err == nil {
 			hooks = append(hooks, loaded...)
 		}
-		stopHooks, maxNudges, err := agent.LoadWorkspaceStopHooks(ws, workspaceStopHookOptions())
+		wsStop, n, err := agent.LoadWorkspaceStopHooks(ws, workspaceStopHookOptions())
 		if err != nil {
 			slog.Warn("harness hooks: skip stop_rules", "workspace", ws, "err", err)
-			stopHooks = nil
+			wsStop = nil
 		}
+		stopHooks = append(wsStop, stopHooks...)
+		maxNudges = n
 		if critic := CriticStopHook(m, ws); critic != nil {
 			stopHooks = append(stopHooks, critic)
-		}
-		if len(stopHooks) > 0 {
-			opts = append(opts, agent.WithReActStopHooks(stopHooks...), agent.WithReActMaxStopNudges(maxNudges))
 		}
 		if agent.WorkspaceInvestigationLedgerEnabled(ws) {
 			opts = append(opts, agent.WithReActToolSuccessHook(agent.InvestigationObserver(tool.DefaultInvestigationStore)))
 		}
+	}
+	if len(stopHooks) > 0 {
+		opts = append(opts, agent.WithReActStopHooks(stopHooks...), agent.WithReActMaxStopNudges(maxNudges))
 	}
 	if len(hooks) > 0 {
 		opts = append(opts, agent.WithReActToolHooks(hooks...))

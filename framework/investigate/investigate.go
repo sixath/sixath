@@ -35,7 +35,7 @@ type Config struct {
 	// 不能沿用框架默认 1024：结论正文被截断会丢掉末尾状态行，
 	// 被 parseConclusion 误判为证据不足。
 	MaxOutputTokens int
-	// StopHooks 透传给子 agent（通常复用父 agent 工作区的 stop_rules）；为空则不启用。
+	// StopHooks 透传给子 agent（通常复用父 agent 工作区的 stop_rules），并与 harness.DefaultStopHooks 合并。
 	StopHooks []harness.StopHook
 	// MaxStopNudges 子 agent 的 StopHook 续跑上限；<=0 用 harness 默认值。
 	MaxStopNudges int

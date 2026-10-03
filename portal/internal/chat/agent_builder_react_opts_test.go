@@ -67,8 +67,27 @@ rules:
 	if len(cfg.ToolHooks) != 1 {
 		t.Fatalf("ToolHooks=%d want 1", len(cfg.ToolHooks))
 	}
+	if len(cfg.StopHooks) != 1 || !agent.HasStopHookPrefix(cfg.StopHooks, agent.SuspectEvidenceRuleID) {
+		t.Fatalf("StopHooks=%d want only the default suspect hook without stop_rules", len(cfg.StopHooks))
+	}
+}
+
+func TestHarnessReActOptions_NoWorkspaceStillRegistersDefaultStopHooks(t *testing.T) {
+	var cfg agent.ReActConfig
+	for _, o := range HarnessReActOptions("", nil) {
+		o(&cfg)
+	}
+	if len(cfg.StopHooks) != 1 || !agent.HasStopHookPrefix(cfg.StopHooks, agent.SuspectEvidenceRuleID) {
+		t.Fatalf("StopHooks=%d want the default suspect hook", len(cfg.StopHooks))
+	}
+
+	t.Setenv(agent.EnvStopSuspect, "off")
+	cfg = agent.ReActConfig{}
+	for _, o := range HarnessReActOptions("", nil) {
+		o(&cfg)
+	}
 	if len(cfg.StopHooks) != 0 {
-		t.Fatalf("StopHooks=%d want 0 without stop_rules", len(cfg.StopHooks))
+		t.Fatalf("StopHooks=%d want 0 with %s=off", len(cfg.StopHooks), agent.EnvStopSuspect)
 	}
 }
 
@@ -92,7 +111,7 @@ stop_rules:
 	for _, o := range HarnessReActOptions(root, nil) {
 		o(&cfg)
 	}
-	if len(cfg.StopHooks) != 1 || cfg.MaxStopNudges != 3 {
+	if len(cfg.StopHooks) != 2 || cfg.MaxStopNudges != 3 {
 		t.Fatalf("StopHooks=%d MaxStopNudges=%d", len(cfg.StopHooks), cfg.MaxStopNudges)
 	}
 }
@@ -133,7 +152,7 @@ func TestInvestigationLedgerWiring(t *testing.T) {
 	for _, o := range HarnessReActOptions(root, nil) {
 		o(&cfg)
 	}
-	if cfg.ToolSuccessHook == nil || len(cfg.StopHooks) != 1 {
+	if cfg.ToolSuccessHook == nil || len(cfg.StopHooks) != 2 {
 		t.Fatalf("observer=%v stopHooks=%d", cfg.ToolSuccessHook != nil, len(cfg.StopHooks))
 	}
 	if ic := InvestigateConfig(&builderGateFake{finalReply: "ok"}, root); len(ic.ExtraOptions) != 1 || len(ic.StopHooks) != 1 {
@@ -155,11 +174,13 @@ func TestCriticWiring(t *testing.T) {
 	for _, o := range HarnessReActOptionsFor(fake, root, nil) {
 		o(&cfg)
 	}
-	if len(cfg.StopHooks) != 2 {
-		t.Fatalf("stop rules + critic expected, got %d", len(cfg.StopHooks))
+	if len(cfg.StopHooks) != 3 {
+		t.Fatalf("stop rules + suspect + critic expected, got %d", len(cfg.StopHooks))
 	}
-	if _, ok := cfg.StopHooks[1].(agent.BudgetedStopHook); !ok {
-		t.Fatalf("critic must come last and carry its own budget: %T", cfg.StopHooks[1])
+	if b, ok := cfg.StopHooks[2].(agent.BudgetedStopHook); !ok {
+		t.Fatalf("critic must come last and carry its own budget: %T", cfg.StopHooks[2])
+	} else if p, _ := b.StopBudget(); p != agent.CriticRulePrefix {
+		t.Fatalf("critic must come last: prefix=%q", p)
 	}
 	if ic := InvestigateConfig(fake, root); len(ic.StopHooks) != 2 {
 		t.Fatalf("deep_investigate must inherit the critic: %d", len(ic.StopHooks))
@@ -172,8 +193,8 @@ func TestCriticWiring(t *testing.T) {
 	for _, o := range HarnessReActOptionsFor(fake, root, nil) {
 		o(&cfg)
 	}
-	if len(cfg.StopHooks) != 1 {
-		t.Fatalf("critic alone must still be installed: %d", len(cfg.StopHooks))
+	if len(cfg.StopHooks) != 2 {
+		t.Fatalf("critic (with the default suspect hook) must still be installed: %d", len(cfg.StopHooks))
 	}
 }
 
@@ -190,7 +211,7 @@ func TestHarnessReActOptions_BadStopRulesSkipped(t *testing.T) {
 	for _, o := range HarnessReActOptions(root, nil) {
 		o(&cfg)
 	}
-	if len(cfg.StopHooks) != 0 || cfg.Workspace != root {
+	if len(cfg.StopHooks) != 1 || cfg.Workspace != root {
 		t.Fatalf("bad stop_rules must be skipped without breaking assembly: %+v", cfg.StopHooks)
 	}
 }

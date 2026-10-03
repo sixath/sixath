@@ -155,6 +155,32 @@ func TestExecute_SubRegistryInheritsLedgerAndExtraOptions(t *testing.T) {
 	}
 }
 
+func TestExecute_SubAgentGetsDefaultSuspectHook(t *testing.T) {
+	run := func() int {
+		m := &fakeToolModel{finalText: "没有数据。\n状态: 证据不足"}
+		reg := tool.NewEmptyRegistry()
+		grep := stubTool("rca_grep")
+		grep.Execute = func(context.Context, map[string]any) (any, error) {
+			return map[string]any{"ok": true, "hit_status": tool.HitStatusSuspect, "roots_missing": []string{"src"}}, nil
+		}
+		_ = reg.Register(grep)
+		_ = reg.Register(stubTool("es_log_query"))
+		_ = Register(reg, Config{Model: m})
+		toolEntry, _ := reg.Get(ToolName)
+		if _, err := toolEntry.Execute(context.Background(), map[string]any{"question": "q"}); err != nil {
+			t.Fatal(err)
+		}
+		return m.calls
+	}
+	if calls := run(); calls != 3 {
+		t.Fatalf("suspect evidence must nudge the sub agent exactly once: model calls=%d", calls)
+	}
+	t.Setenv(harness.EnvStopSuspect, "off")
+	if calls := run(); calls != 2 {
+		t.Fatalf("%s=off disables the default hook: model calls=%d", harness.EnvStopSuspect, calls)
+	}
+}
+
 func TestParseConclusion(t *testing.T) {
 	cases := []struct {
 		name         string

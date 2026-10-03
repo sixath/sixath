@@ -78,6 +78,9 @@ func runLiveTask(task Task, reg *tool.Registry, m model.Model, lo liveOptions) T
 		store = tool.DefaultInvestigationStore
 	}
 	hooks := append([]agent.StopHook{}, lo.StopHooks...)
+	if !agent.HasStopHookPrefix(hooks, agent.SuspectEvidenceRuleID) {
+		hooks = append(hooks, agent.DefaultStopHooks()...)
+	}
 	if lo.Critic != nil {
 		cm := lo.CriticModel
 		if cm == nil {

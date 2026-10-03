@@ -56,8 +56,13 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 			harness.WithReActMaxOutputTokens(cfg.maxOutputTokens()),
 			harness.WithReActSystemPrompt(playbookPrompt),
 		}
-		if len(cfg.StopHooks) > 0 {
-			agentOpts = append(agentOpts, harness.WithReActStopHooks(cfg.StopHooks...))
+		stopHooks := cfg.StopHooks
+		if !harness.HasStopHookPrefix(stopHooks, harness.SuspectEvidenceRuleID) {
+			// 默认 hook 放在最前：调用方的结案审查（critic）约定最后执行。
+			stopHooks = append(harness.DefaultStopHooks(), stopHooks...)
+		}
+		if len(stopHooks) > 0 {
+			agentOpts = append(agentOpts, harness.WithReActStopHooks(stopHooks...))
 			if cfg.MaxStopNudges > 0 {
 				agentOpts = append(agentOpts, harness.WithReActMaxStopNudges(cfg.MaxStopNudges))
 			}
