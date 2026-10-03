@@ -42,6 +42,20 @@ func TestSuspectHook(t *testing.T) {
 	if d := h.OnStop(ctx, StopHookInput{Text: "No data found.", ToolCalls: []ToolCallRecord{glob}}); !d.Continue || !strings.Contains(d.Message, "src/x") {
 		t.Fatalf("roots_missing hint: %+v", d)
 	}
+	for _, text := range []string{"共找到 10 条记录。", "Found 20 rows.", "返回 1.0 条"} {
+		if d := h.OnStop(ctx, StopHookInput{Text: text, ToolCalls: []ToolCallRecord{suspectRec("es_log_query")}}); d.Continue {
+			t.Fatalf("non-zero count is not a negative claim: %q", text)
+		}
+	}
+	for _, text := range []string{"共 0 条记录。", "0条", "Query returned 0 rows."} {
+		if d := h.OnStop(ctx, StopHookInput{Text: text, ToolCalls: []ToolCallRecord{suspectRec("es_log_query")}}); !d.Continue {
+			t.Fatalf("zero count is a negative claim: %q", text)
+		}
+	}
+	errRec := ToolCallRecord{ToolName: "execute_read", Allowed: true, Result: map[string]any{"hit_status": tool.HitStatusError}}
+	if d := h.OnStop(ctx, StopHookInput{Text: "没有数据。", ToolCalls: []ToolCallRecord{suspectRec("es_log_query"), errRec}}); d.Continue {
+		t.Fatal("a readable error status vetoes the nudge")
+	}
 	empty := ToolCallRecord{ToolName: "es_log_query", Allowed: true, Result: map[string]any{"hit_status": tool.HitStatusEmpty}}
 	if d := h.OnStop(ctx, StopHookInput{Text: "No data found.", ToolCalls: []ToolCallRecord{empty}}); d.Continue {
 		t.Fatal("only empty (no suspect): do not nudge")
@@ -83,6 +97,46 @@ func TestEvaluateStopHooks_SuspectHasOwnBudget(t *testing.T) {
 
 	if _, ok := a.evaluateStopHooks(context.Background(), "没有数据。", nil, trace, nil); ok {
 		t.Fatal("suspect hook fires at most once")
+	}
+}
+
+func TestRuleInBudget(t *testing.T) {
+	cases := map[string]bool{
+		SuspectEvidenceRuleID:            true,
+		SuspectEvidenceRuleID + ":x":     true,
+		SuspectEvidenceRuleID + "#2":     true,
+		SuspectEvidenceRuleID + "_extra": false,
+		"critic:model":                   false,
+	}
+	for id, want := range cases {
+		if got := ruleInBudget(id, SuspectEvidenceRuleID); got != want {
+			t.Errorf("ruleInBudget(%q)=%v want %v", id, got, want)
+		}
+	}
+	if !ruleInBudget("critic:model", CriticRulePrefix) || ruleInBudget("criticism", CriticRulePrefix) {
+		t.Fatal("critic sub-IDs stay in budget, look-alikes do not")
+	}
+}
+
+func TestEvaluateStopHooks_LookalikeWorkspaceRuleUsesSharedBudget(t *testing.T) {
+	a := NewReActAgent(&criticFakeModel{}, nil, tool.NewRegistry(),
+		WithReActStopHooks(alwaysContinueHook{id: SuspectEvidenceRuleID + "_ws"}, NewSuspectEvidenceHook()), WithReActMaxStopNudges(1))
+	trace := &RunTrace{ToolCalls: []ToolCallRecord{suspectRec("es_log_query")}}
+
+	d, ok := a.evaluateStopHooks(context.Background(), "没有数据。", nil, trace, nil)
+	if !ok || d.RuleID != SuspectEvidenceRuleID+"_ws" {
+		t.Fatalf("workspace rule first: %+v", d)
+	}
+	trace.StopHookContinues = append(trace.StopHookContinues, d.RuleID)
+
+	d, ok = a.evaluateStopHooks(context.Background(), "没有数据。", nil, trace, nil)
+	if !ok || d.RuleID != SuspectEvidenceRuleID {
+		t.Fatalf("look-alike rule must not spend the suspect budget: %+v", d)
+	}
+	trace.StopHookContinues = append(trace.StopHookContinues, d.RuleID)
+
+	if _, ok := a.evaluateStopHooks(context.Background(), "没有数据。", nil, trace, nil); ok {
+		t.Fatal("look-alike rule counted against the shared budget; both budgets spent")
 	}
 }
 

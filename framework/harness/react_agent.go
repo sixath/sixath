@@ -1066,7 +1066,7 @@ var (
 )
 
 // argsParseErrorHint 为参数 JSON 解析失败补充该工具的参数摘要；tool_call 包装时从原始参数中提取内层工具名
-// （优先取对象开头的顶层 "name"，否则取首个已注册工具名的 "name"）。
+// （优先取对象开头的顶层 "name"；它未注册时再取首个已注册工具名的 "name"）。
 func argsParseErrorHint(reg *tool.Registry, name, rawPreview string) string {
 	const generic = "; arguments must be a valid JSON object"
 	if reg == nil {
@@ -1075,8 +1075,11 @@ func argsParseErrorHint(reg *tool.Registry, name, rawPreview string) string {
 	if name == tool.ToolCallName {
 		name = ""
 		if m := toolCallLeadingName.FindStringSubmatch(rawPreview); m != nil {
-			name = m[1]
-		} else {
+			if _, ok := reg.Get(m[1]); ok {
+				name = m[1]
+			}
+		}
+		if name == "" {
 			for _, m := range toolCallAnyName.FindAllStringSubmatch(rawPreview, -1) {
 				if _, ok := reg.Get(m[1]); ok {
 					name = m[1]

@@ -126,7 +126,7 @@ func (a *ReActAgent) evaluateStopHooks(ctx context.Context, text string, message
 
 func hasAnyPrefix(s string, prefixes []string) bool {
 	for _, p := range prefixes {
-		if p != "" && strings.HasPrefix(s, p) {
+		if ruleInBudget(s, p) {
 			return true
 		}
 	}
@@ -136,11 +136,27 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 func countPrefix(ids []string, prefix string) int {
 	n := 0
 	for _, id := range ids {
-		if prefix != "" && strings.HasPrefix(id, prefix) {
+		if ruleInBudget(id, prefix) {
 			n++
 		}
 	}
 	return n
+}
+
+// ruleInBudget 报告 RuleID 是否属于预算前缀 prefix：等于 prefix，或为 prefix 加 ":"/"#" 分隔的子 ID（如 "critic:model"）。
+// 仅以 prefix 开头的其他 ID（如工作区规则 "suspect_evidence_extra"）不计入。
+func ruleInBudget(id, prefix string) bool {
+	if prefix == "" || !strings.HasPrefix(id, prefix) {
+		return false
+	}
+	if len(id) == len(prefix) {
+		return true
+	}
+	switch id[len(prefix)] {
+	case ':', '#':
+		return true
+	}
+	return false
 }
 
 // continueAfterStopHook 把本步回复与 StopHook 消息追加到 messages，并记录 trace / 事件。

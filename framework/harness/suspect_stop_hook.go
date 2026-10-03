@@ -18,7 +18,7 @@ const (
 )
 
 var (
-	negativeClaim  = regexp.MustCompile(`(?i)(没有(查到|找到|数据|记录|日志|结果|相关)|查不到|未查到|未找到|找不到|不存在|未发现|无(数据|记录|结果|日志|匹配)|0\s*条|no (data|results?|matches|records|logs)|not found|nothing found)`)
+	negativeClaim  = regexp.MustCompile(`(?i)(没有(查到|找到|数据|记录|日志|结果|相关)|查不到|未查到|未找到|找不到|不存在|未发现|无(数据|记录|结果|日志|匹配)|(?:^|[^0-9.])0\s*条|(?:^|[^0-9.])0\s*(rows?|results?|hits|records|matches|logs)\b|\bno (data|results?|matches|records|logs)\b|not found|nothing found)`)
 	negativeExempt = regexp.MustCompile(`(?i)(如果|若|假如|一旦|如未|如无|\bif\b|\bunless\b|\bwhen\b)`)
 )
 
@@ -62,7 +62,7 @@ func (suspectEvidenceHook) OnStop(_ context.Context, in StopHookInput) StopDecis
 		result := tool.DecodeJSONResult(rec.Result)
 		st, _, _ := tool.HitContractFromResult(result)
 		switch st {
-		case tool.HitStatusHits:
+		case tool.HitStatusHits, tool.HitStatusError:
 			return StopDecision{}
 		case tool.HitStatusSuspect:
 			lines = append(lines, fmt.Sprintf("- %s：%s", rec.ToolName, suspectHint(result)))

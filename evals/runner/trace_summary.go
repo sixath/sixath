@@ -135,7 +135,9 @@ func newTraceCall(name string, args, result any, errStr string) TraceCall {
 		} else {
 			c.Hits = hits
 			c.Empty = hits == 0
-			c.Suspect = hitStatus == "suspect"
+			if hitStatus == "suspect" {
+				c.Suspect, c.Empty = true, true
+			}
 			if !c.Empty && wantsAggregation(normArgs) && aggregationsEmpty(result) {
 				c.AggEmpty, c.Empty = true, true
 			}

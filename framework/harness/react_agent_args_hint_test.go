@@ -25,6 +25,9 @@ func TestArgsParseErrorHint(t *testing.T) {
 	if got := argsParseErrorHint(reg, tool.ToolCallName, `{"arguments":{"name":"x"},"name":"execute_read"`); !strings.Contains(got, "required: dsl(string)") {
 		t.Fatalf("fallback skips unregistered names: %q", got)
 	}
+	if got := argsParseErrorHint(reg, tool.ToolCallName, `{"name":"exec_read","arguments":{"name":"execute_read"`); !strings.Contains(got, "execute_read required: dsl(string)") {
+		t.Fatalf("unregistered leading name keeps scanning: %q", got)
+	}
 	if got := argsParseErrorHint(reg, tool.ToolCallName, `{"arguments":{"name":"x"`); strings.Contains(got, "required") {
 		t.Fatalf("no registered name: %q", got)
 	}

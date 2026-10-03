@@ -107,6 +107,9 @@ func TestTraceCall_SuspectAndRejects(t *testing.T) {
 			t.Errorf("%s: %+v", name, c)
 		}
 	}
+	if c := newTraceCall("es_log_query", nil, map[string]any{"hit_status": "suspect", "total": float64(5)}, ""); !c.Suspect || !c.Empty || c.Hits != 0 {
+		t.Fatalf("suspect always counts as empty: %+v", c)
+	}
 	if c := newTraceCall("es_log_query", nil, map[string]any{"hit_status": "empty"}, ""); c.Suspect {
 		t.Fatalf("empty is not suspect: %+v", c)
 	}
