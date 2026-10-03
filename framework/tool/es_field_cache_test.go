@@ -141,6 +141,32 @@ func TestESMapperCache_PerCluster(t *testing.T) {
 	}
 }
 
+func TestESMapperCache_SameIndexIsolatedPerCluster(t *testing.T) {
+	ctx := context.Background()
+	perCluster := newESMapperCache(nil, func(cluster string) ESFieldMapper {
+		return &countingMapper{fields: []string{cluster + "_field"}}
+	}, time.Minute)
+	if a, b := perCluster.For("a").ListFields(ctx, "logs-*"), perCluster.For("b").ListFields(ctx, "logs-*"); a[0] != "a_field" || b[0] != "b_field" {
+		t.Fatalf("per-cluster mappers cross-talk: a=%v b=%v", a, b)
+	}
+
+	inner := &countingMapper{fields: []string{"from_a"}}
+	fixed := newESMapperCache(inner, nil, time.Minute)
+	if got := fixed.For("a").ListFields(ctx, "logs-*"); got[0] != "from_a" {
+		t.Fatalf("a=%v", got)
+	}
+	inner.fields = []string{"from_b"}
+	if got := fixed.For("b").ListFields(ctx, "logs-*"); got[0] != "from_b" || inner.calls != 2 {
+		t.Fatalf("fixed mapper must not share cache across clusters: b=%v calls=%d", got, inner.calls)
+	}
+	if got := fixed.For("a").ListFields(ctx, "logs-*"); got[0] != "from_a" || inner.calls != 2 {
+		t.Fatalf("cluster a cache disturbed: a=%v calls=%d", got, inner.calls)
+	}
+	if fixed.For("a") == fixed.For("b") {
+		t.Fatal("clusters must have separate caches")
+	}
+}
+
 func TestESMapperCache_NilMapperIsNil(t *testing.T) {
 	mc := newESMapperCache(nil, func(string) ESFieldMapper { return nil }, time.Minute)
 	if m := mc.For("a"); m != nil {

@@ -123,29 +123,23 @@ func (m *cachedFieldMapper) storeLocked(index string, fields []string) {
 	m.lists[index] = cachedFieldList{fields: fields, at: now}
 }
 
-// esMapperCache 按集群持有带缓存的 mapper；fixed 非空时所有集群共用它（测试/显式注入）。
+// esMapperCache 按集群持有带缓存的 mapper，缓存（含上限与刷新限速）按集群隔离；
+// fixed 非空时所有集群共用同一个底层 mapper（测试/显式注入），但各自缓存，不同集群的同名索引互不串用。
 type esMapperCache struct {
 	mu        sync.Mutex
-	fixed     *cachedFieldMapper
+	fixed     ESFieldMapper
 	newMapper func(cluster string) ESFieldMapper
 	ttl       time.Duration
 	byCluster map[string]*cachedFieldMapper
 }
 
 func newESMapperCache(fixed ESFieldMapper, newMapper func(string) ESFieldMapper, ttl time.Duration) *esMapperCache {
-	mc := &esMapperCache{newMapper: newMapper, ttl: ttl, byCluster: map[string]*cachedFieldMapper{}}
-	if fixed != nil {
-		mc.fixed = newCachedFieldMapper(fixed, ttl)
-	}
-	return mc
+	return &esMapperCache{fixed: fixed, newMapper: newMapper, ttl: ttl, byCluster: map[string]*cachedFieldMapper{}}
 }
 
 // For 返回该集群的 mapper；集群不支持 mapping 时返回 nil（不缓存，便于数据源后续注册）。
 func (mc *esMapperCache) For(cluster string) *cachedFieldMapper {
-	if mc.fixed != nil {
-		return mc.fixed
-	}
-	if mc.newMapper == nil {
+	if mc.fixed == nil && mc.newMapper == nil {
 		return nil
 	}
 	mc.mu.Lock()
@@ -153,7 +147,10 @@ func (mc *esMapperCache) For(cluster string) *cachedFieldMapper {
 	if m, ok := mc.byCluster[cluster]; ok {
 		return m
 	}
-	inner := mc.newMapper(cluster)
+	inner := mc.fixed
+	if inner == nil {
+		inner = mc.newMapper(cluster)
+	}
 	if inner == nil {
 		return nil
 	}
