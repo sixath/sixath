@@ -20,14 +20,14 @@ type TaskResult struct {
 	LedgerScore  *float64        `json:"ledger_score,omitempty"`
 	LedgerChecks map[string]bool `json:"ledger_checks,omitempty"`
 	// Runs / Passes answer_shape 多次运行中有效运行数与通过数；InfraErrors 为因 infra_error/judge_error 丢弃的运行数。
-	Runs        int           `json:"runs,omitempty"`
-	Passes      int           `json:"passes,omitempty"`
-	InfraErrors int           `json:"infra_errors,omitempty"`
+	Runs        int `json:"runs,omitempty"`
+	Passes      int `json:"passes,omitempty"`
+	InfraErrors int `json:"infra_errors,omitempty"`
 	// LostErrors 被丢弃运行的错误（去重，最多 3 条），合并后仍可追查丢失原因。
 	LostErrors []string      `json:"lost_errors,omitempty"`
 	Judge      *JudgeVerdict `json:"judge,omitempty"`
-	Trace       *TraceSummary `json:"trace,omitempty"`
-	Error       string        `json:"error,omitempty"`
+	Trace      *TraceSummary `json:"trace,omitempty"`
+	Error      string        `json:"error,omitempty"`
 }
 
 // Summary 汇总指标。
@@ -67,9 +67,13 @@ type ShapeSummary struct {
 	ByAnswerType  map[string]CategoryStat `json:"by_answer_type"`
 	ToolErrorRate float64                 `json:"tool_error_rate"`
 	EmptyRate     float64                 `json:"empty_rate"`
-	Rule4Failures int                     `json:"rule4_failures"`
-	AvgSteps      float64                 `json:"avg_steps"`
-	Attribution   map[string]int          `json:"attribution"`
+	SuspectRate   float64                 `json:"suspect_rate"`
+	ArgRejectRate float64                 `json:"arg_reject_rate"`
+	// ArgRejectsByKeyword 按规则 keyword 统计参数拒绝次数（一次调用命中多条规则时各计一次）。
+	ArgRejectsByKeyword map[string]int `json:"arg_rejects_by_keyword,omitempty"`
+	Rule4Failures       int            `json:"rule4_failures"`
+	AvgSteps            float64        `json:"avg_steps"`
+	Attribution         map[string]int `json:"attribution"`
 }
 
 // ComputeSummary 由结果与任务集计算汇总。tasks 用于工具选择 F1 的期望比对。

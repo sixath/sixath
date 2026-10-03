@@ -94,6 +94,55 @@ func TestSummarizeRunTrace(t *testing.T) {
 	}
 }
 
+func TestTraceCall_SuspectAndRejects(t *testing.T) {
+	c := newTraceCall("es_log_query", "{}", map[string]any{"ok": true, "hit_status": "suspect"}, "")
+	if !c.Suspect || !c.Empty {
+		t.Fatalf("suspect: %+v", c)
+	}
+	for name, res := range map[string]any{
+		"json string": `{"ok":true,"hit_status":"suspect","total":0}`,
+		"truncated":   `{"hit_status":"suspect","rows":[` + "…[truncated]",
+	} {
+		if c := newTraceCall("es_log_query", nil, res, ""); !c.Suspect || !c.Empty {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	if c := newTraceCall("es_log_query", nil, map[string]any{"hit_status": "empty"}, ""); c.Suspect {
+		t.Fatalf("empty is not suspect: %+v", c)
+	}
+
+	r := newTraceCall("execute_read", "{}", map[string]any{
+		"ok": false, "error": "invalid", "error_code": "permanent",
+		"invalid_arguments": []any{map[string]any{"keyword": "one_of"}, map[string]any{"keyword": "unknown_field"}},
+	}, "")
+	if len(r.RejectKeywords) != 2 || r.RejectKeywords[0] != "one_of" || r.Error == "" {
+		t.Fatalf("rejects: %+v", r)
+	}
+	typed := newTraceCall("execute_read", nil, map[string]any{
+		"ok": false, "invalid_arguments": []map[string]any{{"keyword": "required"}},
+	}, `tool "execute_read": invalid arguments`)
+	if len(typed.RejectKeywords) != 1 || typed.RejectKeywords[0] != "required" {
+		t.Fatalf("typed rejects with harness error: %+v", typed)
+	}
+	js := newTraceCall("execute_read", nil, `{"ok":false,"invalid_arguments":[{"keyword":"pattern"}]}`, "")
+	if len(js.RejectKeywords) != 1 || js.RejectKeywords[0] != "pattern" {
+		t.Fatalf("json string rejects: %+v", js)
+	}
+}
+
+func TestSummarizeRunTrace_UsesRecordContract(t *testing.T) {
+	s := summarizeRunTrace(&agent.RunTrace{ToolCalls: []agent.ToolCallRecord{
+		{ToolName: "picky", Error: "invalid", CheckRejects: []string{"one_of"}},
+		{ToolName: "glob", HitStatus: "suspect", Result: map[string]any{"matches": []any{}}},
+	}})
+	if len(s.Calls[0].RejectKeywords) != 1 || s.Calls[0].RejectKeywords[0] != "one_of" {
+		t.Fatalf("rejects from record: %+v", s.Calls[0])
+	}
+	if !s.Calls[1].Suspect {
+		t.Fatalf("suspect from record: %+v", s.Calls[1])
+	}
+}
+
 func TestNewTraceCallAggregationEmpty(t *testing.T) {
 	cases := []struct {
 		name     string

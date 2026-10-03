@@ -18,13 +18,16 @@ const (
 
 // TraceCall 一次工具调用的摘要。Hits 为 -1 表示无法从结果判断命中数。
 // AggEmpty 表示请求了聚合但聚合桶全空（如对未映射字段聚合：total>0 而 buckets 为空），此时 Empty 也为 true。
+// Suspect 表示零结果被标记为可疑（hit_status=suspect），此时 Empty 也为 true；RejectKeywords 为参数被拒时命中的规则 keyword。
 type TraceCall struct {
-	Tool     string `json:"tool"`
-	Args     string `json:"args,omitempty"`
-	Error    string `json:"error,omitempty"`
-	Hits     int    `json:"hits"`
-	Empty    bool   `json:"empty,omitempty"`
-	AggEmpty bool   `json:"agg_empty,omitempty"`
+	Tool           string   `json:"tool"`
+	Args           string   `json:"args,omitempty"`
+	Error          string   `json:"error,omitempty"`
+	Hits           int      `json:"hits"`
+	Empty          bool     `json:"empty,omitempty"`
+	AggEmpty       bool     `json:"agg_empty,omitempty"`
+	Suspect        bool     `json:"suspect,omitempty"`
+	RejectKeywords []string `json:"reject_keywords,omitempty"`
 }
 
 // TraceSummary live 与 portal 两种运行方式共用的轨迹摘要；judge 与辅助指标只依赖它。
@@ -52,6 +55,27 @@ func (s TraceSummary) EmptyCount() int {
 	return n
 }
 
+func (s TraceSummary) SuspectCount() int {
+	n := 0
+	for _, c := range s.Calls {
+		if c.Suspect {
+			n++
+		}
+	}
+	return n
+}
+
+// RejectCount 返回参数被拒的调用数（每次调用计一次，不论命中几条规则）。
+func (s TraceSummary) RejectCount() int {
+	n := 0
+	for _, c := range s.Calls {
+		if len(c.RejectKeywords) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
 func summarizeRunTrace(tr *agent.RunTrace) TraceSummary {
 	var s TraceSummary
 	if tr == nil {
@@ -63,7 +87,14 @@ func summarizeRunTrace(tr *agent.RunTrace) TraceSummary {
 		if len(c.Arguments) > 0 {
 			args = c.Arguments
 		}
-		s.Calls = append(s.Calls, newTraceCall(c.ToolName, args, c.Result, c.Error))
+		tc := newTraceCall(c.ToolName, args, c.Result, c.Error)
+		if len(tc.RejectKeywords) == 0 && len(c.CheckRejects) > 0 {
+			tc.RejectKeywords = append([]string(nil), c.CheckRejects...)
+		}
+		if c.HitStatus == "suspect" && tc.Error == "" {
+			tc.Suspect, tc.Empty = true, true
+		}
+		s.Calls = append(s.Calls, tc)
 	}
 	return s
 }
@@ -95,6 +126,8 @@ func newTraceCall(name string, args, result any, errStr string) TraceCall {
 			c.Args = truncateRunes(string(raw), traceArgsMaxRunes)
 		}
 	}
+	hitStatus, rejects := resultContract(result)
+	c.RejectKeywords = rejects
 	if errStr == "" {
 		hits, resultErr := classifyResult(result)
 		if resultErr != "" {
@@ -102,12 +135,41 @@ func newTraceCall(name string, args, result any, errStr string) TraceCall {
 		} else {
 			c.Hits = hits
 			c.Empty = hits == 0
+			c.Suspect = hitStatus == "suspect"
 			if !c.Empty && wantsAggregation(normArgs) && aggregationsEmpty(result) {
 				c.AggEmpty, c.Empty = true, true
 			}
 		}
 	}
 	return c
+}
+
+// resultContract 从结果（map、JSON 字符串或 portal 截断前缀）读取 hit_status 与 invalid_arguments 中的规则 keyword。
+func resultContract(result any) (hitStatus string, rejects []string) {
+	var m map[string]any
+	if s, ok := result.(string); ok {
+		s = strings.TrimSpace(s)
+		if json.Unmarshal([]byte(s), &m) != nil {
+			if strings.HasSuffix(s, portalTruncatedSuffix) {
+				if sm := reTruncHitStatus.FindStringSubmatch(s); sm != nil {
+					return sm[1], nil
+				}
+			}
+			return "", nil
+		}
+	} else {
+		m, _ = jsonNormalize(result).(map[string]any)
+	}
+	hitStatus, _ = m["hit_status"].(string)
+	items, _ := m["invalid_arguments"].([]any)
+	for _, it := range items {
+		if em, ok := it.(map[string]any); ok {
+			if k, _ := em["keyword"].(string); k != "" {
+				rejects = append(rejects, k)
+			}
+		}
+	}
+	return hitStatus, rejects
 }
 
 // wantsAggregation 参数里是否请求了聚合：es_log_query 的 agg_field/agg_interval，或 JSON search body 顶层的 aggs/aggregations。

@@ -35,6 +35,26 @@ func TestScoreAnswerShape(t *testing.T) {
 	}
 }
 
+func TestAnswerShapeSummary_SuspectAndArgRejects(t *testing.T) {
+	results := []TaskResult{
+		{TaskID: "a", Runs: 1, Trace: &TraceSummary{Calls: []TraceCall{
+			{Tool: "es_log_query", Hits: 0, Empty: true, Suspect: true},
+			{Tool: "es_log_query", Hits: 3},
+		}}},
+		{TaskID: "b", Runs: 1, Trace: &TraceSummary{Calls: []TraceCall{
+			{Tool: "execute_read", Hits: -1, Error: "invalid", RejectKeywords: []string{"one_of"}},
+			{Tool: "execute_read", Hits: 1},
+		}}},
+	}
+	ss := computeShapeSummary(results, nil)
+	if ss.SuspectRate != 0.25 || ss.ArgRejectRate != 0.25 || ss.ArgRejectsByKeyword["one_of"] != 1 {
+		t.Fatalf("suspect=%v reject=%v by_keyword=%v", ss.SuspectRate, ss.ArgRejectRate, ss.ArgRejectsByKeyword)
+	}
+	if empty := computeShapeSummary([]TaskResult{{TaskID: "c", Runs: 1}}, nil); empty.ArgRejectsByKeyword != nil {
+		t.Fatalf("no rejects: by_keyword must be omitted, got %v", empty.ArgRejectsByKeyword)
+	}
+}
+
 func TestMergeRuns(t *testing.T) {
 	pass := TaskResult{TaskID: "a", Passed: true, Output: "p"}
 	fail := TaskResult{TaskID: "a", FailureReason: "shape_mismatch", Output: "f"}

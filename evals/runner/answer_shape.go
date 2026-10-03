@@ -117,7 +117,7 @@ func computeShapeSummary(results []TaskResult, tasks []Task) *ShapeSummary {
 		types[t.ID] = t.Expect.AnswerType
 	}
 	ss := &ShapeSummary{ByAnswerType: map[string]CategoryStat{}, Attribution: map[string]int{}}
-	calls, errs, empties, steps := 0, 0, 0, 0
+	calls, errs, empties, suspects, rejects, steps := 0, 0, 0, 0, 0, 0
 	for _, r := range results {
 		ss.Tasks++
 		runs, passes, lost := runCounts(r)
@@ -146,6 +146,16 @@ func computeShapeSummary(results []TaskResult, tasks []Task) *ShapeSummary {
 			calls += len(r.Trace.Calls)
 			errs += r.Trace.ErrorCount()
 			empties += r.Trace.EmptyCount()
+			suspects += r.Trace.SuspectCount()
+			rejects += r.Trace.RejectCount()
+			for _, c := range r.Trace.Calls {
+				for _, k := range c.RejectKeywords {
+					if ss.ArgRejectsByKeyword == nil {
+						ss.ArgRejectsByKeyword = map[string]int{}
+					}
+					ss.ArgRejectsByKeyword[k]++
+				}
+			}
 		}
 		steps += r.Steps
 	}
@@ -158,6 +168,8 @@ func computeShapeSummary(results []TaskResult, tasks []Task) *ShapeSummary {
 	if calls > 0 {
 		ss.ToolErrorRate = float64(errs) / float64(calls)
 		ss.EmptyRate = float64(empties) / float64(calls)
+		ss.SuspectRate = float64(suspects) / float64(calls)
+		ss.ArgRejectRate = float64(rejects) / float64(calls)
 	}
 	ss.AvgSteps = float64(steps) / float64(ss.Tasks)
 	for k, cs := range ss.ByAnswerType {

@@ -141,6 +141,16 @@ answer_shape 只判答案形式，不判数值是否正确。judge 模型必须�
 
 这类任务单独汇总为 `summary.answer_shape`（`e2e_pass_rate`、`lost_rate`、`by_answer_type` 等），不计入 `completion_rate`；mock 模式跳过它们。`-repeat N` 让每题跑 N 次，按严格多数合并。
 
+工具轨迹指标（分母均为全部工具调用数）：
+
+| 指标 | 含义 |
+|------|------|
+| `tool_error_rate` | 工具报错（含 `ok=false` / `hit_status=error`）的调用占比 |
+| `empty_rate` | 零结果调用占比（含 `suspect` 与聚合空桶） |
+| `suspect_rate` | 零结果被标记为可疑（`hit_status=suspect`，如放宽条件后有数据、搜索根不存在）的调用占比 |
+| `arg_reject_rate` | 参数被确定性校验拒绝（结果含 `invalid_arguments`）的调用占比 |
+| `arg_rejects_by_keyword` | 参数拒绝按规则 keyword（`required`、`one_of`、`unknown_field`…）的次数分布 |
+
 两种运行方式：
 - **portal**（每晚，真实环境）：通过 Portal/Gateway 的对话接口驱动真实 agent，读取消息 metadata 中的工具轨迹交给 judge。直连 Portal 需以 `SATH_CHAT_PUBLIC_INBOUND_ENABLED=true` 启动（否则 POST 返回 403），或把 `-portal-url` 指向 Gateway。只跑 answer_shape 题，其他类别跳过。
 - **live + fixtures**（CI）：runner 内用被测模型驱动 ReActAgent，工具返回取自任务的 `fixtures`。
