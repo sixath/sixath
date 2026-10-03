@@ -525,19 +525,36 @@ func registerSearchFilesTool(reg *Registry) error {
 			if err != nil {
 				return map[string]any{"error": err.Error()}, nil
 			}
+			rootMissing := false
+			if st, statErr := os.Stat(root); statErr != nil || !st.IsDir() {
+				rootMissing = true
+			}
+			stamp := func(results any, n int) map[string]any {
+				out := map[string]any{"target": target, "matches": results, "root": searchPath}
+				status := HitStatusFromCount(true, n)
+				if n == 0 && rootMissing {
+					out["root_missing"] = true
+					status = HitStatusSuspect
+				}
+				return StampHitContract(out, HitStamp{Status: status, Tool: "search_files", Ctx: ctx})
+			}
 			switch target {
 			case "files":
-				results, err := searchFilesByGlob(ws, root, pattern, fileGlob, limit, offset)
-				if err != nil {
-					return map[string]any{"error": err.Error()}, nil
+				results := []fileMatch{}
+				if !rootMissing {
+					if results, err = searchFilesByGlob(ws, root, pattern, fileGlob, limit, offset); err != nil {
+						return map[string]any{"error": err.Error()}, nil
+					}
 				}
-				return map[string]any{"target": "files", "matches": results}, nil
+				return stamp(results, len(results)), nil
 			case "content":
-				results, err := searchFileContents(ws, root, pattern, fileGlob, limit, offset)
-				if err != nil {
-					return map[string]any{"error": err.Error()}, nil
+				results := []contentMatch{}
+				if !rootMissing {
+					if results, err = searchFileContents(ws, root, pattern, fileGlob, limit, offset); err != nil {
+						return map[string]any{"error": err.Error()}, nil
+					}
 				}
-				return map[string]any{"target": "content", "matches": results}, nil
+				return stamp(results, len(results)), nil
 			default:
 				return map[string]any{"error": "target must be content or files"}, nil
 			}

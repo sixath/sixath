@@ -75,7 +75,7 @@ func RegisterRCASymbolTool(reg *Registry, roots []string, opts RCASymbolOpts) er
 			"type": "object",
 			"properties": map[string]any{
 				"action":              map[string]any{"type": "string", "enum": []string{"definition", "references"}, "description": "Navigation action."},
-				"repo":                map[string]any{"type": "string", "description": "Repository name (basename of a configured root)."},
+				"repo":                map[string]any{"type": "string", "description": rcaRequiredRepoDesc},
 				"file":                map[string]any{"type": "string", "description": "Repo-relative source file path."},
 				"line":                map[string]any{"type": "integer", "description": "1-based source line."},
 				"symbol":              map[string]any{"type": "string", "description": "Go symbol name, optionally qualified as pkg.Name."},
@@ -85,6 +85,7 @@ func RegisterRCASymbolTool(reg *Registry, roots []string, opts RCASymbolOpts) er
 			},
 			"required": []string{"action", "repo"},
 		},
+		ArgChecks: []ArgCheck{repoCheck(roots)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			return executeRCASymbol(ctx, roots, pool, params), nil
 		},

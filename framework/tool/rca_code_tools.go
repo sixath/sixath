@@ -10,6 +10,9 @@ import (
 const (
 	rcaMaxResultsDefault = 100
 	ToolsetRCA           = "rca"
+
+	rcaOptionalRepoDesc = "Optional repository name (one of the configured repos); omit to search all."
+	rcaRequiredRepoDesc = "Repository name (one of the configured repos, i.e. basename of a code root)."
 )
 
 // RegisterRCACodeTools 注册 rca_grep / rca_glob / rca_read 三个多仓库代码检索工具。
@@ -40,13 +43,14 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 			"type": "object",
 			"properties": map[string]any{
 				"pattern":     map[string]any{"type": "string", "description": "Regex pattern for content search."},
-				"repo":        map[string]any{"type": "string", "description": "Optional repo name to limit the search to a single repository root."},
+				"repo":        map[string]any{"type": "string", "description": rcaOptionalRepoDesc},
 				"glob":        map[string]any{"type": "string", "description": "Optional file glob filter, e.g. '*.go' or '**/*.go'."},
 				"max_results": map[string]any{"type": "integer", "description": "Max results (default 100)."},
 				"context":     map[string]any{"type": "integer", "description": "Lines of context before and after each hit (default 3, max 8, 0 = hit line only)."},
 			},
 			"required": []string{"pattern"},
 		},
+		ArgChecks: []ArgCheck{repoCheck(roots)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			const toolName = "rca_grep"
 			pattern, _ := params["pattern"].(string)
@@ -134,11 +138,12 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 					"type":        "string",
 					"description": "Glob pattern. Examples: 'go.mod', '*.go', '**/go.mod', 'cmd/**/*.go'.",
 				},
-				"repo":        map[string]any{"type": "string", "description": "Optional repo name to limit to a single repository root."},
+				"repo":        map[string]any{"type": "string", "description": rcaOptionalRepoDesc},
 				"max_results": map[string]any{"type": "integer", "description": "Max results (default 100)."},
 			},
 			"required": []string{"pattern"},
 		},
+		ArgChecks: []ArgCheck{repoCheck(roots)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			const toolName = "rca_glob"
 			pattern, _ := params["pattern"].(string)
@@ -156,7 +161,12 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 			}
 			matches := make([]map[string]any, 0, maxResults)
 			truncated := false
+			var missing []string
 			for _, root := range sel {
+				if st, err := os.Stat(root); err != nil || !st.IsDir() {
+					missing = append(missing, repoNameFromRoot(root))
+					continue
+				}
 				if len(matches) >= maxResults {
 					break
 				}
@@ -177,10 +187,17 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 					})
 				}
 			}
-			payload := map[string]any{"matches": matches, "truncated": truncated}
+			payload := map[string]any{"matches": matches, "truncated": truncated, "roots": repoNames(sel)}
+			status := HitStatusFromCount(true, len(matches))
 			if len(matches) == 0 {
-				payload["hint"] = "No matches. Roots may be unset, or try basename (go.mod) / path (**/go.mod)."
+				payload["hint"] = "No matches. Try basename (go.mod) / path (**/go.mod)."
+				if len(missing) > 0 {
+					payload["roots_missing"] = missing
+					payload["hint"] = "No matches; some configured code roots do not exist on disk (see roots_missing), so absence of files is not conclusive."
+					status = HitStatusSuspect
+				}
 			}
+			payload = StampHitContract(payload, HitStamp{Status: status, Tool: toolName, Ctx: ctx})
 			return rcaOK(toolName, payload), nil
 		},
 	})
@@ -200,13 +217,14 @@ func registerRCAReadTool(reg *Registry, roots []string) error {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"repo":       map[string]any{"type": "string", "description": "Repository name (basename of a configured root)."},
+				"repo":       map[string]any{"type": "string", "description": rcaRequiredRepoDesc},
 				"file":       map[string]any{"type": "string", "description": "Repo-relative file path."},
 				"start_line": map[string]any{"type": "integer", "description": "1-based start line (default 1)."},
 				"end_line":   map[string]any{"type": "integer", "description": "Inclusive end line (default end of file)."},
 			},
 			"required": []string{"repo", "file"},
 		},
+		ArgChecks: []ArgCheck{repoCheck(roots)},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			const toolName = "rca_read"
 			repo, _ := params["repo"].(string)
@@ -217,7 +235,7 @@ func registerRCAReadTool(reg *Registry, roots []string) error {
 			if strings.TrimSpace(file) == "" {
 				return rcaErr(toolName, "file is required", ErrorPermanent), nil
 			}
-			full, _, err := resolveInRepos(roots, repo, file)
+			full, root, err := resolveInRepos(roots, repo, file)
 			if err != nil {
 				return rcaErr(toolName, err.Error(), ErrorPermanent), nil
 			}
@@ -226,6 +244,7 @@ func registerRCAReadTool(reg *Registry, roots []string) error {
 				if os.IsNotExist(err) {
 					return NormalizeRCAResult(map[string]any{
 						"error": "file not found", "repo": repo, "file": file,
+						"similar": suggestRCAFiles(root, file),
 					}, EvidenceMeta{Tool: toolName, OK: false, ErrorCode: ErrorPermanent}), nil
 				}
 				return rcaErrFrom(toolName, err), nil
