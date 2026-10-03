@@ -29,7 +29,7 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 		names := 0
 		for _, name := range append(append([]string{}, codeToolNames...), logToolNames...) {
 			if t, ok := parent.Get(name); ok {
-				// 重复包装（timeout/参数校验）无副作用：内层先触发，语义不变。
+				// 校验中间件靠 checked 标记不会重复包装；timeout/事件层仍会再包一层，内层先触发，语义不变。
 				if err := sub.Register(t); err == nil {
 					names++
 				}

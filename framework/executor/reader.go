@@ -42,7 +42,7 @@ type QueryOptions struct {
 
 // Diagnosis 是零结果探测的结论：放宽条件后的计数，用于区分"条件写错"与"确实无数据"。
 type Diagnosis struct {
-	Probes    []ProbeCount `json:"probes,omitempty"`
+	Probes    []ProbeCount `json:"probes"`
 	Truncated bool         `json:"truncated,omitempty"`
 	Hint      string       `json:"hint,omitempty"`
 	Errors    []string     `json:"errors,omitempty"`

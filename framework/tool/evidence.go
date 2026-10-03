@@ -536,6 +536,8 @@ func DiagnosisFromResult(v any) *executor.Diagnosis {
 				return nil
 			}
 			return &out
+		case executor.Diagnosis:
+			return &d
 		}
 		return nil
 	case *executor.QueryResult:
@@ -568,6 +570,7 @@ func DecodeJSONResult(v any) any {
 }
 
 // AttachDiagnosis 把诊断写到结果上，不改变 hit_status。
+// 原地修改 map / 指针结果：工具每次调用必须返回新结果，不能复用共享对象。
 func AttachDiagnosis(v any, d *executor.Diagnosis) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -585,6 +588,7 @@ func AttachDiagnosis(v any, d *executor.Diagnosis) any {
 }
 
 // MarkSuspect 写入诊断（可为 nil）并把 hit_status 置为 suspect。
+// 与 AttachDiagnosis 一样原地修改结果，工具每次调用必须返回新结果。
 func MarkSuspect(v any, d *executor.Diagnosis) any {
 	if d != nil {
 		v = AttachDiagnosis(v, d)

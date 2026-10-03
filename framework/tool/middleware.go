@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
+
+	"github.com/sixath/framework/executor"
 )
 
 const argCheckTimeout = 2 * time.Second
@@ -67,6 +70,19 @@ func runArgChecks(ctx context.Context, toolName string, checks []ArgCheck, param
 	return errs, skipped
 }
 
+func withSkippedHint(d *executor.Diagnosis, skipped []string) *executor.Diagnosis {
+	if d == nil {
+		d = &executor.Diagnosis{}
+	}
+	hint := "arg checks skipped: " + strings.Join(skipped, ", ")
+	if d.Hint == "" {
+		d.Hint = hint
+	} else {
+		d.Hint += "; " + hint
+	}
+	return d
+}
+
 // wrapChecks 构造校验中间件：别名 → JSON Schema → ArgChecks → Execute → EmptyProbe。
 // 开关每次调用读取，便于线上即时回退。
 func wrapChecks(t Tool) ExecuteFunc {
@@ -94,7 +110,7 @@ func wrapChecks(t Tool) ExecuteFunc {
 		}
 		if len(skipped) > 0 {
 			if st, _, _ := HitContractFromResult(result); st == HitStatusEmpty {
-				result = MarkSuspect(result, nil)
+				result = MarkSuspect(result, withSkippedHint(DiagnosisFromResult(result), skipped))
 			}
 			if m, ok := result.(map[string]any); ok {
 				m["check_skipped"] = skipped

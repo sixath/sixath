@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,54 @@ func TestRunEmptyProbe_CountErrorRecorded(t *testing.T) {
 	d := out["diagnosis"].(*executor.Diagnosis)
 	if len(d.Errors) != 1 || out["hit_status"] != HitStatusEmpty {
 		t.Fatalf("got %+v", d)
+	}
+}
+
+func TestRunEmptyProbe_AllErrorsDoNotClaimAbsence(t *testing.T) {
+	p := &EmptyProbe{
+		Relax: func(map[string]any) []ProbeVariant { return []ProbeVariant{{Label: "a"}, {Label: "b"}} },
+		Count: func(context.Context, ProbeVariant) (int64, error) { return 0, errors.New("boom") },
+	}
+	out := runEmptyProbe(context.Background(), p, nil, emptyResult()).(map[string]any)
+	d := out["diagnosis"].(*executor.Diagnosis)
+	if strings.Contains(d.Hint, "does not exist") || !strings.Contains(d.Hint, "probe incomplete (2 errors)") {
+		t.Fatalf("hint %q", d.Hint)
+	}
+}
+
+func TestRunEmptyProbe_PartialErrorsDoNotClaimAbsence(t *testing.T) {
+	p := &EmptyProbe{
+		Relax: func(map[string]any) []ProbeVariant { return []ProbeVariant{{Label: "a"}, {Label: "b"}} },
+		Count: func(_ context.Context, v ProbeVariant) (int64, error) {
+			if v.Label == "a" {
+				return 0, nil
+			}
+			return 0, errors.New("boom")
+		},
+	}
+	out := runEmptyProbe(context.Background(), p, nil, emptyResult()).(map[string]any)
+	d := out["diagnosis"].(*executor.Diagnosis)
+	if out["hit_status"] != HitStatusEmpty || len(d.Probes) != 1 || strings.Contains(d.Hint, "does not exist") || !strings.Contains(d.Hint, "probe incomplete (1 errors)") {
+		t.Fatalf("status=%v diag=%+v", out["hit_status"], d)
+	}
+}
+
+func TestRunEmptyProbe_StopsWhenBudgetExpiredOnError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	calls := 0
+	p := &EmptyProbe{
+		Relax: func(map[string]any) []ProbeVariant { return []ProbeVariant{{Label: "a"}, {Label: "b"}} },
+		Count: func(c context.Context, _ ProbeVariant) (int64, error) {
+			calls++
+			<-c.Done()
+			return 0, c.Err()
+		},
+	}
+	out := runEmptyProbe(ctx, p, nil, emptyResult()).(map[string]any)
+	d := out["diagnosis"].(*executor.Diagnosis)
+	if calls != 1 || !d.Truncated || len(d.Errors) != 1 {
+		t.Fatalf("calls=%d diag=%+v", calls, d)
 	}
 }
 

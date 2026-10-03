@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sixath/framework/events"
+	"github.com/sixath/framework/executor"
 )
 
 func newTestRegistry() *Registry {
@@ -78,6 +79,31 @@ func TestMiddleware_CheckErrorFailsOpenAndMarksSuspectOnEmpty(t *testing.T) {
 	m := res.(map[string]any)
 	if m["hit_status"] != HitStatusSuspect || m["check_skipped"] == nil {
 		t.Fatalf("got %+v", m)
+	}
+	if d := DiagnosisFromResult(m); d == nil || d.Hint != "arg checks skipped: one_of:x" {
+		t.Fatalf("diagnosis %+v", d)
+	}
+}
+
+func TestMiddleware_CheckSkippedExtendsQueryResultDiagnosis(t *testing.T) {
+	r := newTestRegistry()
+	_ = r.Register(Tool{
+		Name: "t",
+		ArgChecks: []ArgCheck{OneOf{Param: "x", Source: func(context.Context, map[string]any) ([]string, error) {
+			return nil, errors.New("catalog down")
+		}}},
+		Execute: func(context.Context, map[string]any) (any, error) {
+			return &executor.QueryResult{HitStatus: HitStatusEmpty, Diagnosis: &executor.Diagnosis{Hint: "prior"}}, nil
+		},
+	})
+	tl, _ := r.Get("t")
+	res, err := tl.Execute(context.Background(), map[string]any{"x": "zz"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qr := res.(*executor.QueryResult)
+	if qr.HitStatus != HitStatusSuspect || qr.Diagnosis == nil || qr.Diagnosis.Hint != "prior; arg checks skipped: one_of:x" {
+		t.Fatalf("got %+v diag=%+v", qr, qr.Diagnosis)
 	}
 }
 

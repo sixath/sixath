@@ -1,7 +1,9 @@
 package tool
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sixath/framework/executor"
@@ -304,6 +306,9 @@ func TestMarkSuspectAndDiagnosisFromResult(t *testing.T) {
 	if DiagnosisFromResult("text") != nil {
 		t.Fatal("unknown result type must give nil")
 	}
+	if got := DiagnosisFromResult(map[string]any{"diagnosis": executor.Diagnosis{Hint: "v"}}); got == nil || got.Hint != "v" {
+		t.Fatalf("value diagnosis: %+v", got)
+	}
 	decoded := map[string]any{"diagnosis": map[string]any{"hint": "h", "probes": []any{map[string]any{"label": "a", "count": 3.0}}}}
 	if got := DiagnosisFromResult(decoded); got == nil || got.Hint != "h" || got.Probes[0].Count != 3 {
 		t.Fatalf("decoded map: %+v", got)
@@ -315,6 +320,13 @@ func TestStubFromPayloadCopiesDiagnosis(t *testing.T) {
 	stub := stubFromPayload(map[string]any{"hit_status": HitStatusSuspect, "diagnosis": d}, "tmp/results/s/x.jsonl", 1, nil, nil)
 	if stub.Diagnosis != d || stub.HitStatus != HitStatusSuspect {
 		t.Fatalf("stub %+v", stub)
+	}
+}
+
+func TestDiagnosisJSONAlwaysHasProbes(t *testing.T) {
+	b, err := json.Marshal(executor.Diagnosis{Hint: "h"})
+	if err != nil || !strings.Contains(string(b), `"probes":`) {
+		t.Fatalf("got %s err=%v", b, err)
 	}
 }
 

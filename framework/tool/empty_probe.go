@@ -24,6 +24,7 @@ const (
 // 预算（变体数、超时）由中间件统一控制，工具只负责生成变体与计数。
 type EmptyProbe struct {
 	Relax func(params map[string]any) []ProbeVariant
+	// Count 必须遵守 ctx 的取消与截止时间，否则探测预算无法约束其耗时。
 	Count func(ctx context.Context, v ProbeVariant) (int64, error)
 }
 
@@ -77,6 +78,10 @@ func runEmptyProbe(ctx context.Context, p *EmptyProbe, params map[string]any, re
 		n, err := p.Count(pctx, v)
 		if err != nil {
 			d.Errors = append(d.Errors, fmt.Sprintf("%s: %v", v.Label, err))
+			if pctx.Err() != nil {
+				d.Truncated = true
+				break
+			}
 			continue
 		}
 		d.Probes = append(d.Probes, executor.ProbeCount{Label: v.Label, Count: n})
@@ -89,7 +94,11 @@ func runEmptyProbe(ctx context.Context, p *EmptyProbe, params map[string]any, re
 		return result
 	}
 	if best == nil {
-		d.Hint = "relaxed variants also returned 0; the data likely does not exist in this range"
+		if len(d.Errors) == 0 {
+			d.Hint = "relaxed variants also returned 0; the data likely does not exist in this range"
+		} else {
+			d.Hint = fmt.Sprintf("probe incomplete (%d errors); cannot confirm absence", len(d.Errors))
+		}
 		return AttachDiagnosis(result, d)
 	}
 	d.Hint = fmt.Sprintf("original query returned 0 but %s returned %d; a condition is probably wrong (field/value/time range) — fix it before concluding there is no data", best.Label, best.Count)
