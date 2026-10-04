@@ -165,7 +165,9 @@ func runLiveTask(task Task, reg *tool.Registry, m model.Model, lo liveOptions) T
 	if tr != nil && tr.ModelUnavailable {
 		res.FailureReason, res.Attribution = "model_error", "model"
 		res.Error = strings.Join(tr.Errors, "; ")
-		if task.Category == "answer_shape" {
+		// ModelCalls 只计成功调用：步数用尽后在强制总结处才失败时 == maxSteps，仍按跑满步数算失败。
+		res.HitMaxSteps = tr.ModelCalls >= maxSteps
+		if task.Category == "answer_shape" && !res.HitMaxSteps {
 			res.FailureReason, res.Attribution = "infra_error", ""
 		}
 		return res

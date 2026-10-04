@@ -182,7 +182,8 @@ fixtures 写法：`{"tool":"es_log_query","match":"flow_id","response":"..."}`�
 
 失败分类：
 - 丢失运行（不进 `e2e_pass_rate` 分母）只有 `infra_error`（网关/连接/限流等基础设施故障，live 模式下模型调用失败；模型重试与步骤级恢复耗尽后 agent 给出的「模型服务暂时不可用（…）」降级答复也算）和 `judge_error`（judge 未配置、调用失败或输出无法解析）。
-- 模型错误的容忍度：单次调用重试见 `SATH_MODEL_RETRY_*`（默认 4 次，401/429/5xx 可重试，Retry-After 最多等 `SATH_MODEL_RETRY_MAX_RETRY_AFTER_MS`=60000），之后同一步骤按 `SATH_MODEL_RECOVERY_DELAYS_MS`（默认 `10000,20000,40000`，`off` 关闭）冷却重试，每题最多额外等待约 2 分钟；`-turn-timeout` 需留出这部分余量。
+- 模型错误的容忍度：单次调用重试见 `SATH_MODEL_RETRY_*`（默认 4 次，401/429/5xx 可重试，Retry-After 最多等 `SATH_MODEL_RETRY_MAX_RETRY_AFTER_MS`=60000），之后同一步骤按 `SATH_MODEL_RECOVERY_DELAYS_MS`（默认 `10000,20000,40000`，`off` 关闭）冷却重试。两层共享每次运行的等待预算 `SATH_MODEL_RECOVERY_BUDGET_MS`（默认 120000，只计等待、不计生成耗时）：下一次等待超出剩余预算或 ctx 截止时间时不再等待，直接降级；critic 审查调用另限 10s，`deep_investigate` 子 agent 不做步骤级冷却、失败时返回 `model_unavailable`。`-turn-timeout` 需留出这部分余量。
+- 降级只针对可重试错误（401/429/5xx/超时）；400、内容审核、403、404 等仍按原错误返回。降级语义：非流式 `Run` 返回 `err=nil`，`Metadata["model_unavailable"]=true`，轨迹 `model_unavailable` 置位（`model_recoveries` 为步骤级重试次数，`model_call_retries` 为单次调用层重试次数）；流式界面可能先显示部分文本，再显示重试提示，再显示完整文本，而落库消息只保存最终文本。跑满步数后才降级的仍记 `model_error`（`hit_max_steps`）。
 - 计入失败：`shape_mismatch`（judge 判不通过）、`timeout`、`run_error`、`hitl_required`（agent 请求人工确认，评测无法回应）、`model_error`（跑满 `max_steps`）。
 
 门禁：

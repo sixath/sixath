@@ -153,6 +153,37 @@ func TestRunLiveTask_DegradedAnswerIsLost(t *testing.T) {
 	}
 }
 
+// loopingThenDownModel 前 n 次都调工具（跑满步数），之后模型持续 401。
+type loopingThenDownModel struct {
+	toolErrorModel
+	n int
+}
+
+func (m *loopingThenDownModel) Chat(context.Context, []model.Message, ...model.Option) (*model.Generation, error) {
+	return nil, &model.APIStatusError{StatusCode: 401, Message: "Invalid token"}
+}
+func (m *loopingThenDownModel) ChatWithTools(context.Context, []model.Message, *tool.Registry, ...model.Option) (*model.Generation, error) {
+	m.calls++
+	if m.calls <= m.n {
+		return &model.Generation{Raw: model.ToolStep{Used: true, ToolCallID: "c", ToolName: "es_log_query", Arguments: map[string]any{"query": "x"}}}, nil
+	}
+	return nil, &model.APIStatusError{StatusCode: 401, Message: "Invalid token"}
+}
+
+func TestRunLiveTask_DegradedAfterMaxStepsStaysCountedFailure(t *testing.T) {
+	t.Setenv(agent.EnvModelRecoveryDelays, "off")
+	task := shapeTask
+	task.MaxSteps = 2
+	j := &Judge{Model: &stubJudgeModel{replies: []string{allPass}}}
+	r := runLiveTask(task, failingESRegistry(), &loopingThenDownModel{n: 2}, liveOptions{Judge: j})
+	if !strings.HasPrefix(r.Output, agent.ModelUnavailableAnswerPrefix) {
+		t.Fatalf("test setup must degrade after the step budget, got %+v", r)
+	}
+	if r.FailureReason != "model_error" || !r.HitMaxSteps || isLostRun(r) {
+		t.Fatalf("degrading after max steps must stay a counted max-steps failure, got %+v", r)
+	}
+}
+
 func TestRunLive_RepeatsAndMergesAnswerShape(t *testing.T) {
 	j := &Judge{Model: &stubJudgeModel{replies: []string{allPass, firstFails, allPass}}}
 	res := runLive([]Task{shapeTask}, &toolErrorModel{}, liveOptions{Judge: j, Repeat: 3})
