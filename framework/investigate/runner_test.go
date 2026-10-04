@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sixath/framework/harness"
+	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
 
@@ -152,6 +154,55 @@ func TestExecute_SubRegistryInheritsLedgerAndExtraOptions(t *testing.T) {
 	}
 	if len(observed) != 1 || observed[0] != "rca_grep" {
 		t.Fatalf("extra options must reach the sub agent: observed=%v", observed)
+	}
+}
+
+// unavailableToolModel 在 toolFirst 时先发起一次 rca_grep，之后所有调用都返回 401。
+type unavailableToolModel struct {
+	fakeToolModel
+	toolFirst bool
+}
+
+func (f *unavailableToolModel) ChatWithTools(ctx context.Context, msgs []model.Message, reg *tool.Registry, opts ...model.Option) (*model.Generation, error) {
+	f.calls++
+	if f.toolFirst && f.calls == 1 {
+		return &model.Generation{Raw: model.ToolStep{Used: true, ToolCalls: []model.ToolCall{{
+			ID: "call-1", Name: "rca_grep", Arguments: map[string]any{"pattern": "x"},
+		}}}}, nil
+	}
+	return nil, &model.APIStatusError{StatusCode: 401, Message: "invalid token"}
+}
+
+func TestExecute_SubAgentModelUnavailableReportsTransient(t *testing.T) {
+	t.Setenv(harness.EnvModelRecoveryDelays, "")
+	for _, toolFirst := range []bool{true, false} {
+		m := &unavailableToolModel{toolFirst: toolFirst}
+		reg := tool.NewEmptyRegistry()
+		_ = reg.Register(rcaStubWithEvidence())
+		_ = reg.Register(stubTool("es_log_query"))
+		var slept []time.Duration
+		_ = Register(reg, Config{Model: m, ExtraOptions: []harness.ReActOption{
+			harness.WithReActModelRecoveryDelays(time.Millisecond),
+			harness.WithReActModelRecoverySleep(func(_ context.Context, d time.Duration) error {
+				slept = append(slept, d)
+				return nil
+			}),
+		}})
+		toolEntry, _ := reg.Get(ToolName)
+		out, err := toolEntry.Execute(context.Background(), map[string]any{"question": "q"})
+		if err == nil {
+			t.Fatalf("toolFirst=%v: want error, got %v", toolFirst, out)
+		}
+		res := out.(map[string]any)
+		if res["ok"] != false || res["error_code"] != tool.ErrorTransient || res["model_unavailable"] != true {
+			t.Fatalf("toolFirst=%v: res=%v", toolFirst, res)
+		}
+		if len(slept) != 0 {
+			t.Fatalf("toolFirst=%v: sub agent must not run its own cooldowns: %v", toolFirst, slept)
+		}
+		if _, has := res["conclusion"]; has {
+			t.Fatalf("degraded text must not be reported as a conclusion: %v", res)
+		}
 	}
 }
 

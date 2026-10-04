@@ -60,9 +60,11 @@ func (p *PlanExecuteAgent) Run(ctx context.Context, req *Request) (*Response, er
 	if req == nil {
 		return nil, nil
 	}
+	// planner 与回退的 worker 共享同一 Run 级等待预算。
+	ctx = withRunWaitBudget(ctx, nil)
 	plan, err := p.generatePlan(ctx, req)
 	if err != nil {
-		// 规划彻底失败 → 回退 ReAct：交给 worker 直接执行原始请求。
+		// 规划彻底失败（含模型不可用）→ 回退 ReAct：worker 自带步骤级恢复与降级。
 		return p.worker.Run(ctx, req)
 	}
 
@@ -169,6 +171,7 @@ func (p *PlanExecuteAgent) RunEvents(ctx context.Context, req *Request) (<-chan 
 	if req == nil {
 		return nil, nil
 	}
+	ctx = withRunWaitBudget(ctx, nil)
 	out := make(chan StreamEvent, 16)
 	go func() {
 		defer close(out)

@@ -68,6 +68,8 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 			}
 		}
 		agentOpts = append(agentOpts, cfg.ExtraOptions...)
+		// 步骤级冷却只由父 agent 负责，避免嵌套冷却叠加；单次调用层重试仍走父 ctx 的等待预算。
+		agentOpts = append(agentOpts, harness.WithReActModelRecoveryDelays())
 		subAgent := harness.NewReActAgent(cfg.Model, nil, sub, agentOpts...)
 
 		parentRID, _ := ctx.Value(tool.ContextKeyRequestID).(string)
@@ -77,11 +79,25 @@ func buildExecute(parent *tool.Registry, cfg Config) tool.ExecuteFunc {
 		})
 		if err != nil {
 			return map[string]any{
-				"ok":          false,
-				"error":       err.Error(),
-				"error_code":  tool.ErrorTransient,
-				"duration_ms": time.Since(started).Milliseconds(),
-				"steps_taken": 0,
+				"ok":                false,
+				"error":             err.Error(),
+				"error_code":        tool.ErrorTransient,
+				"model_unavailable": model.IsRetryableModelError(err),
+				"duration_ms":       time.Since(started).Milliseconds(),
+				"steps_taken":       0,
+			}, err
+		}
+		if unavailable, _ := resp.Metadata["model_unavailable"].(bool); unavailable {
+			// 子 agent 的降级回答未经模型总结，不能当作结论交给父 agent。
+			err := errors.New("investigate: model unavailable during sub-investigation")
+			return map[string]any{
+				"ok":                false,
+				"error":             err.Error(),
+				"error_code":        tool.ErrorTransient,
+				"model_unavailable": true,
+				"partial":           resp.Text,
+				"duration_ms":       time.Since(started).Milliseconds(),
+				"steps_taken":       countToolMessages(resp.Messages),
 			}, err
 		}
 

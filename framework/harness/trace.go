@@ -108,6 +108,9 @@ type RunTrace struct {
 	// CanceledByRequest 为 true 表示取消来自 Cancel API（区别于父 ctx 取消/客户端断连）。
 	CanceledByRequest bool `json:"canceled_by_request,omitempty"`
 
+	// ModelCallRetries 为本 Run 所有模型调用中 WrapResilient 单次调用层的重试次数之和
+	// （不含首次尝试；ModelCalls 只计成功的调用）。
+	ModelCallRetries int `json:"model_call_retries,omitempty"`
 	// ModelRecoveries 为步骤级模型恢复（冷却后重试同一步）的次数；恢复成功不计入 Errors。
 	ModelRecoveries int `json:"model_recoveries,omitempty"`
 	// ModelRecoveryErrors 为触发每次恢复的模型错误（与 ModelRecoveries 一一对应）。

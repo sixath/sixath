@@ -296,24 +296,201 @@ func TestModelRecovery_RunExhaustedDeliversDegradedAnswer(t *testing.T) {
 	}
 }
 
-func TestModelRecovery_NonRetryableWithToolsDegrades(t *testing.T) {
+func TestModelRecovery_NonRetryableWithToolsKeepsError(t *testing.T) {
+	t.Setenv(EnvModelRecoveryDelays, "")
+	for _, code := range []int{400, 403, 404} {
+		executed := 0
+		fake := &scriptedModel{script: []scriptTurn{
+			toolTurn("c1", map[string]any{"q": "x"}),
+			{err: &model.APIStatusError{StatusCode: code, Message: "context too long"}},
+		}}
+		rec := &sleepRecorder{}
+		a := NewReActAgent(fake, nil, lookupRegistry(t, &executed), recoveryOpts(rec, time.Millisecond)...)
+		resp, err := a.Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "x"}}})
+		var runErr *RunError
+		if !errors.As(err, &runErr) {
+			t.Fatalf("%d: non-retryable error must keep the error path, got resp=%v err=%v", code, resp, err)
+		}
+		if len(rec.delays) != 0 || runErr.Trace.ModelUnavailable {
+			t.Fatalf("%d: sleeps=%v unavailable=%v", code, rec.delays, runErr.Trace.ModelUnavailable)
+		}
+	}
+}
+
+func TestModelRecovery_StreamNonRetryableWithToolsSendsError(t *testing.T) {
 	t.Setenv(EnvModelRecoveryDelays, "")
 	executed := 0
-	fake := &scriptedModel{script: []scriptTurn{
-		toolTurn("c1", map[string]any{"q": "x"}),
-		{err: &model.APIStatusError{StatusCode: 400, Message: "context too long"}},
-	}}
+	fake := &scriptedStreamModel{&scriptedModel{script: []scriptTurn{
+		toolTurn("c1", nil),
+		{err: &model.APIStatusError{StatusCode: 400, Message: "content filter"}},
+	}}}
 	rec := &sleepRecorder{}
 	a := NewReActAgent(fake, nil, lookupRegistry(t, &executed), recoveryOpts(rec, time.Millisecond)...)
+	ch, _ := a.RunEvents(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "x"}}})
+	_, done, errs := collectStream(t, ch)
+	if done != nil || len(errs) != 1 {
+		t.Fatalf("done=%v errs=%v", done, errs)
+	}
+}
+
+func TestModelRecovery_DeadlineShorterThanCooldownDegradesWithoutSleeping(t *testing.T) {
+	t.Setenv(EnvModelRecoveryDelays, "")
+	executed := 0
+	fake := &scriptedModel{script: []scriptTurn{toolTurn("c1", nil), {err: gateway401()}}}
+	rec := &sleepRecorder{}
+	a := NewReActAgent(fake, nil, lookupRegistry(t, &executed), recoveryOpts(rec, time.Hour)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := a.Run(ctx, &Request{Messages: []model.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("must degrade instead of erroring: %v", err)
+	}
+	if len(rec.delays) != 0 || !strings.HasPrefix(resp.Text, ModelUnavailableAnswerPrefix) {
+		t.Fatalf("sleeps=%v text=%q", rec.delays, resp.Text)
+	}
+}
+
+func TestModelRecovery_BudgetBoundsCooldowns(t *testing.T) {
+	t.Setenv(EnvModelRecoveryDelays, "")
+	t.Setenv(EnvModelRecoveryBudget, "")
+	executed := 0
+	fake := &scriptedModel{script: []scriptTurn{toolTurn("c1", nil), {err: gateway401()}}}
+	rec := &sleepRecorder{}
+	opts := append(recoveryOpts(rec, 10*time.Second, 20*time.Second, 40*time.Second), WithReActModelRecoveryBudget(35*time.Second))
+	a := NewReActAgent(fake, nil, lookupRegistry(t, &executed), opts...)
 	resp, err := a.Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "x"}}})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(rec.delays) != 0 {
-		t.Fatalf("400 must not sleep: %v", rec.delays)
+	// 10s + 20s 在 35s 预算内，40s 超出 → 不再等待，直接降级。
+	if len(rec.delays) != 2 || resp.Metadata["trace"].(*RunTrace).ModelRecoveries != 2 {
+		t.Fatalf("sleeps=%v", rec.delays)
 	}
-	if !strings.Contains(resp.Text, "HTTP 400") {
-		t.Fatalf("text=%s", resp.Text)
+	if !strings.HasPrefix(resp.Text, ModelUnavailableAnswerPrefix) {
+		t.Fatalf("text=%q", resp.Text)
+	}
+}
+
+func TestModelRecovery_BudgetEnvOverridesAndInheritedBudgetWins(t *testing.T) {
+	t.Setenv(EnvModelRecoveryDelays, "")
+	t.Setenv(EnvModelRecoveryBudget, "0")
+	executed := 0
+	fake := &scriptedModel{script: []scriptTurn{toolTurn("c1", nil), {err: gateway401()}}}
+	rec := &sleepRecorder{}
+	a := NewReActAgent(fake, nil, lookupRegistry(t, &executed), recoveryOpts(rec, time.Millisecond)...)
+	if _, err := a.Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "x"}}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rec.delays) != 0 {
+		t.Fatalf("zero budget must not wait: %v", rec.delays)
+	}
+
+	t.Setenv(EnvModelRecoveryBudget, "")
+	parent := model.NewRetryWaitBudget(3 * time.Millisecond)
+	fake2 := &scriptedModel{script: []scriptTurn{toolTurn("c1", nil), {err: gateway401()}}}
+	rec2 := &sleepRecorder{}
+	b := NewReActAgent(fake2, nil, lookupRegistry(t, &executed), recoveryOpts(rec2, 2*time.Millisecond, 2*time.Millisecond)...)
+	ctx := model.WithRetryWaitBudget(context.Background(), parent)
+	if _, err := b.Run(ctx, &Request{Messages: []model.Message{{Role: "user", Content: "x"}}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rec2.delays) != 1 || parent.Remaining() != time.Millisecond {
+		t.Fatalf("inherited budget must be shared: sleeps=%v remaining=%v", rec2.delays, parent.Remaining())
+	}
+}
+
+func TestModelRecovery_CountsLayerOneRetries(t *testing.T) {
+	t.Setenv(EnvModelRecoveryDelays, "")
+	executed := 0
+	inner := &scriptedModel{script: []scriptTurn{{err: gateway401()}, finalTurn("ok")}}
+	wrapped := model.WrapResilient(inner, model.RetryConfig{MaxAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond, DisableJitter: true})
+	rec := &sleepRecorder{}
+	a := NewReActAgent(wrapped, nil, lookupRegistry(t, &executed), recoveryOpts(rec, time.Millisecond)...)
+	resp, err := a.Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "x"}}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	tr := resp.Metadata["trace"].(*RunTrace)
+	if tr.ModelCallRetries != 1 || tr.ModelRecoveries != 0 || inner.calls != 2 {
+		t.Fatalf("callRetries=%d recoveries=%d calls=%d", tr.ModelCallRetries, tr.ModelRecoveries, inner.calls)
+	}
+}
+
+func TestWithSubWaitBudget_CapsCriticWait(t *testing.T) {
+	parent := model.NewRetryWaitBudget(120 * time.Second)
+	ctx := withSubWaitBudget(model.WithRetryWaitBudget(context.Background(), parent), criticRetryWaitBudget)
+	if got := model.RetryWaitBudgetFrom(ctx).Remaining(); got != 10*time.Second {
+		t.Fatalf("critic budget=%v want 10s", got)
+	}
+	low := model.NewRetryWaitBudget(3 * time.Second)
+	ctx = withSubWaitBudget(model.WithRetryWaitBudget(context.Background(), low), criticRetryWaitBudget)
+	if got := model.RetryWaitBudgetFrom(ctx).Remaining(); got != 3*time.Second {
+		t.Fatalf("critic budget=%v must respect parent", got)
+	}
+	if got := model.RetryWaitBudgetFrom(withSubWaitBudget(context.Background(), criticRetryWaitBudget)).Remaining(); got != 10*time.Second {
+		t.Fatalf("standalone critic budget=%v", got)
+	}
+}
+
+// erroringPlanner 首次 Generate 前 failFirst 次返回 err，之后按 replies 应答。
+type erroringPlanner struct {
+	fakePlanner
+	failAt map[int]error
+	n      int
+}
+
+func (p *erroringPlanner) Generate(ctx context.Context, prompt string, opts ...model.Option) (*model.Generation, error) {
+	p.n++
+	if err := p.failAt[p.n]; err != nil {
+		return nil, err
+	}
+	return p.fakePlanner.Generate(ctx, prompt, opts...)
+}
+
+type budgetSeeingWorker struct {
+	fakeWorker
+	sawBudget bool
+}
+
+func (w *budgetSeeingWorker) Run(ctx context.Context, req *Request) (*Response, error) {
+	w.sawBudget = model.RetryWaitBudgetFrom(ctx) != nil
+	return w.fakeWorker.Run(ctx, req)
+}
+
+func TestPlanExecuteAgent_RetryablePlannerErrorFallsBackToWorker(t *testing.T) {
+	planner := &erroringPlanner{failAt: map[int]error{1: gateway401()}}
+	worker := &budgetSeeingWorker{fakeWorker: fakeWorker{replies: []*Response{{Text: "react-done"}}}}
+	resp, err := NewPlanExecuteAgent(planner, worker).Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "t"}}})
+	if err != nil || resp == nil || resp.Text != "react-done" || worker.calls != 1 {
+		t.Fatalf("resp=%v err=%v calls=%d", resp, err, worker.calls)
+	}
+	if !worker.sawBudget {
+		t.Fatal("worker must share the plan run's wait budget")
+	}
+}
+
+func TestPlanExecuteAgent_RetryableReplanErrorFallsBackToWorker(t *testing.T) {
+	planner := &erroringPlanner{
+		fakePlanner: fakePlanner{replies: []string{`{"steps":[{"id":"a","goal":"A"}]}`}},
+		failAt:      map[int]error{2: &model.APIStatusError{StatusCode: 429}},
+	}
+	worker := &budgetSeeingWorker{fakeWorker: fakeWorker{replies: []*Response{{Text: ""}, {Text: "react-done"}}}}
+	resp, err := NewPlanExecuteAgent(planner, worker).Run(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "t"}}})
+	if err != nil || resp == nil || resp.Text != "react-done" || worker.calls != 2 {
+		t.Fatalf("resp=%v err=%v calls=%d", resp, err, worker.calls)
+	}
+}
+
+func TestPlanExecuteAgent_RunEventsRetryablePlannerErrorFallsBack(t *testing.T) {
+	planner := &erroringPlanner{failAt: map[int]error{1: &model.APIStatusError{StatusCode: 503}}}
+	worker := &fakeWorker{replies: []*Response{{Text: "react-done"}}}
+	ch, err := NewPlanExecuteAgent(planner, worker).RunEvents(context.Background(), &Request{Messages: []model.Message{{Role: "user", Content: "t"}}})
+	if err != nil {
+		t.Fatalf("RunEvents: %v", err)
+	}
+	deltas, done, errs := collectStream(t, ch)
+	if deltas != "react-done" || done == nil || len(errs) != 0 {
+		t.Fatalf("deltas=%q done=%v errs=%v", deltas, done, errs)
 	}
 }
 
@@ -346,7 +523,7 @@ func TestModelRecovery_CanceledDuringCooldownStops(t *testing.T) {
 		return context.Canceled
 	}
 	a := NewReActAgent(fake, nil, lookupRegistry(t, &executed),
-		WithReActMaxSteps(5), WithReActModelRecoveryDelays(time.Hour), WithReActModelRecoverySleep(sleep))
+		WithReActMaxSteps(5), WithReActModelRecoveryDelays(time.Second), WithReActModelRecoverySleep(sleep))
 	resp, err := a.Run(ctx, &Request{Messages: []model.Message{{Role: "user", Content: "x"}}})
 	if err == nil {
 		t.Fatalf("canceled run must not deliver a degraded answer: %#v", resp)
@@ -508,5 +685,9 @@ func TestModelRecoveryDelays_EnvAndDefaults(t *testing.T) {
 	disabled := NewReActAgent(&scriptedModel{}, nil, nil, WithReActModelRecoveryDelays())
 	if got := disabled.modelRecoveryDelays(); len(got) != 0 {
 		t.Fatalf("empty option must disable, got %v", got)
+	}
+	t.Setenv(EnvModelRecoveryDelays, "100,200")
+	if got := disabled.modelRecoveryDelays(); len(got) != 0 {
+		t.Fatalf("explicit disable must beat env (sub-agents), got %v", got)
 	}
 }

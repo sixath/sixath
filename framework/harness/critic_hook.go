@@ -601,7 +601,7 @@ func (c *CriticHook) modelVerdict(ctx context.Context, in StopHookInput) (Critic
 		}
 	}
 	fmt.Fprintf(&b, "\n## 结论草稿\n%s\n", truncRunes(in.Text, 6000))
-	gen, err := c.model.Chat(ctx, []model.Message{
+	gen, err := c.model.Chat(withSubWaitBudget(ctx, criticRetryWaitBudget), []model.Message{
 		{Role: "system", Content: criticSystemPrompt},
 		{Role: "user", Content: b.String()},
 	})

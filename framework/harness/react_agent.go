@@ -125,6 +125,9 @@ type ReActConfig struct {
 	ModelRecoveryDelays []time.Duration
 	// ModelRecoverySleep 冷却等待函数（测试注入）；nil 为可被 ctx 打断的真实等待。
 	ModelRecoverySleep func(ctx context.Context, d time.Duration) error
+	// ModelRecoveryBudget Run 级模型重试等待总预算（两层共享）；nil 用 DefaultModelRecoveryBudget，
+	// EnvModelRecoveryBudget 优先；ctx 已带预算时沿用 ctx 的。
+	ModelRecoveryBudget *time.Duration
 }
 
 // SkillAutoRouter 按用户 query 返回语义最匹配的 Skill；ok=false 表示无命中或路由不可用。
@@ -401,6 +404,7 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 
 	rid := requestID(req)
 	ctx = context.WithValue(ctx, tool.ContextKeyRequestID, rid)
+	ctx = withRunWaitBudget(ctx, a.config.ModelRecoveryBudget)
 	trace := &RunTrace{RequestID: rid}
 	// 可取消：Cancel(rid) 或在途断连都会走同一条取消路径；trace 记录取消事实。
 	ctx, cancelState := a.beginCancelable(ctx, rid)
@@ -541,6 +545,7 @@ func (a *ReActAgent) RunEvents(ctx context.Context, req *Request) (<-chan Stream
 
 	rid := requestID(req)
 	ctx = context.WithValue(ctx, tool.ContextKeyRequestID, rid)
+	ctx = withRunWaitBudget(ctx, a.config.ModelRecoveryBudget)
 	trace := &RunTrace{RequestID: rid}
 	ctx, cancelState := a.beginCancelable(ctx, rid)
 	bus := a.eventBus()

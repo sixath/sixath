@@ -299,7 +299,10 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 //
 // 约定：一次 fn 调用必须是「幂等或尚未产生副作用」的。对流式调用这意味着只重试
 // setup 阶段（首 token 之前）；一旦已产生增量，错误一律直接上报，以免重复正文。
+//
+// ctx 上挂有 RetryWaitBudget 时，每次退避从中扣减；下一次退避超出剩余预算即停止重试并返回该错误。
 func (c RetryConfig) retryCall(ctx context.Context, fn func(context.Context) error) error {
+	budget := RetryWaitBudgetFrom(ctx)
 	var lastErr error
 	for attempt := 1; attempt <= c.MaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -317,6 +320,12 @@ func (c RetryConfig) retryCall(ctx context.Context, fn func(context.Context) err
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
 			// 等不到下一次尝试就会超时：直接上报模型错误，便于上层分类与降级。
 			return lastErr
+		}
+		if budget != nil {
+			if !budget.TryReserve(delay) {
+				return lastErr
+			}
+			budget.noteRetry()
 		}
 		if c.OnRetry != nil {
 			c.OnRetry(attempt, lastErr, delay)

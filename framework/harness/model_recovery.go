@@ -15,15 +15,41 @@ import (
 	"github.com/sixath/framework/redact"
 )
 
-// EnvModelRecoveryDelays 覆盖步骤级模型恢复的冷却序列（毫秒，逗号分隔），
-// 如 "10000,20000,40000"；"0"/"off" 关闭。设置后优先于 ReActConfig.ModelRecoveryDelays。
+// 模型错误的两层容错：
 //
-// 与 model.WrapResilient 的单次调用重试（SATH_MODEL_RETRY_*）叠加：单次调用重试耗尽后，
-// 同一步骤以相同 messages 再整体重试，预算按 Run 共享，默认额外等待约 70s。
+//  1. model.WrapResilient：单次调用内重试（SATH_MODEL_RETRY_*），401/429/5xx/传输错误可重试。
+//  2. 本文件 callModel：单次调用重试耗尽后，冷却（EnvModelRecoveryDelays）再以相同 messages
+//     重试同一步；已执行的工具不会重跑。
+//
+// 两层的「等待」共用一个 Run 级 model.RetryWaitBudget（EnvModelRecoveryBudget，默认 120s），经 ctx
+// 传递给 WrapResilient 与子 agent；只计退避/冷却，不计生成耗时。下一次等待超出剩余预算或 ctx
+// deadline 时不再等待，直接进入降级。
+//
+// 降级：可恢复类模型错误最终仍失败、且本 Run 已有工具结果时，以工具结果拼出确定性的部分结果作为终答
+// （ModelUnavailableAnswer，开头为 ModelUnavailableAnswerPrefix）：
+//   - 非流式 Run 返回 error=nil，Response.Metadata["model_unavailable"]=true，且 trace.ModelUnavailable=true、
+//     trace.Errors 含该模型错误；
+//   - 流式 RunEvents 以 delta + done（Metadata["model_unavailable"]=true）结束而非 error。流式界面上可能依次出现
+//     半截正文、ModelRetryNotice 与重试后的完整正文，而 done.Text / 落库消息只含最终正文。
+//
+// 不可恢复错误（400 上下文超长、内容过滤、403、404 等）或尚无工具结果时沿用原报错路径。
+
+// EnvModelRecoveryDelays 覆盖步骤级模型恢复的冷却序列（毫秒，逗号分隔），
+// 如 "10000,20000,40000"；"0"/"off" 关闭。设置后优先于 ReActConfig.ModelRecoveryDelays
+// （例外：显式 WithReActModelRecoveryDelays() 关闭恢复时以配置为准，供子 agent 使用）。
 const EnvModelRecoveryDelays = "SATH_MODEL_RECOVERY_DELAYS_MS"
+
+// EnvModelRecoveryBudget 覆盖 Run 级模型重试等待总预算（毫秒），覆盖两层等待；设置后优先于配置。
+const EnvModelRecoveryBudget = "SATH_MODEL_RECOVERY_BUDGET_MS"
 
 // DefaultModelRecoveryDelays 为默认冷却序列（3 次恢复）。
 var DefaultModelRecoveryDelays = []time.Duration{10 * time.Second, 20 * time.Second, 40 * time.Second}
+
+// DefaultModelRecoveryBudget 为默认 Run 级等待预算。
+const DefaultModelRecoveryBudget = 120 * time.Second
+
+// criticRetryWaitBudget 为 critic 模型调用的等待上限：critic 失败即放行，不值得久等。
+const criticRetryWaitBudget = 10 * time.Second
 
 // ModelRetryNotice 在流式输出中途断开、即将重试本步时补发，避免两次尝试的正文黏连。
 const ModelRetryNotice = "\n\n（模型连接中断，正在重试…）\n\n"
@@ -55,7 +81,17 @@ func WithReActModelRecoverySleep(fn func(context.Context, time.Duration) error) 
 	}
 }
 
+// WithReActModelRecoveryBudget 设置 Run 级等待预算（ctx 上已有预算时沿用 ctx 的，如子 agent）。
+func WithReActModelRecoveryBudget(d time.Duration) ReActOption {
+	return func(c *ReActConfig) {
+		c.ModelRecoveryBudget = &d
+	}
+}
+
 func (a *ReActAgent) modelRecoveryDelays() []time.Duration {
+	if a != nil && a.config.ModelRecoveryDelays != nil && len(a.config.ModelRecoveryDelays) == 0 {
+		return a.config.ModelRecoveryDelays
+	}
 	if d, ok := modelRecoveryDelaysFromEnv(); ok {
 		return d
 	}
@@ -63,6 +99,33 @@ func (a *ReActAgent) modelRecoveryDelays() []time.Duration {
 		return a.config.ModelRecoveryDelays
 	}
 	return DefaultModelRecoveryDelays
+}
+
+func modelRecoveryBudgetTotal(configured *time.Duration) time.Duration {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(EnvModelRecoveryBudget))); err == nil && n >= 0 {
+		return time.Duration(n) * time.Millisecond
+	}
+	if configured != nil {
+		return *configured
+	}
+	return DefaultModelRecoveryBudget
+}
+
+// withRunWaitBudget 确保 ctx 带有 Run 级等待预算；已有（父 agent / plan agent 传入）则沿用，
+// 使嵌套调用共享同一上限。
+func withRunWaitBudget(ctx context.Context, configured *time.Duration) context.Context {
+	if model.RetryWaitBudgetFrom(ctx) != nil {
+		return ctx
+	}
+	return model.WithRetryWaitBudget(ctx, model.NewRetryWaitBudget(modelRecoveryBudgetTotal(configured)))
+}
+
+// withSubWaitBudget 为局部调用派生更小的等待上限（同时受父预算约束）。
+func withSubWaitBudget(ctx context.Context, limit time.Duration) context.Context {
+	if parent := model.RetryWaitBudgetFrom(ctx); parent != nil {
+		return model.WithRetryWaitBudget(ctx, parent.Sub(limit))
+	}
+	return model.WithRetryWaitBudget(ctx, model.NewRetryWaitBudget(limit))
 }
 
 func modelRecoveryDelaysFromEnv() ([]time.Duration, bool) {
@@ -103,8 +166,9 @@ func (a *ReActAgent) recoverySleep(ctx context.Context, d time.Duration) error {
 }
 
 // callModel 执行一次模型调用；遇到可恢复的模型错误（WrapResilient 已重试耗尽）时，
-// 按 Run 级预算冷却后以相同输入重试。call 必须只包含模型调用本身（不得执行工具）。
+// 按 Run 级冷却序列与等待预算冷却后以相同输入重试。call 必须只包含模型调用本身（不得执行工具）。
 // beforeRetry 在决定重试、开始冷却前调用（可为 nil），返回 false 放弃重试。
+// 每次 call 内 WrapResilient 的重试次数累加到 trace.ModelCallRetries。
 func (a *ReActAgent) callModel(
 	ctx context.Context,
 	trace *RunTrace,
@@ -113,8 +177,13 @@ func (a *ReActAgent) callModel(
 	beforeRetry func() bool,
 	call func() error,
 ) error {
+	budget := model.RetryWaitBudgetFrom(ctx)
 	for {
+		before := budget.Retries()
 		err := call()
+		if trace != nil {
+			trace.ModelCallRetries += budget.Retries() - before
+		}
 		if err == nil {
 			return nil
 		}
@@ -126,10 +195,20 @@ func (a *ReActAgent) callModel(
 		if n >= len(delays) {
 			return err
 		}
+		delay := delays[n]
+		// 等不完这次冷却（ctx 将超时或预算不足）就不等：直接返回错误，由调用方降级给出部分结果。
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+			return err
+		}
+		if budget != nil && delay > budget.Remaining() {
+			return err
+		}
 		if beforeRetry != nil && !beforeRetry() {
 			return err
 		}
-		delay := delays[n]
+		if !budget.TryReserve(delay) {
+			return err
+		}
 		trace.ModelRecoveries++
 		trace.ModelRecoveryErrors = append(trace.ModelRecoveryErrors, err.Error())
 		emit(events.ModelRecovering, map[string]any{
@@ -145,10 +224,13 @@ func (a *ReActAgent) callModel(
 	}
 }
 
-// degradeOnModelError 在模型最终不可用、但本 Run 已有工具结果时生成确定性的部分结果
-// （未经模型总结）并按普通终答落记忆；取消或尚无工具结果时返回 false，沿用报错路径。
+// degradeOnModelError 在可恢复类模型错误最终仍失败、且本 Run 已有工具结果时生成确定性的部分结果
+// （未经模型总结）并按普通终答落记忆；不可恢复错误、取消或尚无工具结果时返回 false，沿用报错路径。
 func (a *ReActAgent) degradeOnModelError(ctx context.Context, trace *RunTrace, err error, emit func(events.Kind, map[string]any)) (string, bool) {
 	if err == nil || errors.Is(err, errStreamAborted) || canceled(ctx) || trace == nil || len(trace.ToolCalls) == 0 {
+		return "", false
+	}
+	if !model.IsRetryableModelError(err) {
 		return "", false
 	}
 	text := ModelUnavailableAnswer(trace.ToolCalls, err)
