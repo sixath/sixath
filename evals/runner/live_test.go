@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/model"
 	"github.com/sixath/framework/tool"
 )
@@ -124,6 +125,31 @@ func TestRunLiveTask_AnswerShapeModelFailureIsLost(t *testing.T) {
 	r := runLiveTask(shapeTask, failingESRegistry(), &unavailableModel{}, liveOptions{Judge: j})
 	if r.FailureReason != "infra_error" || !isLostRun(r) {
 		t.Fatalf("model call failure must be a lost run, got %+v", r)
+	}
+}
+
+// degradedModel 先调用一次工具，之后模型持续返回网关 401，harness 会给出降级答复。
+type degradedModel struct{ toolErrorModel }
+
+func (m *degradedModel) Chat(context.Context, []model.Message, ...model.Option) (*model.Generation, error) {
+	return nil, &model.APIStatusError{StatusCode: 401, Message: "Invalid token"}
+}
+func (m *degradedModel) ChatWithTools(ctx context.Context, msgs []model.Message, reg *tool.Registry, opts ...model.Option) (*model.Generation, error) {
+	if m.calls == 0 {
+		return m.toolErrorModel.ChatWithTools(ctx, msgs, reg, opts...)
+	}
+	return nil, &model.APIStatusError{StatusCode: 401, Message: "Invalid token"}
+}
+
+func TestRunLiveTask_DegradedAnswerIsLost(t *testing.T) {
+	t.Setenv(agent.EnvModelRecoveryDelays, "off")
+	j := &Judge{Model: &stubJudgeModel{replies: []string{allPass}}}
+	r := runLiveTask(shapeTask, failingESRegistry(), &degradedModel{}, liveOptions{Judge: j})
+	if r.FailureReason != "infra_error" || !isLostRun(r) || r.Judge != nil {
+		t.Fatalf("degraded (model unavailable) answer must be a lost run, got %+v", r)
+	}
+	if !strings.Contains(r.Error, "401") || !strings.HasPrefix(r.Output, agent.ModelUnavailableAnswerPrefix) {
+		t.Fatalf("error=%q output=%q", r.Error, r.Output)
 	}
 }
 

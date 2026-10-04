@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/model"
 )
 
@@ -329,6 +330,7 @@ func TestClassifyPortalTurn(t *testing.T) {
 		{"too many requests", portalTurn{Failed: true, Error: "Too Many Requests"}, nil, "infra_error", "", false, false, false},
 		{"other run error", portalTurn{Failed: true, Error: "context deadline exceeded", Timeline: tl}, nil, "run_error", "harness", false, false, true},
 		{"hitl", portalTurn{HITL: true, Answer: "请确认", Timeline: tl}, nil, "hitl_required", "harness", false, false, true},
+		{"degraded model-unavailable answer", portalTurn{Answer: agent.ModelUnavailableAnswerPrefix + "HTTP 401：Invalid token），以下是已完成步骤的结果，未经模型总结。\n\n1. **es_log_query**", Timeline: tl}, nil, "infra_error", "", false, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

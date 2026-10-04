@@ -161,6 +161,15 @@ func runLiveTask(task Task, reg *tool.Registry, m model.Model, lo liveOptions) T
 		res.CriticRounds = criticRounds(tr.StopHookContinues)
 		res.HitMaxSteps = tr.ModelCalls > maxSteps
 	}
+	// 模型最终不可用时 harness 返回由工具结果拼出的降级答复（无 error），按模型调用失败同样归类。
+	if tr != nil && tr.ModelUnavailable {
+		res.FailureReason, res.Attribution = "model_error", "model"
+		res.Error = strings.Join(tr.Errors, "; ")
+		if task.Category == "answer_shape" {
+			res.FailureReason, res.Attribution = "infra_error", ""
+		}
+		return res
+	}
 
 	if task.Category == "answer_shape" {
 		jctx, cancel := context.Background(), context.CancelFunc(func() {})

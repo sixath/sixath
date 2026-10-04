@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	agent "github.com/sixath/framework/harness"
 )
 
 const (
@@ -482,6 +484,11 @@ var portalInfraStatusRes = []*regexp.Regexp{
 func classifyPortalTurn(task Task, turn portalTurn, err error) (TaskResult, bool) {
 	if err != nil {
 		return TaskResult{TaskID: task.ID, Category: task.Category, FailureReason: "infra_error", Error: err.Error()}, false
+	}
+	if !turn.Failed && strings.HasPrefix(strings.TrimSpace(turn.Answer), agent.ModelUnavailableAnswerPrefix) {
+		// 模型持续不可用时 harness 以工具结果拼出降级答复（未经模型总结），按基础设施故障记丢失运行。
+		first, _, _ := strings.Cut(strings.TrimSpace(turn.Answer), "\n")
+		return TaskResult{TaskID: task.ID, Category: task.Category, FailureReason: "infra_error", Output: turn.Answer, Error: first}, false
 	}
 	if !turn.TimedOut && !turn.Failed && !turn.HITL {
 		return TaskResult{}, true
