@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -325,9 +326,11 @@ func TestWrapResilient_DeadlineDuringBackoffStopsRetry(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
+	// 退避时长超过剩余 deadline 时直接返回最后一次模型错误（而非空等到 deadline）。
 	_, err := m.Chat(ctx, []Message{{Role: "user", Content: "hi"}})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("err=%v want context.DeadlineExceeded", err)
+	var apiErr *APIStatusError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 500 {
+		t.Fatalf("err=%v want last model error (500)", err)
 	}
 	if got := fake.callCount(); got != 1 {
 		t.Fatalf("calls=%d want 1 (must not keep hammering after deadline)", got)
@@ -396,12 +399,115 @@ func TestRetryConfig_BackoffSequence(t *testing.T) {
 }
 
 func TestRetryConfig_BackoffHonoursRetryAfterAndCap(t *testing.T) {
-	cfg := RetryConfig{BaseDelay: time.Second, MaxDelay: 2 * time.Second, DisableJitter: true}.normalized()
+	cfg := RetryConfig{BaseDelay: time.Second, MaxDelay: 2 * time.Second, MaxRetryAfter: 30 * time.Second, DisableJitter: true}.normalized()
 	if got := cfg.backoff(1, 1500*time.Millisecond); got != 1500*time.Millisecond {
 		t.Fatalf("Retry-After honoured: got %v", got)
 	}
-	if got := cfg.backoff(1, time.Hour); got != 2*time.Second {
-		t.Fatalf("Retry-After capped by MaxDelay: got %v", got)
+	// Retry-After 不受 MaxDelay 限制，只受 MaxRetryAfter 限制。
+	if got := cfg.backoff(1, 20*time.Second); got != 20*time.Second {
+		t.Fatalf("Retry-After above MaxDelay honoured: got %v", got)
+	}
+	if got := cfg.backoff(1, time.Hour); got != 30*time.Second {
+		t.Fatalf("Retry-After capped by MaxRetryAfter: got %v", got)
+	}
+}
+
+func TestRetryConfig_Defaults(t *testing.T) {
+	cfg := RetryConfig{}.normalized()
+	if cfg.MaxAttempts != 4 {
+		t.Fatalf("MaxAttempts=%d want 4", cfg.MaxAttempts)
+	}
+	if cfg.MaxDelay != 8*time.Second {
+		t.Fatalf("MaxDelay=%v want 8s", cfg.MaxDelay)
+	}
+	if cfg.MaxRetryAfter != 60*time.Second {
+		t.Fatalf("MaxRetryAfter=%v want 60s", cfg.MaxRetryAfter)
+	}
+}
+
+func TestRetryConfig_EnvOverrideMaxRetryAfter(t *testing.T) {
+	t.Setenv("SATH_MODEL_RETRY_MAX_RETRY_AFTER_MS", "5000")
+	cfg := RetryConfig{}.withEnvOverrides().normalized()
+	if cfg.MaxRetryAfter != 5*time.Second {
+		t.Fatalf("MaxRetryAfter=%v want 5s", cfg.MaxRetryAfter)
+	}
+}
+
+func TestWrapResilient_RetriesOn401ThenSucceeds(t *testing.T) {
+	fake := &retryFake{
+		failFirst: 1,
+		err:       &openai.APIError{HTTPStatusCode: 401, Message: "Invalid token (request id: abc)"},
+		text:      "ok",
+	}
+	m := WrapResilient(&retryFakeModel{f: fake}, testRetryConfig(3))
+	gen, err := m.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if gen.Text != "ok" || fake.callCount() != 2 {
+		t.Fatalf("text=%q calls=%d", gen.Text, fake.callCount())
+	}
+}
+
+func TestWrapResilient_RetryAfterBeyondDeadlineFailsFast(t *testing.T) {
+	fake := &retryFake{failFirst: 99, err: &APIStatusError{StatusCode: 429, RetryAfter: 30 * time.Second}}
+	m := WrapResilient(&retryFakeModel{f: fake}, testRetryConfig(4))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := m.Chat(ctx, []Message{{Role: "user", Content: "hi"}})
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("waited %v; must not sleep past ctx deadline", elapsed)
+	}
+	var apiErr *APIStatusError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 {
+		t.Fatalf("err=%v want last model error (429)", err)
+	}
+	if got := fake.callCount(); got != 1 {
+		t.Fatalf("calls=%d want 1", got)
+	}
+}
+
+func TestIsRetryableModelError(t *testing.T) {
+	if !IsRetryableModelError(&openai.APIError{HTTPStatusCode: 401}) {
+		t.Fatal("401 must be retryable")
+	}
+	if !IsRetryableModelError(fmt.Errorf("stream: %w", &APIStatusError{StatusCode: 429})) {
+		t.Fatal("wrapped 429 must be retryable")
+	}
+	if IsRetryableModelError(&APIStatusError{StatusCode: 400}) {
+		t.Fatal("400 must not be retryable")
+	}
+	// 类型在跨层传递中丢失时（只剩 go-openai 的错误文本），仍按状态码判定。
+	if !IsRetryableModelError(errors.New("error, status code: 401, status: 401 Unauthorized, message: Invalid token (request id: x)")) {
+		t.Fatal("textual 401 must be retryable")
+	}
+	if IsRetryableModelError(errors.New("error, status code: 403, status: 403 Forbidden")) {
+		t.Fatal("textual 403 must not be retryable")
+	}
+	if IsRetryableModelError(context.Canceled) {
+		t.Fatal("canceled must not be retryable")
+	}
+}
+
+func TestModelErrorStatus(t *testing.T) {
+	tests := []struct {
+		err  error
+		code int
+		ok   bool
+	}{
+		{&APIStatusError{StatusCode: 429}, 429, true},
+		{fmt.Errorf("x: %w", &openai.APIError{HTTPStatusCode: 401}), 401, true},
+		{&openai.RequestError{HTTPStatusCode: 502, Err: &openai.APIError{}}, 502, true},
+		{errors.New("error, status code: 401, status: 401 Unauthorized"), 401, true},
+		{errors.New("boom"), 0, false},
+		{nil, 0, false},
+	}
+	for _, tt := range tests {
+		code, ok := ModelErrorStatus(tt.err)
+		if code != tt.code || ok != tt.ok {
+			t.Fatalf("ModelErrorStatus(%v)=(%d,%v) want (%d,%v)", tt.err, code, ok, tt.code, tt.ok)
+		}
 	}
 }
 
@@ -436,9 +542,12 @@ func TestRetryableModelError_Classification(t *testing.T) {
 		{"500", &APIStatusError{StatusCode: 500}, true},
 		{"503", &APIStatusError{StatusCode: 503}, true},
 		{"400", &APIStatusError{StatusCode: 400}, false},
-		{"401", &APIStatusError{StatusCode: 401}, false},
+		// 网关偶发 401 Invalid token，按 429 同等对待。
+		{"401", &APIStatusError{StatusCode: 401}, true},
+		{"403", &APIStatusError{StatusCode: 403}, false},
 		{"404", &APIStatusError{StatusCode: 404}, false},
 		{"openai 429", &openai.APIError{HTTPStatusCode: 429}, true},
+		{"openai 401", &openai.APIError{HTTPStatusCode: 401, Message: "Invalid token"}, true},
 		{"openai 403", &openai.APIError{HTTPStatusCode: 403}, false},
 		{"openai request transport", &openai.RequestError{}, true},
 		// SDK 在响应体非 JSON 时构造的形态：外层带真实状态码、内层状态码为 0。

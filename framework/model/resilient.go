@@ -20,9 +20,10 @@ import (
 
 // 重试默认值。可用 SATH_MODEL_RETRY_* 环境变量覆盖（见 withEnvOverrides）。
 const (
-	DefaultRetryMaxAttempts = 3
-	DefaultRetryBaseDelay   = 500 * time.Millisecond
-	DefaultRetryMaxDelay    = 8 * time.Second
+	DefaultRetryMaxAttempts   = 4
+	DefaultRetryBaseDelay     = 500 * time.Millisecond
+	DefaultRetryMaxDelay      = 8 * time.Second
+	DefaultRetryMaxRetryAfter = 60 * time.Second
 )
 
 // APIStatusError 表示 provider 返回的 HTTP 层失败，由各 provider 适配器构造，
@@ -58,8 +59,11 @@ type RetryConfig struct {
 	MaxAttempts int
 	// BaseDelay 为首次退避时长；<=0 时使用 DefaultRetryBaseDelay。
 	BaseDelay time.Duration
-	// MaxDelay 为单次退避上限；<=0 时使用 DefaultRetryMaxDelay。
+	// MaxDelay 为单次计算退避（指数退避）的上限；<=0 时使用 DefaultRetryMaxDelay。
 	MaxDelay time.Duration
+	// MaxRetryAfter 为 provider Retry-After 的采纳上限（独立于 MaxDelay，限流窗口
+	// 常远大于 8s）；<=0 时使用 DefaultRetryMaxRetryAfter。
+	MaxRetryAfter time.Duration
 	// DisableJitter 关闭 full jitter（默认启用，用于打散重试风暴）。
 	DisableJitter bool
 	// OnRetry 在每次重试前回调，供调用方打点/日志；可为 nil。
@@ -79,15 +83,22 @@ func (c RetryConfig) normalized() RetryConfig {
 	if c.MaxDelay < c.BaseDelay {
 		c.MaxDelay = c.BaseDelay
 	}
+	if c.MaxRetryAfter <= 0 {
+		c.MaxRetryAfter = DefaultRetryMaxRetryAfter
+	}
 	return c
 }
 
 // withEnvOverrides 允许不改代码即调节重试行为（部署期调优 + 事故时快速降级）：
 //
-//	SATH_MODEL_RETRY_MAX_ATTEMPTS=1        关闭重试
+//	SATH_MODEL_RETRY_MAX_ATTEMPTS=1        关闭重试（默认 4，含首次）
 //	SATH_MODEL_RETRY_BASE_DELAY_MS=200
-//	SATH_MODEL_RETRY_MAX_DELAY_MS=4000
+//	SATH_MODEL_RETRY_MAX_DELAY_MS=4000     指数退避单次上限（默认 8000）
+//	SATH_MODEL_RETRY_MAX_RETRY_AFTER_MS=60000  Retry-After 采纳上限（默认 60000）
 //	SATH_MODEL_RETRY_DISABLE_JITTER=1
+//
+// 单次调用重试耗尽后，harness 还有一层按步骤的恢复（SATH_MODEL_RECOVERY_DELAYS_MS，
+// 见 framework/harness/model_recovery.go）。
 func (c RetryConfig) withEnvOverrides() RetryConfig {
 	if v, ok := envInt("SATH_MODEL_RETRY_MAX_ATTEMPTS"); ok {
 		c.MaxAttempts = v
@@ -97,6 +108,9 @@ func (c RetryConfig) withEnvOverrides() RetryConfig {
 	}
 	if v, ok := envInt("SATH_MODEL_RETRY_MAX_DELAY_MS"); ok {
 		c.MaxDelay = time.Duration(v) * time.Millisecond
+	}
+	if v, ok := envInt("SATH_MODEL_RETRY_MAX_RETRY_AFTER_MS"); ok {
+		c.MaxRetryAfter = time.Duration(v) * time.Millisecond
 	}
 	if v := strings.TrimSpace(os.Getenv("SATH_MODEL_RETRY_DISABLE_JITTER")); v == "1" || strings.EqualFold(v, "true") {
 		c.DisableJitter = true
@@ -139,8 +153,8 @@ func envInt(name string) (int, bool) {
 // backoff 计算第 attempt 次失败后的等待时长（attempt 从 1 开始）。
 func (c RetryConfig) backoff(attempt int, retryAfter time.Duration) time.Duration {
 	if retryAfter > 0 {
-		if retryAfter > c.MaxDelay {
-			return c.MaxDelay
+		if retryAfter > c.MaxRetryAfter {
+			return c.MaxRetryAfter
 		}
 		return retryAfter
 	}
@@ -200,13 +214,64 @@ func retryableModelError(err error) (bool, time.Duration) {
 		errors.Is(err, io.EOF) {
 		return true, 0
 	}
+	if code, ok := statusFromErrorText(err.Error()); ok {
+		return statusCodeRetryable(code), 0
+	}
 	return false, 0
 }
 
-// statusCodeRetryable 只对明确的瞬时状态码放行；400/401/403/404 重试无意义。
+// IsRetryableModelError 报告 err 是否为瞬时模型错误（限流、网关 401、5xx、传输中断等），
+// 供 harness 在 WrapResilient 重试耗尽后决定是否做步骤级恢复。
+func IsRetryableModelError(err error) bool {
+	ok, _ := retryableModelError(err)
+	return ok
+}
+
+// ModelErrorStatus 从模型错误中提取 HTTP 状态码（APIStatusError / go-openai 错误，
+// 或类型丢失后仅剩的 go-openai 错误文本）。
+func ModelErrorStatus(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	var apiErr *APIStatusError
+	if errors.As(err, &apiErr) && apiErr.StatusCode > 0 {
+		return apiErr.StatusCode, true
+	}
+	var oaiReq *openai.RequestError
+	if errors.As(err, &oaiReq) && oaiReq.HTTPStatusCode > 0 {
+		return oaiReq.HTTPStatusCode, true
+	}
+	var oaiAPI *openai.APIError
+	if errors.As(err, &oaiAPI) && oaiAPI.HTTPStatusCode > 0 {
+		return oaiAPI.HTTPStatusCode, true
+	}
+	return statusFromErrorText(err.Error())
+}
+
+// statusFromErrorText 识别 go-openai 的错误文本格式 "status code: 401"，
+// 仅作为错误类型在跨层传递中丢失（被 %v 格式化）时的兜底。
+func statusFromErrorText(s string) (int, bool) {
+	const marker = "status code: "
+	i := strings.Index(s, marker)
+	if i < 0 {
+		return 0, false
+	}
+	rest := s[i+len(marker):]
+	if len(rest) < 3 {
+		return 0, false
+	}
+	code, err := strconv.Atoi(rest[:3])
+	if err != nil || code < 100 || code > 599 {
+		return 0, false
+	}
+	return code, true
+}
+
+// statusCodeRetryable 只对明确的瞬时状态码放行；400/403/404 重试无意义。
+// 401 例外：上游网关会偶发返回 401 Invalid token（token 本身有效），按 429 同等对待。
 func statusCodeRetryable(status int) bool {
 	switch {
-	case status == 408, status == 409, status == 425, status == 429:
+	case status == 401, status == 408, status == 409, status == 425, status == 429:
 		return true
 	case status >= 500 && status <= 599:
 		return true
@@ -249,6 +314,10 @@ func (c RetryConfig) retryCall(ctx context.Context, fn func(context.Context) err
 			return lastErr
 		}
 		delay := c.backoff(attempt, retryAfter)
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+			// 等不到下一次尝试就会超时：直接上报模型错误，便于上层分类与降级。
+			return lastErr
+		}
 		if c.OnRetry != nil {
 			c.OnRetry(attempt, lastErr, delay)
 		}
