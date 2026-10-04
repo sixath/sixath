@@ -181,7 +181,8 @@ go run . -mode=live -tasks ../tasks_ci/answer_shape_ci.jsonl -model <m> -base-ur
 fixtures 写法：`{"tool":"es_log_query","match":"flow_id","response":"..."}`。被调用工具名命中 `tool`、且参数 JSON（键按字典序、无空格）包含 `match` 中任一项（`|` 分隔，忽略大小写；空表示任意参数）时返回 `response`；同一工具按声明顺序取第一条命中，所以更具体的 `match` 要放前面；都不命中时返回空 hits。`response` 应按真实工具的返回形态写（`es_log_query` 用 `hit_status` / `total` / `hits` / `aggregations`），轨迹摘要据此判断空结果：`hit_status` 为 `empty` 或 `total=0` 记为空结果；请求了聚合（`agg_field` / `agg_interval`）而聚合桶全空时，即使 `total>0` 也记为空结果（`agg_empty`）。
 
 失败分类：
-- 丢失运行（不进 `e2e_pass_rate` 分母）只有 `infra_error`（网关/连接/限流等基础设施故障，live 模式下模型调用失败）和 `judge_error`（judge 未配置、调用失败或输出无法解析）。
+- 丢失运行（不进 `e2e_pass_rate` 分母）只有 `infra_error`（网关/连接/限流等基础设施故障，live 模式下模型调用失败；模型重试与步骤级恢复耗尽后 agent 给出的「模型服务暂时不可用（…）」降级答复也算）和 `judge_error`（judge 未配置、调用失败或输出无法解析）。
+- 模型错误的容忍度：单次调用重试见 `SATH_MODEL_RETRY_*`（默认 4 次，401/429/5xx 可重试，Retry-After 最多等 `SATH_MODEL_RETRY_MAX_RETRY_AFTER_MS`=60000），之后同一步骤按 `SATH_MODEL_RECOVERY_DELAYS_MS`（默认 `10000,20000,40000`，`off` 关闭）冷却重试，每题最多额外等待约 2 分钟；`-turn-timeout` 需留出这部分余量。
 - 计入失败：`shape_mismatch`（judge 判不通过）、`timeout`、`run_error`、`hitl_required`（agent 请求人工确认，评测无法回应）、`model_error`（跑满 `max_steps`）。
 
 门禁：
