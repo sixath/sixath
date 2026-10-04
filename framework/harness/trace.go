@@ -108,6 +108,14 @@ type RunTrace struct {
 	// CanceledByRequest 为 true 表示取消来自 Cancel API（区别于父 ctx 取消/客户端断连）。
 	CanceledByRequest bool `json:"canceled_by_request,omitempty"`
 
+	// ModelRecoveries 为步骤级模型恢复（冷却后重试同一步）的次数；恢复成功不计入 Errors。
+	ModelRecoveries int `json:"model_recoveries,omitempty"`
+	// ModelRecoveryErrors 为触发每次恢复的模型错误（与 ModelRecoveries 一一对应）。
+	ModelRecoveryErrors []string `json:"model_recovery_errors,omitempty"`
+	// ModelUnavailable 为 true 表示模型最终不可用，终答是由工具结果拼出的降级部分结果
+	// （未经模型总结）；此时 Errors 含该模型错误。
+	ModelUnavailable bool `json:"model_unavailable,omitempty"`
+
 	// invocationSeq 为单次 Run 内 model 调用序号，不序列化。
 	invocationSeq int `json:"-"`
 }

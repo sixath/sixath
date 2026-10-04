@@ -120,6 +120,11 @@ type ReActConfig struct {
 	StopHooks []StopHook
 	// MaxStopNudges 单次 Run 内 StopHook 继续次数上限；<=0 时默认 DefaultMaxStopNudges。
 	MaxStopNudges int
+	// ModelRecoveryDelays 步骤级模型恢复的冷却序列（Run 内共享）；nil 用 DefaultModelRecoveryDelays，
+	// 空切片关闭。EnvModelRecoveryDelays 设置时优先（见 model_recovery.go）。
+	ModelRecoveryDelays []time.Duration
+	// ModelRecoverySleep 冷却等待函数（测试注入）；nil 为可被 ctx 打断的真实等待。
+	ModelRecoverySleep func(ctx context.Context, d time.Duration) error
 }
 
 // SkillAutoRouter 按用户 query 返回语义最匹配的 Skill；ok=false 表示无命中或路由不可用。
@@ -430,8 +435,16 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools"})
 		beginModelInvocation(trace, "tools")
 		messages = a.prepareModelMessages(ctx, messages, trace)
-		gen, err := tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts()...)
+		var gen *model.Generation
+		err := a.callModel(ctx, trace, emit, step, nil, func() error {
+			var cerr error
+			gen, cerr = tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts()...)
+			return cerr
+		})
 		if err != nil {
+			if resp, ok := a.degradedResponse(ctx, trace, messages, err, emit); ok {
+				return resp, nil
+			}
 			trace.Errors = append(trace.Errors, err.Error())
 			emit(events.RunError, map[string]any{"error": err.Error(), "step": step})
 			return nil, runError(err, trace)
@@ -478,6 +491,9 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 
 	resp, sumErr := a.forceFinalSummary(ctx, req, messages, trace, emit)
 	if sumErr != nil {
+		if dresp, ok := a.degradedResponse(ctx, trace, messages, sumErr, emit); ok {
+			return dresp, nil
+		}
 		trace.Errors = append(trace.Errors, sumErr.Error())
 		emit(events.RunError, map[string]any{"error": sumErr.Error(), "forced_summary": true})
 		return nil, runError(sumErr, trace)
@@ -720,7 +736,12 @@ func (a *ReActAgent) runPlainEvents(
 	if !hasStream {
 		beginModelInvocation(trace, "plain_stream")
 		messages = a.prepareModelMessages(ctx, messages, trace)
-		gen, err := a.model.Chat(ctx, messages, a.modelOpts()...)
+		var gen *model.Generation
+		err := a.callModel(ctx, trace, emit, -1, nil, func() error {
+			var cerr error
+			gen, cerr = a.model.Chat(ctx, messages, a.modelOpts()...)
+			return cerr
+		})
 		if err != nil {
 			sendError(err, -1)
 			return
@@ -738,7 +759,12 @@ func (a *ReActAgent) runPlainEvents(
 
 	beginModelInvocation(trace, "plain_stream")
 	messages = a.prepareModelMessages(ctx, messages, trace)
-	ch, err := sm.ChatStream(ctx, messages, a.modelOpts()...)
+	var ch <-chan string
+	err := a.callModel(ctx, trace, emit, -1, nil, func() error {
+		var cerr error
+		ch, cerr = sm.ChatStream(ctx, messages, a.modelOpts()...)
+		return cerr
+	})
 	if err != nil {
 		sendError(err, -1)
 		return
@@ -772,9 +798,16 @@ func (a *ReActAgent) runToolEventsSync(
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools"})
 		beginModelInvocation(trace, "tools")
 		messages = a.prepareModelMessages(ctx, messages, trace)
-		gen, err := tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts()...)
+		var gen *model.Generation
+		err := a.callModel(ctx, trace, emit, step, nil, func() error {
+			var cerr error
+			gen, cerr = tm.ChatWithTools(ctx, messages, a.tools, a.modelOpts()...)
+			return cerr
+		})
 		if err != nil {
-			sendError(err, step)
+			if !a.finishDegradedStream(ctx, trace, messages, err, false, emit, send) {
+				sendError(err, step)
+			}
 			return
 		}
 		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
@@ -841,7 +874,7 @@ func (a *ReActAgent) runToolEventsSync(
 	}
 
 	if handled, sumErr := a.forceFinalSummaryStream(ctx, req, messages, trace, emit, send); handled {
-		if sumErr != nil {
+		if sumErr != nil && !a.finishDegradedStream(ctx, trace, messages, sumErr, false, emit, send) {
 			sendError(sumErr, a.config.MaxSteps)
 		}
 		return
@@ -866,19 +899,38 @@ func (a *ReActAgent) runToolEvents(
 		emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": step, "mode": "tools_stream"})
 		beginModelInvocation(trace, "tools_stream")
 		messages = a.prepareModelMessages(ctx, messages, trace)
-		textCh, genCh, err := tsm.ChatWithToolsStream(ctx, messages, a.tools, a.modelOpts()...)
+		var gen *model.Generation
+		// streamed 表示本次尝试已向客户端发出正文增量；中途失败重试前须先补发分隔提示。
+		streamed := false
+		err := a.callModel(ctx, trace, emit, step, func() bool {
+			if !streamed {
+				return true
+			}
+			return send(StreamEvent{Type: StreamEventDelta, Text: ModelRetryNotice, Trace: trace})
+		}, func() error {
+			streamed = false
+			textCh, genCh, cerr := tsm.ChatWithToolsStream(ctx, messages, a.tools, a.modelOpts()...)
+			if cerr != nil {
+				return cerr
+			}
+			for s := range textCh {
+				if s != "" {
+					streamed = true
+				}
+				if !send(StreamEvent{Type: StreamEventDelta, Text: s, Trace: trace}) {
+					return errStreamAborted
+				}
+			}
+			gen, cerr = receiveStreamGeneration(ctx, genCh)
+			return cerr
+		})
 		if err != nil {
-			sendError(err, step)
-			return
-		}
-		for s := range textCh {
-			if !send(StreamEvent{Type: StreamEventDelta, Text: s, Trace: trace}) {
+			if errors.Is(err, errStreamAborted) {
 				return
 			}
-		}
-		gen, err := receiveStreamGeneration(ctx, genCh)
-		if err != nil {
-			sendError(err, step)
+			if !a.finishDegradedStream(ctx, trace, messages, err, streamed, emit, send) {
+				sendError(err, step)
+			}
 			return
 		}
 		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
@@ -951,7 +1003,7 @@ func (a *ReActAgent) runToolEvents(
 	}
 
 	if ok, sumErr := a.forceFinalSummaryStream(ctx, req, messages, trace, emit, send); ok {
-		if sumErr != nil {
+		if sumErr != nil && !a.finishDegradedStream(ctx, trace, messages, sumErr, false, emit, send) {
 			sendError(sumErr, a.config.MaxSteps)
 		}
 		return
@@ -993,7 +1045,12 @@ func (a *ReActAgent) forceFinalSummary(ctx context.Context, req *Request, messag
 	emit(events.ModelInvoked, map[string]any{"message_count": len(msgs), "step": -1, "mode": "plain_summary", "forced_summary": true})
 	beginModelInvocation(trace, "plain_summary")
 	msgs = a.prepareModelMessages(ctx, msgs, trace)
-	gen, err := a.model.Chat(ctx, msgs, a.modelOpts()...)
+	var gen *model.Generation
+	err := a.callModel(ctx, trace, emit, -1, nil, func() error {
+		var cerr error
+		gen, cerr = a.model.Chat(ctx, msgs, a.modelOpts()...)
+		return cerr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1053,6 +1110,10 @@ func receiveStreamGeneration(ctx context.Context, genCh <-chan *model.Generation
 	case gen, ok := <-genCh:
 		if !ok || gen == nil {
 			return nil, errors.New("missing streamed generation")
+		}
+		// provider 在流中途失败时以 Generation.Err 上报（见 model/openai_tools_stream.go）。
+		if gen.Err != nil {
+			return nil, gen.Err
 		}
 		return gen, nil
 	case <-ctx.Done():
@@ -1240,7 +1301,12 @@ func (a *ReActAgent) runPlain(ctx context.Context, messages []model.Message, emi
 	emit(events.ModelInvoked, map[string]any{"message_count": len(messages), "step": -1, "mode": "plain"})
 	beginModelInvocation(trace, "plain")
 	messages = a.prepareModelMessages(ctx, messages, trace)
-	gen, err := a.model.Chat(ctx, messages, a.modelOpts()...)
+	var gen *model.Generation
+	err := a.callModel(ctx, trace, emit, -1, nil, func() error {
+		var cerr error
+		gen, cerr = a.model.Chat(ctx, messages, a.modelOpts()...)
+		return cerr
+	})
 	if err != nil {
 		trace.Errors = append(trace.Errors, err.Error())
 		emit(events.RunError, map[string]any{"error": err.Error()})

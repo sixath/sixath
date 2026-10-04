@@ -12,6 +12,9 @@ const (
 	RunStarted     Kind = "agent.run.started"
 	ModelInvoked   Kind = "agent.model.invoked"
 	ModelResponded Kind = "agent.model.responded"
+	// ModelRecovering 模型调用重试耗尽后进入步骤级恢复（载荷含 error / step / attempt / max_attempts / delay_ms）；
+	// 不是终态，恢复失败时仍以 RunError 或降级的 RunCompleted 结束。
+	ModelRecovering Kind = "agent.model.recovering"
 
 	ToolInvoked   Kind = "agent.tool.invoked"
 	ToolExecuted  Kind = "agent.tool.executed"
@@ -33,7 +36,7 @@ const (
 	// CriticVerdict 结案审查结果（载荷含 tier=rules|model、verdict=pass|revise、issues、round）。
 	CriticVerdict Kind = "agent.critic.verdict"
 	RunCompleted  Kind = "agent.run.completed"
-	RunError          Kind = "agent.run.error"
+	RunError      Kind = "agent.run.error"
 
 	// MemoryPrefetchSkipped 记忆预取未注入（fail-open 跳过或空结果），载荷含 reason（设计 §4.6）。
 	MemoryPrefetchSkipped Kind = "agent.memory.prefetch_skipped"
