@@ -2630,11 +2630,14 @@ func (uc *RepoRegistryUsecase) Scan(ctx context.Context) (*RepoScanReport, error
 }
 
 func (uc *RepoRegistryUsecase) scanRoot(ctx context.Context, root string, rep *RepoScanReport) error {
-	rels, err := DiscoverGitRepos(root, RepoScanMaxDepth)
+	rels, unreadable, err := DiscoverGitRepos(root, RepoScanMaxDepth)
 	if err != nil {
 		return err
 	}
 	rep.Roots++
+	for _, u := range unreadable {
+		rep.Errors = append(rep.Errors, fmt.Sprintf("%s: unreadable subtree %q", root, u))
+	}
 	existing, err := uc.repo.ListRepositories(ctx, RepoFilter{CodeRoot: root})
 	if err != nil {
 		return err
@@ -2671,12 +2674,20 @@ func (uc *RepoRegistryUsecase) scanRoot(ctx context.Context, root string, rep *R
 		}
 	}
 	for rel, r := range byRel {
-		if !seen[rel] && r.Status == RepoStatusActive {
-			if err := uc.repo.SetRepositoryStatus(ctx, r.ID, RepoStatusMissing); err != nil {
-				return err
-			}
-			rep.Missing++
+		if seen[rel] || r.Status != RepoStatusActive {
+			continue
 		}
+		if underAnyPrefix(rel, unreadable) {
+			// 子树读不到时保持原状，并保留其目录组成员身份，避免绑定该组的 agent 丢仓库。
+			if parent := path.Dir(rel); parent != "." {
+				dirMembers[parent] = append(dirMembers[parent], r.ID)
+			}
+			continue
+		}
+		if err := uc.repo.SetRepositoryStatus(ctx, r.ID, RepoStatusMissing); err != nil {
+			return err
+		}
+		rep.Missing++
 	}
 	return uc.syncDirGroups(ctx, root, dirMembers)
 }
