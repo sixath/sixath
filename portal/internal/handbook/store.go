@@ -9,15 +9,44 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// ErrBadPath rejects page paths that are empty, absolute or escape the skill directory.
+// ErrBadPath rejects repo ids and page paths that are empty, absolute, escape the skill
+// directory or contain anything but slug-like segments.
 var ErrBadPath = errors.New("handbook: invalid page path")
 
 const maxReadBytes = 256 << 10
+
+var (
+	repoIDRe   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	segmentRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	errBadRepo = fmt.Errorf("%w: repo id", ErrBadPath)
+)
+
+func checkID(id string) error {
+	if !repoIDRe.MatchString(id) {
+		return errBadRepo
+	}
+	return nil
+}
+
+// checkRel requires a slash path of slug-like segments that is local on this OS
+// (filepath.IsLocal rejects Windows device names such as AUX or CON.md).
+func checkRel(rel string) error {
+	for _, seg := range strings.Split(rel, "/") {
+		if !segmentRe.MatchString(seg) || strings.HasSuffix(seg, ".") {
+			return ErrBadPath
+		}
+	}
+	if !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return ErrBadPath
+	}
+	return nil
+}
 
 // Store lays out handbook versions under Root (normally {data_root}/handbooks):
 // repos/<id>/v<N>/... and repos/<id>/current.json.
@@ -40,8 +69,16 @@ func (s Store) SkillDir(id string, v int) string { return filepath.Join(s.Versio
 // Publish writes files into v<version>, points current.json at it and keeps the newest keep
 // versions. Older versions stay readable until pruned so in-flight chats are not broken.
 func (s Store) Publish(id string, version int, files map[string][]byte, keep int) error {
+	if err := checkID(id); err != nil {
+		return err
+	}
 	if version <= 0 {
 		return fmt.Errorf("handbook: invalid version %d", version)
+	}
+	for rel := range files {
+		if err := checkRel(rel); err != nil {
+			return fmt.Errorf("%w: %q", err, rel)
+		}
 	}
 	final := s.VersionDir(id, version)
 	tmp := final + ".tmp"
@@ -76,6 +113,9 @@ func (s Store) Publish(id string, version int, files map[string][]byte, keep int
 
 // Current returns the version current.json points at, or 0 when nothing is published.
 func (s Store) Current(id string) (int, error) {
+	if err := checkID(id); err != nil {
+		return 0, err
+	}
 	b, err := os.ReadFile(filepath.Join(s.repoDir(id), "current.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
@@ -116,6 +156,9 @@ func (s Store) prune(id string, current, keep int) {
 
 // ListSkillFiles lists the files of a version's skill directory as sorted slash paths.
 func (s Store) ListSkillFiles(id string, v int) ([]string, error) {
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
 	root := s.SkillDir(id, v)
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -138,12 +181,18 @@ func (s Store) ListSkillFiles(id string, v int) ([]string, error) {
 
 // ReadSkillFile reads one page of a version's skill directory, capped at 256 KiB.
 func (s Store) ReadSkillFile(id string, v int, rel string) ([]byte, error) {
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
 	clean := path.Clean(strings.ReplaceAll(rel, `\`, "/"))
 	if strings.TrimSpace(rel) == "" || path.IsAbs(clean) || clean == "." || clean == ".." ||
 		strings.HasPrefix(clean, "../") || filepath.VolumeName(filepath.FromSlash(clean)) != "" {
 		return nil, ErrBadPath
 	}
-	f, err := os.Open(filepath.Join(s.SkillDir(id, v), filepath.FromSlash(clean)))
+	if err := checkRel(clean); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenInRoot(s.SkillDir(id, v), filepath.FromSlash(clean))
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +215,11 @@ func WriteFileAtomic(p string, b []byte) error {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(name)
 		return err

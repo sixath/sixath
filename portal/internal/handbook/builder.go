@@ -8,7 +8,7 @@ import (
 
 // GeneratorVersion changes whenever the output format changes; repos built by an older
 // generator are rebuilt on the next pass.
-const GeneratorVersion = "p2a-1"
+const GeneratorVersion = "p2a-2"
 
 // BuildInput identifies the checkout to build from.
 type BuildInput struct {

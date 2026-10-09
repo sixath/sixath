@@ -45,13 +45,13 @@ func parseGoFile(rel string, src []byte) (*goFileInfo, error) {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			start, end := fset.Position(d.Pos()), fset.Position(d.End())
+			start, end := fset.PositionFor(d.Pos(), false), fset.PositionFor(d.End(), false)
 			s := Symbol{Name: d.Name.Name, Kind: "func", Line: start.Line, EndLine: end.Line, BodyHash: shortHash(src[start.Offset:end.Offset])}
 			if d.Recv != nil && len(d.Recv.List) > 0 {
 				s.Kind = "method"
 				s.Name = "(" + recvString(d.Recv.List[0].Type) + ")." + d.Name.Name
 				if d.Name.Name == "TableName" {
-					if lit := returnedStringLiteral(d); lit != "" {
+					if lit := returnedStringLiteral(d); lit != "" && len(lit) <= maxRegisterName {
 						info.Tables = append(info.Tables, RegisterHit{Kind: RegTable, Name: lit, Access: AccessRef, Path: rel, Line: start.Line})
 					}
 				}
@@ -66,7 +66,7 @@ func parseGoFile(rel string, src []byte) (*goFileInfo, error) {
 				if !ok {
 					continue
 				}
-				start, end := fset.Position(ts.Pos()), fset.Position(ts.End())
+				start, end := fset.PositionFor(ts.Pos(), false), fset.PositionFor(ts.End(), false)
 				info.Symbols = append(info.Symbols, Symbol{Name: ts.Name.Name, Kind: "type", Line: start.Line, EndLine: end.Line})
 			}
 		}
@@ -133,7 +133,9 @@ func parseGoMod(src []byte) *GoModule {
 	m := &GoModule{}
 	inRequire := false
 	for _, raw := range strings.Split(string(src), "\n") {
-		line := strings.TrimSpace(raw)
+		line, comment, _ := strings.Cut(raw, "//")
+		line = strings.TrimSpace(line)
+		indirect := strings.HasPrefix(strings.TrimSpace(comment), "indirect")
 		switch {
 		case strings.HasPrefix(line, "module "):
 			m.Path = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "module ")), `"`)
@@ -143,7 +145,7 @@ func parseGoMod(src []byte) *GoModule {
 			inRequire = false
 		case inRequire || strings.HasPrefix(line, "require "):
 			line = strings.TrimSpace(strings.TrimPrefix(line, "require "))
-			if line == "" || strings.HasPrefix(line, "//") || strings.Contains(line, "// indirect") {
+			if line == "" || indirect {
 				continue
 			}
 			if fields := strings.Fields(line); len(fields) > 0 {

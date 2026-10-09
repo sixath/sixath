@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -33,13 +34,56 @@ func TestStore_PublishPruneRead(t *testing.T) {
 	if err != nil || string(b) != "v3" {
 		t.Fatalf("read = %q err=%v", b, err)
 	}
-	for _, bad := range []string{"", "../manifest.json", "..", "/etc/passwd", `..\x`, "references/../../x"} {
+	bads := []string{"", "../manifest.json", "..", "/etc/passwd", `..\x`, "references/../../x",
+		".. ", "SKILL.md.", "references/ index.md", "C:x", "references/a b.md"}
+	if runtime.GOOS == "windows" {
+		bads = append(bads, "AUX", "CON.md", "references/NUL", "com1.txt")
+	}
+	for _, bad := range bads {
 		if _, err := s.ReadSkillFile("r1", 3, bad); !errors.Is(err, ErrBadPath) {
 			t.Fatalf("ReadSkillFile(%q) err = %v, want ErrBadPath", bad, err)
 		}
 	}
 	if _, err := s.ReadSkillFile("r1", 3, "nope.md"); !os.IsNotExist(err) {
 		t.Fatalf("missing page err = %v", err)
+	}
+	if b, err := s.ReadSkillFile("r1", 3, `references\index.md`); err != nil || string(b) != "idx" {
+		t.Fatalf("backslash read = %q err=%v", b, err)
+	}
+}
+
+func TestStore_RejectsBadIDsAndKeys(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	files := map[string][]byte{"skill/SKILL.md": []byte("x")}
+	for _, id := range []string{"", "..", "a/b", `a\b`, "a.b", "AUX "} {
+		if err := s.Publish(id, 1, files, 1); !errors.Is(err, ErrBadPath) {
+			t.Fatalf("Publish(%q) err = %v", id, err)
+		}
+		if _, err := s.Current(id); !errors.Is(err, ErrBadPath) {
+			t.Fatalf("Current(%q) err = %v", id, err)
+		}
+		if _, err := s.ListSkillFiles(id, 1); !errors.Is(err, ErrBadPath) {
+			t.Fatalf("ListSkillFiles(%q) err = %v", id, err)
+		}
+		if _, err := s.ReadSkillFile(id, 1, "SKILL.md"); !errors.Is(err, ErrBadPath) {
+			t.Fatalf("ReadSkillFile(%q) err = %v", id, err)
+		}
+	}
+	keys := []string{"../x", "skill/../../x", "/abs", "skill/a.", "skill//x", ""}
+	if runtime.GOOS == "windows" {
+		keys = append(keys, "skill/CON")
+	}
+	for _, key := range keys {
+		err := s.Publish("r1", 1, map[string][]byte{key: []byte("x")}, 1)
+		if !errors.Is(err, ErrBadPath) {
+			t.Fatalf("Publish key %q err = %v", key, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.Root, "x")); !os.IsNotExist(err) {
+		t.Fatal("bad key escaped the store root")
+	}
+	if err := s.Publish("0b1e-4c_ID", 1, map[string][]byte{"skill/references/areas/a.p2.md": []byte("x")}, 1); err != nil {
+		t.Fatal(err)
 	}
 }
 

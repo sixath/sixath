@@ -16,6 +16,8 @@ const (
 	AccessServe = "serve"
 	AccessRead  = "read"
 	AccessRef   = "ref"
+
+	maxRegisterName = 200
 )
 
 // RegisterHit is one literal reference to shared state (table, route, topic, cache key).
@@ -77,6 +79,9 @@ func scanRegisters(rel, lang string, src []byte) []RegisterHit {
 	for i, line := range strings.Split(string(src), "\n") {
 		n := i + 1
 		add := func(kind, name, access string) {
+			if len(name) > maxRegisterName {
+				return
+			}
 			out = append(out, RegisterHit{Kind: kind, Name: name, Access: access, Path: rel, Line: n})
 		}
 		switch {

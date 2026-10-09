@@ -2,6 +2,7 @@ package handbook
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,6 +126,39 @@ func TestCollectFacts_TruncatesAtMaxFiles(t *testing.T) {
 	}
 	if len(f.Files) != 3 || !f.Coverage.Truncated {
 		t.Fatalf("files=%d truncated=%v", len(f.Files), f.Coverage.Truncated)
+	}
+}
+
+type staleEntry struct {
+	fs.DirEntry
+	size int64
+}
+
+func (e staleEntry) Info() (fs.FileInfo, error) {
+	info, err := e.DirEntry.Info()
+	return staleInfo{info, e.size}, err
+}
+
+type staleInfo struct {
+	fs.FileInfo
+	size int64
+}
+
+func (i staleInfo) Size() int64 { return i.size }
+
+func TestAddFile_GrewAfterStat(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{"big.txt": strings.Repeat("x", MaxFileBytes+10)})
+	ents, err := os.ReadDir(root)
+	if err != nil || len(ents) != 1 {
+		t.Fatalf("ents=%v err=%v", ents, err)
+	}
+	f := &Facts{Symbols: map[string][]Symbol{}}
+	if err := f.addFile(filepath.Join(root, "big.txt"), "big.txt", staleEntry{ents[0], 10}, map[string]*GoPackage{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Files) != 0 || f.Coverage.SkippedLarge != 1 {
+		t.Fatalf("files=%v coverage=%#v", f.Files, f.Coverage)
 	}
 }
 

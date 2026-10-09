@@ -57,6 +57,14 @@ func TestScanRegisters_SQLProtoYAML(t *testing.T) {
 	}
 }
 
+func TestScanRegisters_DropsLongNames(t *testing.T) {
+	long := "/" + strings.Repeat("a", 200)
+	src := `r.GET("` + long + `", h)` + "\n" + `r.GET("/ok", h)`
+	if got := hitsString(scanRegisters("svc/r.go", "go", []byte(src))); got != "route//ok/serve@2" {
+		t.Fatalf("hits: %s", got)
+	}
+}
+
 func TestSortRegisters_WritesFirst(t *testing.T) {
 	hs := []RegisterHit{
 		{Kind: RegTable, Name: "orders", Access: AccessRead, Path: "a.go", Line: 1},

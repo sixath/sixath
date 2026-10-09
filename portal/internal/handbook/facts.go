@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -147,9 +148,13 @@ func (f *Facts) addFile(abs, rel string, d fs.DirEntry, pkgs map[string]*GoPacka
 		f.Coverage.SkippedLarge++
 		return nil
 	}
-	src, err := os.ReadFile(abs)
+	src, err := readCapped(abs)
 	if err != nil {
 		f.Coverage.Unreadable = append(f.Coverage.Unreadable, rel)
+		return nil
+	}
+	if len(src) > MaxFileBytes {
+		f.Coverage.SkippedLarge++
 		return nil
 	}
 	if bytes.IndexByte(src[:min(len(src), sniffBytes)], 0) >= 0 {
@@ -198,6 +203,16 @@ func (f *Facts) addFile(abs, rel string, d fs.DirEntry, pkgs map[string]*GoPacka
 	}
 	f.Registers = append(f.Registers, scanRegisters(rel, file.Lang, src)...)
 	return nil
+}
+
+// readCapped reads at most MaxFileBytes+1 bytes so a file that grew after stat is detected.
+func readCapped(p string) ([]byte, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
 }
 
 func isGenerated(rel string, src []byte) bool {

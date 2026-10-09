@@ -50,8 +50,26 @@ func TestParseGoFile_SyntaxError(t *testing.T) {
 	}
 }
 
+func TestParseGoFile_IgnoresLineDirectives(t *testing.T) {
+	src := "package x\n\n//line other.go:100\nfunc f() {\n}\n"
+	gi, err := parseGoFile("x.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gi.Symbols) != 1 || gi.Symbols[0].Line != 4 || gi.Symbols[0].EndLine != 5 {
+		t.Fatalf("symbols = %#v", gi.Symbols)
+	}
+}
+
 func TestParseGoMod(t *testing.T) {
 	m := parseGoMod([]byte("module \"example.com/a\"\n\nrequire github.com/x/y v1.0.0\nrequire (\n\t// comment\n\tgithub.com/p/q v0.1.0\n\tgithub.com/z/z v1.0.0 // indirect\n)\n"))
+	if m.Path != "example.com/a" || strings.Join(m.Requires, ",") != "github.com/x/y,github.com/p/q" {
+		t.Fatalf("mod = %#v", m)
+	}
+}
+
+func TestParseGoMod_TrailingComments(t *testing.T) {
+	m := parseGoMod([]byte("module example.com/a // the service\n\nrequire github.com/x/y v1.0.0 // pinned\nrequire ( // direct deps\n\tgithub.com/p/q v0.1.0 // why\n)\n"))
 	if m.Path != "example.com/a" || strings.Join(m.Requires, ",") != "github.com/x/y,github.com/p/q" {
 		t.Fatalf("mod = %#v", m)
 	}

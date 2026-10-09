@@ -1,12 +1,15 @@
 package handbook
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // MaxPageBytes keeps each page small enough to read in one read_skill_file call.
@@ -17,6 +20,8 @@ const (
 	maxPackagesPerArea = 50
 	maxLocationsPerReg = 30
 	maxRequires        = 40
+	maxMains           = 50
+	indexTableRows     = 100
 )
 
 // RenderMeta identifies the repository and commit a handbook was built from.
@@ -28,10 +33,12 @@ type RenderMeta struct {
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+const maxSlug = 60
+
 func slug(s string) string {
 	s = strings.Trim(slugRe.ReplaceAllString(strings.ToLower(s), "-"), "-")
-	if len(s) > 60 {
-		s = strings.TrimRight(s[:60], "-")
+	if len(s) > maxSlug {
+		s = strings.TrimRight(s[:maxSlug], "-")
 	}
 	if s == "" {
 		s = "root"
@@ -39,8 +46,23 @@ func slug(s string) string {
 	return s
 }
 
-// SkillName is the handbook skill name for a repository logical name (rel_path).
-func SkillName(relPath string) string { return "handbook-" + slug(relPath) }
+// SkillName is the handbook skill name for a repository logical name (rel_path). When the
+// slug does not reproduce rel_path exactly, a sha256 prefix of rel_path keeps names unique.
+func SkillName(relPath string) string {
+	s := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(relPath), "-"), "-")
+	if s != "" && s == relPath && len(s) <= maxSlug {
+		return "handbook-" + s
+	}
+	sum := sha256.Sum256([]byte(relPath))
+	suffix := hex.EncodeToString(sum[:4])
+	if room := maxSlug - len(suffix) - 1; len(s) > room {
+		s = strings.TrimRight(s[:room], "-")
+	}
+	if s == "" {
+		s = "root"
+	}
+	return "handbook-" + s + "-" + suffix
+}
 
 func shortCommit(c string) string {
 	if len(c) > 12 {
@@ -86,15 +108,16 @@ func buildAreas(f *Facts) []area {
 		a.Files = append(a.Files, file)
 	}
 	sort.Strings(names)
-	used := map[string]int{}
+	taken := map[string]bool{}
 	out := make([]area, 0, len(names))
 	for _, n := range names {
 		a := byName[n]
-		id := slug(n)
-		used[id]++
-		if used[id] > 1 {
-			id = fmt.Sprintf("%s-%d", id, used[id])
+		base := slug(n)
+		id := base
+		for k := 2; taken[id]; k++ {
+			id = fmt.Sprintf("%s-%d", base, k)
 		}
+		taken[id] = true
 		a.ID = id
 		sort.SliceStable(a.Files, func(i, j int) bool {
 			di, dj := path.Dir(a.Files[i].Path), path.Dir(a.Files[j].Path)
@@ -120,34 +143,54 @@ func Render(meta RenderMeta, f *Facts) map[string]string {
 			pages[p] = c
 		}
 	}
-	pages["references/index.md"] = renderIndex(meta, areas, f)
+	for p, c := range paginate("references/index", "# "+meta.RelPath+" 分区索引", indexSections(areas, f)) {
+		pages[p] = c
+	}
 	pages["references/overview.md"] = renderOverview(meta, f, areas)
 	pages["SKILL.md"] = renderSkill(meta)
 	return pages
 }
 
-// paginate splits sections into pages of at most MaxPageBytes without splitting a section.
+const (
+	truncatedMark = "\n…（已截断）\n"
+	minPageBudget = 4 << 10
+)
+
+// paginate splits sections into pages of at most MaxPageBytes without splitting a section;
+// a section larger than a page is truncated at a rune boundary.
 // The first page is <base>.md and lists continuation pages <base>.p2.md, <base>.p3.md, ...
 func paginate(base, title string, sections []string) map[string]string {
-	var chunks [][]string
-	var cur []string
-	size := 0
-	for _, s := range sections {
-		if len(cur) > 0 && size+len(s) > MaxPageBytes {
-			chunks = append(chunks, cur)
-			cur, size = nil, 0
-		}
-		cur = append(cur, s)
-		size += len(s)
-	}
-	if len(cur) > 0 || len(chunks) == 0 {
-		chunks = append(chunks, cur)
-	}
 	name := func(i int) string {
 		if i == 0 {
 			return base + ".md"
 		}
 		return fmt.Sprintf("%s.p%d.md", base, i+1)
+	}
+	contents := func(n int) string {
+		if n <= 1 {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("续页：")
+		for j := 1; j < n; j++ {
+			if j > 1 {
+				b.WriteString("、")
+			}
+			fmt.Fprintf(&b, "`%s`", name(j))
+		}
+		b.WriteString("\n\n")
+		return b.String()
+	}
+	var chunks [][]string
+	for n := 1; ; {
+		header := len(title) + len(fmt.Sprintf("（第 %d/%d 页）", n, n)) + len("\n\n")
+		rest := max(MaxPageBytes-header, minPageBudget)
+		first := max(rest-len(contents(n)), minPageBudget)
+		chunks = splitSections(sections, first, rest)
+		if len(chunks) <= n {
+			break
+		}
+		n = len(chunks)
 	}
 	out := make(map[string]string, len(chunks))
 	for i, c := range chunks {
@@ -157,15 +200,8 @@ func paginate(base, title string, sections []string) map[string]string {
 			fmt.Fprintf(&b, "（第 %d/%d 页）", i+1, len(chunks))
 		}
 		b.WriteString("\n\n")
-		if i == 0 && len(chunks) > 1 {
-			b.WriteString("续页：")
-			for j := 1; j < len(chunks); j++ {
-				if j > 1 {
-					b.WriteString("、")
-				}
-				fmt.Fprintf(&b, "`%s`", name(j))
-			}
-			b.WriteString("\n\n")
+		if i == 0 {
+			b.WriteString(contents(len(chunks)))
 		}
 		if len(c) == 0 {
 			b.WriteString("（无）\n")
@@ -176,6 +212,42 @@ func paginate(base, title string, sections []string) map[string]string {
 		out[name(i)] = b.String()
 	}
 	return out
+}
+
+// splitSections packs sections into chunks whose bodies fit first (page 1) or rest bytes.
+func splitSections(sections []string, first, rest int) [][]string {
+	var chunks [][]string
+	var cur []string
+	size := 0
+	limit := func() int {
+		if len(chunks) == 0 {
+			return first
+		}
+		return rest
+	}
+	for _, s := range sections {
+		if len(cur) > 0 && size+len(s) > limit() {
+			chunks = append(chunks, cur)
+			cur, size = nil, 0
+		}
+		if len(s) > limit() {
+			s = truncateSection(s, limit())
+		}
+		cur = append(cur, s)
+		size += len(s)
+	}
+	if len(cur) > 0 || len(chunks) == 0 {
+		chunks = append(chunks, cur)
+	}
+	return chunks
+}
+
+func truncateSection(s string, limit int) string {
+	cut := max(limit-len(truncatedMark), 0)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + truncatedMark
 }
 
 var registerKinds = []struct{ kind, title string }{
@@ -260,23 +332,29 @@ func areaSections(a area, f *Facts) []string {
 	return out
 }
 
-func renderIndex(meta RenderMeta, areas []area, f *Facts) string {
+// indexSections is the area table, split into standalone tables of indexTableRows rows,
+// followed by one package list section per area.
+func indexSections(areas []area, f *Facts) []string {
 	pkgsByArea := map[string][]GoPackage{}
 	for _, p := range f.Packages {
 		n := areaOfDir(p.Dir)
 		pkgsByArea[n] = append(pkgsByArea[n], p)
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s 分区索引\n\n按目录分区。分区页列出文件和符号；表、路由、topic、缓存键见 `references/registers.md`。\n\n", meta.RelPath)
-	b.WriteString("| 分区 | 文件数 | 页面 |\n|---|---|---|\n")
-	for _, a := range areas {
-		fmt.Fprintf(&b, "| %s | %d | `references/areas/%s.md` |\n", a.Name, len(a.Files), a.ID)
+	out := []string{"按目录分区。分区页列出文件和符号；表、路由、topic、缓存键见 `references/registers.md`。\n"}
+	for i := 0; i < len(areas); i += indexTableRows {
+		var b strings.Builder
+		b.WriteString("\n| 分区 | 文件数 | 页面 |\n|---|---|---|\n")
+		for _, a := range areas[i:min(i+indexTableRows, len(areas))] {
+			fmt.Fprintf(&b, "| %s | %d | `references/areas/%s.md` |\n", a.Name, len(a.Files), a.ID)
+		}
+		out = append(out, b.String())
 	}
 	for _, a := range areas {
 		pk := pkgsByArea[a.Name]
 		if len(pk) == 0 {
 			continue
 		}
+		var b strings.Builder
 		fmt.Fprintf(&b, "\n## %s\n\n", a.Name)
 		for i, p := range pk {
 			if i == maxPackagesPerArea {
@@ -289,8 +367,9 @@ func renderIndex(meta RenderMeta, areas []area, f *Facts) string {
 			}
 			b.WriteString("\n")
 		}
+		out = append(out, b.String())
 	}
-	return b.String()
+	return out
 }
 
 func renderOverview(meta RenderMeta, f *Facts, areas []area) string {
@@ -304,7 +383,7 @@ func renderOverview(meta RenderMeta, f *Facts, areas []area) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s 概览\n\n", meta.RelPath)
-	fmt.Fprintf(&b, "- commit `%s`，生成于 %s（静态分析，无 LLM）\n", shortCommit(meta.Commit), meta.GeneratedAt.Format("2006-01-02 15:04"))
+	fmt.Fprintf(&b, "- commit `%s`，生成于 %s（静态分析，无 LLM）\n", shortCommit(meta.Commit), meta.GeneratedAt.UTC().Format("2006-01-02 15:04 UTC"))
 	fmt.Fprintf(&b, "- 文件 %d 个（测试 %d），Go 包 %d 个，分区 %d 个\n", len(f.Files), tests, len(f.Packages), len(areas))
 	if f.Module != nil && f.Module.Path != "" {
 		fmt.Fprintf(&b, "- Go module `%s`\n", f.Module.Path)
@@ -321,7 +400,11 @@ func renderOverview(meta RenderMeta, f *Facts, areas []area) string {
 	}
 	if len(mains) > 0 {
 		b.WriteString("\n## 入口（package main）\n\n")
-		for _, m := range mains {
+		for i, m := range mains {
+			if i == maxMains {
+				fmt.Fprintf(&b, "- …另有 %d 个\n", len(mains)-i)
+				break
+			}
 			fmt.Fprintf(&b, "- `%s`\n", m)
 		}
 	}
@@ -378,7 +461,7 @@ func renderSkill(meta RenderMeta) string {
 	fmt.Fprintf(&b, "---\nname: %s\ndescription: >-\n  %s 的代码地图（静态生成，commit %s）：目录分区、Go 包与符号、数据表/路由/topic/缓存键的读写位置。RCA 定位时按需下钻，结论以 rca_read 读到的源码为准。\nhidden_from_summary: true\n---\n\n",
 		SkillName(meta.RelPath), meta.RelPath, shortCommit(meta.Commit))
 	fmt.Fprintf(&b, "# %s Handbook\n\n仓库逻辑名 `%s`（rca_* 工具的 repo 参数）。commit `%s`，生成于 %s。\n\n",
-		meta.RelPath, meta.RelPath, shortCommit(meta.Commit), meta.GeneratedAt.Format("2006-01-02 15:04"))
+		meta.RelPath, meta.RelPath, shortCommit(meta.Commit), meta.GeneratedAt.UTC().Format("2006-01-02 15:04 UTC"))
 	b.WriteString("## 文件\n\n" +
 		"- `references/overview.md` —— 语言、规模、入口、直接依赖、覆盖说明。先读。\n" +
 		"- `references/index.md` —— 目录分区及其中的 Go 包和包说明。\n" +

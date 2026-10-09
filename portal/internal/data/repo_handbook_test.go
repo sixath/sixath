@@ -168,10 +168,10 @@ func TestHandbookUsecase_RebuildStaleAndSkillDirs(t *testing.T) {
 		t.Fatalf("code-map = %#v ok=%v", cm, ok)
 	}
 	body, _ := idx.LoadSkillBody("code-map")
-	if !strings.Contains(body, `skill_view("handbook-cloudgame-svc-a")`) {
+	if !strings.Contains(body, `skill_view("`+handbook.SkillName("cloudgame/svc-a")+`")`) {
 		t.Fatalf("code-map body:\n%s", body)
 	}
-	if hbMeta, ok := idx.GetByName("handbook-cloudgame-svc-a"); !ok || !hbMeta.HiddenFromSummary {
+	if hbMeta, ok := idx.GetByName(handbook.SkillName("cloudgame/svc-a")); !ok || !hbMeta.HiddenFromSummary {
 		t.Fatalf("handbook skill = %#v ok=%v", hbMeta, ok)
 	}
 

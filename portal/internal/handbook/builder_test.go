@@ -33,7 +33,7 @@ func TestBuild(t *testing.T) {
 	if m["generator_version"] != GeneratorVersion || m["files"] != float64(5) {
 		t.Fatalf("stats map = %#v", m)
 	}
-	if !strings.Contains(string(out.Files["skill/SKILL.md"]), "name: handbook-cloudgame-svc-a") {
+	if !strings.Contains(string(out.Files["skill/SKILL.md"]), "name: "+SkillName("cloudgame/svc-a")+"\n") {
 		t.Fatal("skill name")
 	}
 }
