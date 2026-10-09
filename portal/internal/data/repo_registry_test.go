@@ -25,6 +25,13 @@ func openRepoRegistryTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shared-cache connections fail with "table is locked" instead of waiting.
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.AutoMigrate(&model.Repository{}, &model.RepoGroup{}, &model.RepoGroupMember{},
 		&model.AgentRepoBinding{}, &model.AgentEffectiveRepo{}); err != nil {
 		t.Fatalf("migrate: %v", err)

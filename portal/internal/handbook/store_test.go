@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -49,6 +51,66 @@ func TestStore_PublishPruneRead(t *testing.T) {
 	}
 	if b, err := s.ReadSkillFile("r1", 3, `references\index.md`); err != nil || string(b) != "idx" {
 		t.Fatalf("backslash read = %q err=%v", b, err)
+	}
+	if _, err := s.ReadSkillFile("r1", 3, "references"); !errors.Is(err, ErrBadPath) {
+		t.Fatalf("directory read err = %v, want ErrBadPath", err)
+	}
+}
+
+func TestStore_PublishNeverClobbersAVersion(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	if err := s.Publish("r1", 1, map[string][]byte{"skill/SKILL.md": []byte("first")}, 2); err != nil {
+		t.Fatal(err)
+	}
+	err := s.Publish("r1", 1, map[string][]byte{"skill/SKILL.md": []byte("second")}, 2)
+	if !errors.Is(err, ErrVersionExists) {
+		t.Fatalf("republish err = %v, want ErrVersionExists", err)
+	}
+	if b, err := s.ReadSkillFile("r1", 1, "SKILL.md"); err != nil || string(b) != "first" {
+		t.Fatalf("published version changed: %q err=%v", b, err)
+	}
+	ents, err := os.ReadDir(filepath.Join(s.Root, "repos", "r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Fatalf("staging dir left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestStore_ConcurrentPublishSameVersion(t *testing.T) {
+	s := Store{Root: t.TempDir()}
+	const n = 4
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			files := map[string][]byte{"skill/SKILL.md": []byte(strconv.Itoa(i)), "skill/references/index.md": []byte(strconv.Itoa(i))}
+			errs <- s.Publish("r1", 1, files, 2)
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	ok := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case !errors.Is(err, ErrVersionExists):
+			t.Fatalf("unexpected err: %v", err)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d publishers succeeded, want 1", ok)
+	}
+	a, _ := s.ReadSkillFile("r1", 1, "SKILL.md")
+	b, _ := s.ReadSkillFile("r1", 1, "references/index.md")
+	if len(a) == 0 || string(a) != string(b) {
+		t.Fatalf("mixed version contents: %q vs %q", a, b)
 	}
 }
 

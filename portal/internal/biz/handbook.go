@@ -17,13 +17,18 @@ import (
 
 const (
 	handbookLease        = 30 * time.Minute
+	handbookBuildTimeout = handbookLease - 5*time.Minute
 	handbookKeepVersions = 2
-	maxHandbookErrorLen  = 500
+	handbookMaxBuilds    = 2
+	// handbookPublishAttempts bounds version bumps past directories left by builds that lost their lease.
+	handbookPublishAttempts = 3
+	maxHandbookErrorLen     = 500
 )
 
 var (
-	ErrHandbookBuilding = errors.New("handbook: build already running")
-	ErrHandbookNotFound = errors.New("handbook: not found")
+	ErrHandbookBuilding  = errors.New("handbook: build already running")
+	ErrHandbookNotFound  = errors.New("handbook: not found")
+	ErrHandbookLeaseLost = errors.New("handbook: build lease lost")
 )
 
 // HandbookBuilder builds the handbook files of one checkout.
@@ -48,15 +53,17 @@ type HandbookUsecase struct {
 	build     HandbookBuilder
 	staleMu   sync.Mutex
 	codeMapMu sync.Mutex
-	wg        sync.WaitGroup
-	now       func() time.Time
-	log       *log.Helper
+	// slots caps concurrent builds across RebuildStale and RequestRebuild.
+	slots chan struct{}
+	wg    sync.WaitGroup
+	now   func() time.Time
+	log   *log.Helper
 }
 
 func NewHandbookUsecase(repo RepoRegistryRepo, registry *RepoRegistryUsecase, dataRoot string, logger log.Logger) *HandbookUsecase {
 	return &HandbookUsecase{
 		repo: repo, registry: registry, store: handbook.Store{Root: filepath.Join(dataRoot, "handbooks")},
-		build: handbook.Build, now: time.Now, log: log.NewHelper(logger),
+		build: handbook.Build, slots: make(chan struct{}, handbookMaxBuilds), now: time.Now, log: log.NewHelper(logger),
 	}
 }
 
@@ -66,16 +73,32 @@ func (uc *HandbookUsecase) SetBuilder(b HandbookBuilder) { uc.build = b }
 // Wait blocks until rebuilds started by RequestRebuild have finished.
 func (uc *HandbookUsecase) Wait() { uc.wg.Wait() }
 
-func handbookNeedsRebuild(r *Repository) bool {
+// handbookNeedsRebuild also picks up builds stuck in building after their lease expired.
+func handbookNeedsRebuild(r *Repository, now time.Time) bool {
 	if r.Status != RepoStatusActive || r.HeadCommit == "" {
 		return false
 	}
-	if r.HandbookStatus == HandbookStatusFailed {
+	switch r.HandbookStatus {
+	case HandbookStatusBuilding:
+		return r.HandbookLeaseUntil == nil || r.HandbookLeaseUntil.Before(now)
+	case HandbookStatusFailed:
 		failed, _ := r.HandbookStats["failed_commit"].(string)
 		return failed != r.HeadCommit
 	}
 	gen, _ := r.HandbookStats["generator_version"].(string)
 	return r.HandbookCommit != r.HeadCommit || gen != handbook.GeneratorVersion
+}
+
+// statusBeforeClaim is the status restored when a claimed build is released without an
+// outcome. A stuck building status is not restored since it no longer has a lease.
+func statusBeforeClaim(r *Repository) string {
+	if r.HandbookStatus != HandbookStatusBuilding {
+		return r.HandbookStatus
+	}
+	if r.HandbookVersion > 0 {
+		return HandbookStatusReady
+	}
+	return HandbookStatusNone
 }
 
 // RebuildStale rebuilds, one at a time, every active repo whose handbook lags its HEAD or
@@ -95,25 +118,30 @@ func (uc *HandbookUsecase) RebuildStale(ctx context.Context) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		if !handbookNeedsRebuild(r) {
+		if !handbookNeedsRebuild(r, uc.now().UTC()) {
 			continue
 		}
-		ok, err := uc.claim(ctx, r.ID)
-		if err != nil {
-			return n, err
+		select {
+		case uc.slots <- struct{}{}:
+		case <-ctx.Done():
+			return n, ctx.Err()
 		}
-		if !ok {
+		token, ok, err := uc.claim(ctx, r.ID)
+		if err != nil || !ok {
+			<-uc.slots
+			if err != nil {
+				return n, err
+			}
 			continue
 		}
 		n++
-		if err := uc.runClaimed(ctx, r.ID); err != nil {
-			uc.log.Warnf("handbook rebuild %s: %v", r.RelPath, err)
-		}
+		uc.buildInSlot(ctx, r.ID, token, statusBeforeClaim(r))
 	}
 	return n, nil
 }
 
 // RequestRebuild starts an asynchronous rebuild of one active repo regardless of staleness.
+// It returns ErrHandbookBuilding when the repo is already building or no build slot is free.
 func (uc *HandbookUsecase) RequestRebuild(ctx context.Context, id string) error {
 	r, err := uc.getRepo(ctx, id)
 	if err != nil {
@@ -122,72 +150,124 @@ func (uc *HandbookUsecase) RequestRebuild(ctx context.Context, id string) error 
 	if r.Status != RepoStatusActive {
 		return fmt.Errorf("%w: repository is %s", ErrInvalidRepo, r.Status)
 	}
-	ok, err := uc.claim(ctx, id)
-	if err != nil {
-		return err
+	select {
+	case uc.slots <- struct{}{}:
+	default:
+		return ErrHandbookBuilding
 	}
-	if !ok {
+	token, ok, err := uc.claim(ctx, id)
+	if err != nil || !ok {
+		<-uc.slots
+		if err != nil {
+			return err
+		}
 		return ErrHandbookBuilding
 	}
 	uc.wg.Add(1)
 	go func() {
 		defer uc.wg.Done()
-		bctx, cancel := context.WithTimeout(context.Background(), handbookLease)
-		defer cancel()
-		if err := uc.runClaimed(bctx, id); err != nil {
-			uc.log.Warnf("handbook rebuild %s: %v", id, err)
-		}
+		uc.buildInSlot(context.WithoutCancel(ctx), id, token, statusBeforeClaim(r))
 	}()
 	return nil
 }
 
-func (uc *HandbookUsecase) claim(ctx context.Context, id string) (bool, error) {
-	now := uc.now()
+// buildInSlot runs one claimed build under the build timeout and frees its slot.
+func (uc *HandbookUsecase) buildInSlot(ctx context.Context, id, token, prevStatus string) {
+	defer func() { <-uc.slots }()
+	bctx, cancel := context.WithTimeout(ctx, handbookBuildTimeout)
+	defer cancel()
+	if err := uc.runClaimed(bctx, id, token, prevStatus); err != nil {
+		uc.log.Warnf("handbook rebuild %s: %v", id, err)
+	}
+}
+
+func (uc *HandbookUsecase) claim(ctx context.Context, id string) (string, bool, error) {
+	now := uc.now().UTC()
 	return uc.repo.ClaimHandbookBuild(ctx, id, now, now.Add(handbookLease))
 }
 
 // runClaimed builds and publishes under a held lease. The row is re-read after the claim so
-// the next version number cannot collide with a build that finished in between.
-func (uc *HandbookUsecase) runClaimed(ctx context.Context, id string) error {
+// the next version number cannot collide with a build that finished in between. Builds
+// that are cancelled, or whose repo cannot be read or is no longer active, release the
+// lease without recording a failure.
+func (uc *HandbookUsecase) runClaimed(ctx context.Context, id, token, prevStatus string) error {
 	start := uc.now()
 	r, err := uc.getRepo(ctx, id)
 	if err != nil {
-		return uc.finishFailed(ctx, &Repository{ID: id}, err)
+		return errors.Join(err, uc.release(ctx, id, token, prevStatus))
+	}
+	if r.Status != RepoStatusActive {
+		return uc.release(ctx, id, token, prevStatus)
 	}
 	root, err := uc.registry.ResolveRepoPath(r)
 	if err != nil {
-		return uc.finishFailed(ctx, r, err)
+		return uc.finishFailed(ctx, r, token, err)
 	}
 	out, err := uc.build(ctx, handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start})
 	if err != nil {
-		return uc.finishFailed(ctx, r, err)
+		if ctx.Err() != nil {
+			return errors.Join(err, uc.release(ctx, id, token, prevStatus))
+		}
+		return uc.finishFailed(ctx, r, token, err)
 	}
 	version := r.HandbookVersion + 1
-	if err := uc.store.Publish(r.ID, version, out.Files, handbookKeepVersions); err != nil {
-		return uc.finishFailed(ctx, r, err)
+	for attempt := 1; ; attempt++ {
+		err = uc.store.Publish(r.ID, version, out.Files, handbookKeepVersions)
+		if !errors.Is(err, handbook.ErrVersionExists) || attempt == handbookPublishAttempts {
+			break
+		}
+		version++
+	}
+	if err != nil {
+		return uc.finishFailed(ctx, r, token, err)
 	}
 	stats := out.Stats.Map()
 	stats["duration_ms"] = uc.now().Sub(start).Milliseconds()
-	return uc.repo.FinishHandbookBuild(context.WithoutCancel(ctx), r.ID, HandbookBuildResult{
+	return uc.finish(ctx, r.ID, token, HandbookBuildResult{
 		Status: HandbookStatusReady, Commit: r.HeadCommit, Version: version, Stats: stats,
 	})
 }
 
-func (uc *HandbookUsecase) finishFailed(ctx context.Context, r *Repository, cause error) error {
+func (uc *HandbookUsecase) finishFailed(ctx context.Context, r *Repository, token string, cause error) error {
 	stats := make(map[string]any, len(r.HandbookStats)+2)
 	for k, v := range r.HandbookStats {
 		stats[k] = v
 	}
-	msg := cause.Error()
-	if len(msg) > maxHandbookErrorLen {
-		msg = msg[:maxHandbookErrorLen]
-	}
-	stats["last_error"] = msg
+	stats["last_error"] = truncateRunes(cause.Error(), maxHandbookErrorLen)
 	stats["failed_commit"] = r.HeadCommit
-	if err := uc.repo.FinishHandbookBuild(context.WithoutCancel(ctx), r.ID, HandbookBuildResult{Status: HandbookStatusFailed, Stats: stats}); err != nil {
+	if err := uc.finish(ctx, r.ID, token, HandbookBuildResult{Status: HandbookStatusFailed, Stats: stats}); err != nil {
 		return errors.Join(cause, err)
 	}
 	return cause
+}
+
+// finish drops the result when another build has taken over the lease.
+func (uc *HandbookUsecase) finish(ctx context.Context, id, token string, res HandbookBuildResult) error {
+	err := uc.repo.FinishHandbookBuild(context.WithoutCancel(ctx), id, token, res)
+	if errors.Is(err, ErrHandbookLeaseLost) {
+		uc.log.Warnf("handbook rebuild %s: lease lost, dropping %s result", id, res.Status)
+		return nil
+	}
+	return err
+}
+
+func (uc *HandbookUsecase) release(ctx context.Context, id, token, status string) error {
+	err := uc.repo.ReleaseHandbookBuild(context.WithoutCancel(ctx), id, token, status)
+	if errors.Is(err, ErrHandbookLeaseLost) {
+		return nil
+	}
+	return err
+}
+
+func truncateRunes(s string, n int) string {
+	i := 0
+	for j := range s {
+		if i == n {
+			return s[:j]
+		}
+		i++
+	}
+	return s
 }
 
 func (uc *HandbookUsecase) getRepo(ctx context.Context, id string) (*Repository, error) {
@@ -247,6 +327,9 @@ func (uc *HandbookUsecase) ReadPage(ctx context.Context, id, rel string) (string
 // SkillDirsForAgent returns the agent's code-map skill dir followed by the handbook skill
 // dirs of its effective repos. nil means the agent has no repo bindings.
 func (uc *HandbookUsecase) SkillDirsForAgent(ctx context.Context, agentID string) ([]string, error) {
+	if uc == nil {
+		return nil, nil
+	}
 	bound, repos, err := uc.registry.EffectiveRepositories(ctx, agentID)
 	if err != nil || !bound {
 		return nil, err

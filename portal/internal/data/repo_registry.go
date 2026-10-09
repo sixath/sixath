@@ -401,25 +401,53 @@ func (r *repoRegistryRepo) ListAgentIDsByEffectiveRepo(ctx context.Context, repo
 	return ids, err
 }
 
-func (r *repoRegistryRepo) ClaimHandbookBuild(ctx context.Context, id string, now, leaseUntil time.Time) (bool, error) {
+func (r *repoRegistryRepo) ClaimHandbookBuild(ctx context.Context, id string, now, leaseUntil time.Time) (string, bool, error) {
+	token := uuid.NewString()
 	res := r.db.WithContext(ctx).Model(&model.Repository{}).
 		Where("id = ? AND (handbook_status <> ? OR handbook_lease_until IS NULL OR handbook_lease_until < ?)",
-			id, biz.HandbookStatusBuilding, now).
-		Updates(map[string]any{"handbook_status": biz.HandbookStatusBuilding, "handbook_lease_until": leaseUntil})
-	return res.RowsAffected > 0, res.Error
+			id, biz.HandbookStatusBuilding, now.UTC()).
+		Updates(map[string]any{
+			"handbook_status":      biz.HandbookStatusBuilding,
+			"handbook_lease_until": leaseUntil.UTC(),
+			"handbook_lease_token": token,
+		})
+	if res.Error != nil || res.RowsAffected == 0 {
+		return "", false, res.Error
+	}
+	return token, true, nil
 }
 
-func (r *repoRegistryRepo) FinishHandbookBuild(ctx context.Context, id string, res biz.HandbookBuildResult) error {
+func (r *repoRegistryRepo) FinishHandbookBuild(ctx context.Context, id, token string, res biz.HandbookBuildResult) error {
 	updates := map[string]any{
-		"handbook_status":      res.Status,
-		"handbook_lease_until": nil,
-		"handbook_stats":       model.JSONObject(res.Stats),
+		"handbook_status": res.Status,
+		"handbook_stats":  model.JSONObject(res.Stats),
 	}
 	if res.Status == biz.HandbookStatusReady {
 		updates["handbook_commit"] = res.Commit
 		updates["handbook_version"] = res.Version
 	}
-	return r.db.WithContext(ctx).Model(&model.Repository{}).Where("id = ?", id).Updates(updates).Error
+	return r.releaseLease(ctx, id, token, updates)
+}
+
+func (r *repoRegistryRepo) ReleaseHandbookBuild(ctx context.Context, id, token, status string) error {
+	return r.releaseLease(ctx, id, token, map[string]any{"handbook_status": status})
+}
+
+func (r *repoRegistryRepo) releaseLease(ctx context.Context, id, token string, updates map[string]any) error {
+	if token == "" {
+		return biz.ErrHandbookLeaseLost
+	}
+	updates["handbook_lease_until"] = nil
+	updates["handbook_lease_token"] = nil
+	res := r.db.WithContext(ctx).Model(&model.Repository{}).
+		Where("id = ? AND handbook_lease_token = ?", id, token).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return biz.ErrHandbookLeaseLost
+	}
+	return nil
 }
 
 func repositoryToBiz(m *model.Repository) *biz.Repository {
@@ -428,7 +456,8 @@ func repositoryToBiz(m *model.Repository) *biz.Repository {
 		Tags: []string(m.Tags), GitRemote: m.GitRemote, GitBranch: m.GitBranch, HeadCommit: m.HeadCommit,
 		SyncMode: m.SyncMode, Status: m.Status, HandbookStatus: m.HandbookStatus, OwnerID: m.OwnerID,
 		HandbookCommit: m.HandbookCommit, HandbookVersion: m.HandbookVersion, HandbookStats: map[string]any(m.HandbookStats),
-		LastScannedAt: m.LastScannedAt, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+		HandbookLeaseUntil: m.HandbookLeaseUntil,
+		LastScannedAt:      m.LastScannedAt, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }
 

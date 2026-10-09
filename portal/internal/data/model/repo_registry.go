@@ -25,6 +25,7 @@ type Repository struct {
 	HandbookVersion    int         `gorm:"column:handbook_version;not null;default:0"`
 	HandbookStats      JSONObject  `gorm:"column:handbook_stats;type:json"`
 	HandbookLeaseUntil *time.Time  `gorm:"column:handbook_lease_until"`
+	HandbookLeaseToken *string     `gorm:"column:handbook_lease_token;size:36"`
 	OwnerID            string      `gorm:"column:owner_id;size:36;not null;default:''"`
 	LastScannedAt      *time.Time  `gorm:"column:last_scanned_at"`
 	CreatedAt          time.Time   `gorm:"column:created_at;not null"`

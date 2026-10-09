@@ -13,13 +13,22 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrBadPath rejects repo ids and page paths that are empty, absolute, escape the skill
 // directory or contain anything but slug-like segments.
 var ErrBadPath = errors.New("handbook: invalid page path")
 
-const maxReadBytes = 256 << 10
+// ErrVersionExists means the version directory is already published and is left untouched.
+var ErrVersionExists = errors.New("handbook: version already published")
+
+const (
+	maxReadBytes = 256 << 10
+	tmpMarker    = ".tmp-"
+	// staleTmpAge exceeds the build lease so prune never removes a live builder's staging dir.
+	staleTmpAge = time.Hour
+)
 
 var (
 	repoIDRe   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -68,6 +77,7 @@ func (s Store) SkillDir(id string, v int) string { return filepath.Join(s.Versio
 
 // Publish writes files into v<version>, points current.json at it and keeps the newest keep
 // versions. Older versions stay readable until pruned so in-flight chats are not broken.
+// An already published v<version> is never replaced; ErrVersionExists is returned instead.
 func (s Store) Publish(id string, version int, files map[string][]byte, keep int) error {
 	if err := checkID(id); err != nil {
 		return err
@@ -81,10 +91,17 @@ func (s Store) Publish(id string, version int, files map[string][]byte, keep int
 		}
 	}
 	final := s.VersionDir(id, version)
-	tmp := final + ".tmp"
-	if err := os.RemoveAll(tmp); err != nil {
+	if _, err := os.Lstat(final); err == nil {
+		return fmt.Errorf("%w: v%d", ErrVersionExists, version)
+	}
+	if err := os.MkdirAll(s.repoDir(id), 0o755); err != nil {
 		return err
 	}
+	tmp, err := os.MkdirTemp(s.repoDir(id), "v"+strconv.Itoa(version)+tmpMarker+"*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
 	for rel, b := range files {
 		p := filepath.Join(tmp, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -94,10 +111,13 @@ func (s Store) Publish(id string, version int, files map[string][]byte, keep int
 			return err
 		}
 	}
-	if err := os.RemoveAll(final); err != nil {
-		return err
+	if _, err := os.Lstat(final); err == nil {
+		return fmt.Errorf("%w: v%d", ErrVersionExists, version)
 	}
 	if err := os.Rename(tmp, final); err != nil {
+		if _, serr := os.Lstat(final); serr == nil {
+			return fmt.Errorf("%w: v%d", ErrVersionExists, version)
+		}
 		return err
 	}
 	ptr, err := json.Marshal(currentPointer{Version: version})
@@ -143,8 +163,10 @@ func (s Store) prune(id string, current, keep int) {
 		if !e.IsDir() || !strings.HasPrefix(name, "v") {
 			continue
 		}
-		if strings.HasSuffix(name, ".tmp") {
-			_ = os.RemoveAll(filepath.Join(s.repoDir(id), name))
+		if strings.Contains(name, tmpMarker) || strings.HasSuffix(name, ".tmp") {
+			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > staleTmpAge {
+				_ = os.RemoveAll(filepath.Join(s.repoDir(id), name))
+			}
 			continue
 		}
 		n, err := strconv.Atoi(strings.TrimPrefix(name, "v"))
@@ -197,6 +219,13 @@ func (s Store) ReadSkillFile(id string, v int, rel string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		return nil, ErrBadPath
+	}
 	b, err := io.ReadAll(io.LimitReader(f, maxReadBytes))
 	if err != nil {
 		return nil, err

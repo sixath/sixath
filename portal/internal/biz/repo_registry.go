@@ -58,10 +58,12 @@ type Repository struct {
 	HandbookCommit  string         `json:"handbook_commit"`
 	HandbookVersion int            `json:"handbook_version"`
 	HandbookStats   map[string]any `json:"handbook_stats,omitempty"`
-	OwnerID         string         `json:"owner_id"`
-	LastScannedAt   *time.Time     `json:"last_scanned_at,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	// HandbookLeaseUntil is set while a build holds the lease; a past value means it is stuck.
+	HandbookLeaseUntil *time.Time `json:"handbook_lease_until,omitempty"`
+	OwnerID            string     `json:"owner_id"`
+	LastScannedAt      *time.Time `json:"last_scanned_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // AbsPath is the repository root on disk.
@@ -174,8 +176,13 @@ type RepoRegistryRepo interface {
 	ListAgentIDsByEffectiveRepo(ctx context.Context, repoID string) ([]string, error)
 
 	// ClaimHandbookBuild marks the repo as building until leaseUntil unless another build
-	// holds a lease that has not expired at now; it reports whether the claim succeeded.
-	ClaimHandbookBuild(ctx context.Context, id string, now, leaseUntil time.Time) (bool, error)
-	// FinishHandbookBuild releases the lease and records the outcome.
-	FinishHandbookBuild(ctx context.Context, id string, res HandbookBuildResult) error
+	// holds a lease that has not expired at now. On success it returns a fresh lease token
+	// that the holder must present to finish or release the build.
+	ClaimHandbookBuild(ctx context.Context, id string, now, leaseUntil time.Time) (token string, ok bool, err error)
+	// FinishHandbookBuild releases the lease held by token and records the outcome;
+	// ErrHandbookLeaseLost when the lease was taken over or already released.
+	FinishHandbookBuild(ctx context.Context, id, token string, res HandbookBuildResult) error
+	// ReleaseHandbookBuild releases the lease held by token and restores status without
+	// recording an outcome; ErrHandbookLeaseLost when token no longer holds the lease.
+	ReleaseHandbookBuild(ctx context.Context, id, token, status string) error
 }
