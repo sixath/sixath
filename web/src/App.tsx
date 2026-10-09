@@ -22,6 +22,7 @@ import SessionHistoryPage from './pages/SessionHistoryPage'
 import EvolutionReviewPage from './pages/EvolutionReviewPage'
 import RepoListPage from './pages/RepoListPage'
 import RepoGroupListPage from './pages/RepoGroupListPage'
+import RepoMigrationPage from './pages/RepoMigrationPage'
 import SettingsPage from './pages/SettingsPage'
 import OrgListPage from './pages/OrgListPage'
 import OrgDetailPage from './pages/OrgDetailPage'
@@ -319,6 +320,7 @@ function AppShell() {
             <Route path="/orgs/:id" element={<OrgDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/repos" element={<RepoListPage />} />
+            <Route path="/repos/migration" element={<RepoMigrationPage />} />
             <Route path="/repo-groups" element={<RepoGroupListPage />} />
             <Route path="/evolution-review" element={<EvolutionReviewPage />} />
             <Route
