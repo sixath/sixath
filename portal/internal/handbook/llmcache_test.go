@@ -110,6 +110,23 @@ func TestLoadLLMLayer_CurrentAndStaleCards(t *testing.T) {
 	}
 }
 
+func TestLoadLLMLayer_UnreadableCardIsMissing(t *testing.T) {
+	c := LLMCache{Dir: t.TempDir()}
+	badH, okH := hashOf("a"), hashOf("b")
+	if err := os.MkdirAll(c.cardPath(badH), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.PutCard(okH, &Card{Purpose: "好", Hash: okH})
+	f := &Facts{Files: []File{{Path: "bad.go", Lang: "go", Size: 1, Hash: badH}, {Path: "ok.go", Lang: "go", Size: 1, Hash: okH}}}
+	l, err := LoadLLMLayer(c, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Cards["bad.go"] != nil || l.Cards["ok.go"] == nil {
+		t.Fatalf("cards %#v", l.Cards)
+	}
+}
+
 func TestLoadLLMLayer_IgnoresOldPromptSkeleton(t *testing.T) {
 	c := LLMCache{Dir: t.TempDir()}
 	_ = c.PutSkeleton(&Skeleton{PromptVersion: "old", Stages: []Stage{{ID: "s"}}})

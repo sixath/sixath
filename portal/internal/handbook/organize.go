@@ -286,7 +286,7 @@ func inferSkeleton(ctx context.Context, m model.Model, relPath string, f *Facts,
 			continue
 		}
 		valid[id] = true
-		title := clipRunes(collapseSpaces(firstNonEmpty(s.Title, id)), 40)
+		title := clipRunes(collapseSpaces(firstNonEmpty(s.Title, id)), stageTitleRunes)
 		stages = append(stages, Stage{ID: id, Title: title, Summary: clipRunes(collapseSpaces(s.Summary), 200)})
 	}
 	files := eligibleFiles(f)

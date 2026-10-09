@@ -68,7 +68,7 @@ func summarizeStage(ctx context.Context, m model.Model, relPath string, st Stage
 	if err := llmJSON(ctx, m, stageSystemPrompt, stagePrompt(relPath, st, files, cards), stageMaxTokens, &r, u); err != nil {
 		return "", err
 	}
-	s := clipRunes(r.Summary, 1500)
+	s := clipRunes(r.Summary, stageSummaryRunes)
 	if s == "" {
 		return "", fmt.Errorf("%w: empty stage summary", errBadReply)
 	}
@@ -119,7 +119,7 @@ func writeOverview(ctx context.Context, m model.Model, relPath string, f *Facts,
 	if err := llmJSON(ctx, m, overviewSystemPrompt, overviewPrompt(relPath, f, sk), overviewMaxTokens, &r, u); err != nil {
 		return "", err
 	}
-	s := clipRunes(r.Overview, 4000)
+	s := clipRunes(r.Overview, overviewRunes)
 	if s == "" {
 		return "", fmt.Errorf("%w: empty overview", errBadReply)
 	}
@@ -183,7 +183,7 @@ func registerNotes(ctx context.Context, m model.Model, relPath string, hits []Re
 			return nil, err
 		}
 		for _, g := range batch {
-			if n := clipRunes(collapseSpaces(r.Notes[g.Key]), 160); n != "" {
+			if n := clipRunes(collapseSpaces(r.Notes[g.Key]), registerNoteRunes); n != "" {
 				notes[g.Key] = n
 			}
 		}

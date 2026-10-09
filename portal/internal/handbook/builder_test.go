@@ -3,6 +3,7 @@ package handbook
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,51 @@ func TestBuild(t *testing.T) {
 	}
 	if s.Cards != 0 || s.StaleCards != 0 || s.Stages != 0 || s.LLMRev != "" {
 		t.Fatalf("LLM stats without LLMDir = %#v", s)
+	}
+}
+
+func TestBuild_UnreadableLLMCacheDegrades(t *testing.T) {
+	root := sampleRepo(t)
+	facts, err := CollectFacts(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target File
+	for _, f := range facts.Files {
+		if CardEligible(f) {
+			target = f
+			break
+		}
+	}
+
+	cardErr := LLMCache{Dir: t.TempDir()}
+	if err := os.MkdirAll(cardErr.cardPath(target.Hash), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Build(context.Background(), BuildInput{RelPath: "svc", Root: root, Commit: "c", LLMDir: cardErr.Dir, LLMRev: "7"})
+	if err != nil {
+		t.Fatalf("unreadable card failed the build: %v", err)
+	}
+	if out.Stats.Cards != 0 || out.Stats.LLMRev != "7" {
+		t.Fatalf("stats %#v", out.Stats)
+	}
+
+	skErr := LLMCache{Dir: t.TempDir()}
+	if err := skErr.PutCard(target.Hash, &Card{Purpose: "不应渲染", Hash: target.Hash, PromptVersion: LLMPromptVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skErr.skeletonPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err = Build(context.Background(), BuildInput{RelPath: "svc", Root: root, Commit: "c", LLMDir: skErr.Dir, LLMRev: "7"})
+	if err != nil {
+		t.Fatalf("unreadable skeleton failed the build: %v", err)
+	}
+	if out.Stats.Cards != 0 || out.Stats.Stages != 0 || out.Stats.LLMRev != "" {
+		t.Fatalf("stats %#v", out.Stats)
+	}
+	if strings.Contains(string(out.Files["skill/references/overview.md"]), "LLM，") {
+		t.Fatal("rendered LLM content from an unreadable cache")
 	}
 }
 

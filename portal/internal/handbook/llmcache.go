@@ -25,6 +25,18 @@ var cardLangs = map[string]bool{
 // CardEligible reports whether a file gets an LLM card: non-empty, non-test source code.
 func CardEligible(f File) bool { return !f.Test && f.Size > 0 && cardLangs[f.Lang] }
 
+// Rune limits of LLM text, applied when it is generated and again when it is rendered.
+const (
+	cardPurposeRunes     = 120
+	cardDescriptionRunes = 600
+	cardLifecycleRunes   = 120
+	cardFuncSummaryRunes = 160
+	stageTitleRunes      = 40
+	stageSummaryRunes    = 1500
+	overviewRunes        = 4000
+	registerNoteRunes    = 160
+)
+
 // CardFunc is one key function of a card; Name is always one of the file's symbols.
 type CardFunc struct {
 	Name    string `json:"name"`
@@ -321,11 +333,8 @@ func LoadLLMLayer(c LLMCache, f *Facts) (*LLMLayer, error) {
 		if !CardEligible(file) || !validHash(file.Hash) {
 			continue
 		}
-		card, err := c.Card(file.Hash)
-		if err != nil {
-			return nil, err
-		}
-		if card != nil {
+		// An unreadable card renders like a missing one rather than failing the publish.
+		if card, err := c.Card(file.Hash); err == nil && card != nil {
 			l.Cards[file.Path] = card
 			continue
 		}

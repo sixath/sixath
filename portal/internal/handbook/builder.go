@@ -68,10 +68,13 @@ func Build(ctx context.Context, in BuildInput) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
+	// An unreadable LLM cache never blocks the deterministic publish: render without it and
+	// leave LLMRev empty so the stats mismatch the current rev and a later build retries.
 	var layer *LLMLayer
+	llmRev := in.LLMRev
 	if in.LLMDir != "" {
 		if layer, err = LoadLLMLayer(LLMCache{Dir: in.LLMDir}, facts); err != nil {
-			return nil, err
+			layer, llmRev = nil, ""
 		}
 	}
 	if in.Now.IsZero() {
@@ -89,7 +92,7 @@ func Build(ctx context.Context, in BuildInput) (*Output, error) {
 	stats := Stats{
 		GeneratorVersion: GeneratorVersion, BuiltAt: in.Now.UTC().Format(time.RFC3339),
 		Files: len(facts.Files), Packages: len(facts.Packages), Areas: len(buildAreas(facts)),
-		Registers: len(regNames), Truncated: facts.Coverage.Truncated, LLMRev: in.LLMRev,
+		Registers: len(regNames), Truncated: facts.Coverage.Truncated, LLMRev: llmRev,
 	}
 	if layer != nil {
 		stats.Cards, stats.StaleCards = len(layer.Cards), len(layer.Stale)

@@ -105,9 +105,9 @@ func generateCard(ctx context.Context, m model.Model, modelName, relPath string,
 // sanitizeCard clips fields and keeps only functions that name one of the file's symbols.
 func sanitizeCard(r cardReply, syms []Symbol) *Card {
 	c := &Card{
-		Purpose:     clipRunes(collapseSpaces(r.Purpose), 120),
-		Description: clipRunes(collapseSpaces(r.Description), 600),
-		Lifecycle:   clipRunes(collapseSpaces(r.Lifecycle), 120),
+		Purpose:     clipRunes(collapseSpaces(r.Purpose), cardPurposeRunes),
+		Description: clipRunes(collapseSpaces(r.Description), cardDescriptionRunes),
+		Lifecycle:   clipRunes(collapseSpaces(r.Lifecycle), cardLifecycleRunes),
 		Role:        strings.ToLower(strings.TrimSpace(r.Role)),
 	}
 	if !cardRoles[c.Role] {
@@ -124,7 +124,7 @@ func sanitizeCard(r cardReply, syms []Symbol) *Card {
 			continue
 		}
 		seen[name] = true
-		c.Functions = append(c.Functions, CardFunc{Name: name, Summary: clipRunes(collapseSpaces(fn.Summary), 160)})
+		c.Functions = append(c.Functions, CardFunc{Name: name, Summary: clipRunes(collapseSpaces(fn.Summary), cardFuncSummaryRunes)})
 	}
 	return c
 }

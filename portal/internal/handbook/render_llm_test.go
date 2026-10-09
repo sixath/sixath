@@ -1,6 +1,7 @@
 package handbook
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -149,6 +150,101 @@ func TestRender_UntrustedLLMText(t *testing.T) {
 	}
 	if strings.Contains(pages["references/areas/internal-order.md"], "\n# 职责") {
 		t.Fatal("card purpose produced a heading")
+	}
+}
+
+func TestMarkdownBlock_Fences(t *testing.T) {
+	if got := markdownBlock("```go``` 示例\n# 标题"); got != "```go``` 示例\n#### 标题" {
+		t.Errorf("backticks in the info string open no fence: %q", got)
+	}
+	if got := markdownBlock("```\n    ```\n# 内部"); got != "```\n    ```\n# 内部\n```" {
+		t.Errorf("4-space indented line closes no fence: %q", got)
+	}
+	if got := markdownBlock("````\n```\n# 内部\n````\n# 外部"); got != "````\n```\n# 内部\n````\n#### 外部" {
+		t.Errorf("shorter fence closes nothing: %q", got)
+	}
+	if got := markdownBlock("~~~ a`b\n```\n~~~\n# 外部"); got != "~~~ a`b\n```\n~~~\n#### 外部" {
+		t.Errorf("tilde fence: %q", got)
+	}
+}
+
+func TestEscapeLineStart(t *testing.T) {
+	cases := map[string]string{
+		"1. 第一":         `1\. 第一`,
+		"23) 第二":        `23\) 第二`,
+		"1234567890. x": "1234567890. x",
+		"# 标题":          `\# 标题`,
+		"- 列表":          `\- 列表`,
+		"普通 1. 文本":      "普通 1. 文本",
+	}
+	for in, want := range cases {
+		if got := escapeLineStart(in); got != want {
+			t.Errorf("escapeLineStart(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRender_ClipsAndEscapesLLMText(t *testing.T) {
+	meta, f, l := llmRenderFixture()
+	l.Skeleton.Stages[0].Title = "1. 下单"
+	l.Skeleton.Overview = strings.Repeat("长", overviewRunes+500)
+	l.Cards["internal/order/store.go"].Description = strings.Repeat("述", cardDescriptionRunes+500)
+	pages := Render(meta, f, l)
+	ov := pages["references/overview.md"]
+	if !strings.Contains(ov, "- 1\\. 下单（`references/stages/order.md`）") {
+		t.Errorf("stage title list item not escaped:\n%s", ov)
+	}
+	if strings.Contains(ov, strings.Repeat("长", overviewRunes+1)) || !strings.Contains(ov, strings.Repeat("长", overviewRunes)+"…") {
+		t.Error("overview not clipped")
+	}
+	st := pages["references/stages/order.md"]
+	if strings.Contains(st, strings.Repeat("述", cardDescriptionRunes+1)) || !strings.Contains(st, strings.Repeat("述", cardDescriptionRunes)+"…") {
+		t.Error("card description not clipped")
+	}
+}
+
+func TestRender_LargeRepoWithLLMLayerWithinCap(t *testing.T) {
+	f := &Facts{Symbols: map[string][]Symbol{}}
+	l := &LLMLayer{Cards: map[string]*Card{}, Stale: map[string]*Card{},
+		Skeleton: &Skeleton{PromptVersion: LLMPromptVersion, Overview: strings.Repeat("总览。", 2000), Files: map[string]FileAssign{}}}
+	for s := 0; s < maxStages; s++ {
+		l.Skeleton.Stages = append(l.Skeleton.Stages, Stage{ID: fmt.Sprintf("s%02d", s), Title: strings.Repeat("题", 60), Summary: strings.Repeat("阶段说明", 500)})
+	}
+	long := func(r string, n int) string { return strings.Repeat(r, n) }
+	const assigned, unassigned = 600, 150
+	for i := 0; i < assigned+unassigned; i++ {
+		p := fmt.Sprintf("module%03d/pkg/x.go", i)
+		h := fmt.Sprintf("%064x", i)
+		f.Files = append(f.Files, File{Path: p, Lang: "go", Size: 1000, Lines: 100, Hash: h})
+		card := &Card{Purpose: long("职", 200), Role: "service", Description: long("描", 900), Lifecycle: long("时", 200)}
+		for j := 0; j < 60; j++ {
+			name := fmt.Sprintf("Func%02d", j)
+			f.Symbols[p] = append(f.Symbols[p], Symbol{Name: name, Kind: "func", Line: j, EndLine: j + 1})
+			card.Functions = append(card.Functions, CardFunc{Name: name, Summary: long("函", 300)})
+		}
+		if i%10 == 0 {
+			l.Stale[p] = card
+		} else {
+			l.Cards[p] = card
+		}
+		if i < assigned {
+			l.Skeleton.Files[p] = FileAssign{Stage: fmt.Sprintf("s%02d", i%maxStages), CardHash: h, Hash: h}
+		}
+	}
+	pages := Render(RenderMeta{RelPath: "big/repo", Commit: "c", GeneratedAt: time.Unix(0, 0)}, f, l)
+	for p, c := range pages {
+		if len(c) > MaxPageBytes {
+			t.Fatalf("%s is %d bytes > %d", p, len(c), MaxPageBytes)
+		}
+	}
+	if _, ok := pages["references/stages/s00.p2.md"]; !ok {
+		t.Fatalf("stage pages should paginate; pages = %d", len(pages))
+	}
+	idx := pages["references/index.md"]
+	sec := idx[strings.Index(idx, "## 未归类文件"):]
+	sec = sec[:strings.Index(sec, "\n## ")+1]
+	if n := strings.Count(sec, "\n- `"); n != maxIndexFileList || !strings.Contains(sec, "…共 150 个，只列前 100 个") {
+		t.Fatalf("unassigned list has %d entries:\n%s", n, sec)
 	}
 }
 

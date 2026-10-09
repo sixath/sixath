@@ -292,7 +292,7 @@ func registerSections(hits []RegisterHit, notes map[string]string) []string {
 			hs := byName[n]
 			var b strings.Builder
 			fmt.Fprintf(&b, "### `%s`\n\n", n)
-			if note := inlineText(notes[k.kind+":"+n]); note != "" {
+			if note := inlineClip(notes[k.kind+":"+n], registerNoteRunes); note != "" {
 				fmt.Fprintf(&b, "用途：%s\n\n", note)
 			}
 			for i, h := range hs {
@@ -336,7 +336,7 @@ func areaSections(a area, f *Facts, v *llmView) []string {
 		fmt.Fprintf(&b, "- `%s`（%s，%d 行%s）\n", file.Path, file.Lang, file.Lines, mark)
 		card, stale := v.card(file.Path)
 		var funcs map[string]string
-		if purpose := inlineText(cardPurpose(card)); purpose != "" {
+		if purpose := cardPurpose(card); purpose != "" {
 			if stale {
 				fmt.Fprintf(&b, "  - 职责（已过期，以源码为准）：%s\n", purpose)
 			} else {
@@ -345,8 +345,8 @@ func areaSections(a area, f *Facts, v *llmView) []string {
 		}
 		if card != nil && !stale {
 			funcs = map[string]string{}
-			for _, fn := range card.Functions {
-				funcs[fn.Name] = inlineText(fn.Summary)
+			for _, fn := range card.Functions[:min(len(card.Functions), maxCardFuncs)] {
+				funcs[fn.Name] = inlineClip(fn.Summary, cardFuncSummaryRunes)
 			}
 		}
 		syms := f.Symbols[file.Path]
@@ -439,7 +439,7 @@ func renderOverview(meta RenderMeta, f *Facts, areas []area, v *llmView) string 
 	if v.hasStages() {
 		b.WriteString("\n## 执行阶段\n\n")
 		for _, st := range v.stages {
-			fmt.Fprintf(&b, "- %s（`references/stages/%s.md`）", st.Title, st.ID)
+			fmt.Fprintf(&b, "- %s（`references/stages/%s.md`）", escapeLineStart(st.Title), st.ID)
 			if lead := summaryLead(st.Summary, 80); lead != "" {
 				b.WriteString("：" + lead)
 			}
@@ -565,21 +565,24 @@ func renderStageSkill(meta RenderMeta) string {
 const (
 	maxIndexFileList = 100
 	stageLeadRunes   = 80
+	maxRoleRunes     = 20
+	maxFuncNameRunes = 200
 )
 
 // llmView is the validated LLM content of one render; nil when the layer adds nothing.
 type llmView struct {
 	l          *LLMLayer
-	stages     []Stage             // valid, distinct ids; single-line titles
+	stages     []Stage             // valid, distinct ids; single-line clipped titles, clipped summaries
 	stageFiles map[string][]string // stage id -> card-eligible files of f, sorted
 	unassigned []string            // card-eligible files of f without a valid stage, sorted
+	files      map[string]File     // path -> card-eligible file of f
 }
 
 func newLLMView(f *Facts, l *LLMLayer) *llmView {
 	if l.Empty() {
 		return nil
 	}
-	v := &llmView{l: l, stageFiles: map[string][]string{}}
+	v := &llmView{l: l, stageFiles: map[string][]string{}, files: map[string]File{}}
 	sk := l.Skeleton
 	if sk == nil {
 		return v
@@ -596,6 +599,7 @@ func newLLMView(f *Facts, l *LLMLayer) *llmView {
 		if !CardEligible(file) {
 			continue
 		}
+		v.files[file.Path] = file
 		if id := sk.Files[file.Path].Stage; valid[id] {
 			v.stageFiles[id] = append(v.stageFiles[id], file.Path)
 		} else {
@@ -622,7 +626,8 @@ func validStages(sk *Skeleton) []Stage {
 			continue
 		}
 		seen[s.ID] = true
-		s.Title = inlineText(firstNonEmpty(s.Title, s.ID))
+		s.Title = inlineClip(firstNonEmpty(s.Title, s.ID), stageTitleRunes)
+		s.Summary = clipRunes(s.Summary, stageSummaryRunes)
 		out = append(out, s)
 	}
 	return out
@@ -662,18 +667,18 @@ func (v *llmView) overview() string {
 	if v == nil || v.l.Skeleton == nil {
 		return ""
 	}
-	return markdownBlock(v.l.Skeleton.Overview)
+	return markdownBlock(clipRunes(v.l.Skeleton.Overview, overviewRunes))
 }
 
 func cardPurpose(c *Card) string {
 	if c == nil {
 		return ""
 	}
-	return c.Purpose
+	return inlineClip(c.Purpose, cardPurposeRunes)
 }
 
 func roleSuffix(role string) string {
-	if role = inlineText(role); role != "" {
+	if role = inlineClip(role, maxRoleRunes); role != "" {
 		return "（" + role + "）"
 	}
 	return ""
@@ -725,12 +730,8 @@ func stageSections(st Stage, files []string, f *Facts, v *llmView) []string {
 		summary = "（暂无说明）"
 	}
 	out := []string{fmt.Sprintf("%s\n\n## 文件（%d 个）\n\n", summary, len(files))}
-	byPath := make(map[string]File, len(f.Files))
-	for _, file := range f.Files {
-		byPath[file.Path] = file
-	}
 	for _, p := range files {
-		file := byPath[p]
+		file := v.files[p]
 		var b strings.Builder
 		fmt.Fprintf(&b, "### `%s`（%s，%d 行）", file.Path, file.Lang, file.Lines)
 		card, stale := v.card(p)
@@ -743,13 +744,13 @@ func stageSections(st Stage, files []string, f *Facts, v *llmView) []string {
 			out = append(out, b.String())
 			continue
 		}
-		if purpose := inlineText(card.Purpose); purpose != "" {
+		if purpose := cardPurpose(card); purpose != "" {
 			fmt.Fprintf(&b, "职责：%s%s\n", purpose, roleSuffix(card.Role))
 		}
-		if d := inlineText(card.Description); d != "" {
+		if d := inlineClip(card.Description, cardDescriptionRunes); d != "" {
 			b.WriteString(escapeLineStart(d) + "\n")
 		}
-		if lc := inlineText(card.Lifecycle); lc != "" {
+		if lc := inlineClip(card.Lifecycle, cardLifecycleRunes); lc != "" {
 			fmt.Fprintf(&b, "执行时机：%s\n", lc)
 		}
 		if len(card.Functions) > 0 {
@@ -760,8 +761,8 @@ func stageSections(st Stage, files []string, f *Facts, v *llmView) []string {
 				}
 			}
 			b.WriteString("关键函数：\n")
-			for _, fn := range card.Functions {
-				name := strings.ReplaceAll(inlineText(fn.Name), "`", "")
+			for _, fn := range card.Functions[:min(len(card.Functions), maxCardFuncs)] {
+				name := strings.ReplaceAll(inlineClip(fn.Name, maxFuncNameRunes), "`", "")
 				if name == "" {
 					continue
 				}
@@ -769,7 +770,7 @@ func stageSections(st Stage, files []string, f *Facts, v *llmView) []string {
 				if s, ok := lines[name]; ok {
 					fmt.Fprintf(&b, " L%d-%d", s.Line, s.EndLine)
 				}
-				if sum := inlineText(fn.Summary); sum != "" {
+				if sum := inlineClip(fn.Summary, cardFuncSummaryRunes); sum != "" {
 					b.WriteString(" —— " + sum)
 				}
 				b.WriteString("\n")
@@ -801,10 +802,15 @@ func summaryLead(s string, n int) string {
 // inlineText is LLM text reduced to one line.
 func inlineText(s string) string { return collapseSpaces(s) }
 
+// inlineClip is LLM text reduced to one line of at most n runes.
+func inlineClip(s string, n int) string { return clipRunes(collapseSpaces(s), n) }
+
 // tableCell is LLM text safe inside one Markdown table cell.
 func tableCell(s string) string {
 	return strings.ReplaceAll(inlineText(s), "|", `\|`)
 }
+
+var orderedListStartRe = regexp.MustCompile(`^(\d{1,9})([.)])`)
 
 // escapeLineStart keeps a line of LLM text from starting a heading, quote, list, fence or
 // HTML block.
@@ -812,14 +818,15 @@ func escapeLineStart(s string) string {
 	if s != "" && strings.ContainsRune("#>-+*=|`~<", rune(s[0])) {
 		return `\` + s
 	}
-	return s
+	return orderedListStartRe.ReplaceAllString(s, `$1\$2`)
 }
 
 var (
-	mdHeadingRe = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]|$)`)
-	mdSetextRe  = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
-	mdFenceRe   = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
-	mdHTMLRe    = regexp.MustCompile(`^ {0,3}<`)
+	mdHeadingRe    = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]|$)`)
+	mdSetextRe     = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
+	mdFenceOpenRe  = regexp.MustCompile("^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$")
+	mdFenceCloseRe = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})[ \t]*$")
+	mdHTMLRe       = regexp.MustCompile(`^ {0,3}<`)
 )
 
 // markdownBlock keeps multi-line LLM Markdown from breaking the page around it: headings are
@@ -834,13 +841,13 @@ func markdownBlock(s string) string {
 	fence := ""
 	for i, ln := range lines {
 		if fence != "" {
-			if t := strings.TrimSpace(ln); strings.HasPrefix(t, fence) && strings.Trim(t, fence[:1]) == "" {
+			if m := mdFenceCloseRe.FindStringSubmatch(ln); m != nil && m[1][0] == fence[0] && len(m[1]) >= len(fence) {
 				fence = ""
 			}
 			continue
 		}
-		if m := mdFenceRe.FindStringSubmatch(ln); m != nil {
-			fence = m[1]
+		if m := mdFenceOpenRe.FindStringSubmatch(ln); m != nil {
+			fence = m[1] + m[2]
 			continue
 		}
 		if m := mdHeadingRe.FindStringSubmatchIndex(ln); m != nil {
