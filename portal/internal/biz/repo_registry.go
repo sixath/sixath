@@ -12,8 +12,11 @@ const (
 	RepoStatusMissing  = "missing"
 	RepoStatusArchived = "archived"
 
-	RepoSyncRegistryOnly = "registry_only"
-	HandbookStatusNone   = "none"
+	RepoSyncRegistryOnly   = "registry_only"
+	HandbookStatusNone     = "none"
+	HandbookStatusBuilding = "building"
+	HandbookStatusReady    = "ready"
+	HandbookStatusFailed   = "failed"
 
 	RepoGroupDir    = "dir"
 	RepoGroupTag    = "tag"
@@ -40,22 +43,25 @@ var (
 )
 
 type Repository struct {
-	ID             string     `json:"id"`
-	CodeRoot       string     `json:"code_root"`
-	RelPath        string     `json:"rel_path"`
-	Name           string     `json:"name"`
-	Description    string     `json:"description"`
-	Tags           []string   `json:"tags"`
-	GitRemote      string     `json:"git_remote"`
-	GitBranch      string     `json:"git_branch"`
-	HeadCommit     string     `json:"head_commit"`
-	SyncMode       string     `json:"sync_mode"`
-	Status         string     `json:"status"`
-	HandbookStatus string     `json:"handbook_status"`
-	OwnerID        string     `json:"owner_id"`
-	LastScannedAt  *time.Time `json:"last_scanned_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID              string         `json:"id"`
+	CodeRoot        string         `json:"code_root"`
+	RelPath         string         `json:"rel_path"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description"`
+	Tags            []string       `json:"tags"`
+	GitRemote       string         `json:"git_remote"`
+	GitBranch       string         `json:"git_branch"`
+	HeadCommit      string         `json:"head_commit"`
+	SyncMode        string         `json:"sync_mode"`
+	Status          string         `json:"status"`
+	HandbookStatus  string         `json:"handbook_status"`
+	HandbookCommit  string         `json:"handbook_commit"`
+	HandbookVersion int            `json:"handbook_version"`
+	HandbookStats   map[string]any `json:"handbook_stats,omitempty"`
+	OwnerID         string         `json:"owner_id"`
+	LastScannedAt   *time.Time     `json:"last_scanned_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // AbsPath is the repository root on disk.
@@ -127,6 +133,15 @@ type RepoMetaPatch struct {
 	Status      *string   `json:"status"`
 }
 
+// HandbookBuildResult is the outcome of one handbook build. Commit and Version are written
+// only when Status is ready; a failed build keeps serving the previous version.
+type HandbookBuildResult struct {
+	Status  string
+	Commit  string
+	Version int
+	Stats   map[string]any
+}
+
 // RepoRegistryRepo persists repositories, groups and agent bindings.
 type RepoRegistryRepo interface {
 	// UpsertScannedRepository inserts by (code_root, rel_path) or refreshes git fields and
@@ -157,4 +172,10 @@ type RepoRegistryRepo interface {
 	ReplaceEffectiveRepos(ctx context.Context, agentID string, rows []*AgentEffectiveRepo) error
 	ListEffectiveRepos(ctx context.Context, agentID string) ([]*AgentEffectiveRepo, error)
 	ListAgentIDsByEffectiveRepo(ctx context.Context, repoID string) ([]string, error)
+
+	// ClaimHandbookBuild marks the repo as building until leaseUntil unless another build
+	// holds a lease that has not expired at now; it reports whether the claim succeeded.
+	ClaimHandbookBuild(ctx context.Context, id string, now, leaseUntil time.Time) (bool, error)
+	// FinishHandbookBuild releases the lease and records the outcome.
+	FinishHandbookBuild(ctx context.Context, id string, res HandbookBuildResult) error
 }

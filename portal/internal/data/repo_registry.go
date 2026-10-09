@@ -401,11 +401,33 @@ func (r *repoRegistryRepo) ListAgentIDsByEffectiveRepo(ctx context.Context, repo
 	return ids, err
 }
 
+func (r *repoRegistryRepo) ClaimHandbookBuild(ctx context.Context, id string, now, leaseUntil time.Time) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Repository{}).
+		Where("id = ? AND (handbook_status <> ? OR handbook_lease_until IS NULL OR handbook_lease_until < ?)",
+			id, biz.HandbookStatusBuilding, now).
+		Updates(map[string]any{"handbook_status": biz.HandbookStatusBuilding, "handbook_lease_until": leaseUntil})
+	return res.RowsAffected > 0, res.Error
+}
+
+func (r *repoRegistryRepo) FinishHandbookBuild(ctx context.Context, id string, res biz.HandbookBuildResult) error {
+	updates := map[string]any{
+		"handbook_status":      res.Status,
+		"handbook_lease_until": nil,
+		"handbook_stats":       model.JSONObject(res.Stats),
+	}
+	if res.Status == biz.HandbookStatusReady {
+		updates["handbook_commit"] = res.Commit
+		updates["handbook_version"] = res.Version
+	}
+	return r.db.WithContext(ctx).Model(&model.Repository{}).Where("id = ?", id).Updates(updates).Error
+}
+
 func repositoryToBiz(m *model.Repository) *biz.Repository {
 	return &biz.Repository{
 		ID: m.ID, CodeRoot: m.CodeRoot, RelPath: m.RelPath, Name: m.Name, Description: m.Description,
 		Tags: []string(m.Tags), GitRemote: m.GitRemote, GitBranch: m.GitBranch, HeadCommit: m.HeadCommit,
 		SyncMode: m.SyncMode, Status: m.Status, HandbookStatus: m.HandbookStatus, OwnerID: m.OwnerID,
+		HandbookCommit: m.HandbookCommit, HandbookVersion: m.HandbookVersion, HandbookStats: map[string]any(m.HandbookStats),
 		LastScannedAt: m.LastScannedAt, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }
