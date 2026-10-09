@@ -32,7 +32,7 @@ var (
 
 // SkillEmbedRouterFor 返回按缓存键复用的语义路由器；不可用或未启用时返回 nil。
 func SkillEmbedRouterFor(ctx context.Context, idx *skills.Index, agentMeta *biz.AgentMeta) *skills.EmbedRouter {
-	if idx == nil || len(idx.All()) == 0 {
+	if idx == nil || len(skills.VisibleSkills(idx.All())) == 0 {
 		return nil
 	}
 	key := skillRouterCacheKey(idx, agentMeta)
@@ -89,7 +89,7 @@ func buildSkillEmbedRouter(ctx context.Context, idx *skills.Index, agentMeta *bi
 // skillRouterCacheKey 由 skills 内容哈希 + embed 模型身份组成；任一变化都会触发重建。
 func skillRouterCacheKey(idx *skills.Index, agentMeta *biz.AgentMeta) string {
 	var b strings.Builder
-	for _, m := range idx.All() {
+	for _, m := range skills.VisibleSkills(idx.All()) {
 		b.WriteString(m.Name)
 		b.WriteByte('|')
 		b.WriteString(m.Description)

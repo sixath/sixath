@@ -847,3 +847,27 @@ func TestSkillManage_CreateIndexedAfterOK(t *testing.T) {
 		t.Fatalf("meta: %#v", meta)
 	}
 }
+
+func TestSkillManage_RejectsReservedNames(t *testing.T) {
+	for _, requireConfirm := range []bool{false, true} {
+		root := t.TempDir()
+		tl := registerSkillManageForTest(t, skillManageTestConfig(nil, requireConfirm))
+		for _, name := range []string{"code-map", "handbook-cloudgame-svc-a"} {
+			res, err := tl.Execute(skillManageTestCtx(root), map[string]any{
+				"action":  "create",
+				"name":    name,
+				"content": "---\nname: " + name + "\ndescription: d\n---\n# x",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := res.(map[string]any)
+			if m["error"] != "skill_name_reserved" {
+				t.Fatalf("confirm=%v name=%s: %#v", requireConfirm, name, m)
+			}
+			if _, err := os.Stat(filepath.Join(root, "skills", name)); !os.IsNotExist(err) {
+				t.Fatalf("reserved skill written to disk: %v", err)
+			}
+		}
+	}
+}

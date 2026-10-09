@@ -433,7 +433,7 @@ func registerSkillsListTool(reg *tool.Registry, idx *skills.Index) error {
 		},
 		Execute: func(ctx context.Context, params map[string]any) (any, error) {
 			category, _ := params["category"].(string)
-			metas := idx.All()
+			metas := skills.VisibleSkills(idx.All())
 			if category != "" {
 				metas = filterSkillsByCategory(metas, category)
 			}

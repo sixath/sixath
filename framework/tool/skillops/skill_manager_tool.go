@@ -194,6 +194,9 @@ func proposeSkillManage(ctx context.Context, cfg *SkillManageConfig, workspace, 
 	if err := skillManageScanParams(action, params); err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
+	if r := reservedSkillNameResult(action, name); r != nil {
+		return r, nil
+	}
 
 	warnings, errMap := validateSkillManageContent(workspace, action, name, params)
 	if errMap != nil {
@@ -332,6 +335,9 @@ func applySkillManage(ctx context.Context, lease *RuntimeWriteLease, workspace, 
 	// Params-only injection scan (no disk). Schema validate of composed markdown runs under lease.
 	if err := skillManageScanParams(action, params); err != nil {
 		return map[string]any{"error": err.Error()}, nil
+	}
+	if r := reservedSkillNameResult(action, name); r != nil {
+		return r, nil
 	}
 
 	if isSkillManageWriteAction(action) {
@@ -512,6 +518,18 @@ func skillManageScanParams(action string, params map[string]any) error {
 		return ScanUserContent(fc)
 	default:
 		return nil
+	}
+}
+
+// reservedSkillNameResult rejects writes to names owned by generated repository handbooks.
+func reservedSkillNameResult(action, name string) map[string]any {
+	if !isSkillManageWriteAction(action) || !skills.IsReservedSkillName(name) {
+		return nil
+	}
+	return map[string]any{
+		"error": "skill_name_reserved",
+		"hint":  "code-map and handbook-* are generated from the repository registry; pick another name",
+		"name":  name,
 	}
 }
 

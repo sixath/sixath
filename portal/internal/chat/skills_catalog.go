@@ -23,7 +23,7 @@ func (p *SkillsCatalogProvider) Enrich(_ context.Context, entries []tool.ToolCat
 	if p.Index == nil {
 		return entries
 	}
-	metas := p.Index.All()
+	metas := skills.VisibleSkills(p.Index.All())
 	if len(metas) == 0 {
 		return entries
 	}
