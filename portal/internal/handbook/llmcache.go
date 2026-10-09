@@ -65,9 +65,11 @@ type Skeleton struct {
 	BuiltAt             time.Time             `json:"built_at"`
 	UpdatedAt           time.Time             `json:"updated_at"`
 	BaseFiles           int                   `json:"base_files"`
-	ChangedSinceRebuild int                   `json:"changed_since_rebuild"`
+	ChangedSinceRebuild int                   `json:"changed_since_rebuild"`   // len(ChangedPaths)
+	ChangedPaths        []string              `json:"changed_paths,omitempty"` // distinct, sorted
 	TopDirs             []string              `json:"top_dirs"`
 	FallbackAreas       bool                  `json:"fallback_areas,omitempty"`
+	FallbackReason      string                `json:"fallback_reason,omitempty"`
 	Stages              []Stage               `json:"stages"`
 	Files               map[string]FileAssign `json:"files"`
 	Overview            string                `json:"overview,omitempty"`

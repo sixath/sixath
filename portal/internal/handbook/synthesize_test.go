@@ -3,6 +3,7 @@ package handbook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,28 @@ func TestRegisterNotes_SelectsAndValidates(t *testing.T) {
 	}
 	if !strings.Contains(m.calls[0], "写 internal/order/store.go:10") || !strings.Contains(m.calls[0], "订单存储") {
 		t.Fatalf("prompt must carry locations and file purposes: %s", m.calls[0])
+	}
+}
+
+func TestSummarizeStage_TruncatesOversizedFirstLine(t *testing.T) {
+	m := (&fakeModel{}).on("阶段说明", func(string) string { return `{"summary":"s"}` })
+	cards := map[string]*Card{"a.go": {Purpose: strings.Repeat("长", stageInputBudget)}}
+	var u usage
+	if _, err := summarizeStage(context.Background(), m, "svc", Stage{ID: "x", Title: "X"}, []string{"a.go", "b.go"}, cards, &u); err != nil {
+		t.Fatal(err)
+	}
+	p := m.calls[0]
+	if !strings.Contains(p, "- a.go：长") || !strings.Contains(p, "其余文件省略") || len(p) > stageInputBudget+1024 {
+		t.Fatalf("oversized line must be truncated, not dropped (len %d)", len(p))
+	}
+}
+
+func TestRegisterNotes_TransportErrorPropagates(t *testing.T) {
+	boom := errors.New("boom")
+	hits := []RegisterHit{{Kind: RegTable, Name: "orders", Access: AccessWrite, Path: "a.go", Line: 1}}
+	var u usage
+	if _, err := registerNotes(context.Background(), &fakeModel{failErr: boom}, "svc", hits, nil, nil, nil, &u); !errors.Is(err, boom) || errors.Is(err, errBadReply) {
+		t.Fatalf("err %v", err)
 	}
 }
 

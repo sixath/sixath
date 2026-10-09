@@ -70,6 +70,14 @@ func TestSanitizeCard_TrimsBackticksFromNames(t *testing.T) {
 	}
 }
 
+func TestSanitizeCard_CollapsesWhitespace(t *testing.T) {
+	c := sanitizeCard(cardReply{Purpose: "订单\n  存储", Description: "a\n\nb", Lifecycle: " 请求\t时 ",
+		Functions: []CardFunc{{Name: "F", Summary: "读\r\n写"}}}, []Symbol{{Name: "F"}})
+	if c.Purpose != "订单 存储" || c.Description != "a b" || c.Lifecycle != "请求 时" || c.Functions[0].Summary != "读 写" {
+		t.Fatalf("%#v", c)
+	}
+}
+
 type stubModel struct {
 	fakeModel
 	gen *model.Generation

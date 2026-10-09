@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sixath/framework/model"
 )
@@ -32,7 +33,7 @@ func stagePrompt(relPath string, st Stage, files []string, cards map[string]*Car
 		b.WriteString("，提示：" + st.Summary)
 	}
 	b.WriteString("\n\n阶段内文件：\n")
-	for _, p := range files {
+	for i, p := range files {
 		line := "- " + p + "："
 		if c := cards[p]; c != nil {
 			line += c.Purpose
@@ -46,9 +47,12 @@ func stagePrompt(relPath string, st Stage, files []string, cards map[string]*Car
 		} else {
 			line += "（无卡片）"
 		}
-		if b.Len()+len(line) > stageInputBudget {
-			b.WriteString("- …其余文件省略\n")
-			break
+		if room := stageInputBudget - b.Len(); len(line) > room {
+			if i > 0 {
+				b.WriteString("- …其余文件省略\n")
+				break
+			}
+			line = clipBytes(line, room-1)
 		}
 		b.WriteString(line + "\n")
 	}
@@ -179,12 +183,25 @@ func registerNotes(ctx context.Context, m model.Model, relPath string, hits []Re
 			return nil, err
 		}
 		for _, g := range batch {
-			if n := clipRunes(r.Notes[g.Key], 160); n != "" {
+			if n := clipRunes(collapseSpaces(r.Notes[g.Key]), 160); n != "" {
 				notes[g.Key] = n
 			}
 		}
 	}
 	return notes, nil
+}
+
+// clipBytes keeps at most n bytes of s (cut at a UTF-8 boundary), marking the cut with "…".
+func clipBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	const mark = "…"
+	cut := max(n-len(mark), 0)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + mark
 }
 
 func touches(hits []RegisterHit, changed map[string]bool) bool {
