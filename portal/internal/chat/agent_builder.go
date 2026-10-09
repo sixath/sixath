@@ -74,6 +74,10 @@ type RegistryBuildOptions struct {
 	// Proxies is the preloaded catalog (no ACL). A nonempty AgentProxyID
 	// missing from Proxies is a permanent miss (fail-closed; no silent direct).
 	Proxies map[string]netx.Spec
+	// RCARoots are the agent's bound repositories with unique logical names.
+	// nil means no repo bindings (legacy workspace/code and configured roots apply);
+	// non-nil is authoritative, so an empty slice registers no rca_code/rca_symbol tools.
+	RCARoots []tool.RCARoot
 }
 
 // BuildRegistry 根据 Agent 绑定的工具与 MCP Server 列表构建 tool.Registry。

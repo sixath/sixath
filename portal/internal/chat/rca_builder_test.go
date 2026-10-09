@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"backend/internal/biz"
@@ -61,6 +62,64 @@ func TestRegisterRCATool_CodeNoRootsSkips(t *testing.T) {
 	registerRCATool(reg, map[string]any{"rca": map[string]any{"func_path": "rca_code"}}, "")
 	if rcaHas(reg, "rca_grep") {
 		t.Fatal("rca_code with no roots must register nothing")
+	}
+}
+
+func TestRegisterRCATool_NamedRootsOverrideWorkspace(t *testing.T) {
+	base := t.TempDir()
+	a := filepath.Join(base, "cloudgame", "gateway")
+	b := filepath.Join(base, "migu", "gateway")
+	for dir, body := range map[string]string{a: "from cloudgame", b: "from migu"} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package x\n// "+body+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := tool.NewRegistry()
+	cfg := map[string]interface{}{"rca": map[string]interface{}{"func_path": "rca_code"}}
+	registerRCATool(reg, cfg, "", RegistryBuildOptions{RCARoots: []tool.RCARoot{
+		{Name: "cloudgame/gateway", Path: a},
+		{Name: "migu/gateway", Path: b},
+	}})
+
+	tl, ok := reg.Get("rca_read")
+	if !ok {
+		t.Fatal("rca_read not registered")
+	}
+	out, err := tl.Execute(context.Background(), map[string]any{"repo": "cloudgame/gateway", "file": "main.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content, _ := out.(map[string]any)["content"].(string); !strings.Contains(content, "from cloudgame") {
+		t.Fatalf("content = %q", content)
+	}
+}
+
+func TestRegisterRCATool_NamedRootsForSymbol(t *testing.T) {
+	reg := tool.NewRegistry()
+	cfg := map[string]interface{}{"rca": map[string]interface{}{"func_path": "rca_symbol"}}
+	registerRCATool(reg, cfg, "", RegistryBuildOptions{RCARoots: []tool.RCARoot{{Name: "cg/a", Path: t.TempDir()}}})
+	if _, ok := reg.Get("rca_symbol"); !ok {
+		t.Fatal("rca_symbol not registered with named roots")
+	}
+}
+
+func TestRegisterRCATool_EmptyNamedRootsAreAuthoritative(t *testing.T) {
+	ws := withCodeMount(t)
+	if err := os.WriteFile(filepath.Join(ws, WorkspaceCodeLink, "main.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, fp := range []string{"rca_code", "rca_symbol"} {
+		reg := tool.NewRegistry()
+		cfg := map[string]interface{}{"rca": map[string]interface{}{"func_path": fp}}
+		registerRCATool(reg, cfg, ws, RegistryBuildOptions{Workspace: ws, RCARoots: []tool.RCARoot{}})
+		for _, n := range []string{"rca_read", "rca_grep", "rca_symbol"} {
+			if rcaHas(reg, n) {
+				t.Fatalf("%s: %s must not register when bound repos yield no usable roots", fp, n)
+			}
+		}
 	}
 }
 

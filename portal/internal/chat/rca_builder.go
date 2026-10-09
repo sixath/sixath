@@ -38,6 +38,16 @@ func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace s
 	funcPath, _ := rcaMap["func_path"].(string)
 	switch funcPath {
 	case "rca_code":
+		if o.RCARoots != nil {
+			if len(o.RCARoots) == 0 {
+				slog.Warn("rca: agent has repo bindings but no usable roots, skip", "tool", funcPath)
+				return
+			}
+			if err := tool.RegisterRCACodeToolsNamed(reg, o.RCARoots); err != nil {
+				slog.Warn("rca: rca_code named roots rejected", "err", err)
+			}
+			return
+		}
 		roots := MergeRCARoots(workspace, stringSliceFromAny(rcaMap["roots"]))
 		if len(roots) == 0 {
 			slog.Warn("rca: rca_code has no roots, skip")
@@ -45,20 +55,30 @@ func registerRCATool(reg *tool.Registry, cfg map[string]interface{}, workspace s
 		}
 		_ = tool.RegisterRCACodeTools(reg, roots)
 	case "rca_symbol":
+		goplsPath, _ := rcaMap["gopls_path"].(string)
+		symOpts := tool.RCASymbolOpts{GoplsPath: goplsPath}
+		if readyTimeout, ok := rcaTimeoutSeconds(rcaMap["ready_timeout_sec"]); ok {
+			symOpts.ReadyTimeout = readyTimeout
+		}
+		if requestTimeout, ok := rcaTimeoutSeconds(rcaMap["request_timeout_sec"]); ok {
+			symOpts.RequestTimeout = requestTimeout
+		}
+		if o.RCARoots != nil {
+			if len(o.RCARoots) == 0 {
+				slog.Warn("rca: agent has repo bindings but no usable roots, skip", "tool", funcPath)
+				return
+			}
+			if err := tool.RegisterRCASymbolToolNamed(reg, o.RCARoots, symOpts); err != nil {
+				slog.Warn("rca: rca_symbol named roots rejected", "err", err)
+			}
+			return
+		}
 		roots := MergeRCARoots(workspace, stringSliceFromAny(rcaMap["roots"]))
 		if len(roots) == 0 {
 			slog.Warn("rca: rca_symbol has no roots, skip")
 			return
 		}
-		goplsPath, _ := rcaMap["gopls_path"].(string)
-		opts := tool.RCASymbolOpts{GoplsPath: goplsPath}
-		if readyTimeout, ok := rcaTimeoutSeconds(rcaMap["ready_timeout_sec"]); ok {
-			opts.ReadyTimeout = readyTimeout
-		}
-		if requestTimeout, ok := rcaTimeoutSeconds(rcaMap["request_timeout_sec"]); ok {
-			opts.RequestTimeout = requestTimeout
-		}
-		_ = tool.RegisterRCASymbolTool(reg, roots, opts)
+		_ = tool.RegisterRCASymbolTool(reg, roots, symOpts)
 	case "jaeger_trace":
 		queryURL, _ := rcaMap["query_url"].(string)
 		if queryURL == "" {
