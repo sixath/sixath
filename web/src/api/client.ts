@@ -964,7 +964,7 @@ export const agentApi = {
   },
   /** Create workspace/code → target symlink under code_roots. */
   workspaceLink: (id: string, target: string) =>
-    request<{ link?: string; target?: string }>(`/agents/${id}/workspace-link`, {
+    request<{ link?: string; target?: string; repo_bindings_override?: boolean; warning?: string }>(`/agents/${id}/workspace-link`, {
       method: 'POST',
       body: JSON.stringify({ target }),
     }),
