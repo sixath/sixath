@@ -26,6 +26,8 @@ func TestRepoRegistryErr(t *testing.T) {
 		{"not found", biz.ErrRepoNotFound, 404},
 		{"scan running", biz.ErrRepoScanRunning, 409},
 		{"group in use", fmt.Errorf("%w: bound by a1", biz.ErrRepoGroupInUse), 409},
+		{"handbook building", biz.ErrHandbookBuilding, 409},
+		{"handbook not found", biz.ErrHandbookNotFound, 404},
 		{"kratos passthrough", kratosErrors.Forbidden("FORBIDDEN", "no"), 403},
 	}
 	for _, tc := range cases {
@@ -55,5 +57,22 @@ func TestPutBindings_MissingFieldRejected(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "bindings is required") {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandbookRoutes_DisabledWithoutUsecase(t *testing.T) {
+	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
+	h := NewRepoRegistryHandlers(nil, nil)
+	srv.Route("/").GET("/api/v1/repos/{id}/handbook", h.GetHandbook())
+	srv.Route("/").POST("/api/v1/repos/{id}/handbook/rebuild", h.RebuildHandbook())
+	for _, tc := range []struct{ method, url string }{
+		{http.MethodGet, "/api/v1/repos/r1/handbook"},
+		{http.MethodPost, "/api/v1/repos/r1/handbook/rebuild"},
+	} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.url, nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s %s: status = %d body = %s", tc.method, tc.url, rec.Code, rec.Body.String())
+		}
 	}
 }

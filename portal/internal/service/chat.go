@@ -44,6 +44,7 @@ type ChatService struct {
 	turnTraceStore   turntrace.Store
 	codeRoots        []string
 	rcaRoots         RCARootResolver
+	handbookDirs     HandbookSkillDirResolver
 	db               *gorm.DB
 	catalog          *data.ModelCatalogStore
 	proxyRepo        biz.ProxyRepo
@@ -99,6 +100,14 @@ func (s *ChatService) SetRCARootResolver(r RCARootResolver) {
 		return
 	}
 	s.rcaRoots = r
+}
+
+// SetHandbookSkillDirs wires repository handbook skills into the agent's skill dirs.
+func (s *ChatService) SetHandbookSkillDirs(r HandbookSkillDirResolver) {
+	if s == nil {
+		return
+	}
+	s.handbookDirs = r
 }
 
 func (s *ChatService) turnModelLoader() chat.TurnModelLoader {
@@ -170,10 +179,15 @@ func newChatService(chatUC *biz.ChatUsecase, agentUC *biz.AgentUsecase, toolUC *
 }
 
 func (s *ChatService) sharedSkillDirs(ctx context.Context, agentID string) ([]string, error) {
-	if s.skillUC == nil {
-		return nil, nil
+	var dirs []string
+	if s.skillUC != nil {
+		d, err := s.skillUC.SharedSkillDirs(ctx, agentID)
+		if err != nil {
+			return nil, err
+		}
+		dirs = d
 	}
-	return s.skillUC.SharedSkillDirs(ctx, agentID)
+	return appendHandbookDirs(ctx, s.handbookDirs, agentID, dirs, s.log), nil
 }
 
 func (s *ChatService) listMcpServersByAgent(ctx context.Context, agentID string) ([]*biz.McpServerMeta, error) {

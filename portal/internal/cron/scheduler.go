@@ -19,6 +19,7 @@ type Scheduler struct {
 
 	repoUC           *biz.RepoRegistryUsecase
 	repoScanInterval time.Duration
+	handbookUC       *biz.HandbookUsecase
 }
 
 // DefaultRepoScanInterval is how often code roots are rescanned for repositories.
@@ -87,6 +88,11 @@ func (s *Scheduler) SetRepoRegistry(uc *biz.RepoRegistryUsecase, interval time.D
 	s.repoScanInterval = interval
 }
 
+// SetHandbook rebuilds stale repository handbooks after every successful repo scan.
+func (s *Scheduler) SetHandbook(uc *biz.HandbookUsecase) {
+	s.handbookUC = uc
+}
+
 // repoScanLoop scans once at startup, then every repoScanInterval.
 func (s *Scheduler) repoScanLoop(ctx context.Context) {
 	s.runRepoScan(ctx)
@@ -122,6 +128,24 @@ func (s *Scheduler) runRepoScan(ctx context.Context) {
 	}
 	s.log.Infof("repo scan: roots=%d found=%d added=%d restored=%d missing=%d errors=%d first_errors=%q",
 		rep.Roots, rep.Found, rep.Added, rep.Restored, rep.Missing, len(rep.Errors), errs)
+	if s.handbookUC != nil {
+		go s.runHandbookRebuild(ctx)
+	}
+}
+
+func (s *Scheduler) runHandbookRebuild(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Errorf("handbook rebuild panic: %v", r)
+		}
+	}()
+	n, err := s.handbookUC.RebuildStale(ctx)
+	if err != nil && ctx.Err() == nil {
+		s.log.Warnf("handbook rebuild: %v", err)
+	}
+	if n > 0 {
+		s.log.Infof("handbook rebuild: %d repos", n)
+	}
 }
 
 // evolutionCleanupLoop runs weekly expiry of old pending proposals.

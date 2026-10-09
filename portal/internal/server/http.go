@@ -31,7 +31,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager, agentRepo biz.AgentRepo, toolUC *biz.ToolUsecase, evolutionUC *biz.EvolutionUsecase, repoUC *biz.RepoRegistryUsecase) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager, agentRepo biz.AgentRepo, toolUC *biz.ToolUsecase, evolutionUC *biz.EvolutionUsecase, repoUC *biz.RepoRegistryUsecase, handbookUC *biz.HandbookUsecase) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -161,12 +161,15 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/evolution/config", evHandlers.GetConfig())
 	r.PUT("/api/v1/evolution/config", evHandlers.PutConfig())
 	// Repo registry: login only (no global admin role exists); agent bindings require agent edit.
-	repoH := NewRepoRegistryHandlers(repoUC, agentUC)
+	repoH := NewRepoRegistryHandlers(repoUC, agentUC).WithHandbook(handbookUC)
 	r.GET("/api/v1/repos", repoH.ListRepos())
 	r.POST("/api/v1/repos/scan", repoH.Scan())
 	r.POST("/api/v1/repos/migrate-legacy-links", repoH.MigrateLegacyLinks())
 	r.GET("/api/v1/repos/{id}", repoH.GetRepo())
 	r.PATCH("/api/v1/repos/{id}", repoH.PatchRepo())
+	r.GET("/api/v1/repos/{id}/handbook", repoH.GetHandbook())
+	r.GET("/api/v1/repos/{id}/handbook/page", repoH.HandbookPage())
+	r.POST("/api/v1/repos/{id}/handbook/rebuild", repoH.RebuildHandbook())
 	r.GET("/api/v1/repo-groups", repoH.ListGroups())
 	r.POST("/api/v1/repo-groups", repoH.CreateGroup())
 	r.PUT("/api/v1/repo-groups/{id}/members", repoH.SetGroupMembers())

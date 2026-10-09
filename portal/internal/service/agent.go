@@ -18,6 +18,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	agent "github.com/sixath/framework/harness"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
 
@@ -52,8 +53,9 @@ type AgentService struct {
 	channelUC   *biz.ChannelUsecase
 	proxyRepo   biz.ProxyRepo
 	codeRoots   []string
-	rcaRoots    RCARootResolver
-	log         *log.Helper
+	rcaRoots     RCARootResolver
+	handbookDirs HandbookSkillDirResolver
+	log          *log.Helper
 }
 
 // SetRCARootResolver wires repo-binding based RCA roots.
@@ -64,16 +66,29 @@ func (s *AgentService) SetRCARootResolver(r RCARootResolver) {
 	s.rcaRoots = r
 }
 
+// SetHandbookSkillDirs wires repository handbook skills into the agent's skill dirs.
+func (s *AgentService) SetHandbookSkillDirs(r HandbookSkillDirResolver) {
+	if s == nil {
+		return
+	}
+	s.handbookDirs = r
+}
+
 // NewAgentService creates an AgentService
 func NewAgentService(uc *biz.AgentUsecase, toolUC *biz.ToolUsecase, mcpServerUC *biz.McpServerUsecase, skillUC *biz.SkillResourceUsecase, channelUC *biz.ChannelUsecase, proxyRepo biz.ProxyRepo, codeRoots []string, logger log.Logger) *AgentService {
 	return &AgentService{uc: uc, toolUC: toolUC, mcpServerUC: mcpServerUC, skillUC: skillUC, channelUC: channelUC, proxyRepo: proxyRepo, codeRoots: codeRoots, log: log.NewHelper(logger)}
 }
 
 func (s *AgentService) sharedSkillDirs(ctx context.Context, agentID string) ([]string, error) {
-	if s.skillUC == nil {
-		return nil, nil
+	var dirs []string
+	if s.skillUC != nil {
+		d, err := s.skillUC.SharedSkillDirs(ctx, agentID)
+		if err != nil {
+			return nil, err
+		}
+		dirs = d
 	}
-	return s.skillUC.SharedSkillDirs(ctx, agentID)
+	return appendHandbookDirs(ctx, s.handbookDirs, agentID, dirs, s.log), nil
 }
 
 // BindWecomChannel 将 Agent 绑定到指定 wecom Channel（写入 agents.wecom_channel_id）。
@@ -551,7 +566,7 @@ func (s *AgentService) ListSkills(ctx context.Context, req *agentv1.ListSkillsRe
 	if skillsIdx == nil {
 		return &agentv1.ListSkillsReply{Ret: baseSuccess(), Items: []*agentv1.SkillMeta{}}, nil
 	}
-	all := skillsIdx.All()
+	all := skills.VisibleSkills(skillsIdx.All())
 	items := make([]*agentv1.SkillMeta, len(all))
 	for i, m := range all {
 		// path 返回技能目录的绝对路径（SKILL.md 的父目录）

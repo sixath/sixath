@@ -17,13 +17,22 @@ const maxJSONBodyBytes = 1 << 20
 
 // RepoRegistryHandlers serves /api/v1/repos, /api/v1/repo-groups and agent repo bindings.
 type RepoRegistryHandlers struct {
-	uc      *biz.RepoRegistryUsecase
-	agentUC *biz.AgentUsecase
+	uc       *biz.RepoRegistryUsecase
+	agentUC  *biz.AgentUsecase
+	handbook *biz.HandbookUsecase
 }
 
 func NewRepoRegistryHandlers(uc *biz.RepoRegistryUsecase, agentUC *biz.AgentUsecase) *RepoRegistryHandlers {
 	return &RepoRegistryHandlers{uc: uc, agentUC: agentUC}
 }
+
+// WithHandbook enables the /api/v1/repos/{id}/handbook endpoints.
+func (h *RepoRegistryHandlers) WithHandbook(uc *biz.HandbookUsecase) *RepoRegistryHandlers {
+	h.handbook = uc
+	return h
+}
+
+var errHandbookDisabled = kratosErrors.ServiceUnavailable("HANDBOOK_DISABLED", "repository handbooks are not configured")
 
 func repoRegistryErr(err error) error {
 	switch {
@@ -37,6 +46,10 @@ func repoRegistryErr(err error) error {
 		return kratosErrors.Conflict("REPO_SCAN_RUNNING", err.Error())
 	case errors.Is(err, biz.ErrRepoGroupInUse):
 		return kratosErrors.Conflict("REPO_GROUP_IN_USE", err.Error())
+	case errors.Is(err, biz.ErrHandbookBuilding):
+		return kratosErrors.Conflict("HANDBOOK_BUILDING", err.Error())
+	case errors.Is(err, biz.ErrHandbookNotFound):
+		return kratosErrors.NotFound("HANDBOOK_NOT_FOUND", err.Error())
 	default:
 		// ACL / agent-not-found errors are already kratos errors; keep their status codes.
 		return err
@@ -114,6 +127,51 @@ func (h *RepoRegistryHandlers) PatchRepo() func(kratoshttp.Context) error {
 			return err
 		}
 		return h.serve(ctx, func(c context.Context) (any, error) { return h.uc.PatchRepo(c, id, p) })
+	}
+}
+
+// GET /api/v1/repos/{id}/handbook
+func (h *RepoRegistryHandlers) GetHandbook() func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		if h.handbook == nil {
+			return errHandbookDisabled
+		}
+		id := strings.TrimSpace(ctx.Vars().Get("id"))
+		return h.serve(ctx, func(c context.Context) (any, error) { return h.handbook.GetHandbook(c, id) })
+	}
+}
+
+// GET /api/v1/repos/{id}/handbook/page?path=references/index.md
+func (h *RepoRegistryHandlers) HandbookPage() func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		if h.handbook == nil {
+			return errHandbookDisabled
+		}
+		id := strings.TrimSpace(ctx.Vars().Get("id"))
+		p := ctx.Query().Get("path")
+		return h.serve(ctx, func(c context.Context) (any, error) {
+			content, err := h.handbook.ReadPage(c, id, p)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"path": p, "content": content}, nil
+		})
+	}
+}
+
+// POST /api/v1/repos/{id}/handbook/rebuild
+func (h *RepoRegistryHandlers) RebuildHandbook() func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		if h.handbook == nil {
+			return errHandbookDisabled
+		}
+		id := strings.TrimSpace(ctx.Vars().Get("id"))
+		return h.serve(ctx, func(c context.Context) (any, error) {
+			if err := h.handbook.RequestRebuild(c, id); err != nil {
+				return nil, err
+			}
+			return map[string]any{"accepted": true}, nil
+		})
 	}
 }
 
