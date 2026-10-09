@@ -48,7 +48,7 @@ func NewEmbedRouter(ctx context.Context, idx *Index, embed EmbedFunc, threshold 
 	if idx == nil || embed == nil {
 		return nil, nil
 	}
-	metas := idx.All()
+	metas := VisibleSkills(idx.All())
 	if len(metas) == 0 {
 		return nil, nil
 	}

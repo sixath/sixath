@@ -214,13 +214,15 @@ func parseSkillFrontmatterContent(content, path string) (SkillMeta, bool, error)
 	rawYAML := parts[1]
 
 	type frontmatter struct {
-		Name         string      `yaml:"name"`
-		Description  string      `yaml:"description"`
-		Tags         []string    `yaml:"tags"`
-		Scope        interface{} `yaml:"scope"` // 兼容字符串或字符串数组
-		AllowedTools []string    `yaml:"allowed_tools"`
-		McpServers   interface{} `yaml:"mcp_servers"` // 兼容字符串或字符串数组
-		McpTools     interface{} `yaml:"mcp_tools"`   // 兼容字符串或字符串数组
+		Name              string      `yaml:"name"`
+		Description       string      `yaml:"description"`
+		Tags              []string    `yaml:"tags"`
+		Scope             interface{} `yaml:"scope"` // 兼容字符串或字符串数组
+		AllowedTools      []string    `yaml:"allowed_tools"`
+		McpServers        interface{} `yaml:"mcp_servers"` // 兼容字符串或字符串数组
+		McpTools          interface{} `yaml:"mcp_tools"`   // 兼容字符串或字符串数组
+		HiddenFromSummary bool        `yaml:"hidden_from_summary"`
+		SummaryPinned     bool        `yaml:"summary_pinned"`
 	}
 
 	var fm frontmatter
@@ -260,13 +262,15 @@ func parseSkillFrontmatterContent(content, path string) (SkillMeta, bool, error)
 	mcpTools := normalizeStringList(fm.McpTools)
 
 	return SkillMeta{
-		Name:         fm.Name,
-		Description:  strings.TrimSpace(fm.Description),
-		Tags:         fm.Tags,
-		Scopes:       scopes,
-		AllowedTools: fm.AllowedTools,
-		MCPServers:   mcpServers,
-		MCPTools:     mcpTools,
+		Name:              fm.Name,
+		Description:       strings.TrimSpace(fm.Description),
+		Tags:              fm.Tags,
+		Scopes:            scopes,
+		AllowedTools:      fm.AllowedTools,
+		MCPServers:        mcpServers,
+		MCPTools:          mcpTools,
+		HiddenFromSummary: fm.HiddenFromSummary,
+		SummaryPinned:     fm.SummaryPinned,
 	}, true, nil
 }
 

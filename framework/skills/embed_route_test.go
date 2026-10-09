@@ -199,3 +199,21 @@ func TestCosineSimilarity32(t *testing.T) {
 		}
 	}
 }
+
+func TestNewEmbedRouter_skipsHidden(t *testing.T) {
+	calls := 0
+	idx := testIndexFromMetas(
+		SkillMeta{Name: "alpha-skill", Description: "handles alpha", HiddenFromSummary: true},
+		SkillMeta{Name: "beta-skill", Description: "handles beta"},
+	)
+	r, err := NewEmbedRouter(context.Background(), idx, fakeEmbedByKeyword(&calls), 0.5)
+	if err != nil || r == nil {
+		t.Fatalf("build: err=%v r=%v", err, r)
+	}
+	if calls != 1 {
+		t.Fatalf("hidden skill must not be embedded, embedded %d texts", calls)
+	}
+	if _, _, ok := r.Route(context.Background(), "please do alpha thing"); ok {
+		t.Fatal("hidden skill must not be routed")
+	}
+}

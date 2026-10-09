@@ -2,15 +2,18 @@ package skills
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // BuildSkillsSummary 根据 Skill 列表构造一段简短的系统提示摘要。
 // maxCount <= 0 时默认展示最多 8 个 Skill。
 func BuildSkillsSummary(all []SkillMeta, maxCount int) string {
+	all = VisibleSkills(all)
 	if len(all) == 0 {
 		return ""
 	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].SummaryPinned && !all[j].SummaryPinned })
 	if maxCount <= 0 {
 		maxCount = 8
 	}

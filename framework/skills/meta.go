@@ -1,5 +1,7 @@
 package skills
 
+import "strings"
+
 // SkillMeta 描述一个 Skill 的基础元数据，由 SKILL.md 的 frontmatter 解析而来。
 type SkillMeta struct {
 	// Name 是 Skill 的唯一标识，推荐使用 kebab-case（例如 "frontend-design"）。
@@ -18,4 +20,27 @@ type SkillMeta struct {
 	MCPServers []string
 	// MCPTools 该 Skill 允许调用的 MCP 工具名列表（可选，用于白名单或提示）。
 	MCPTools []string
+	// HiddenFromSummary 为 true 时不进系统提示摘要、不参与自动路由和 skills_list，
+	// 只能按名字 load_skill / skill_view / read_skill_file（仓库 handbook 使用）。
+	HiddenFromSummary bool
+	// SummaryPinned 为 true 时在系统提示摘要中排在最前，不会被条数上限截掉。
+	SummaryPinned bool
+}
+
+// VisibleSkills returns the skills not marked hidden_from_summary, in their original order.
+func VisibleSkills(all []SkillMeta) []SkillMeta {
+	out := make([]SkillMeta, 0, len(all))
+	for _, m := range all {
+		if !m.HiddenFromSummary {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// IsReservedSkillName reports whether name belongs to generated repository handbooks
+// ("code-map" and the "handbook-" prefix); user-authored skills must not use it.
+func IsReservedSkillName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	return n == "code-map" || strings.HasPrefix(n, "handbook-")
 }

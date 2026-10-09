@@ -106,3 +106,15 @@ func TestRouteBest_runnerUpScore(t *testing.T) {
 		t.Fatalf("want runner-up >= 5, got %+v", m)
 	}
 }
+
+func TestRoute_skipsHidden(t *testing.T) {
+	visible := SkillMeta{Name: "archive-move-ops", Description: "archive migration logs"}
+	if got := Route("help me with archive-move-ops flow", []SkillMeta{visible}, RouteOptions{}); len(got) != 1 {
+		t.Fatalf("control: want 1 match, got %#v", got)
+	}
+	hidden := visible
+	hidden.HiddenFromSummary = true
+	if got := Route("help me with archive-move-ops flow", []SkillMeta{hidden}, RouteOptions{}); len(got) != 0 {
+		t.Fatalf("hidden skill routed: %#v", got)
+	}
+}

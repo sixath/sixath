@@ -213,3 +213,24 @@ scope: [chat]
 		t.Fatalf("nonexistent tool should not be allowed")
 	}
 }
+
+func TestParseSkillFrontmatter_summaryFlags(t *testing.T) {
+	meta, ok, err := parseSkillFrontmatterContent("---\nname: handbook-x\ndescription: d\nhidden_from_summary: true\nsummary_pinned: true\n---\nbody", "SKILL.md")
+	if err != nil || !ok {
+		t.Fatalf("parse: ok=%v err=%v", ok, err)
+	}
+	if !meta.HiddenFromSummary || !meta.SummaryPinned {
+		t.Fatalf("flags not parsed: %#v", meta)
+	}
+}
+
+func TestIsReservedSkillName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"code-map": true, "handbook-cloudgame-svc-a": true, "Handbook-X": true,
+		"code-mapper": false, "my-handbook": false, "": false,
+	} {
+		if got := IsReservedSkillName(name); got != want {
+			t.Fatalf("IsReservedSkillName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

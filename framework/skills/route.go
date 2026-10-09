@@ -36,6 +36,9 @@ func Route(userQuery string, metas []SkillMeta, opts RouteOptions) []RouteMatch 
 
 	var out []RouteMatch
 	for _, m := range metas {
+		if m.HiddenFromSummary {
+			continue
+		}
 		sc := scoreSkill(q, qTokens, m)
 		if sc >= minScore {
 			out = append(out, RouteMatch{Name: m.Name, Score: sc})

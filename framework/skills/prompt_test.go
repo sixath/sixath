@@ -42,3 +42,28 @@ func TestBuildSkillsAwarePrompt_errorQuoteUsesRcaGrepFirst(t *testing.T) {
 		t.Fatal("must not require strictly following a skill")
 	}
 }
+
+func TestBuildSkillsSummary_hiddenAndPinned(t *testing.T) {
+	all := []SkillMeta{
+		{Name: "a", Description: "A"},
+		{Name: "b", Description: "B"},
+		{Name: "handbook-x", Description: "H", HiddenFromSummary: true},
+		{Name: "code-map", Description: "M", SummaryPinned: true},
+	}
+	out := BuildSkillsSummary(all, 2)
+	if strings.Contains(out, "handbook-x") {
+		t.Fatalf("hidden skill listed: %s", out)
+	}
+	if !strings.Contains(out, "- code-map：M") || !strings.Contains(out, "- a：A") || strings.Contains(out, "- b：B") {
+		t.Fatalf("pinned skill must come first within the cap: %s", out)
+	}
+	if all[0].Name != "a" || all[3].Name != "code-map" {
+		t.Fatal("input slice must not be reordered")
+	}
+}
+
+func TestBuildSkillsSummary_allHidden(t *testing.T) {
+	if got := BuildSkillsSummary([]SkillMeta{{Name: "h", HiddenFromSummary: true}}, 8); got != "" {
+		t.Fatalf("all hidden: got %q", got)
+	}
+}
