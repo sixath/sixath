@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -237,5 +239,180 @@ func TestRepoRegistryRepo_ReplaceEffectiveReposBatches(t *testing.T) {
 	}
 	if len(eff) != 1200 {
 		t.Fatalf("effective rows = %d, want 1200", len(eff))
+	}
+}
+
+type stubAgentRepo struct {
+	biz.AgentRepo
+	agents []*biz.AgentMeta
+}
+
+func (s *stubAgentRepo) List(_ context.Context, page, pageSize int32) ([]*biz.AgentMeta, int, error) {
+	start := int((page - 1) * pageSize)
+	if start >= len(s.agents) {
+		return nil, len(s.agents), nil
+	}
+	end := start + int(pageSize)
+	if end > len(s.agents) {
+		end = len(s.agents)
+	}
+	return s.agents[start:end], len(s.agents), nil
+}
+
+func mkRepoDir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newUsecaseForTest(t *testing.T, codeRoot string, agents ...*biz.AgentMeta) (*biz.RepoRegistryUsecase, biz.RepoRegistryRepo) {
+	repo := newRepoRegistryRepoForTest(t)
+	uc := biz.NewRepoRegistryUsecase(repo, &stubAgentRepo{agents: agents}, []string{codeRoot}, log.DefaultLogger)
+	return uc, repo
+}
+
+func TestRepoRegistryUsecase_ScanBindAndRoots(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "cloudgame", "gateway"))
+	mkRepoDir(t, filepath.Join(codeRoot, "cloudgame", "svc-a"))
+	mkRepoDir(t, filepath.Join(codeRoot, "migu", "gateway"))
+	uc, _ := newUsecaseForTest(t, codeRoot)
+
+	rep, err := uc.Scan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Found != 3 || rep.Added != 3 {
+		t.Fatalf("report = %#v", rep)
+	}
+	groups, err := uc.ListGroups(ctx, biz.RepoGroupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cg *biz.RepoGroupView
+	for _, g := range groups {
+		if g.Name == "cloudgame" {
+			cg = g
+		}
+	}
+	if cg == nil || len(cg.RepoIDs) != 2 {
+		t.Fatalf("cloudgame dir group = %#v", cg)
+	}
+	repos, _ := uc.ListRepos(ctx, biz.RepoFilter{Query: "migu/gateway"})
+	if len(repos) != 1 {
+		t.Fatalf("migu repos = %#v", repos)
+	}
+
+	_, err = uc.ReplaceBindings(ctx, "ag", []*biz.AgentRepoBinding{
+		{TargetKind: biz.RepoTargetGroup, TargetID: cg.ID},
+		{TargetKind: biz.RepoTargetRepo, TargetID: repos[0].ID},
+	}, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots, err := uc.RCARootsForAgent(ctx, "ag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, r := range roots {
+		names[r.Name] = r.Path
+	}
+	if len(roots) != 3 || names["migu/gateway"] != filepath.Join(codeRoot, "migu", "gateway") || names["cloudgame/gateway"] == "" {
+		t.Fatalf("roots = %#v", roots)
+	}
+
+	// a repo disappearing drops out of the effective set after rescan
+	if err := os.RemoveAll(filepath.Join(codeRoot, "cloudgame", "svc-a")); err != nil {
+		t.Fatal(err)
+	}
+	rep, _ = uc.Scan(ctx)
+	if rep.Missing != 1 {
+		t.Fatalf("report = %#v", rep)
+	}
+	roots, _ = uc.RCARootsForAgent(ctx, "ag")
+	if len(roots) != 2 {
+		t.Fatalf("after missing: %#v", roots)
+	}
+}
+
+func TestRepoRegistryUsecase_ReplaceBindingsRejectsUnknownTarget(t *testing.T) {
+	uc, _ := newUsecaseForTest(t, t.TempDir())
+	_, err := uc.ReplaceBindings(context.Background(), "ag", []*biz.AgentRepoBinding{{TargetKind: biz.RepoTargetRepo, TargetID: "nope"}}, "")
+	if !errors.Is(err, biz.ErrInvalidRepoBinding) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRepoRegistryUsecase_NoBindingsMeansNoRoots(t *testing.T) {
+	uc, _ := newUsecaseForTest(t, t.TempDir())
+	roots, err := uc.RCARootsForAgent(context.Background(), "ag")
+	if err != nil || roots != nil {
+		t.Fatalf("roots = %#v, err = %v", roots, err)
+	}
+}
+
+func TestRepoRegistryUsecase_MigrateLegacyLinks(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "cloudgame", "svc-a"))
+	mkRepoDir(t, filepath.Join(codeRoot, "solo"))
+
+	mkLinkedWorkspace := func(target string) string {
+		ws := t.TempDir()
+		if err := os.Symlink(target, filepath.Join(ws, "code")); err != nil {
+			t.Skipf("symlink not permitted: %v", err)
+		}
+		return ws
+	}
+	agents := []*biz.AgentMeta{
+		{ID: "a-repo", Workspace: mkLinkedWorkspace(filepath.Join(codeRoot, "solo"))},
+		{ID: "a-group", Workspace: mkLinkedWorkspace(filepath.Join(codeRoot, "cloudgame"))},
+		{ID: "a-multi", Workspace: mkLinkedWorkspace(codeRoot)},
+		{ID: "a-none", Workspace: t.TempDir()},
+	}
+	uc, repo := newUsecaseForTest(t, codeRoot, agents...)
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := uc.MigrateLegacyLinks(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := map[string]string{}
+	for _, it := range items {
+		actions[it.AgentID] = it.Action
+		if it.Applied {
+			t.Fatalf("dry run must not apply: %#v", it)
+		}
+	}
+	if actions["a-repo"] != biz.LegacyActionBindRepo || actions["a-group"] != biz.LegacyActionBindGroup ||
+		actions["a-multi"] != biz.LegacyActionManualMulti {
+		t.Fatalf("actions = %v", actions)
+	}
+	if _, ok := actions["a-none"]; ok {
+		t.Fatal("agents without workspace/code are not reported")
+	}
+
+	if _, err := uc.MigrateLegacyLinks(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if bs, _ := repo.ListAgentBindings(ctx, "a-repo"); len(bs) != 1 {
+		t.Fatalf("a-repo bindings = %#v", bs)
+	}
+	if bs, _ := repo.ListAgentBindings(ctx, "a-multi"); len(bs) != 0 {
+		t.Fatalf("manual cases must not be applied: %#v", bs)
+	}
+	items, _ = uc.MigrateLegacyLinks(ctx, true)
+	for _, it := range items {
+		if it.AgentID == "a-repo" && it.Action != biz.LegacyActionSkipHasBindings {
+			t.Fatalf("second run must skip bound agents: %#v", it)
+		}
 	}
 }
