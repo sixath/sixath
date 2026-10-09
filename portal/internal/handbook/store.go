@@ -202,6 +202,14 @@ func (s Store) ReadFacts(id string, v int) (*Facts, error) {
 			return nil, fmt.Errorf("handbook: %s v%d: missing facts/%s: %w", id, v, name, fs.ErrNotExist)
 		}
 	}
+	var mod GoModule
+	ok, err := readJSON(filepath.Join(dir, "module.json"), &mod)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		f.Module = &mod
+	}
 	if f.Symbols == nil {
 		f.Symbols = map[string][]Symbol{}
 	}

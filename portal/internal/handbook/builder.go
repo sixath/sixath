@@ -98,6 +98,9 @@ func Build(ctx context.Context, in BuildInput) (*Output, error) {
 			LeafMode: "file", GeneratedAt: in.Now, Stats: stats,
 		},
 	}
+	if facts.Module != nil {
+		docs["facts/module.json"] = facts.Module
+	}
 	for p, v := range docs {
 		b, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {

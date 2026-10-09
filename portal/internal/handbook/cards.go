@@ -1,6 +1,7 @@
 package handbook
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -37,7 +38,8 @@ func cardPrompt(relPath string, f File, syms []Symbol, content string) string {
 			fmt.Fprintf(&b, "- %s `%s` L%d-%d\n", s.Kind, s.Name, s.Line, s.EndLine)
 		}
 	}
-	fmt.Fprintf(&b, "\n文件内容：\n```%s\n%s\n```\n\n", f.Lang, content)
+	fence := codeFence(content)
+	fmt.Fprintf(&b, "\n文件内容：\n%s%s\n%s\n%s\n\n", fence, f.Lang, content, fence)
 	b.WriteString(`输出 JSON：{"purpose":"一句话说明文件职责（不超过 60 字）",` +
 		`"description":"2-4 句：做什么、被谁调用、读写哪些表/缓存/topic/外部接口",` +
 		`"role":"entry|handler|service|repository|model|config|util|client|job|other 之一",` +
@@ -47,8 +49,24 @@ func cardPrompt(relPath string, f File, syms []Symbol, content string) string {
 	return b.String()
 }
 
-// clipContent keeps at most maxBytes of content, cut at a line boundary.
+// codeFence returns a backtick fence longer than any backtick run in content (at least 3).
+func codeFence(content string) string {
+	longest, run := 0, 0
+	for i := 0; i < len(content); i++ {
+		if content[i] == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	return strings.Repeat("`", max(3, longest+1))
+}
+
+// clipContent keeps at most maxBytes of content, cut at a line boundary when there is one
+// and otherwise at a UTF-8 boundary.
 func clipContent(content []byte, maxBytes int) string {
+	maxBytes = max(maxBytes, 1)
 	if len(content) <= maxBytes {
 		return string(content)
 	}
@@ -56,7 +74,7 @@ func clipContent(content []byte, maxBytes int) string {
 	for cut > 0 && !utf8.RuneStart(content[cut]) {
 		cut--
 	}
-	if i := strings.LastIndexByte(string(content[:cut]), '\n'); i > 0 {
+	if i := bytes.LastIndexByte(content[:cut], '\n'); i > 0 {
 		cut = i + 1
 	}
 	return string(content[:cut]) + clippedMark
@@ -101,7 +119,7 @@ func sanitizeCard(r cardReply, syms []Symbol) *Card {
 	}
 	seen := map[string]bool{}
 	for _, fn := range r.Functions {
-		name := strings.TrimSpace(fn.Name)
+		name := strings.Trim(fn.Name, " `")
 		if !known[name] || seen[name] || len(c.Functions) == maxCardFuncs {
 			continue
 		}

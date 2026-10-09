@@ -22,7 +22,7 @@ const llmTemperature = 0.2
 type usage struct{ in, out atomic.Int64 }
 
 func (u *usage) add(g *model.Generation) {
-	if g != nil && g.TokenUsage != nil {
+	if u != nil && g != nil && g.TokenUsage != nil {
 		u.in.Add(int64(g.TokenUsage.InputTokens))
 		u.out.Add(int64(g.TokenUsage.OutputTokens))
 	}
@@ -34,6 +34,9 @@ func llmJSON(ctx context.Context, m model.Model, system, user string, maxTokens 
 		model.WithMaxTokens(maxTokens), model.WithTemperature(llmTemperature))
 	if err != nil {
 		return err
+	}
+	if g == nil {
+		return fmt.Errorf("%w: no generation", errBadReply)
 	}
 	u.add(g)
 	if g.FinishReason == "length" {
@@ -49,14 +52,22 @@ func llmJSON(ctx context.Context, m model.Model, system, user string, maxTokens 
 	return nil
 }
 
-// extractJSONObject returns the text from the first '{' to the last '}'.
+// extractJSONObject returns the first JSON object in s, trying each '{' in order so prose
+// braces before or after the object are skipped.
 func extractJSONObject(s string) string {
-	i := strings.Index(s, "{")
-	j := strings.LastIndex(s, "}")
-	if i < 0 || j <= i {
-		return ""
+	for off := 0; off < len(s); {
+		i := strings.IndexByte(s[off:], '{')
+		if i < 0 {
+			return ""
+		}
+		off += i
+		var raw json.RawMessage
+		if err := json.NewDecoder(strings.NewReader(s[off:])).Decode(&raw); err == nil {
+			return string(raw)
+		}
+		off++
 	}
-	return s[i : j+1]
+	return ""
 }
 
 // clipRunes trims s and keeps at most n runes.

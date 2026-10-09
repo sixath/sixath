@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/sixath/framework/model"
 )
 
 func TestExtractJSONObject(t *testing.T) {
@@ -12,6 +15,11 @@ func TestExtractJSONObject(t *testing.T) {
 		"```json\n{\"a\":1}\n```": `{"a":1}`,
 		"好的：{\"a\":{\"b\":2}} 以上": `{"a":{"b":2}}`,
 		"没有":                      "",
+		`{"a":1} 注：{x}`:           `{"a":1}`,
+		`前置 {说明} 然后 {"a":1}`:      `{"a":1}`,
+		"说明：\n```\n{\"a\":[1,{\"b\":\"}\"}]}\n```\n完": `{"a":[1,{"b":"}"}]}`,
+		"{ 未闭合": "",
+		`[1,2]`: "",
 	}
 	for in, want := range cases {
 		if got := extractJSONObject(in); got != want {
@@ -28,6 +36,68 @@ func TestClipContent(t *testing.T) {
 	}
 	if clipContent([]byte("short"), 50) != "short" {
 		t.Fatal("short content must be kept")
+	}
+	noNL := clipContent([]byte(strings.Repeat("中", 20)), 10)
+	body := strings.TrimSuffix(noNL, clippedMark)
+	if !utf8.ValidString(body) || body != strings.Repeat("中", 3) {
+		t.Fatalf("no-newline clip must cut at a UTF-8 boundary: %q", noNL)
+	}
+	for _, n := range []int{0, -5} {
+		if got := clipContent([]byte("abc"), n); got != "a"+clippedMark {
+			t.Fatalf("maxBytes %d: %q", n, got)
+		}
+	}
+}
+
+func TestCodeFence(t *testing.T) {
+	cases := map[string]string{"plain": "```", "a ``` b": "````", "x ````` y `": "``````"}
+	for in, want := range cases {
+		if got := codeFence(in); got != want {
+			t.Errorf("%q: got %q", in, got)
+		}
+	}
+	p := cardPrompt("r", File{Path: "a.md", Lang: "go"}, nil, "s := \"```\"")
+	if !strings.Contains(p, "````go\n") || !strings.Contains(p, "\n````\n") {
+		t.Fatalf("prompt fence: %s", p)
+	}
+}
+
+func TestSanitizeCard_TrimsBackticksFromNames(t *testing.T) {
+	c := sanitizeCard(cardReply{Purpose: "x", Functions: []CardFunc{{Name: " `(*Store).Get` ", Summary: "s"}}},
+		[]Symbol{{Name: "(*Store).Get"}})
+	if len(c.Functions) != 1 || c.Functions[0].Name != "(*Store).Get" {
+		t.Fatalf("functions %#v", c.Functions)
+	}
+}
+
+type stubModel struct {
+	fakeModel
+	gen *model.Generation
+	err error
+}
+
+func (s *stubModel) Chat(context.Context, []model.Message, ...model.Option) (*model.Generation, error) {
+	return s.gen, s.err
+}
+
+func TestLLMJSON_ErrorKinds(t *testing.T) {
+	var out map[string]any
+	var u usage
+	truncated := &stubModel{gen: &model.Generation{Text: `{"a":1}`, FinishReason: "length"}}
+	if err := llmJSON(context.Background(), truncated, "s", "u", 10, &out, &u); !errors.Is(err, errBadReply) {
+		t.Fatalf("length: %v", err)
+	}
+	transport := &stubModel{err: errors.New("connection reset")}
+	if err := llmJSON(context.Background(), transport, "s", "u", 10, &out, &u); err == nil || errors.Is(err, errBadReply) {
+		t.Fatalf("transport error must not be errBadReply: %v", err)
+	}
+	empty := &stubModel{}
+	if err := llmJSON(context.Background(), empty, "s", "u", 10, &out, nil); !errors.Is(err, errBadReply) {
+		t.Fatalf("nil generation: %v", err)
+	}
+	ok := &stubModel{gen: &model.Generation{Text: `{"a":1}`, TokenUsage: &model.TokenUsage{InputTokens: 3}}}
+	if err := llmJSON(context.Background(), ok, "s", "u", 10, &out, nil); err != nil || out["a"] != float64(1) {
+		t.Fatalf("nil usage: %v %#v", err, out)
 	}
 }
 

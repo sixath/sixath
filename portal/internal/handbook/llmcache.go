@@ -1,7 +1,6 @@
 package handbook
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,8 +21,8 @@ var cardLangs = map[string]bool{
 	"php": true, "ruby": true, "kotlin": true, "csharp": true, "scala": true, "vue": true,
 }
 
-// CardEligible reports whether a file gets an LLM card: non-test source code.
-func CardEligible(f File) bool { return !f.Test && cardLangs[f.Lang] }
+// CardEligible reports whether a file gets an LLM card: non-empty, non-test source code.
+func CardEligible(f File) bool { return !f.Test && f.Size > 0 && cardLangs[f.Lang] }
 
 // CardFunc is one key function of a card; Name is always one of the file's symbols.
 type CardFunc struct {
@@ -78,14 +77,22 @@ type Skeleton struct {
 // LLMCache stores LLM output of one repository outside its versioned dirs.
 type LLMCache struct{ Dir string }
 
-var errBadHash = errors.New("handbook: invalid content hash")
+var (
+	errBadHash     = errors.New("handbook: invalid content hash")
+	errCorruptJSON = errors.New("handbook: corrupt JSON file")
+)
 
+// validHash accepts a lowercase hex sha256, the form CollectFacts produces.
 func validHash(h string) bool {
 	if len(h) != 64 {
 		return false
 	}
-	_, err := hex.DecodeString(h)
-	return err == nil
+	for i := 0; i < len(h); i++ {
+		if c := h[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (c LLMCache) cardPath(hash string) string {
@@ -94,30 +101,53 @@ func (c LLMCache) cardPath(hash string) string {
 
 func (c LLMCache) skeletonPath() string { return filepath.Join(c.Dir, "skeleton.json") }
 
+// readCacheJSON is readJSON for regenerable cache files: a file that does not decode is
+// removed (best effort) and reported as missing.
+func readCacheJSON(p string, v any) (bool, error) {
+	ok, err := readJSON(p, v)
+	if errors.Is(err, errCorruptJSON) {
+		_ = os.Remove(p)
+		return false, nil
+	}
+	return ok, err
+}
+
 // Card returns the cached card of a content hash, or nil when there is none.
 func (c LLMCache) Card(hash string) (*Card, error) {
 	if !validHash(hash) {
 		return nil, errBadHash
 	}
 	var card Card
-	if ok, err := readJSON(c.cardPath(hash), &card); !ok || err != nil {
+	if ok, err := readCacheJSON(c.cardPath(hash), &card); !ok || err != nil {
 		return nil, err
 	}
 	return &card, nil
 }
 
-// PutCard stores the card of a content hash.
+// PutCard stores the card of a content hash. Concurrent writers of the same hash may collide
+// on Windows, where renaming over a file being replaced fails; cards of one hash are
+// interchangeable, so a readable card left by another writer counts as success.
 func (c LLMCache) PutCard(hash string, card *Card) error {
 	if !validHash(hash) {
 		return errBadHash
 	}
-	return writeJSON(c.cardPath(hash), card)
+	var err error
+	for attempt := range 3 {
+		if err = writeJSON(c.cardPath(hash), card); err == nil {
+			return nil
+		}
+		if got, rerr := c.Card(hash); rerr == nil && got != nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+	}
+	return err
 }
 
 // Skeleton returns the cached skeleton, or nil when there is none.
 func (c LLMCache) Skeleton() (*Skeleton, error) {
 	var sk Skeleton
-	if ok, err := readJSON(c.skeletonPath(), &sk); !ok || err != nil {
+	if ok, err := readCacheJSON(c.skeletonPath(), &sk); !ok || err != nil {
 		return nil, err
 	}
 	if sk.Files == nil {
@@ -143,6 +173,12 @@ func (c LLMCache) PruneCards(keep map[string]bool) (int, error) {
 		if d.IsDir() {
 			return nil
 		}
+		if strings.HasPrefix(d.Name(), ".") {
+			if info, err := d.Info(); err == nil && time.Since(info.ModTime()) > staleTmpAge {
+				_ = os.Remove(p)
+			}
+			return nil
+		}
 		hash, _, _ := strings.Cut(d.Name(), "-")
 		if keep[hash] && strings.HasSuffix(d.Name(), "-"+LLMPromptVersion+".json") {
 			return nil
@@ -165,7 +201,7 @@ func readJSON(p string, v any) (bool, error) {
 		return false, err
 	}
 	if err := json.Unmarshal(b, v); err != nil {
-		return false, fmt.Errorf("handbook: decode %s: %w", filepath.Base(p), err)
+		return false, fmt.Errorf("%w: decode %s: %v", errCorruptJSON, filepath.Base(p), err)
 	}
 	return true, nil
 }
