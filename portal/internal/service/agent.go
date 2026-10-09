@@ -52,7 +52,16 @@ type AgentService struct {
 	channelUC   *biz.ChannelUsecase
 	proxyRepo   biz.ProxyRepo
 	codeRoots   []string
+	rcaRoots    RCARootResolver
 	log         *log.Helper
+}
+
+// SetRCARootResolver wires repo-binding based RCA roots.
+func (s *AgentService) SetRCARootResolver(r RCARootResolver) {
+	if s == nil {
+		return
+	}
+	s.rcaRoots = r
 }
 
 // NewAgentService creates an AgentService
@@ -307,6 +316,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		Workspace:    agentMeta.Workspace,
 		AgentProxyID: agentMeta.ProxyID,
 		Proxies:      cat,
+		RCARoots:     resolveRCARoots(ctx, s.rcaRoots, agentMeta.ID, s.log),
 	})
 	if err != nil {
 		s.log.Errorf("Chat build tool registry failed: agent_id=%s err=%v", agentID, err)

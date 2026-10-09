@@ -43,6 +43,7 @@ type ChatService struct {
 	memoryStore      memory.MemoryStore
 	turnTraceStore   turntrace.Store
 	codeRoots        []string
+	rcaRoots         RCARootResolver
 	db               *gorm.DB
 	catalog          *data.ModelCatalogStore
 	proxyRepo        biz.ProxyRepo
@@ -90,6 +91,14 @@ func (s *ChatService) SetCodeRoots(roots []string) {
 		return
 	}
 	s.codeRoots = roots
+}
+
+// SetRCARootResolver wires repo-binding based RCA roots.
+func (s *ChatService) SetRCARootResolver(r RCARootResolver) {
+	if s == nil {
+		return
+	}
+	s.rcaRoots = r
 }
 
 func (s *ChatService) turnModelLoader() chat.TurnModelLoader {
@@ -425,6 +434,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		Workspace:    agentMeta.Workspace,
 		AgentProxyID: agentMeta.ProxyID,
 		Proxies:      cat,
+		RCARoots:     resolveRCARoots(ctx, s.rcaRoots, agentMeta.ID, s.log),
 	})
 	if err != nil {
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
@@ -729,6 +739,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		Workspace:    agentMeta.Workspace,
 		AgentProxyID: agentMeta.ProxyID,
 		Proxies:      cat,
+		RCARoots:     resolveRCARoots(ctx, s.rcaRoots, agentMeta.ID, s.log),
 	})
 	if err != nil {
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
@@ -893,17 +904,17 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	go func() {
 		defer func() {
 			epBuf.Clear()
-				// 技能自进化检测（异步，不阻塞响应）
-				if chat.EvolutionEnabled() && len(priorHistory) > 0 {
-					go func() {
-						var skillNames []string
-						for _, sk := range skillsIdx.All() {
-							skillNames = append(skillNames, sk.Name)
-						}
-						ctx := context.Background()
-						chat.RunEvolutionPipeline(ctx, session.AgentID, sessionID, len(priorHistory), priorHistory, skillNames, s.evolutionRepo)
-					}()
-				}
+			// 技能自进化检测（异步，不阻塞响应）
+			if chat.EvolutionEnabled() && len(priorHistory) > 0 {
+				go func() {
+					var skillNames []string
+					for _, sk := range skillsIdx.All() {
+						skillNames = append(skillNames, sk.Name)
+					}
+					ctx := context.Background()
+					chat.RunEvolutionPipeline(ctx, session.AgentID, sessionID, len(priorHistory), priorHistory, skillNames, s.evolutionRepo)
+				}()
+			}
 			// 关闭顺序（保证不丢事件、不 send-on-closed）：
 			// 1. 到此处时 `for ev := range evCh` 已经返回——框架的 RunEvents 单 goroutine
 			//    在 defer close(out) 之前完成了所有 emit（同步订阅已把事件写入 relay），
