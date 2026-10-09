@@ -3040,3 +3040,33 @@ git commit -m "feat(web): handbook LLM state, model override and enrichment cont
 git add docs/superpowers/specs/2026-10-09-repo-registry-and-rca-handbook-design.md docs/superpowers/plans/2026-10-09-repo-handbook-p2b.md
 git commit -m "docs: sync P2b handbook LLM layer design"
 ```
+
+---
+
+## 实施后说明
+
+实现提交 `62e7f47..0acf6df`（`git log --oneline 8ae99c8..HEAD`）。以代码为准，设计文档 §4.1、§7.1、§7.2"P2b 实现"、§8.1–§8.3、§11、§12、§13.1、§15、§16 已同步。
+
+### 实施偏差
+
+评审后与上文计划正文不一致的主要地方：
+
+- **卡片按内容去重**：内容相同的文件共用一张卡片、一次模型调用；`max_cards_per_run` 计的是**模型调用数**，不是文件数。`cards_*` 计数仍按文件。
+- **卡片失败分两类**：回复不可用 → 内容哈希写入失败集 `llm/failed-<prompt 版本>.json`（计划为"本轮计数、HEAD 变化前不重试"）；传输错误 → 计入新字段 `card_transport_errors`，状态 `partial`，下轮重试，同一哈希 3 轮传输错误后才转入失败集。有待重试的传输错误时不合成。`full` 运行清空失败集。
+- **过期卡片**：`FileAssign` 增加 `Hash`（上次归类时的内容），`CardHash` 只在当前内容有卡片时更新，否则保留旧卡片哈希用于"已过期"渲染；清理时保留骨架引用的旧卡片。
+- **骨架提示词降级**：计划是超过 120KB 直接退化；实际先逐级减少职责行（3→1→0），再把目录合并到前 4→1 级，同时要求目录数 ≤ 359。回复 `max_tokens = min(1000 + 20 × 目录数, 8192)`（计划固定 6000）。阶段下限为 2（提示词要求 3–15），超过 15 个保留文件最多的 15 个。
+- **退化原因**：新增 `fallback_reason`（`too_large` / `bad_reply` / `few_stages` / `unassigned` / `no_model`），超过 15 个分区时合并出"其他"；`bad_reply` 退化 24 小时后重试（重建原因 `fallback_retry`，`needsEnrich` 同样检查）。骨架推断的传输错误不退化，按失败处理。
+- **增量与重建**：变得没有文件的阶段被删除；`ChangedPaths` 记录去重后的路径（同一文件多次改动只算一次）；`unassigned` 在增量更新后判断，其余条件先判断。
+- **合成**：传输错误重试 2 次（线性退避）；0 个阶段不写总览；寄存器用途只重写读写位置有改动的条目，重建时沿用同提示词版本的旧用途后再重写；所有步骤成功才写骨架，内容和 commit 都没变时不写。
+- **渲染**：LLM 文本在渲染时再次截断并净化（单行折叠、表格转义 `|`、行首转义、多行 Markdown 标题降级到 `####`、补闭合代码围栏、非法阶段 id 跳过）；读取 `llm/` 出错时按无 LLM 渲染且 `llm_rev` 留空，下轮重试；版本目录新增 `facts/module.json` 供 `ReadFacts` 使用。
+- **biz 运行**：`EnrichPending` 按 `run_at` 升序（从未运行的最先），本次调用已用时超过运行超时后不再启动新运行；`RequestEnrich` 在其他仓库占用槽位时返回新的 `ErrHandbookLLMBusy`（409 `HANDBOOK_LLM_BUSY`），该仓库租约被占才是 `HANDBOOK_BUILDING`；`handbookCurrent` 额外要求 `generator_version` 为当前版本。`failed` 在 HEAD **或模型**变化后自动重试。读取 facts、解析仓库路径、打开缓存等基础设施错误不记失败，只写 `last_error`，下轮重试；失败轮次若已改变缓存仍换新 rev。未合成的轮次沿用上轮的 `stages` / `fallback` / `fallback_reason` / `skeleton_built_at`；`last_error` 也记录非失败轮次的最后一次传输错误。
+- **配置**：`concurrency` 上限 16、`max_file_kb` 上限 256、`max_run_minutes` 上限 20；有模型目录就安装解析器（即使全局模型为空，仓库覆盖也能运行）；解析带超时。`handbook_model` 校验：≤ 255、无空白/控制字符，`off` 不区分大小写。
+- **HTTP**：enrich 成功返回 200 `{"accepted":true}`（计划为 202 `{"ok":true}`）；`full` 用 `strconv.ParseBool` 解析，非法 400；`GET /handbook/config` 返回完整配置及 `available`（已安装解析器）与 `enabled`（`available` 且全局模型非空）。
+- **Web**：`request()` 抛出带 `status` / `reason` 的 `ApiError`，enrich 错误按 reason 映射中文提示；新增 `off` / `running` / `pending` 状态，`failed` 只在 `failed_commit` 与模型都未变时显示；列表在 LLM 运行中也轮询；弹窗运行中每 3 秒刷新并在结束后重新加载页面内容；模型候选来自模型目录（仅启用且有 key 的 provider，名称不可用时用 ID）。
+
+### 真实模型冒烟（人工执行，需要模型凭据）
+
+1. 在"模型目录"确认一个可用模型：provider 已启用且有 API key，模型条目未隐藏。建议 openai_compat 类型；DashScope 实现的结果解析未验证，若卡片全部"生成失败"（`card_errors` ≈ `cards_total`），先换 openai_compat 模型。
+2. 配置模型（三选一）：`portal/configs/config.yaml` 的 `handbook.model: "<provider 名称或 ID>/<模型名>"`（或精确模型名）；或环境变量 `SATH_HANDBOOK_MODEL`；或在仓库页"编辑"弹窗的"Handbook 模型"里给单个仓库填覆盖（立即生效，无需重启）。前两种需要重启 portal（配置只在启动时读取）。重启后 `GET /api/v1/handbook/config` 应返回 `available: true`，设置了全局模型时 `enabled: true`。
+3. 让 LLM 层跑起来：确认该仓库 Handbook 列为"最新"（生成器版本升到 `p2b-1` 后首次扫描会全部重建，也可点"重建"）。之后等下一次扫描（默认 10 分钟，或 `POST /api/v1/repos/scan`）——扫描成功后 cron 先 `RebuildStale` 再 `EnrichPending`；或打开 Handbook 弹窗点"重新生成 LLM 内容"（`POST /api/v1/repos/{id}/handbook/enrich?full=1`）。观察 LLM 徽章"待增强"→"增强中"→"部分完成 x/y"（超出单轮预算时，下一次扫描继续）→"已完成 x/y"。完成后的重渲染结束时，打开 Handbook：`references/overview.md` 有"系统总览（LLM 生成）"，`references/index.md` 有"执行阶段"表，任一 `references/stages/<id>.md` 有阶段说明和文件卡片。通过 `GET /api/v1/repos/{id}/handbook` 检查 `llm`：`fallback` 应为 `false`（若为 `true` 看 `fallback_reason`，`bad_reply` 说明模型输出不可用）、`tokens_in/out` 非零、`stats.llm_rev == llm.rev`。
+4. 修改该仓库一个卡片资格文件（非测试源码）并提交。下一次扫描后：确定性重建先发布（该文件在阶段页标"已过期"），随后 LLM 运行只为该文件生成卡片——`cards_new = 1`（若有其他文件与新内容完全相同则为相同内容的文件数）、`skeleton_rebuilt = false`（未触发重建阈值时）；重渲染后对应阶段页条目更新、"已过期"标注消失。

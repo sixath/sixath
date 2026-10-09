@@ -113,8 +113,11 @@ agent_effective_repos  ──►  RCA roots  +  可见 handbook  +  code-map 入
 | handbook_status | VARCHAR(16) | `none` / `building` / `ready` / `stale` / `failed` |
 | handbook_commit | VARCHAR(64) | handbook 对应 commit |
 | handbook_version | INT | 原子切换用的版本号 |
-| handbook_stats | JSON | 冻结比例、未归类文件比例、文件数、stage 数、register 数；P2a 实际为 `generator_version`、`built_at`、文件/Go 文件/包/分区/符号/寄存器数、`truncated`、`duration_ms`，失败时含 `last_error`、`failed_commit` |
+| handbook_stats | JSON | 冻结比例、未归类文件比例、文件数、stage 数、register 数；P2a 实际为 `generator_version`、`built_at`、文件/Go 文件/包/分区/符号/寄存器数、`truncated`、`duration_ms`，失败时含 `last_error`、`failed_commit`；P2b 增加 `cards`（有当前卡片的文件数）、`stale_cards`、`stages`、`llm_rev`（本次渲染所用的 LLM 内容修订号） |
 | handbook_lease_until / handbook_lease_token | DATETIME(3) / VARCHAR(36) | P2a 构建租约（migration `020_repo_handbook.sql`，§8.2） |
+| handbook_model | VARCHAR(255) NOT NULL DEFAULT '' | P2b：仓库级 handbook 模型覆盖。空 = 继承全局 `handbook.model`；`off`（不区分大小写，存为小写）= 该仓库禁用 LLM 层；其余为模型名或 `<provider 名称或 ID>/<模型名>`（migration `021_repo_handbook_llm.sql`） |
+| handbook_llm | JSON | P2b：LLM 层状态，字段见 §7.2"P2b 实现"的 `handbook_llm` 表 |
+| handbook_llm_lease_until / handbook_llm_lease_token | DATETIME(3) / VARCHAR(36) | P2b：LLM 运行租约，独立于构建租约（§8.2） |
 | owner_id | VARCHAR(36) | 负责人 |
 | last_scanned_at / created_at / updated_at | DATETIME(3) | |
 
@@ -285,12 +288,8 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
         symbols.json                  # P2a：Go 符号（含 body 指纹）
         registers.json                # P2a：寄存器候选（kind、name、access、path:line）
         packages.json                 # P2a：Go 包目录、包名、包注释、文件数、是否 main
-        graph.json                    # P2b：调用边（P2a 不做，coverage.graph = "none"）
-      generated/                      # P2b（LLM 产物）
-        cards/<path-hash>.json        # file card
-        stages.json                   # stage 骨架与文件归属
-        overview.md                   # L1
-        registers.json                # 状态寄存器说明
+        module.json                   # P2b：go.mod 信息（有 go.mod 时），供 LLM 层读取 facts
+        graph.json                    # 调用边（P2a/P2b 均未做，coverage.graph = "none"）
       coverage.json                   # 未归类文件、冻结条目、未解析调用；P2a 记录跳过统计与截断
       skill/                          # 对 Agent 暴露（渲染产物）
         SKILL.md
@@ -298,13 +297,19 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
         references/index.md           # 超过 48KB 时分页：index.p2.md、index.p3.md …
         references/registers.md       # 同上分页
         references/areas/<id>.md      # P2a：目录分区（同上分页）
-        references/stages/<id>.md     # P2b：LLM 行为阶段
+        references/stages/<id>.md     # P2b（已实现）：LLM 行为阶段
+    llm/                              # P2b：LLM 缓存，不在版本目录里、不随版本切换
+      cards/<hash 前 2 位>/<hash>-<prompt 版本>.json   # 文件卡片，按文件内容 sha256 寻址
+      skeleton.json                   # 阶段骨架、文件归属、总览、寄存器用途
+      failed-<prompt 版本>.json       # 生成失败的内容哈希与传输错误轮数（无失败时删除）
     overlay/                          # 不随版本切换，永不被生成覆盖
       notes.jsonl
   groups/<group_id>/
     current.json, v<N>/ ...           # 组级 handbook，结构同上（无 cards）
   agents/<agent_id>/code-map/SKILL.md # 入口 Skill，有效仓库集变化时重渲染
 ```
+
+P2b 实现：原设想的版本内 `generated/` 改为仓库级 `llm/` 缓存。LLM 层只写 `llm/`，确定性构建（§7.2 P2a）在渲染时读取它，把卡片、阶段、总览、寄存器用途渲染进新版本的 `skill/`；`llm/` 本身不进版本目录，也不随 `current.json` 切换。卡片按内容哈希寻址，换模型不作废卡片；`LLMPromptVersion`（当前 `p2b-1`）变化时旧卡片、旧骨架被忽略并在清理时删除。
 
 ### 7.2 仓库级 handbook 构建（file-as-leaf）
 
@@ -341,6 +346,40 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
 - 校验所有 L3 定位符（文件存在 + 哈希一致），失败即 `frozen`。
 - 渲染 `skill/`，写 `manifest.json`，原子切换 `current.json`。
 
+**P2b 实现（LLM 层，计划 `docs/superpowers/plans/2026-10-09-repo-handbook-p2b.md`）**：
+
+两层：确定性层（P2a 的 `Build`）每次 HEAD 变化立即发布；LLM 层是独立的后台运行 `handbook.Enrich`（biz 侧 `EnrichPending` / `RequestEnrich`），持有独立租约，读已发布版本的 facts 与仓库检出，只写 `llm/` 缓存；运行改变了缓存时生成新的 `handbook_llm.rev`，触发一次确定性重建把新内容渲染发布。模型通过 `framework/model.Model` 注入，所有调用 `temperature = 0.2`（OpenAI 兼容实现会把 0 替换成默认值）；回复取第一个能解码的 JSON 对象，`finish_reason = length`、无 JSON、解码失败都算"回复不可用"（区别于传输错误）。
+
+- **卡片资格**：非测试、非空、语言属于源码类（go、proto、sql、python、java、javascript、typescript、shell、lua、c、cpp、rust、php、ruby、kotlin、csharp、scala、vue）。文档、配置、测试只出现在清单与分区页。
+- **卡片生成**：提示词含仓库、路径、语言、行数、符号清单（最多 80 个，`functions.name` 只能从中原样选取）与文件内容（按 `max_file_kb` 截断在行边界并标注；代码围栏比内容中最长的反引号串更长）。输出 `purpose / description / role / lifecycle / functions(≤8)`，`max_tokens = 900`。校验：清单外或重复的函数丢弃，`role` 不在枚举内改为 `other`，各字段按 rune 截断（purpose 120、description 600、lifecycle 120、函数说明 160），`purpose` 为空视为回复不可用。文件经 `os.OpenInRoot` 读取（仅普通文件、≤ 512KB），内容哈希与 facts 不一致的文件本轮跳过。
+- **按内容去重**：内容相同的文件共用一张卡片和一次模型调用；缓存键为内容 sha256 + 提示词版本。Go 文件优先，其次按路径排序。缓存中解码失败的 JSON 文件被删除并视为缺失；Windows 下同一哈希并发写入冲突时，读到另一写入者留下的有效卡片即视为成功。
+- **预算**：每轮最多 `max_cards_per_run` 次**卡片模型调用**（不是文件数，默认 600）、并发 `concurrency`（默认 4）、时长 `max_run_minutes`（默认 15）。被预算截断、时间到或父 context 取消时状态为 `partial`，已生成的卡片保留，下轮继续。
+- **卡片失败**：回复不可用 → 该内容哈希进入失败集 `llm/failed-<prompt 版本>.json`，不再重试，直到内容变化或手动"重新生成"（`full` 运行清空失败集重试）。传输错误 → 本轮计入 `card_transport_errors`，状态 `partial`，下轮重试；同一哈希累计 3 轮传输错误后转入失败集，避免一直被拒的文件永远卡住合成。连续 5 次调用传输失败 → 本轮失败（`ErrModelUnavailable`）。
+- **合成触发**：本轮没有预算截断、没有取消、没有待重试的传输错误时才合成；只允许失败集中的文件缺卡片（计入 `card_errors`）。
+- **骨架推断（按目录）**：输入为每个含卡片资格文件的目录（文件数 + 最多 3 条"文件名：职责"）及 `package main` 入口，要求划分 3–15 个执行阶段（按请求/任务处理流程，不按技术分层），每个目录归入一个阶段，文件继承目录的阶段。提示词逐级降级直到满足"≤ 120KB 且目录数 ≤ 359"：每目录职责行 3 → 1 → 0，再把目录合并到前 4、3、2、1 级（每级先 1 行职责再 0 行）。回复上限 `max_tokens = min(1000 + 20 × 目录数, 8192)`（许多 OpenAI 兼容服务拒绝更大的 `max_tokens`，目录数上限 359 由此而来）。阶段 id 须匹配 `^[a-z0-9][a-z0-9-]{0,39}$` 且去重；回复漏掉的目录继承最近的已分配祖先目录，仍未分配的文件取最近目录链上的多数阶段；没有文件的阶段丢弃，超过 15 个时保留文件最多的 15 个。
+- **退化（按目录分区作阶段）**：`fallback_reason` 为 `too_large`（降级后仍放不下）、`bad_reply`（回复不可用）、`few_stages`（有效阶段 < 2）、`unassigned`（未归类 > 10%）、`no_model`。退化用 P2a 的目录分区作阶段，超过 15 个分区时保留最大的 14 个，其余并入"其他"。骨架推断的传输错误不退化，按合成失败处理。`bad_reply` 退化的骨架在 24 小时后重试模型（重建原因 `fallback_retry`）。仓库没有任何卡片资格文件时得到空骨架（0 个阶段）。
+- **重建判定**：`none`（无骨架）/ `prompt`（提示词版本变化）/ `age`（距上次重建 > `skeleton_rebuild_days`，默认 30）/ `fallback_retry` / `changes`（自上次重建累计改动的**不同**路径 × 5 > 重建时文件数，即 > 20%）/ `topdir`（出现新顶层目录，仓库根 `.` 除外）/ `unassigned`（增量归类后未归类 > 10%）/ `manual`（`full` 运行）。不依赖增量结果的条件先判断，避免对马上要重建的骨架白做增量；`unassigned` 在增量更新之后判断。
+- **增量更新**：删除的文件移出骨架；内容变化的文件保留阶段；新文件取同目录或最近上级目录的多数阶段；变得没有文件的阶段被删除；改动路径累计到 `ChangedPaths`（去重排序）。每个文件的归属 `FileAssign` 记 `Stage`、`Hash`（上次归类时的内容哈希）与 `CardHash`（展示的卡片）：当前内容有卡片时 `CardHash = Hash`，否则保留旧 `CardHash`，渲染为"已过期"。
+- **合成**：受影响阶段（文件集变化、文件内容变化、获得了当前卡片，或尚无说明；重建时为全部阶段）重写说明（提示词 ≤ 40KB，`max_tokens = 700`，≤ 1500 rune）；有阶段且有说明被重写、总览为空或阶段集变化时重写总览（`max_tokens = 1500`，≤ 4000 rune），**0 个阶段时不写总览**；寄存器用途只为引用次数最多的 60 个寄存器生成，每批 20 个（`max_tokens = 1500`，每条 ≤ 160 rune），已有用途的寄存器只有在读写位置所在文件改动时才重写（重建时全部重写，提示词版本未变则先沿用旧用途）。合成调用的传输错误重试 2 次（线性退避 1s、2s），仍失败则本轮失败且不写骨架；回复不可用时保留旧文本。所有步骤成功后，骨架有变化或 commit 变化才写入 `skeleton.json`。
+- **清理**：合成成功后删除当前 facts 与骨架 `CardHash` 都不再引用的卡片、其他提示词版本的卡片与失败集文件、超过 1 小时的临时文件；清理失败只记日志，不影响本轮结果。
+- **渲染**（`GeneratorVersion = p2b-1`，变化会触发全部仓库确定性重建一次）：`LoadLLMLayer` 读取卡片资格文件的当前卡片、骨架中旧 `CardHash` 对应的过期卡片，以及当前提示词版本的骨架。有阶段时：`SKILL.md` 换成按阶段组织的模板（§7.2 模板）；`references/index.md` 标题改为"索引"，先列"执行阶段"表（阶段、文件数、说明首句、页面），再列"未归类文件""已过期文件"（各最多 100 个），之后是目录分区；`references/stages/<id>.md` 为阶段说明 + 每个文件的卡片（职责与 role、说明、执行时机、关键函数及 facts 中的行号；过期卡片标"已过期，以源码为准，改用 rca_grep"）；`references/overview.md` 增加"系统总览（LLM 生成）"与阶段列表；`references/registers.md` 每个寄存器加"用途："；分区页每个文件加"职责"行（过期标注）。没有阶段但有卡片时仍按 P2a 模板渲染并带卡片职责。
+- **渲染净化**：LLM 文本在渲染时再次按上限截断；单行字段折叠空白，表格单元格转义 `|`，行首的 `#`、`>`、`-`、`+`、`*`、`=`、`|`、反引号、`~`、`<` 与有序列表标记被转义；多行 Markdown（总览、阶段说明）的标题降级到 `####` 以下，setext 下划线与 HTML 块起始被转义，未闭合的代码围栏补闭合；非法或重复的阶段 id 跳过，函数名去掉反引号。
+- **缓存出错时降级**：确定性构建读取 `llm/` 出错时不阻塞发布，按无 LLM 内容渲染，且 `handbook_stats.llm_rev` 留空——与期望的 rev 不符，下一轮扫描会再重建。单张卡片读取失败按缺失处理。
+
+`handbook_llm` 字段：
+
+| 字段 | 含义 |
+|---|---|
+| `state` | `partial` / `complete` / `failed`；只记录过基础设施错误时可能没有 |
+| `model` / `commit` / `prompt_version` | 本轮使用的模型名（配置值）、基于的 handbook commit、`LLMPromptVersion` |
+| `cards_total` / `cards_done` / `cards_new` | 需要卡片的文件数 / 有当前卡片的文件数 / 本轮新生成卡片覆盖的文件数（均按文件计，同内容文件共享卡片） |
+| `card_errors` / `card_transport_errors` | 失败集中的文件数（等内容变化或手动重新生成）/ 本轮调用出错、下轮重试的文件数 |
+| `stages` / `fallback` / `fallback_reason` / `skeleton_rebuilt` / `rebuild_reason` / `skeleton_built_at` | 骨架信息；未合成的轮次沿用上一轮的 `stages`、`fallback`、`fallback_reason`、`skeleton_built_at` |
+| `tokens_in` / `tokens_out` | 本轮 token |
+| `run_at` / `duration_ms` | 本轮开始时间与耗时 |
+| `rev` | 内容修订号；变化即触发确定性重渲染（确定性构建把它写进 `handbook_stats.llm_rev`） |
+| `last_error` / `failed_commit` | 错误信息；`last_error` 也用于记录非失败轮次的最后一次传输错误和基础设施错误，只有 `state = failed` 才是失败 |
+
 **SKILL.md 模板**（对齐论文 Figure 6，RCA 化）：
 
 ```markdown
@@ -373,7 +412,7 @@ hidden_from_summary: true
 - 页面为 `SKILL.md`、`references/overview.md`、`references/index.md`、`references/registers.md`、`references/areas/<id>.md`；"阶段"由目录分区代替（按首级目录分区，`internal`/`pkg`/`cmd`/`app(s)`/`src`/`service(s)`/`api` 下取两级）。
 - **Skill 名**：`handbook-<slug>`，slug 为 `rel_path` 小写后把 `[a-z0-9]` 以外的连续字符替换为 `-`。slug 有损（`rel_path` 含 `[a-z0-9-]` 以外的字符，如嵌套路径 `group/svc`、大写、下划线）或超长被截断时，追加 `-<sha256(rel_path) 前 8 位十六进制>`，slug 部分总长 ≤ 60 字符，保证不同仓库的 skill 名不冲突。
 - **页面大小**：每页（含 `index.md`）不超过 `MaxPageBytes` = 48KB，能被一次 `read_skill_file` 读完；超出时按节分页，首页列出续页 `<base>.p2.md`、`<base>.p3.md` …；单节超过一页时在 rune 边界截断并标注 `…（已截断）`。每文件符号、每寄存器位置、index 表格行数另有上限。
-- `generator_version` 变化会触发所有仓库重建。
+- `generator_version` 变化会触发所有仓库重建。P2b 起为 `p2b-1`，渲染时合入 LLM 层（见上文"P2b 实现"）。
 
 ### 7.3 组级 handbook（L0）
 
@@ -425,6 +464,17 @@ P2a 实现：每个 agent 一份 `handbooks/agents/<agent_id>/code-map/SKILL.md`
 - 冻结条目比例 > 15%；
 - 距上次重建 > 30 天。
 
+**P2b 实现**：
+
+| 层 | 实际做法 |
+|----|----------|
+| 校验 / 冻结 | 不做运行时校验；"冻结"落实为渲染时的"已过期"标注：文件当前内容没有卡片、但骨架里有旧卡片时显示旧卡片并标"已过期，以源码为准"（§8.3）。设计中"冻结比例 > 15% 触发重建"不做——每轮增量会补上新卡片 |
+| 确定性层 | 每次 HEAD 变化（或 `generator_version`、期望的 `llm_rev` 变化）由 `RebuildStale` 全量重算 Phase I 并发布，不调用 LLM |
+| LLM 增量 | 同一次扫描里 `RebuildStale` 之后运行 `EnrichPending`：只为缺卡片的内容哈希生成卡片（预算内），新文件按目录多数阶段归类，改动文件保留阶段，删除文件移除，受影响阶段重写说明，总览与相关寄存器用途随之重写 |
+| 骨架重建 | §7.2"重建判定"中的任一条件：无骨架、提示词版本变化、> `skeleton_rebuild_days`、改动路径 > 20%、新顶层目录、未归类 > 10%、`bad_reply` 退化满 24 小时、手动"重新生成"（`full`）；复用未变文件的卡片 |
+
+`needsEnrich`（自动运行的条件）：仓库 `active`、未在构建、已发布的 handbook 由 HEAD 和当前生成器构建（`handbook_version > 0`、`handbook_commit = head_commit`、`generator_version` 一致）、LLM 租约空闲、该仓库的模型非空；并且上一轮未完成（`partial` 或无状态）、基于其他 commit 或提示词版本、骨架超龄、或 `bad_reply` 退化满 24 小时。`failed` 只在 HEAD 或使用的模型变化后自动重试。
+
 ### 8.2 并发与一致性
 
 - 每个仓库同一时刻只允许一个构建任务：DB 行级租约（`handbook_status=building` + `handbook_lease_until` + `handbook_lease_token`），过期可抢占。
@@ -441,9 +491,21 @@ P2a 实现：每个 agent 一份 `handbooks/agents/<agent_id>/code-map/SKILL.md`
 - **发布**：先写入 `v<N>.tmp-*` 唯一临时目录再 rename 为 `v<N>`，**从不覆盖已存在的版本目录**（`ErrVersionExists`）；遇到失去租约的构建遗留的目录时版本号顺延，最多尝试 3 次；成功后原子写 `current.json`，保留最近 2 版，超过 1 小时的临时目录由清理删除。
 - **读取**：`ReadSkillFile` 校验 repo id（`[A-Za-z0-9_-]`）与路径每一段（白名单字符、不以 `.` 结尾），再经 `filepath.IsLocal`（拒绝 Windows 设备名）与 `os.OpenInRoot` 打开，拒绝目录，单次最多 256KB。
 
+**P2b 实现（LLM 运行）**：
+
+- **租约**：列 `handbook_llm_lease_until` + `handbook_llm_lease_token`（migration `021_repo_handbook_llm.sql`），与构建租约互相独立，不改 `handbook_status`。`ClaimHandbookEnrich` 在租约为空或已过期时认领，时长 = 运行超时（`max_run_minutes`）+ 10 分钟；`FinishHandbookEnrich` / `ReleaseHandbookEnrich` 只在 token 匹配时生效，否则结果被丢弃（`ErrHandbookLeaseLost`）。
+- **并发**：全局同时最多 1 个 LLM 运行（`enrichSlots` 容量 1，`EnrichPending` 与 `RequestEnrich` 共用）。`EnrichPending` 由 cron 在每次扫描成功、`RebuildStale` 之后于同一 goroutine 调用，`TryLock` 保证同一时刻只有一轮；待运行仓库按上次 `run_at` 升序（从未运行过的最先），逐个同步运行，本次调用已用时超过运行超时后不再启动新的运行，剩余仓库留给下一次扫描。
+- **手动**：`RequestEnrich(id, full)` 不论状态都可触发（含 `failed`）；仓库非 `active` → `ErrInvalidRepo`，模型为空 → `ErrHandbookLLMDisabled`，handbook 不是当前 HEAD + 当前生成器 → `ErrHandbookNotReady`，该仓库 LLM 租约被占 → `ErrHandbookBuilding`，其他仓库正在运行（槽位满）→ `ErrHandbookLLMBusy`。认领成功后异步运行（`context.WithoutCancel`）。
+- **配置**：`handbook:` 段（§11），`concurrency` 上限 16、`max_file_kb` 上限 256、`max_run_minutes` 上限 20，0 或不填取默认。模型名优先级：仓库 `handbook_model`（`off` 禁用）> 全局 `handbook.model`（环境变量 `SATH_HANDBOOK_MODEL` 覆盖）。按模型目录解析（与 critic 相同：精确模型名，或 `<provider 名称或 ID>/<模型名>`），每次解析有超时。只要有模型目录就安装解析器，因此即使没有全局模型，仓库级覆盖也能运行。
+- **失败与重试**：解析模型失败或 `Enrich` 返回错误（连续调用失败、合成传输错误、缓存写失败）→ `state = failed`、`failed_commit` = 当前 commit、`model` = 所用模型，HEAD 或模型变化、或手动重新生成前不自动重试；失败轮次若已改变缓存（如生成了部分卡片）仍会换新 rev 触发重渲染。读取 facts、解析仓库路径、打开缓存目录等**基础设施错误**不记失败，只写 `last_error`、`run_at`、`duration_ms`（`state` 不变），下一次扫描重试。
+- **取消**：父 context 取消（进程关闭）、仓库读取失败、认领后发现仓库已非 `active` / handbook 不再是当前版本 / 模型被禁用时，释放租约，不记录任何状态。
+- **重渲染**：运行改变了缓存（新卡片或骨架变化）或此前没有 rev 时生成新 `rev`（`now` 的 36 进制纳秒），写库后调用 `RequestRebuild`；`RebuildStale` 也会把 `handbook_stats.llm_rev` 与期望值（LLM 层禁用时为空）不一致的仓库视为过期，保证重渲染最终发生。确定性构建只在仓库的模型非空时读取 `llm/`。
+
 ### 8.3 冻结条目的呈现
 
 论文中冻结条目不参与定位；RCA 场景放宽：仍出现在 index，但标注"已过期，以源码为准，改用 rca_grep"。保证 handbook 过期时退化为现状（Baseline），不会更差。
+
+P2b 实现：文件内容变化后、新卡片生成前，阶段页显示旧卡片并在文件标题后标"已过期，以源码为准，改用 rca_grep"，分区页的职责行标"已过期，以源码为准"且不附卡片中的函数说明；`references/index.md` 末尾列出"已过期文件"；新卡片生成并重渲染后标注消失。
 
 ### 8.4 版本对齐
 
@@ -567,6 +629,31 @@ P2a 已实现的 handbook 接口：
 
 错误码：参数非法 400 `INVALID_ARGUMENT`；仓库/组不存在 404 `NOT_FOUND`；agent 不存在沿用 `AGENT_NOT_FOUND`；409 见上表；handbook 未发布或页面不存在 404 `HANDBOOK_NOT_FOUND`；未配置 handbook 503 `HANDBOOK_DISABLED`。
 
+P2b 新增与变更的接口：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| PATCH | `/api/v1/repos/{id}` | 新增可选字段 `handbook_model`：去首尾空白，≤ 255 字符且不含空白/控制字符（否则 400 `INVALID_ARGUMENT`）；`off` 不区分大小写，存为 `off`；`""` 清除覆盖 |
+| POST | `/api/v1/repos/{id}/handbook/enrich?full=` | 异步启动该仓库的 LLM 运行，成功 200 `{"accepted":true}`。`full` 用 `strconv.ParseBool` 解析（`1`/`true`/`0`/`false` 等），非法 400 `INVALID_ARGUMENT`；`full=true` 重建骨架并重试失败集。错误：仓库非 `active` 400 `INVALID_ARGUMENT`；LLM 层禁用 400 `HANDBOOK_LLM_DISABLED`；handbook 不是当前 HEAD/生成器 409 `HANDBOOK_NOT_READY`；该仓库 LLM 运行中 409 `HANDBOOK_BUILDING`；其他仓库 LLM 运行中 409 `HANDBOOK_LLM_BUSY`；仓库不存在 404 `NOT_FOUND`；未配置 handbook 503 `HANDBOOK_DISABLED` |
+| GET | `/api/v1/handbook/config` | 全局 LLM 配置（已套默认值与上限）：`model`、`concurrency`、`max_cards_per_run`、`max_file_kb`、`max_run_minutes`、`skeleton_rebuild_days`，以及 `available`（已安装模型解析器；否则任何仓库包括覆盖都不运行）与 `enabled`（`available` 且全局模型非空） |
+| GET | `/api/v1/repos/{id}/handbook` | 新增 `llm`（`handbook_llm`）、`llm_model`（该仓库实际使用的模型，`""` = LLM 层关闭）、`llm_running`（LLM 租约未过期） |
+
+`GET /api/v1/repos`、`/repos/{id}` 的仓库对象新增 `handbook_model`、`handbook_llm`、`handbook_llm_lease_until`。
+
+配置（`portal/configs/config.yaml`）：
+
+```yaml
+handbook:
+  model: ""                 # 空 = 只生成静态 handbook（仓库可单独覆盖）；环境变量 SATH_HANDBOOK_MODEL 覆盖
+  concurrency: 4            # 上限 16
+  max_cards_per_run: 600    # 每轮卡片模型调用数
+  max_file_kb: 24           # 上限 256
+  max_run_minutes: 15       # 上限 20；租约 = 该值 + 10 分钟
+  skeleton_rebuild_days: 30
+```
+
+配置只在进程启动时读取；仓库级覆盖经 PATCH 立即生效。
+
 后续阶段的接口：`POST /api/v1/repos/batch`、`POST /api/v1/repo-groups/{id}/members/confirm`，以及 tag 组的创建与修改。
 
 ---
@@ -589,7 +676,13 @@ P2a 已实现：
 - **重建按钮**：仓库为 `active` 即可点击，构建中也可以点（后端返回 409 时在列表上方内联显示"重建 … 失败：…"）；列表中存在租约未过期的构建时每 3 秒静默刷新一次，没有活跃构建（含租约已过期、卡住的 `building`）时停止轮询。
 - **查看弹窗** `HandbookDialog`：状态、版本、commit 与 HEAD 取自弹窗内获取的 handbook 视图（不依赖列表行的旧数据）；左侧页面列表（SKILL.md → references → areas）、右侧页面内容；视图与页面加载时显示"加载中…"，失败时显示错误；Esc 关闭。
 
-后续阶段：落后天数、冻结比例、漏召回率列（P2b/P3）；仓库批量操作；tag 组与 pending 成员确认（P4）。
+P2b 已实现：
+
+- **LLM 徽章**（仓库表 Handbook 列下方）：未启用 / 增强中 / 待增强 / 部分完成 x/y / 已完成 x/y / 失败，悬停显示 `last_error`。前端按 `/handbook/config` 与仓库字段计算：服务端无模型解析器（`available=false`）、仓库设为 `off`、或既无覆盖也无全局模型 → 未启用；LLM 租约未过期 → 增强中；`failed` 只在 `failed_commit` 仍等于 `handbook_commit` 且模型未变时显示为失败（否则后端会重试，显示待增强）；无状态或 `commit` 不是当前 handbook commit → 待增强。进度 x/y 只在部分完成与已完成时显示。列表在有活跃构建**或**活跃 LLM 运行时每 3 秒静默刷新。
+- **编辑弹窗**新增"Handbook 模型"输入框，候选来自模型目录（仅启用且有 API key 的 provider、非隐藏条目，取值 `<provider 名称或 ID>/<模型名>`，名称含空白或 `/` 时用 ID）以及 `off`；占位提示显示继承的全局模型或"服务端未启用 LLM 增强"。
+- **HandbookDialog 的 LLM 区块**：状态徽章、所用模型、卡片 x/y（本轮新增、生成失败、调用出错待重试）、阶段数（退化时注明原因）、最近一轮时间/耗时/token；`last_error` 在失败时显示为错误、否则显示为"最近一轮有错误"警告。"重新生成 LLM 内容"按钮调用 `enrich?full=1`（LLM 关闭或运行中时禁用），失败按服务端 `reason`（`ApiError` 携带 HTTP 状态与 reason）映射成中文提示；运行期间每 3 秒刷新视图，运行结束后自动重新加载当前页面内容；触发成功后通知列表刷新。
+
+后续阶段：落后天数、冻结比例、漏召回率列（P3）；仓库批量操作；tag 组与 pending 成员确认（P4）。
 
 ---
 
@@ -598,6 +691,8 @@ P2a 已实现：
 ### 13.1 指标
 
 按仓库：handbook 落后 HEAD 天数、冻结比例、未归类比例、漏召回率、构建耗时与 token。按 agent：有效仓库数、无 handbook 的仓库数。
+
+P2b 起，构建 token 与卡片指标的来源是 `repositories.handbook_llm`（`tokens_in` / `tokens_out` / `duration_ms` / `cards_*` / `card_errors`，每轮覆盖）；过期比例可由 `handbook_stats.stale_cards / cards` 得出。暂无单独的指标上报。
 
 ### 13.2 RCA 定位 A/B（`evals/`）
 
@@ -636,7 +731,7 @@ workspace-link 接口不再自动绑定（§6.3）。
 |----|------|------|
 | P1 | 仓库表、扫描、dir 组、绑定（repo/group/排除）、有效仓库集、**RCA 仓库逻辑名（§6.1.1）**、运行时 RCA roots、迁移、仓库与绑定 UI | 30 仓库 agent 一次勾选完成绑定；basename 重名的两个仓库 `rca_read` 读取正确；旧 agent 行为不变 |
 | P2a | 确定性 handbook（Phase I 事实 + 目录分区渲染，无 LLM）、code-map、`hidden_from_summary` / `summary_pinned`、保留名、租约与版本化发布、HEAD 变化自动全量重建、仓库页 Handbook 列/查看/重建（计划 `docs/superpowers/plans/2026-10-09-repo-handbook-p2a.md`） | 任选 1 个业务仓库生成 handbook；agent 绑定后 `code-map` 出现在摘要首位、handbook 不进摘要；HEAD 变化后下一次扫描内重建 |
-| P2b | LLM 文件卡片、行为阶段（`references/stages/`）、总览、增量刷新、骨架重建、冻结 | 选 1 个业务仓库跑通；HEAD 变化后 10 分钟内增量刷新 |
+| P2b | LLM 文件卡片（按内容去重）、行为阶段（`references/stages/`）、总览、寄存器用途、预算分轮的增量刷新、骨架重建与退化、"已过期"标注、仓库级模型覆盖、LLM 状态 UI 与手动重新生成（计划 `docs/superpowers/plans/2026-10-09-repo-handbook-p2b.md`，已实现；真实模型冒烟待人工执行，步骤见计划末尾） | 选 1 个业务仓库跑通；HEAD 变化后的下一次扫描（默认 10 分钟）内完成确定性重建与增量 LLM 刷新（改动在单轮预算内时） |
 | P3 | RCA 确认信号（反馈按钮 + 文本分类 + 修复提交命中）、RCA 定位 A/B 评测、漏召回统计 | 反馈可在 web 提交；修复提交命中可在仓库页展示；A/B 报告进 nightly |
 | P4 | 组级 handbook、按 agent 裁剪视图、tag 组、规则绑定 | 跨服务问题样例中组级 handbook 被路由命中 |
 | P5 | overlay 提案接入 evolution 流水线 | 确认的 RCA 能产生可评审 overlay 提案 |
@@ -657,8 +752,14 @@ P1 独立有价值（解决多仓库绑定与可观测性），不依赖 handboo
 | CREATE | `portal/internal/data/repository_repo.go` | Repo 实现 |
 | CREATE | `portal/internal/biz/repo_registry.go` | 扫描、分组、绑定展开 Usecase |
 | CREATE | `portal/internal/biz/handbook.go` | handbook 构建/刷新/校验编排 |
-| CREATE | `portal/internal/handbook/`（P2a 已实现：`facts.go`、`gosyms.go`、`registers.go`、`render.go`、`codemap.go`、`store.go`、`builder.go`；P2b 及以后：cards、organize、synthesize、validate、group_join） | handbook 生成管线 |
+| CREATE | `portal/internal/handbook/`（P2a 已实现：`facts.go`、`gosyms.go`、`registers.go`、`render.go`、`codemap.go`、`store.go`、`builder.go`；P2b 已实现：`llmcache.go`、`llmcall.go`、`cards.go`、`organize.go`、`synthesize.go`、`enrich.go`；以后：validate、group_join） | handbook 生成管线 |
 | CREATE | `portal/migrations/020_repo_handbook.sql` | P2a：`handbook_lease_until`、`handbook_lease_token` |
+| CREATE | `portal/migrations/021_repo_handbook_llm.sql` | P2b：`handbook_model`、`handbook_llm`、`handbook_llm_lease_until`、`handbook_llm_lease_token` |
+| CREATE | `portal/internal/biz/handbook_llm.go` | P2b：`HandbookLLMConfig`、`SetLLM`、`EnrichPending`、`RequestEnrich`、LLM 租约与状态记录 |
+| CREATE | `portal/internal/conf/handbook_config.go` | P2b：`handbook:` 配置段与 `SATH_HANDBOOK_MODEL` |
+| CREATE | `portal/internal/service/handbook_llm.go`；MODIFY `service/critic_model.go` | P2b：抽出 `catalogModelResolver`，`ConfigureHandbookLLM` 接线 |
+| MODIFY | `portal/internal/biz/handbook.go`、`repo_registry.go`、`repo_registry_usecase.go`，`portal/internal/data/repo_registry.go`、`data/model/repo_registry.go`，`portal/internal/server/repo_registry.go`、`http.go`，`portal/internal/cron/scheduler.go`，`portal/cmd/backend/main.go`、`wire.go`、`wire_gen.go`，`portal/configs/config.yaml` | P2b：重建判定加 `llm_rev`、LLM 租约方法、`handbook_model` 校验与更新、enrich/config 接口、扫描后运行 `EnrichPending`、配置加载 |
+| MODIFY | `web/src/api/client.ts`（`ApiError`）、`api/repoRegistry.ts`、`api/repoRegistryTypes.ts`、`utils/repoRegistry.ts`、`components/HandbookDialog.tsx`、`pages/RepoListPage.tsx`、`pages/RepoRegistry.css` | P2b：LLM 状态、模型覆盖、重新生成 |
 | CREATE | `portal/internal/service/handbook_dirs.go` | P2a：`HandbookSkillDirResolver`，`sharedSkillDirs` 末尾追加 code-map 与 handbook 目录（fail-open） |
 | CREATE | `web/src/components/HandbookDialog.tsx` | P2a：handbook 查看弹窗 |
 | CREATE | `portal/internal/server/repos.go` | HTTP handlers |
@@ -674,7 +775,7 @@ P1 独立有价值（解决多仓库绑定与可观测性），不依赖 handboo
 | MODIFY | `framework/skills/index.go`、`skills/prompt.go`、`skills/route.go`、`skills/embed_route.go` | 支持 `hidden_from_summary`（不进摘要、不参与自动路由） |
 | MODIFY | `framework/tool/call_graph.go` | 包级调用图（Go 仓库 Phase I） |
 | MODIFY | `framework/tool/rca_repos.go`、`rca_code_tools.go`、`rca_symbol_tool.go` | 命名 root（`RCARoot{Name, Path}`）；`[]string` 入口检测 basename 重名 |
-| CREATE | `portal/migrations/021_rca_feedback.sql`、`portal/internal/biz/feedback.go`、`server/feedback.go` | RCA 确认反馈（已解决 / 根因正确 / 纠正根因位置） |
+| CREATE | `portal/migrations/022_rca_feedback.sql`（021 已被 P2b 占用）、`portal/internal/biz/feedback.go`、`server/feedback.go` | RCA 确认反馈（已解决 / 根因正确 / 纠正根因位置） |
 | MODIFY | `gateway/internal/wecom/frame.go`、`wsclient.go` | 卡片按钮事件回调帧、发送/更新模板卡片 |
 | CREATE | `gateway/internal/wecom/feedback_card.go` | 反馈卡片构造、token 映射 |
 | MODIFY | `gateway/internal/adapter/wecom_bot.go` | 最终回复后发反馈卡片（仅本轮用过 `rca_*`）；事件回调转 portal 反馈 API |
