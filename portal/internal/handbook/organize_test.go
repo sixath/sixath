@@ -209,6 +209,39 @@ func TestInferSkeleton_CollapsesLargePrompt(t *testing.T) {
 	}
 }
 
+func TestInferSkeleton_CollapsesToReplyCapacity(t *testing.T) {
+	var files []File
+	assign := map[string]string{}
+	for i := 0; i < 500; i++ {
+		top := fmt.Sprintf("top%02d", i%50)
+		files = append(files, File{Path: fmt.Sprintf("%s/sub%03d/f.go", top, i), Lang: "go", Size: 1, Hash: hashOf("d")})
+		assign[top] = []string{"even", "odd"}[i%2]
+	}
+	reply, _ := json.Marshal(map[string]any{
+		"stages": []map[string]string{{"id": "even", "title": "偶"}, {"id": "odd", "title": "奇"}},
+		"assign": assign,
+	})
+	m := (&fakeModel{}).on("执行阶段", func(string) string { return string(reply) })
+	f := &Facts{Files: files}
+	if p := skeletonPrompt("svc", f, eligibleDirs(f, nil), 0); len(p) > skeletonInputBudget {
+		t.Fatalf("fixture must fit the byte budget uncollapsed so only the dir limit forces collapsing: %d", len(p))
+	}
+	var u usage
+	sk, err := inferSkeleton(context.Background(), m, "svc", f, nil, "c1", time.Now(), &u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sk.FallbackAreas || len(sk.Stages) != 2 || sk.Files["top01/sub001/f.go"].Stage != "odd" {
+		t.Fatalf("skeleton %#v", sk.Stages)
+	}
+	if !strings.Contains(m.calls[0], "- top00（10 个文件）") || strings.Contains(m.calls[0], "sub") {
+		t.Fatalf("prompt must list top-level dirs: %.300s", m.calls[0])
+	}
+	if len(m.maxTokens) != 1 || m.maxTokens[0] > 8192 || m.maxTokens[0] != skeletonMaxTokens(50) {
+		t.Fatalf("max tokens %v", m.maxTokens)
+	}
+}
+
 func TestInferSkeleton_TooLargeFallsBack(t *testing.T) {
 	long := strings.Repeat("y", 100)
 	var files []File
@@ -234,8 +267,8 @@ func TestInferSkeleton_TooLargeFallsBack(t *testing.T) {
 }
 
 func TestSkeletonMaxTokensScales(t *testing.T) {
-	if skeletonMaxTokens(10) != 1200 || skeletonMaxTokens(100000) != skeletonMaxTokensCap {
-		t.Fatal(skeletonMaxTokens(10), skeletonMaxTokens(100000))
+	if skeletonMaxTokens(10) != 1200 || skeletonMaxTokens(100000) != 8192 || skeletonMaxTokens(skeletonMaxDirs) > 8192 {
+		t.Fatal(skeletonMaxTokens(10), skeletonMaxTokens(100000), skeletonMaxTokens(skeletonMaxDirs))
 	}
 }
 

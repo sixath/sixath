@@ -11,10 +11,11 @@ import (
 
 // fakeModel answers by the first rule whose key occurs in the system or user prompt.
 type fakeModel struct {
-	mu      sync.Mutex
-	rules   []fakeRule
-	calls   []string // user prompts in call order
-	failErr error    // returned by every call when set
+	mu        sync.Mutex
+	rules     []fakeRule
+	calls     []string // user prompts in call order
+	maxTokens []int    // WithMaxTokens of each call
+	failErr   error    // returned by every call when set
 }
 
 type fakeRule struct {
@@ -27,7 +28,7 @@ func (m *fakeModel) on(key string, reply func(user string) string) *fakeModel {
 	return m
 }
 
-func (m *fakeModel) Chat(ctx context.Context, msgs []model.Message, _ ...model.Option) (*model.Generation, error) {
+func (m *fakeModel) Chat(ctx context.Context, msgs []model.Message, opts ...model.Option) (*model.Generation, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -40,7 +41,12 @@ func (m *fakeModel) Chat(ctx context.Context, msgs []model.Message, _ ...model.O
 		}
 	}
 	m.mu.Lock()
+	var cfg model.CallConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	m.calls = append(m.calls, user)
+	m.maxTokens = append(m.maxTokens, cfg.MaxTokens)
 	fail := m.failErr
 	m.mu.Unlock()
 	if fail != nil {

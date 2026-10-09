@@ -19,7 +19,8 @@ const (
 	skeletonInputBudget   = 120 << 10
 	skeletonBaseTokens    = 1000
 	skeletonTokensPerDir  = 20
-	skeletonMaxTokensCap  = 16000
+	skeletonMaxTokensCap  = 8192 // many OpenAI-compatible providers reject larger max_tokens
+	skeletonMaxDirs       = (skeletonMaxTokensCap - skeletonBaseTokens) / skeletonTokensPerDir
 	maxDirPurposes        = 3
 	rebuildChangedRatio   = 5  // full rebuild when changed files exceed 1/5 (20%) of the base
 	rebuildUnassignedPct  = 10 // full rebuild when more than 10% of files are unassigned
@@ -220,13 +221,17 @@ func skeletonPrompt(relPath string, f *Facts, dirs []dirSummary, depth int) stri
 // skeletonLevels are tried in order until the prompt fits: fewer responsibility lines first,
 // then directories collapsed to shallower depths.
 var skeletonLevels = []struct{ depth, purposes int }{
-	{0, 3}, {0, 1}, {0, 0}, {4, 1}, {4, 0}, {3, 1}, {3, 0}, {2, 1}, {2, 0},
+	{0, 3}, {0, 1}, {0, 0}, {4, 1}, {4, 0}, {3, 1}, {3, 0}, {2, 1}, {2, 0}, {1, 1}, {1, 0},
 }
 
-// fitSkeletonPrompt returns the first prompt within budget and the directories it lists.
+// fitSkeletonPrompt returns the first prompt within the input budget whose directories the
+// reply can assign within skeletonMaxTokensCap, and the directories it lists.
 func fitSkeletonPrompt(relPath string, f *Facts, dirs []dirSummary) (string, []dirSummary, bool) {
 	for _, lv := range skeletonLevels {
 		ds := collapseDirs(dirs, lv.depth, lv.purposes)
+		if len(ds) > skeletonMaxDirs {
+			continue
+		}
 		if p := skeletonPrompt(relPath, f, ds, lv.depth); len(p) <= skeletonInputBudget {
 			return p, ds, true
 		}
