@@ -170,6 +170,8 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/repos/{id}/handbook", repoH.GetHandbook())
 	r.GET("/api/v1/repos/{id}/handbook/page", repoH.HandbookPage())
 	r.POST("/api/v1/repos/{id}/handbook/rebuild", repoH.RebuildHandbook())
+	r.POST("/api/v1/repos/{id}/handbook/enrich", repoH.EnrichHandbook())
+	r.GET("/api/v1/handbook/config", repoH.HandbookConfig())
 	r.GET("/api/v1/repo-groups", repoH.ListGroups())
 	r.POST("/api/v1/repo-groups", repoH.CreateGroup())
 	r.PUT("/api/v1/repo-groups/{id}/members", repoH.SetGroupMembers())

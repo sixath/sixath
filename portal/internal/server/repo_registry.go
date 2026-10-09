@@ -50,6 +50,12 @@ func repoRegistryErr(err error) error {
 		return kratosErrors.Conflict("HANDBOOK_BUILDING", err.Error())
 	case errors.Is(err, biz.ErrHandbookNotFound):
 		return kratosErrors.NotFound("HANDBOOK_NOT_FOUND", err.Error())
+	case errors.Is(err, biz.ErrHandbookLLMDisabled):
+		return kratosErrors.BadRequest("HANDBOOK_LLM_DISABLED", err.Error())
+	case errors.Is(err, biz.ErrHandbookNotReady):
+		return kratosErrors.Conflict("HANDBOOK_NOT_READY", err.Error())
+	case errors.Is(err, biz.ErrHandbookLLMBusy):
+		return kratosErrors.Conflict("HANDBOOK_LLM_BUSY", err.Error())
 	default:
 		// ACL / agent-not-found errors are already kratos errors; keep their status codes.
 		return err
@@ -171,6 +177,39 @@ func (h *RepoRegistryHandlers) RebuildHandbook() func(kratoshttp.Context) error 
 				return nil, err
 			}
 			return map[string]any{"accepted": true}, nil
+		})
+	}
+}
+
+// POST /api/v1/repos/{id}/handbook/enrich?full=1 — full rebuilds the skeleton and retries failed cards.
+func (h *RepoRegistryHandlers) EnrichHandbook() func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		if h.handbook == nil {
+			return errHandbookDisabled
+		}
+		id := strings.TrimSpace(ctx.Vars().Get("id"))
+		full := strings.ToLower(strings.TrimSpace(ctx.Query().Get("full")))
+		return h.serve(ctx, func(c context.Context) (any, error) {
+			if err := h.handbook.RequestEnrich(c, id, full == "1" || full == "true"); err != nil {
+				return nil, err
+			}
+			return map[string]any{"accepted": true}, nil
+		})
+	}
+}
+
+// GET /api/v1/handbook/config — the global LLM layer configuration; enabled when a global model is set.
+func (h *RepoRegistryHandlers) HandbookConfig() func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		return h.serve(ctx, func(context.Context) (any, error) {
+			var cfg biz.HandbookLLMConfig
+			if h.handbook != nil {
+				cfg = h.handbook.LLMConfig()
+			}
+			return struct {
+				biz.HandbookLLMConfig
+				Enabled bool `json:"enabled"`
+			}{cfg, cfg.Model != ""}, nil
 		})
 	}
 }

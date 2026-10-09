@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,7 +13,9 @@ import (
 	"backend/internal/biz"
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"github.com/sixath/framework/model"
 )
 
 func TestRepoRegistryErr(t *testing.T) {
@@ -28,6 +32,9 @@ func TestRepoRegistryErr(t *testing.T) {
 		{"group in use", fmt.Errorf("%w: bound by a1", biz.ErrRepoGroupInUse), 409},
 		{"handbook building", biz.ErrHandbookBuilding, 409},
 		{"handbook not found", biz.ErrHandbookNotFound, 404},
+		{"handbook llm disabled", biz.ErrHandbookLLMDisabled, 400},
+		{"handbook not ready", biz.ErrHandbookNotReady, 409},
+		{"handbook llm busy", biz.ErrHandbookLLMBusy, 409},
 		{"kratos passthrough", kratosErrors.Forbidden("FORBIDDEN", "no"), 403},
 	}
 	for _, tc := range cases {
@@ -37,6 +44,16 @@ func TestRepoRegistryErr(t *testing.T) {
 				t.Fatalf("code = %d, want %d", got.Code, tc.code)
 			}
 		})
+	}
+	for in, reason := range map[error]string{
+		biz.ErrHandbookLLMDisabled: "HANDBOOK_LLM_DISABLED",
+		biz.ErrHandbookNotReady:    "HANDBOOK_NOT_READY",
+		biz.ErrHandbookLLMBusy:     "HANDBOOK_LLM_BUSY",
+		biz.ErrHandbookBuilding:    "HANDBOOK_BUILDING",
+	} {
+		if got := kratosErrors.FromError(repoRegistryErr(in)).Reason; got != reason {
+			t.Errorf("%v: reason = %q, want %q", in, got, reason)
+		}
 	}
 	if repoRegistryErr(nil) != nil {
 		t.Fatal("nil error should stay nil")
@@ -65,14 +82,68 @@ func TestHandbookRoutes_DisabledWithoutUsecase(t *testing.T) {
 	h := NewRepoRegistryHandlers(nil, nil)
 	srv.Route("/").GET("/api/v1/repos/{id}/handbook", h.GetHandbook())
 	srv.Route("/").POST("/api/v1/repos/{id}/handbook/rebuild", h.RebuildHandbook())
+	srv.Route("/").POST("/api/v1/repos/{id}/handbook/enrich", h.EnrichHandbook())
+	srv.Route("/").GET("/api/v1/handbook/config", h.HandbookConfig())
 	for _, tc := range []struct{ method, url string }{
 		{http.MethodGet, "/api/v1/repos/r1/handbook"},
 		{http.MethodPost, "/api/v1/repos/r1/handbook/rebuild"},
+		{http.MethodPost, "/api/v1/repos/r1/handbook/enrich?full=1"},
 	} {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.url, nil))
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s %s: status = %d body = %s", tc.method, tc.url, rec.Code, rec.Body.String())
 		}
+	}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/handbook/config", nil))
+	var cfg map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("config: status = %d body = %s err = %v", rec.Code, rec.Body.String(), err)
+	}
+	if cfg["model"] != "" || cfg["enabled"] != false {
+		t.Fatalf("config without usecase = %v, want disabled", cfg)
+	}
+}
+
+func TestHandbookConfigRoute(t *testing.T) {
+	uc := biz.NewHandbookUsecase(nil, nil, t.TempDir(), log.DefaultLogger)
+	uc.SetLLM(biz.HandbookLLMConfig{Model: "qwen/qwen-max", Concurrency: 2}, func(context.Context, string) (model.Model, error) {
+		return nil, errors.New("unused")
+	})
+	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
+	srv.Route("/").GET("/api/v1/handbook/config", NewRepoRegistryHandlers(nil, nil).WithHandbook(uc).HandbookConfig())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/handbook/config", nil))
+	var cfg map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s err = %v", rec.Code, rec.Body.String(), err)
+	}
+	want := map[string]any{
+		"model": "qwen/qwen-max", "enabled": true, "concurrency": 2.0, "max_cards_per_run": 600.0,
+		"max_file_kb": 24.0, "max_run_minutes": 15.0, "skeleton_rebuild_days": 30.0,
+	}
+	for k, v := range want {
+		if cfg[k] != v {
+			t.Errorf("%s = %v, want %v (body %s)", k, cfg[k], v, rec.Body.String())
+		}
+	}
+}
+
+// missingRepoRegistry knows no repositories; other methods are not used.
+type missingRepoRegistry struct{ biz.RepoRegistryRepo }
+
+func (missingRepoRegistry) GetRepositoriesByIDs(context.Context, []string) (map[string]*biz.Repository, error) {
+	return map[string]*biz.Repository{}, nil
+}
+
+func TestEnrichHandbook_UnknownRepo(t *testing.T) {
+	uc := biz.NewHandbookUsecase(missingRepoRegistry{}, nil, t.TempDir(), log.DefaultLogger)
+	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
+	srv.Route("/").POST("/api/v1/repos/{id}/handbook/enrich", NewRepoRegistryHandlers(nil, nil).WithHandbook(uc).EnrichHandbook())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/repos/r1/handbook/enrich", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 }

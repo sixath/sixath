@@ -27,7 +27,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, growth *conf.Growth, logger log.Logger) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, growth *conf.Growth, handbookConfig *conf.HandbookConfig, logger log.Logger) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData, auth, logger)
 	if err != nil {
 		return nil, nil, err
@@ -52,6 +52,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	repoRegistryRepo := data.NewRepoRegistryRepo(dataData, logger)
 	repoRegistryUsecase := biz.NewRepoRegistryUsecase(repoRegistryRepo, agentRepo, v, logger)
 	handbookUsecase := biz.NewHandbookUsecase(repoRegistryRepo, repoRegistryUsecase, string2, logger)
+	service.ConfigureHandbookLLM(handbookUsecase, handbookConfig, data.NewModelCatalogStore(dataData.DB()))
 	agentService.SetRCARootResolver(repoRegistryUsecase)
 	agentService.SetHandbookSkillDirs(handbookUsecase)
 	chatSessionRepo := data.NewChatSessionRepo(dataData, logger)

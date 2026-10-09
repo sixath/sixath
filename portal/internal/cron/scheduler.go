@@ -88,7 +88,8 @@ func (s *Scheduler) SetRepoRegistry(uc *biz.RepoRegistryUsecase, interval time.D
 	s.repoScanInterval = interval
 }
 
-// SetHandbook rebuilds stale repository handbooks after every successful repo scan.
+// SetHandbook rebuilds stale repository handbooks, then runs their pending LLM layer, after
+// every successful repo scan.
 func (s *Scheduler) SetHandbook(uc *biz.HandbookUsecase) {
 	s.handbookUC = uc
 }
@@ -145,6 +146,15 @@ func (s *Scheduler) runHandbookRebuild(ctx context.Context) {
 	}
 	if n > 0 {
 		s.log.Infof("handbook rebuild: %d repos", n)
+	}
+	// Runs in this scan's goroutine: later scans rebuild meanwhile, and overlapping
+	// EnrichPending calls return at once.
+	n, err = s.handbookUC.EnrichPending(ctx)
+	if err != nil && ctx.Err() == nil {
+		s.log.Warnf("handbook enrich: %v", err)
+	}
+	if n > 0 {
+		s.log.Infof("handbook enrich: %d repos", n)
 	}
 }
 

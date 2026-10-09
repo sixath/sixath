@@ -31,6 +31,16 @@ chat:
   # 对外 Chat 入站（create session / send message / SSE）默认关闭；走 Gateway → /runtime/v1。
   # 本地直连调试可设 true，或用 SATH_CHAT_PUBLIC_INBOUND_ENABLED=true。
   public_inbound_enabled: false
+# 仓库 handbook 的 LLM 增强层（P2b）。model 为空则只生成静态 handbook；
+# 名字按模型目录解析：模型名，或 "<provider 名称或 ID>/<模型名>"。仓库页可单独覆盖（off 为禁用）。
+# 环境变量 SATH_HANDBOOK_MODEL 覆盖 model。下列数值为默认值，0 或不填也取默认。
+handbook:
+  model: ""
+  concurrency: 4            # 每轮并发模型调用，上限 16
+  max_cards_per_run: 600    # 每轮最多新生成的文件卡片
+  max_file_kb: 24           # 每个文件发给模型的内容上限，上限 256
+  max_run_minutes: 15       # 每轮时间预算，上限 20
+  skeleton_rebuild_days: 30 # 骨架定期重建间隔
 auth:
   # 仅用于本地默认 ACL 锚点；生产环境请替换 token。
   bootstrap_user_id: "bootstrap"

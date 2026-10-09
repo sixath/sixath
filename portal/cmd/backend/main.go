@@ -106,6 +106,11 @@ func main() {
 		server.ConfigurePublicInbound(chatCfg.PublicInboundEnabled)
 	}
 
+	handbookCfg, err := conf.LoadHandbookFromConfigPath(flagconf)
+	if err != nil {
+		panic(err)
+	}
+
 	flags := chat.DefaultHermesP0ToolFlags
 	chat.EnrichHermesP0FromEnv(&flags)
 	// Do not promote WebToolsShouldRegister (Bocha/Tavily key present) into process-wide
@@ -125,11 +130,11 @@ func main() {
 	}
 
 	// Store agent_extra path for runtime config persistence (e.g. evolution toggle).
-		if p, err := fwconfig.ResolvePortalAgentExtraPath(flagconf); err == nil {
-			chat.SetEvolutionConfigPath(p)
-		}
+	if p, err := fwconfig.ResolvePortalAgentExtraPath(flagconf); err == nil {
+		chat.SetEvolutionConfigPath(p)
+	}
 
-		if portalExtra != nil {
+	if portalExtra != nil {
 		chat.SetPortalAgentExtra(portalExtra)
 	} else if p, err := fwconfig.ResolvePortalAgentExtraPath(flagconf); err == nil {
 		if extra, err := fwconfig.LoadPortalAgentExtra(p); err != nil {
@@ -144,6 +149,7 @@ func main() {
 		bc.Data,
 		bc.Auth,
 		bc.Growth,
+		handbookCfg,
 		logger,
 	)
 	if err != nil {
