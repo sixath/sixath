@@ -416,6 +416,27 @@ func TestHandbookUsecase_CancelledBuildRestoresStatus(t *testing.T) {
 	}
 }
 
+func TestHandbookUsecase_BuildTimeoutIsRecordedAsFailure(t *testing.T) {
+	f := newHandbookFixture(t)
+	f.hb.SetBuildTimeout(50 * time.Millisecond)
+	f.hb.SetBuilder(func(bctx context.Context, _ handbook.BuildInput) (*handbook.Output, error) {
+		<-bctx.Done()
+		return nil, bctx.Err()
+	})
+	if n, err := f.hb.RebuildStale(f.ctx); err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	r := f.get(t)
+	msg, _ := r.HandbookStats["last_error"].(string)
+	if r.HandbookStatus != biz.HandbookStatusFailed || r.HandbookStats["failed_commit"] != shaOf('a') ||
+		!strings.Contains(msg, "构建超时") || r.HandbookLeaseUntil != nil {
+		t.Fatalf("a timed-out build must be recorded as failed: %#v", r)
+	}
+	if n, _ := f.hb.RebuildStale(f.ctx); n != 0 {
+		t.Fatalf("a timed-out commit must not be retried automatically, n=%d", n)
+	}
+}
+
 // hookedRepo runs hooks around lease operations to simulate concurrent writers.
 type hookedRepo struct {
 	biz.RepoRegistryRepo

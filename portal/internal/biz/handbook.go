@@ -54,21 +54,26 @@ type HandbookUsecase struct {
 	staleMu   sync.Mutex
 	codeMapMu sync.Mutex
 	// slots caps concurrent builds across RebuildStale and RequestRebuild.
-	slots chan struct{}
-	wg    sync.WaitGroup
-	now   func() time.Time
-	log   *log.Helper
+	slots        chan struct{}
+	buildTimeout time.Duration
+	wg           sync.WaitGroup
+	now          func() time.Time
+	log          *log.Helper
 }
 
 func NewHandbookUsecase(repo RepoRegistryRepo, registry *RepoRegistryUsecase, dataRoot string, logger log.Logger) *HandbookUsecase {
 	return &HandbookUsecase{
 		repo: repo, registry: registry, store: handbook.Store{Root: filepath.Join(dataRoot, "handbooks")},
-		build: handbook.Build, slots: make(chan struct{}, handbookMaxBuilds), now: time.Now, log: log.NewHelper(logger),
+		build: handbook.Build, slots: make(chan struct{}, handbookMaxBuilds), buildTimeout: handbookBuildTimeout,
+		now: time.Now, log: log.NewHelper(logger),
 	}
 }
 
 // SetBuilder replaces the handbook generator.
 func (uc *HandbookUsecase) SetBuilder(b HandbookBuilder) { uc.build = b }
+
+// SetBuildTimeout overrides how long one build may run; it must stay below the lease.
+func (uc *HandbookUsecase) SetBuildTimeout(d time.Duration) { uc.buildTimeout = d }
 
 // Wait blocks until rebuilds started by RequestRebuild have finished.
 func (uc *HandbookUsecase) Wait() { uc.wg.Wait() }
@@ -171,12 +176,10 @@ func (uc *HandbookUsecase) RequestRebuild(ctx context.Context, id string) error 
 	return nil
 }
 
-// buildInSlot runs one claimed build under the build timeout and frees its slot.
+// buildInSlot runs one claimed build and frees its slot.
 func (uc *HandbookUsecase) buildInSlot(ctx context.Context, id, token, prevStatus string) {
 	defer func() { <-uc.slots }()
-	bctx, cancel := context.WithTimeout(ctx, handbookBuildTimeout)
-	defer cancel()
-	if err := uc.runClaimed(bctx, id, token, prevStatus); err != nil {
+	if err := uc.runClaimed(ctx, id, token, prevStatus); err != nil {
 		uc.log.Warnf("handbook rebuild %s: %v", id, err)
 	}
 }
@@ -186,13 +189,16 @@ func (uc *HandbookUsecase) claim(ctx context.Context, id string) (string, bool, 
 	return uc.repo.ClaimHandbookBuild(ctx, id, now, now.Add(handbookLease))
 }
 
-// runClaimed builds and publishes under a held lease. The row is re-read after the claim so
-// the next version number cannot collide with a build that finished in between. Builds
-// that are cancelled, or whose repo cannot be read or is no longer active, release the
-// lease without recording a failure.
+// runClaimed builds and publishes under a held lease, bounded by the build timeout. The row
+// is re-read after the claim so the next version number cannot collide with a build that
+// finished in between. A build cancelled through ctx, or whose repo cannot be read or is no
+// longer active, releases the lease without recording a failure; hitting the build timeout
+// is recorded as a failure so the commit is not retried on every scan.
 func (uc *HandbookUsecase) runClaimed(ctx context.Context, id, token, prevStatus string) error {
+	bctx, cancel := context.WithTimeout(ctx, uc.buildTimeout)
+	defer cancel()
 	start := uc.now()
-	r, err := uc.getRepo(ctx, id)
+	r, err := uc.getRepo(bctx, id)
 	if err != nil {
 		return errors.Join(err, uc.release(ctx, id, token, prevStatus))
 	}
@@ -203,10 +209,13 @@ func (uc *HandbookUsecase) runClaimed(ctx context.Context, id, token, prevStatus
 	if err != nil {
 		return uc.finishFailed(ctx, r, token, err)
 	}
-	out, err := uc.build(ctx, handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start})
+	out, err := uc.build(bctx, handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start})
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
 			return errors.Join(err, uc.release(ctx, id, token, prevStatus))
+		case errors.Is(bctx.Err(), context.DeadlineExceeded):
+			err = fmt.Errorf("构建超时（%s）: %w", formatBuildTimeout(uc.buildTimeout), err)
 		}
 		return uc.finishFailed(ctx, r, token, err)
 	}
@@ -257,6 +266,13 @@ func (uc *HandbookUsecase) release(ctx context.Context, id, token, status string
 		return nil
 	}
 	return err
+}
+
+func formatBuildTimeout(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		return fmt.Sprintf("%d 分钟", int(d/time.Minute))
+	}
+	return d.String()
 }
 
 func truncateRunes(s string, n int) string {
