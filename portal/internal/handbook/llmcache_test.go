@@ -284,3 +284,67 @@ func TestLLMCache_ConcurrentPutCard(t *testing.T) {
 		t.Fatalf("card %#v %v", got, err)
 	}
 }
+
+// failCacheIO makes the next n cache writes and removals fail like a rename over a file a
+// reader holds open on Windows.
+func failCacheIO(t *testing.T, n int) *int {
+	t.Helper()
+	calls := 0
+	busy := errors.New("Access is denied.")
+	write, remove := cacheWriteFile, cacheRemove
+	cacheWriteFile = func(p string, b []byte) error {
+		if calls++; calls <= n {
+			return busy
+		}
+		return write(p, b)
+	}
+	cacheRemove = func(p string) error {
+		if calls++; calls <= n {
+			return busy
+		}
+		return remove(p)
+	}
+	t.Cleanup(func() { cacheWriteFile, cacheRemove = write, remove })
+	return &calls
+}
+
+func TestLLMCache_WritesRetryTransientFailures(t *testing.T) {
+	c := LLMCache{Dir: t.TempDir()}
+	failCacheIO(t, cacheWriteAttempts-1)
+	if err := c.PutSkeleton(&Skeleton{PromptVersion: LLMPromptVersion, Commit: "c1"}); err != nil {
+		t.Fatalf("skeleton: %v", err)
+	}
+	if sk, err := c.Skeleton(); err != nil || sk == nil || sk.Commit != "c1" {
+		t.Fatalf("skeleton %#v %v", sk, err)
+	}
+	failCacheIO(t, cacheWriteAttempts-1)
+	cf := &CardFailures{Failed: map[string]bool{hashOf("a"): true}, Transport: map[string]int{}}
+	if err := c.PutCardFailures(cf); err != nil {
+		t.Fatalf("card failures: %v", err)
+	}
+	failCacheIO(t, cacheWriteAttempts-1)
+	if err := c.PutCardFailures(&CardFailures{}); err != nil {
+		t.Fatalf("remove card failures: %v", err)
+	}
+	if _, err := os.Stat(c.failedPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("card failures file left: %v", err)
+	}
+	failCacheIO(t, cacheWriteAttempts-1)
+	if err := c.PutCard(hashOf("b"), &Card{Purpose: "p", Hash: hashOf("b")}); err != nil {
+		t.Fatalf("card: %v", err)
+	}
+}
+
+func TestLLMCache_PersistentWriteFailureWrapsErrCacheWrite(t *testing.T) {
+	c := LLMCache{Dir: t.TempDir()}
+	calls := failCacheIO(t, 1000)
+	if err := c.PutSkeleton(&Skeleton{}); !errors.Is(err, ErrCacheWrite) || *calls != cacheWriteAttempts {
+		t.Fatalf("skeleton: %v after %d attempts", err, *calls)
+	}
+	if err := c.PutCardFailures(&CardFailures{}); !errors.Is(err, ErrCacheWrite) {
+		t.Fatalf("remove card failures: %v", err)
+	}
+	if err := c.PutCard(hashOf("b"), &Card{Hash: hashOf("b")}); !errors.Is(err, ErrCacheWrite) {
+		t.Fatalf("card: %v", err)
+	}
+}

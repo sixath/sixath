@@ -352,7 +352,7 @@ P2b 实现：原设想的版本内 `generated/` 改为仓库级 `llm/` 缓存。
 
 - **卡片资格**：非测试、非空、语言属于源码类（go、proto、sql、python、java、javascript、typescript、shell、lua、c、cpp、rust、php、ruby、kotlin、csharp、scala、vue）。文档、配置、测试只出现在清单与分区页。
 - **卡片生成**：提示词含仓库、路径、语言、行数、符号清单（最多 80 个，`functions.name` 只能从中原样选取）与文件内容（按 `max_file_kb` 截断在行边界并标注；代码围栏比内容中最长的反引号串更长）。输出 `purpose / description / role / lifecycle / functions(≤8)`，`max_tokens = 900`。校验：清单外或重复的函数丢弃，`role` 不在枚举内改为 `other`，各字段按 rune 截断（purpose 120、description 600、lifecycle 120、函数说明 160），`purpose` 为空视为回复不可用。文件经 `os.OpenInRoot` 读取（仅普通文件、≤ 512KB），内容哈希与 facts 不一致的文件本轮跳过。
-- **按内容去重**：内容相同的文件共用一张卡片和一次模型调用；缓存键为内容 sha256 + 提示词版本。Go 文件优先，其次按路径排序。缓存中解码失败的 JSON 文件被删除并视为缺失；Windows 下同一哈希并发写入冲突时，读到另一写入者留下的有效卡片即视为成功。
+- **按内容去重**：内容相同的文件共用一张卡片和一次模型调用；缓存键为内容 sha256 + 提示词版本。Go 文件优先，其次按路径排序。缓存中解码失败的 JSON 文件被删除并视为缺失；Windows 下同一哈希并发写入冲突时，读到另一写入者留下的有效卡片即视为成功。所有缓存写入（卡片、失败集及其删除、骨架）失败时线性退避重试 3 次（10ms、20ms），仍失败返回 `ErrCacheWrite`；读取失败（非解码失败）返回 `ErrCacheRead`。
 - **预算**：每轮最多 `max_cards_per_run` 次**卡片模型调用**（不是文件数，默认 600）、并发 `concurrency`（默认 4）、时长 `max_run_minutes`（默认 15）。被预算截断、时间到或父 context 取消时状态为 `partial`，已生成的卡片保留，下轮继续。
 - **卡片失败**：回复不可用 → 该内容哈希进入失败集 `llm/failed-<prompt 版本>.json`，不再重试，直到内容变化或手动"重新生成"（`full` 运行清空失败集重试）。传输错误 → 本轮计入 `card_transport_errors`，状态 `partial`，下轮重试；同一哈希累计 3 轮传输错误后转入失败集，避免一直被拒的文件永远卡住合成。连续 5 次调用传输失败 → 本轮失败（`ErrModelUnavailable`）。
 - **合成触发**：本轮没有预算截断、没有取消、没有待重试的传输错误时才合成；只允许失败集中的文件缺卡片（计入 `card_errors`）。
@@ -497,7 +497,7 @@ P2a 实现：每个 agent 一份 `handbooks/agents/<agent_id>/code-map/SKILL.md`
 - **并发**：全局同时最多 1 个 LLM 运行（`enrichSlots` 容量 1，`EnrichPending` 与 `RequestEnrich` 共用）。`EnrichPending` 由 cron 在每次扫描成功、`RebuildStale` 之后于同一 goroutine 调用，`TryLock` 保证同一时刻只有一轮；待运行仓库按上次 `run_at` 升序（从未运行过的最先），逐个同步运行，本次调用已用时超过运行超时后不再启动新的运行，剩余仓库留给下一次扫描。
 - **手动**：`RequestEnrich(id, full)` 不论状态都可触发（含 `failed`）；仓库非 `active` → `ErrInvalidRepo`，模型为空 → `ErrHandbookLLMDisabled`，handbook 不是当前 HEAD + 当前生成器 → `ErrHandbookNotReady`，该仓库 LLM 租约被占 → `ErrHandbookBuilding`，其他仓库正在运行（槽位满）→ `ErrHandbookLLMBusy`。认领成功后异步运行（`context.WithoutCancel`）。
 - **配置**：`handbook:` 段（§11），`concurrency` 上限 16、`max_file_kb` 上限 256、`max_run_minutes` 上限 20，0 或不填取默认。模型名优先级：仓库 `handbook_model`（`off` 禁用）> 全局 `handbook.model`（环境变量 `SATH_HANDBOOK_MODEL` 覆盖）。按模型目录解析（与 critic 相同：精确模型名，或 `<provider 名称或 ID>/<模型名>`），每次解析有超时。只要有模型目录就安装解析器，因此即使没有全局模型，仓库级覆盖也能运行。
-- **失败与重试**：解析模型失败或 `Enrich` 返回错误（连续调用失败、合成传输错误、缓存写失败）→ `state = failed`、`failed_commit` = 当前 commit、`model` = 所用模型，HEAD 或模型变化、或手动重新生成前不自动重试；失败轮次若已改变缓存（如生成了部分卡片）仍会换新 rev 触发重渲染。读取 facts、解析仓库路径、打开缓存目录等**基础设施错误**不记失败，只写 `last_error`、`run_at`、`duration_ms`（`state` 不变），下一次扫描重试。
+- **失败与重试**：解析模型失败或 `Enrich` 返回模型相关错误（连续调用失败、合成传输错误）→ `state = failed`、`failed_commit` = 当前 commit、`model` = 所用模型，HEAD 或模型变化、或手动重新生成前不自动重试；失败轮次若已改变缓存（如生成了部分卡片）仍会换新 rev 触发重渲染。读取 facts、解析仓库路径、打开缓存目录、缓存读写失败（`ErrCacheRead` / `ErrCacheWrite`，如 Windows 下读者占用导致 rename 失败）等**基础设施错误**不记失败，只写 `last_error`、`run_at`、`duration_ms`（`state` 不变；本轮已改变缓存时换新 rev），下一次扫描重试。
 - **取消**：父 context 取消（进程关闭）、仓库读取失败、认领后发现仓库已非 `active` / handbook 不再是当前版本 / 模型被禁用时，释放租约，不记录任何状态。
 - **重渲染**：运行改变了缓存（新卡片或骨架变化）或此前没有 rev 时生成新 `rev`（`now` 的 36 进制纳秒），写库后调用 `RequestRebuild`；`RebuildStale` 也会把 `handbook_stats.llm_rev` 与期望值（LLM 层禁用时为空）不一致的仓库视为过期，保证重渲染最终发生。确定性构建只在仓库的模型非空时读取 `llm/`。
 

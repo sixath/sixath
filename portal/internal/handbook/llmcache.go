@@ -106,7 +106,46 @@ type LLMCache struct{ Dir string }
 var (
 	errBadHash     = errors.New("handbook: invalid content hash")
 	errCorruptJSON = errors.New("handbook: corrupt JSON file")
+	// ErrCacheWrite wraps failed LLM cache writes. They are local and often transient: on
+	// Windows a rename fails while a reader holds the target open.
+	ErrCacheWrite = errors.New("handbook: LLM cache write failed")
+	// ErrCacheRead wraps failed LLM cache reads; a corrupt file reads as missing instead.
+	ErrCacheRead = errors.New("handbook: LLM cache read failed")
 )
+
+// Replaced in tests to inject write failures.
+var (
+	cacheWriteFile = WriteFileAtomic
+	cacheRemove    = os.Remove
+)
+
+const cacheWriteAttempts = 3
+
+// retryCacheWrite runs write up to cacheWriteAttempts times with a short linear backoff,
+// stopping early once settled reports that another writer left an acceptable result. A
+// final failure is wrapped in ErrCacheWrite.
+func retryCacheWrite(write func() error, settled func() bool) error {
+	var err error
+	for attempt := range cacheWriteAttempts {
+		if err = write(); err == nil {
+			return nil
+		}
+		if settled != nil && settled() {
+			return nil
+		}
+		if attempt < cacheWriteAttempts-1 {
+			time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("%w: %w", ErrCacheWrite, err)
+}
+
+func cacheReadErr(err error) error {
+	if err == nil || errors.Is(err, errBadHash) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrCacheRead, err)
+}
 
 // validHash accepts a lowercase hex sha256, the form CollectFacts produces.
 func validHash(h string) bool {
@@ -135,7 +174,7 @@ func readCacheJSON(p string, v any) (bool, error) {
 		_ = os.Remove(p)
 		return false, nil
 	}
-	return ok, err
+	return ok, cacheReadErr(err)
 }
 
 // Card returns the cached card of a content hash, or nil when there is none.
@@ -157,17 +196,10 @@ func (c LLMCache) PutCard(hash string, card *Card) error {
 	if !validHash(hash) {
 		return errBadHash
 	}
-	var err error
-	for attempt := range 3 {
-		if err = writeJSON(c.cardPath(hash), card); err == nil {
-			return nil
-		}
-		if got, rerr := c.Card(hash); rerr == nil && got != nil {
-			return nil
-		}
-		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
-	}
-	return err
+	return retryCacheWrite(func() error { return writeJSON(c.cardPath(hash), card) }, func() bool {
+		got, err := c.Card(hash)
+		return err == nil && got != nil
+	})
 }
 
 func (c LLMCache) failedPath() string {
@@ -210,17 +242,19 @@ func (c LLMCache) CardFailures() (*CardFailures, error) {
 // PutCardFailures stores the card failures, removing the file when there are none.
 func (c LLMCache) PutCardFailures(cf *CardFailures) error {
 	if len(cf.Failed) == 0 && len(cf.Transport) == 0 {
-		if err := os.Remove(c.failedPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		return nil
+		return retryCacheWrite(func() error {
+			if err := cacheRemove(c.failedPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			return nil
+		}, nil)
 	}
 	raw := cardFailuresJSON{Transport: cf.Transport}
 	for h := range cf.Failed {
 		raw.Failed = append(raw.Failed, h)
 	}
 	sort.Strings(raw.Failed)
-	return writeJSON(c.failedPath(), raw)
+	return retryCacheWrite(func() error { return writeJSON(c.failedPath(), raw) }, nil)
 }
 
 // Skeleton returns the cached skeleton, or nil when there is none.
@@ -236,7 +270,9 @@ func (c LLMCache) Skeleton() (*Skeleton, error) {
 }
 
 // PutSkeleton stores the skeleton.
-func (c LLMCache) PutSkeleton(sk *Skeleton) error { return writeJSON(c.skeletonPath(), sk) }
+func (c LLMCache) PutSkeleton(sk *Skeleton) error {
+	return retryCacheWrite(func() error { return writeJSON(c.skeletonPath(), sk) }, nil)
+}
 
 // PruneCards removes cached cards whose content hash is not in keep and the card failures of
 // other prompt versions, and returns how many cards were removed.
@@ -304,7 +340,7 @@ func writeJSON(p string, v any) error {
 	if err != nil {
 		return err
 	}
-	return WriteFileAtomic(p, b)
+	return cacheWriteFile(p, b)
 }
 
 // LLMLayer is the LLM content available to one render.

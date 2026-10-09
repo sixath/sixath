@@ -107,7 +107,8 @@ type cardJob struct {
 // Enrich generates missing file cards within budget and, once every card-eligible file has
 // been attempted, synthesizes the skeleton. Cancelling ctx stops the run and reports partial
 // progress without error; everything already generated stays cached. Any other error leaves
-// the cached skeleton untouched and reports state failed.
+// the cached skeleton untouched and reports state failed; local cache errors wrap
+// ErrCacheWrite or ErrCacheRead.
 func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 	o := in.Opts.withDefaults()
 	var u usage

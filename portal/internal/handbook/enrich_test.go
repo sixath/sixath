@@ -315,7 +315,7 @@ func TestEnrich_CardCacheWriteFailureStopsRun(t *testing.T) {
 		return `{"purpose":"职责"}`
 	}}
 	res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{Concurrency: 1}))
-	if err == nil || errors.Is(err, ErrModelUnavailable) || res.State != LLMStateFailed || res.CardsNew != 0 {
+	if !errors.Is(err, ErrCacheWrite) || errors.Is(err, ErrModelUnavailable) || res.State != LLMStateFailed || res.CardsNew != 0 {
 		t.Fatalf("a cache write failure is an IO error, not a model error: %#v %v", res, err)
 	}
 	if n := countCalls(m, cardMarker); n != 1 {
@@ -323,6 +323,20 @@ func TestEnrich_CardCacheWriteFailureStopsRun(t *testing.T) {
 	}
 	if sk, _ := cache.Skeleton(); sk != nil {
 		t.Fatal("no synthesis after a failed run")
+	}
+}
+
+func TestEnrich_SkeletonWriteFailureIsCacheError(t *testing.T) {
+	r := newEnrichRepo(t)
+	cache := LLMCache{Dir: t.TempDir()}
+	m := happyModel()
+	m.rules[4] = fakeRule{"用途", func(string) string {
+		failCacheIO(t, 1000)
+		return `{"notes":{}}`
+	}}
+	res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{}))
+	if !errors.Is(err, ErrCacheWrite) || errors.Is(err, ErrModelUnavailable) || res.State != LLMStateFailed {
+		t.Fatalf("want ErrCacheWrite, got %v %#v", err, res)
 	}
 }
 

@@ -142,6 +142,7 @@ type handbookFixture struct {
 	repo     biz.RepoRegistryRepo
 	hb       *biz.HandbookUsecase
 	repoID   string
+	dataRoot string
 }
 
 func newHandbookFixture(t *testing.T) *handbookFixture {
@@ -166,8 +167,9 @@ func newHandbookFixture(t *testing.T) *handbookFixture {
 	if err != nil || len(repos) != 1 {
 		t.Fatalf("repos = %v err=%v", repos, err)
 	}
-	hb := biz.NewHandbookUsecase(repo, reg, t.TempDir(), log.DefaultLogger)
-	return &handbookFixture{ctx: ctx, codeRoot: codeRoot, repoDir: repoDir, reg: reg, repo: repo, hb: hb, repoID: repos[0].ID}
+	dataRoot := t.TempDir()
+	hb := biz.NewHandbookUsecase(repo, reg, dataRoot, log.DefaultLogger)
+	return &handbookFixture{ctx: ctx, codeRoot: codeRoot, repoDir: repoDir, reg: reg, repo: repo, hb: hb, repoID: repos[0].ID, dataRoot: dataRoot}
 }
 
 func (f *handbookFixture) get(t *testing.T) *biz.Repository {

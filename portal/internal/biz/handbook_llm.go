@@ -262,10 +262,10 @@ func (uc *HandbookUsecase) enrichInSlot(ctx context.Context, s *handbookLLMSetti
 
 // runEnrichClaimed runs the LLM layer under a held lease, bounded by the run timeout, and
 // stores its state. A run cancelled through ctx, or whose repo cannot be read or no longer
-// has a current handbook, releases the lease without recording anything. Local errors before
-// the model runs record last_error only, so the next pass retries; a model that cannot be
-// resolved or a failed run is recorded as failed. A run that changed the cache gets a new
-// rev and a deterministic re-render.
+// has a current handbook, releases the lease without recording anything. Local errors (before
+// the model runs, or reading/writing the LLM cache) record last_error only, so the next pass
+// retries; a model that cannot be resolved or a failed run is recorded as failed. A run that
+// changed the cache gets a new rev and a deterministic re-render.
 func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMSettings, id, token string, full bool) error {
 	start := uc.now()
 	r, err := uc.getRepo(ctx, id)
@@ -291,8 +291,12 @@ func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMS
 		llm["duration_ms"] = uc.now().Sub(start).Milliseconds()
 		return llm
 	}
-	retryLater := func(cause error) error {
-		return errors.Join(cause, uc.storeEnrich(ctx, id, token, stamp(nil, cause), prevRev))
+	retryLater := func(cause error, res *handbook.EnrichResult) error {
+		llm := stamp(nil, cause)
+		if res != nil && res.Changed {
+			llm["rev"] = uc.newLLMRev()
+		}
+		return errors.Join(cause, uc.storeEnrich(ctx, id, token, llm, prevRev))
 	}
 	fail := func(cause error, res *handbook.EnrichResult) error {
 		llm := stamp(nil, cause)
@@ -310,15 +314,15 @@ func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMS
 	}
 	facts, err := uc.store.ReadFacts(r.ID, r.HandbookVersion)
 	if err != nil {
-		return retryLater(err)
+		return retryLater(err, nil)
 	}
 	root, err := uc.registry.ResolveRepoPath(r)
 	if err != nil {
-		return retryLater(err)
+		return retryLater(err, nil)
 	}
 	cache, err := uc.store.LLMCache(r.ID)
 	if err != nil {
-		return retryLater(err)
+		return retryLater(err, nil)
 	}
 	rctx, cancel := context.WithTimeout(ctx, s.runTimeout)
 	defer cancel()
@@ -329,6 +333,9 @@ func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMS
 	})
 	if ctx.Err() != nil {
 		return errors.Join(err, uc.releaseEnrich(ctx, id, token))
+	}
+	if errors.Is(err, handbook.ErrCacheWrite) || errors.Is(err, handbook.ErrCacheRead) {
+		return retryLater(err, res)
 	}
 	if err != nil {
 		return fail(err, res)

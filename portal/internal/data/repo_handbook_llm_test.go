@@ -862,3 +862,42 @@ func TestHandbookLLM_LocalErrorRetriesNextPass(t *testing.T) {
 		t.Fatalf("after the retry: %#v", r.HandbookLLM)
 	}
 }
+
+func TestHandbookLLM_CacheWriteErrorRetriesNextPass(t *testing.T) {
+	f := newHandbookFixture(t)
+	fake := &llmFake{}
+	var names []string
+	f.hb.SetLLM(biz.HandbookLLMConfig{Model: "fake"}, fakeResolver(fake, &names))
+	if _, err := f.hb.RebuildStale(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := handbook.Store{Root: filepath.Join(f.dataRoot, "handbooks")}.LLMCache(f.repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a file where the cards directory belongs makes every card write fail
+	blocker := filepath.Join(cache.Dir, "cards")
+	if err := os.MkdirAll(cache.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := f.hb.EnrichPending(f.ctx)
+	mustCount(t, "enrich", n, err, 1)
+	f.hb.Wait()
+	r := f.get(t)
+	if llmString(r, "state") != "" || !strings.Contains(llmString(r, "last_error"), "cache") || llmString(r, "run_at") == "" ||
+		r.HandbookLLM["failed_commit"] != nil || r.HandbookLLMLeaseUntil != nil {
+		t.Fatalf("a cache write error must record last_error only: %#v", r)
+	}
+	if err := os.Remove(blocker); err != nil {
+		t.Fatal(err)
+	}
+	n, err = f.hb.EnrichPending(f.ctx)
+	mustCount(t, "the next pass retries", n, err, 1)
+	f.hb.Wait()
+	if r := f.get(t); llmString(r, "state") != handbook.LLMStateComplete || r.HandbookLLM["last_error"] != nil {
+		t.Fatalf("after the retry: %#v", r.HandbookLLM)
+	}
+}
