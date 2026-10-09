@@ -182,7 +182,9 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 	if err != nil {
 		return fail(err)
 	}
-	if cut || ctx.Err() != nil {
+	// Cards that failed in transit are retried next run, like cards cut by the budget; only
+	// failed-set hashes may stay missing when synthesizing.
+	if cut || ctx.Err() != nil || res.CardTransportErrors > 0 {
 		res.State = LLMStatePartial
 		return res, nil
 	}
@@ -220,7 +222,6 @@ func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []
 			cancel()
 		}
 	}
-	limit := min(maxConsecutiveCallErrors, len(todo), o.MaxCardsPerRun)
 	jobs := make(chan *cardJob)
 	for i := 0; i < o.Concurrency; i++ {
 		wg.Add(1)
@@ -266,7 +267,7 @@ func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []
 				default:
 					res.CardTransportErrors += len(j.files)
 					consecutive++
-					if consecutive >= limit {
+					if consecutive >= maxConsecutiveCallErrors {
 						abort(fmt.Errorf("%w: %w", ErrModelUnavailable, err))
 					}
 				}

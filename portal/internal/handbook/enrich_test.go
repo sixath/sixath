@@ -253,10 +253,53 @@ func TestEnrich_SkipsFilesChangedOnDisk(t *testing.T) {
 
 func TestEnrich_ModelFailuresAbort(t *testing.T) {
 	r := newEnrichRepo(t)
+	for _, rel := range []string{"internal/pay/refund.go", "internal/pay/notify.go"} {
+		r.facts.Files = append(r.facts.Files, writeRepoFile(t, r.root, rel, "package pay\n// "+rel+"\n"))
+	}
 	m := &fakeModel{failErr: errors.New("503 upstream")}
 	res, err := Enrich(context.Background(), r.input(m, LLMCache{Dir: t.TempDir()}, EnrichOptions{Concurrency: 1}))
 	if !errors.Is(err, ErrModelUnavailable) || res.State != LLMStateFailed {
 		t.Fatalf("want ErrModelUnavailable, got %v %#v", err, res)
+	}
+	if n := m.callCount(); n != maxConsecutiveCallErrors {
+		t.Fatalf("aborted after %d calls", n)
+	}
+}
+
+func TestEnrich_SingleTransientErrorRetriesNextRun(t *testing.T) {
+	r := newEnrichRepo(t)
+	cache := LLMCache{Dir: t.TempDir()}
+	if _, err := Enrich(context.Background(), r.input(happyModel(), cache, EnrichOptions{})); err != nil {
+		t.Fatal(err)
+	}
+	sk0, _ := cache.Skeleton()
+	sk0.BaseFiles = 100
+	if err := cache.PutSkeleton(sk0); err != nil {
+		t.Fatal(err)
+	}
+	const p = "internal/order/service.go"
+	for i, f := range r.facts.Files {
+		if f.Path == p {
+			r.facts.Files[i] = writeRepoFile(t, r.root, p, "package order\n// v2\n")
+		}
+	}
+	m := &fakeModel{failErr: errors.New("503 upstream")}
+	in := r.input(m, cache, EnrichOptions{})
+	in.Commit = "c2"
+	res, err := Enrich(context.Background(), in)
+	if err != nil || res.State != LLMStatePartial || res.CardTransportErrors != 1 || m.callCount() != 1 {
+		t.Fatalf("one transient error leaves the run partial: %#v %v", res, err)
+	}
+	if sk, _ := cache.Skeleton(); sk.Commit != "c1" {
+		t.Fatalf("no synthesis while a card can still be retried: %#v", sk)
+	}
+	in.Model = happyModel()
+	res, err = Enrich(context.Background(), in)
+	if err != nil || res.State != LLMStateComplete || res.CardsNew != 1 || res.CardsDone != 4 {
+		t.Fatalf("the next run completes: %#v %v", res, err)
+	}
+	if sk, _ := cache.Skeleton(); sk.Commit != "c2" || sk.Files[p].CardHash != sk.Files[p].Hash {
+		t.Fatalf("skeleton %#v", sk)
 	}
 }
 
@@ -351,14 +394,14 @@ func TestEnrich_CardTransportErrorsRetryNextRun(t *testing.T) {
 	cache := LLMCache{Dir: t.TempDir()}
 	m := &flakyModel{fakeModel: happyModel(), match: cardOf("internal/pay/client.go"), fails: func(n int) bool { return n == 1 }}
 	res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{Concurrency: 1}))
-	if err != nil || res.State != LLMStateComplete || res.CardTransportErrors != 1 || res.CardErrors != 0 || res.CardsDone != 3 {
+	if err != nil || res.State != LLMStatePartial || res.CardTransportErrors != 1 || res.CardErrors != 0 || res.CardsDone != 3 {
 		t.Fatalf("%#v %v", res, err)
 	}
 	if failed, _ := cache.FailedCards(); len(failed) != 0 {
 		t.Fatalf("transport errors are not remembered as failed: %v", failed)
 	}
 	res, err = Enrich(context.Background(), r.input(m, cache, EnrichOptions{Concurrency: 1}))
-	if err != nil || res.CardsDone != 4 || res.CardsNew != 1 || m.n != 2 {
+	if err != nil || res.State != LLMStateComplete || res.CardsDone != 4 || res.CardsNew != 1 || m.n != 2 {
 		t.Fatalf("retried next run: %#v %v (calls %d)", res, err, m.n)
 	}
 }
@@ -376,21 +419,23 @@ func TestEnrich_StaleCardKeptUntilNewCardExists(t *testing.T) {
 	}
 	const p = "internal/order/service.go"
 	oldHash := sk0.Files[p].CardHash
+	var changed File
 	for i, f := range r.facts.Files {
-		// a second changed file keeps one failed call below the consecutive-error limit
-		if f.Path == p || f.Path == "internal/order/store.go" {
-			r.facts.Files[i] = writeRepoFile(t, r.root, f.Path, "package order\n// v2 of "+f.Path+"\n")
+		if f.Path == p {
+			changed = writeRepoFile(t, r.root, p, "package order\n// v2\n")
+			r.facts.Files[i] = changed
 		}
 	}
-	m := &flakyModel{fakeModel: happyModel(), match: cardOf(p), fails: func(n int) bool { return n == 1 }}
+	m := happyModel()
+	m.rules[0] = fakeRule{"文件卡片", func(string) string { return "无法回答" }}
 	in := r.input(m, cache, EnrichOptions{})
 	in.Commit = "c2"
 	res, err := Enrich(context.Background(), in)
-	if err != nil || res.State != LLMStateComplete || res.CardTransportErrors != 1 {
+	if err != nil || res.State != LLMStateComplete || res.CardErrors != 1 {
 		t.Fatalf("%#v %v", res, err)
 	}
 	sk, _ := cache.Skeleton()
-	if a := sk.Files[p]; a.CardHash != oldHash || a.Hash == oldHash {
+	if a := sk.Files[p]; a.CardHash != oldHash || a.Hash != changed.Hash {
 		t.Fatalf("the skeleton keeps pointing at the old card: %#v", a)
 	}
 	if card, _ := cache.Card(oldHash); card == nil {
@@ -400,17 +445,21 @@ func TestEnrich_StaleCardKeptUntilNewCardExists(t *testing.T) {
 		t.Fatalf("the old card renders as stale: %v", err)
 	}
 
-	stageCalls := countCalls(m.fakeModel, "阶段：")
+	// a card of the new content shows up (e.g. written by a later run of the same content)
+	if err := cache.PutCard(changed.Hash, &Card{Purpose: "新职责", Hash: changed.Hash, PromptVersion: LLMPromptVersion}); err != nil {
+		t.Fatal(err)
+	}
+	stageCalls := countCalls(m, "阶段：")
 	in.Commit = "c3"
 	res, err = Enrich(context.Background(), in)
-	if err != nil || res.CardsNew != 1 || !res.Changed {
+	if err != nil || res.CardsNew != 0 || res.CardErrors != 0 || !res.Changed {
 		t.Fatalf("%#v %v", res, err)
 	}
 	sk, _ = cache.Skeleton()
-	if a := sk.Files[p]; a.CardHash != a.Hash || a.CardHash == oldHash {
+	if a := sk.Files[p]; a.CardHash != changed.Hash {
 		t.Fatalf("a new card replaces the old one: %#v", a)
 	}
-	if n := countCalls(m.fakeModel, "阶段：") - stageCalls; n != 1 {
+	if n := countCalls(m, "阶段：") - stageCalls; n != 1 {
 		t.Fatalf("the stage that gained a card is rewritten once, got %d", n)
 	}
 }
