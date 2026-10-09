@@ -265,7 +265,7 @@ export default function RepoListPage() {
         </div>
       ) : null}
 
-      <form className="filter-bar" onSubmit={submitFilter}>
+      <form className="filter-bar repo-filter-bar" onSubmit={submitFilter}>
         <select value={draft.status ?? ''} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
           <option value="">全部状态</option>
           <option value="active">{REPO_STATUS_LABELS.active}</option>
@@ -317,7 +317,7 @@ export default function RepoListPage() {
           <p>没有符合条件的仓库。新部署时先点「立即扫描」。</p>
         </div>
       ) : (
-        <div className="table-card">
+        <div className="table-card table-card--repos">
           <table>
             <thead>
               <tr>
@@ -325,9 +325,8 @@ export default function RepoListPage() {
                 <th>分组</th>
                 <th>标签</th>
                 <th>分支 / 提交</th>
-                <th>状态</th>
+                <th>状态 / 最近扫描</th>
                 <th>Handbook</th>
-                <th>最近扫描</th>
                 <th className="col-actions">操作</th>
               </tr>
             </thead>
@@ -360,10 +359,12 @@ export default function RepoListPage() {
                     </div>
                   </td>
                   <td>
-                    {r.git_branch || '—'} <code title={r.head_commit}>{shortCommit(r.head_commit)}</code>
+                    <div className="repo-branch">{r.git_branch || '—'}</div>
+                    <code title={r.head_commit}>{shortCommit(r.head_commit)}</code>
                   </td>
                   <td>
                     <span className={`badge badge-repo-${r.status}`}>{REPO_STATUS_LABELS[r.status]}</span>
+                    <div className="muted repo-scanned-at">{formatTime(r.last_scanned_at)}</div>
                   </td>
                   <td>
                     <span
@@ -375,7 +376,6 @@ export default function RepoListPage() {
                     </span>
                     <LLMBadge repo={r} config={handbookConfig} />
                   </td>
-                  <td>{formatTime(r.last_scanned_at)}</td>
                   <td className="col-actions">
                     <div className="row-actions">
                       <button
