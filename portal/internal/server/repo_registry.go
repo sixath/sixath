@@ -35,6 +35,8 @@ func repoRegistryErr(err error) error {
 		return kratosErrors.NotFound("NOT_FOUND", err.Error())
 	case errors.Is(err, biz.ErrRepoScanRunning):
 		return kratosErrors.Conflict("REPO_SCAN_RUNNING", err.Error())
+	case errors.Is(err, biz.ErrRepoGroupInUse):
+		return kratosErrors.Conflict("REPO_GROUP_IN_USE", err.Error())
 	default:
 		// ACL / agent-not-found errors are already kratos errors; keep their status codes.
 		return err

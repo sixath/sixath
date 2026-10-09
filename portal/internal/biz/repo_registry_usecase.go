@@ -641,7 +641,7 @@ func (uc *RepoRegistryUsecase) SetManualGroupMembers(ctx context.Context, groupI
 	return uc.recomputeAgents(ctx, agents)
 }
 
-// DeleteGroup deletes a manual group and the bindings that reference it.
+// DeleteGroup deletes a manual group; it fails with ErrRepoGroupInUse while any agent binds it.
 func (uc *RepoRegistryUsecase) DeleteGroup(ctx context.Context, groupID string) error {
 	if _, err := uc.requireGroup(ctx, groupID, RepoGroupManual); err != nil {
 		return err
@@ -650,10 +650,10 @@ func (uc *RepoRegistryUsecase) DeleteGroup(ctx context.Context, groupID string) 
 	if err != nil {
 		return err
 	}
-	if err := uc.repo.DeleteGroup(ctx, groupID); err != nil {
-		return err
+	if len(agents) > 0 {
+		return fmt.Errorf("%w: bound by agents %s", ErrRepoGroupInUse, strings.Join(agents, ", "))
 	}
-	return uc.recomputeAgents(ctx, agents)
+	return uc.repo.DeleteGroup(ctx, groupID)
 }
 
 func (uc *RepoRegistryUsecase) requireGroup(ctx context.Context, id, kind string) (*RepoGroup, error) {
@@ -694,6 +694,12 @@ type EffectiveRepoView struct {
 type AgentRepoBindingsView struct {
 	Bindings  []*AgentRepoBinding  `json:"bindings"`
 	Effective []*EffectiveRepoView `json:"effective"`
+}
+
+// HasBindings reports whether the agent has any repo binding (bindings override workspace/code).
+func (uc *RepoRegistryUsecase) HasBindings(ctx context.Context, agentID string) (bool, error) {
+	bs, err := uc.repo.ListAgentBindings(ctx, agentID)
+	return len(bs) > 0, err
 }
 
 func (uc *RepoRegistryUsecase) GetBindings(ctx context.Context, agentID string) (*AgentRepoBindingsView, error) {
@@ -805,9 +811,12 @@ type LegacyLinkMigrationItem struct {
 	AgentID  string              `json:"agent_id"`
 	Target   string              `json:"target"`
 	Action   string              `json:"action"`
+	Reason   string              `json:"reason,omitempty"`
 	Bindings []*AgentRepoBinding `json:"bindings,omitempty"`
-	Applied  bool                `json:"applied"`
-	Error    string              `json:"error,omitempty"`
+	// AfterRoots are the RCA root names the candidate bindings would expose.
+	AfterRoots []string `json:"after_roots,omitempty"`
+	Applied    bool     `json:"applied"`
+	Error      string   `json:"error,omitempty"`
 }
 
 // MigrateLegacyLinks maps each agent's workspace/code link to repo bindings. With apply=false
@@ -819,6 +828,18 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 		return nil, err
 	}
 	groups, err := uc.repo.ListGroups(ctx, RepoGroupDir)
+	if err != nil {
+		return nil, err
+	}
+	repoByID := make(map[string]*Repository, len(repos))
+	for _, r := range repos {
+		repoByID[r.ID] = r
+	}
+	groupIDs := make([]string, 0, len(groups))
+	for _, g := range groups {
+		groupIDs = append(groupIDs, g.ID)
+	}
+	members, err := uc.repo.ListActiveGroupMembers(ctx, groupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -857,7 +878,8 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 				continue
 			}
 			plan := planLegacyBinding(target, repos, groups)
-			item.Action, item.Bindings = plan.Action, plan.Bindings
+			item.Action, item.Bindings, item.Reason = plan.Action, plan.Bindings, plan.Reason
+			item.AfterRoots = legacyAfterRoots(plan.Bindings, members, repoByID)
 			if !apply || !plan.AutoApply() {
 				continue
 			}
@@ -868,7 +890,7 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 			case applied:
 				item.Applied = true
 			default:
-				item.Action, item.Bindings = LegacyActionSkipHasBindings, nil
+				item.Action, item.Bindings, item.AfterRoots = LegacyActionSkipHasBindings, nil, nil
 			}
 		}
 		if len(agents) == 0 || int(page)*pageSize >= total {
@@ -889,26 +911,4 @@ func (uc *RepoRegistryUsecase) applyLegacyPlan(ctx context.Context, agentID stri
 		return false, err
 	}
 	return true, nil
-}
-
-// BindFromLegacyLink keeps the old workspace-link API in sync: when the agent has no
-// bindings and target maps exactly to a repo or dir group, the binding is written.
-func (uc *RepoRegistryUsecase) BindFromLegacyLink(ctx context.Context, agentID, target, actor string) (bool, error) {
-	existing, err := uc.repo.ListAgentBindings(ctx, agentID)
-	if err != nil || len(existing) > 0 {
-		return false, err
-	}
-	repos, err := uc.repo.ListRepositories(ctx, RepoFilter{Status: RepoStatusActive})
-	if err != nil {
-		return false, err
-	}
-	groups, err := uc.repo.ListGroups(ctx, RepoGroupDir)
-	if err != nil {
-		return false, err
-	}
-	plan := planLegacyBinding(mapTargetToConfiguredRoot(target, uc.codeRoots), repos, groups)
-	if !plan.AutoApply() {
-		return false, nil
-	}
-	return uc.applyLegacyPlan(ctx, agentID, plan, actor)
 }

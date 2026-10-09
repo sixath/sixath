@@ -204,6 +204,7 @@ const (
 type legacyPlan struct {
 	Action   string
 	Bindings []*AgentRepoBinding
+	Reason   string
 }
 
 // AutoApply reports whether the plan reproduces the old link exactly.
@@ -212,39 +213,65 @@ func (p legacyPlan) AutoApply() bool {
 }
 
 // planLegacyBinding maps an old workspace/code target to bindings (design §14 step 2).
+// A dir group is only auto-applied when every active repo under the target is a direct
+// member; nested repos would otherwise silently disappear, so that case is left manual.
 func planLegacyBinding(target string, repos []*Repository, groups []*RepoGroup) legacyPlan {
 	target = filepath.Clean(target)
-	sep := string(filepath.Separator)
 	for _, r := range repos {
-		if r.Status == RepoStatusActive && filepath.Clean(r.AbsPath()) == target {
-			return legacyPlan{LegacyActionBindRepo, []*AgentRepoBinding{{TargetKind: RepoTargetRepo, TargetID: r.ID, Mode: RepoBindingInclude}}}
-		}
-	}
-	for _, g := range groups {
-		if d := g.DirPath(); d != "" && filepath.Clean(d) == target {
-			return legacyPlan{LegacyActionBindGroup, []*AgentRepoBinding{{TargetKind: RepoTargetGroup, TargetID: g.ID, Mode: RepoBindingInclude}}}
+		if r.Status == RepoStatusActive && samePath(r.AbsPath(), target) {
+			return legacyPlan{Action: LegacyActionBindRepo, Bindings: []*AgentRepoBinding{{TargetKind: RepoTargetRepo, TargetID: r.ID, Mode: RepoBindingInclude}}}
 		}
 	}
 	var under []*AgentRepoBinding
+	var nested []string
 	for _, r := range repos {
-		abs := filepath.Clean(r.AbsPath())
 		if r.Status != RepoStatusActive {
 			continue
 		}
-		if strings.HasPrefix(abs, target+sep) {
+		abs := r.AbsPath()
+		if pathWithin(target, abs) {
 			under = append(under, &AgentRepoBinding{TargetKind: RepoTargetRepo, TargetID: r.ID, Mode: RepoBindingInclude})
+			if rel, err := filepath.Rel(target, abs); err == nil && strings.ContainsRune(rel, filepath.Separator) {
+				nested = append(nested, r.RelPath)
+			}
 			continue
 		}
-		if strings.HasPrefix(target, abs+sep) {
+		if pathWithin(abs, target) {
 			rel, _ := filepath.Rel(abs, target)
-			return legacyPlan{LegacyActionManualSubdir, []*AgentRepoBinding{{
+			return legacyPlan{Action: LegacyActionManualSubdir, Bindings: []*AgentRepoBinding{{
 				TargetKind: RepoTargetRepo, TargetID: r.ID, Mode: RepoBindingInclude,
 				SubPaths: []string{filepath.ToSlash(rel)},
 			}}}
 		}
 	}
+	for _, g := range groups {
+		if d := g.DirPath(); d == "" || !samePath(d, target) {
+			continue
+		}
+		if len(nested) == 0 {
+			return legacyPlan{Action: LegacyActionBindGroup, Bindings: []*AgentRepoBinding{{TargetKind: RepoTargetGroup, TargetID: g.ID, Mode: RepoBindingInclude}}}
+		}
+		return legacyPlan{Action: LegacyActionManualMulti, Bindings: under,
+			Reason: fmt.Sprintf("dir group %q only covers direct children; nested repos: %s", g.Name, strings.Join(nested, ", "))}
+	}
 	if len(under) > 0 {
-		return legacyPlan{LegacyActionManualMulti, under}
+		return legacyPlan{Action: LegacyActionManualMulti, Bindings: under}
 	}
 	return legacyPlan{Action: LegacyActionUnresolved}
+}
+
+// legacyAfterRoots lists the RCA root names the bindings would expose, without the
+// filesystem checks RCARootsForAgent applies at use time.
+func legacyAfterRoots(bs []*AgentRepoBinding, groupMembers map[string][]string, repos map[string]*Repository) []string {
+	if len(bs) == 0 {
+		return nil
+	}
+	eff := ExpandRepoBindings("", bs, groupMembers, repos, time.Time{})
+	roots := buildRCARoots(eff, repos)
+	names := make([]string, 0, len(roots))
+	for _, r := range roots {
+		names = append(names, r.Name)
+	}
+	sort.Strings(names)
+	return names
 }

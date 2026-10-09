@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -832,5 +833,126 @@ func TestRepoRegistryUsecase_PatchRepoInvalidStatus(t *testing.T) {
 	_, err := uc.PatchRepo(ctx, mustListRepos(t, uc)[0].ID, biz.RepoMetaPatch{Status: &bad})
 	if !errors.Is(err, biz.ErrInvalidRepo) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRepoRegistryUsecase_MigrateGroupFidelityAndAfterRoots(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "ws-g", "code", "r1"))
+	mkRepoDir(t, filepath.Join(codeRoot, "ws-g", "code", "r2"))
+	mkRepoDir(t, filepath.Join(codeRoot, "ws-n", "code", "r1"))
+	mkRepoDir(t, filepath.Join(codeRoot, "ws-n", "code", "sub", "r2"))
+	uc, repo := newUsecaseForTest(t, codeRoot,
+		&biz.AgentMeta{ID: "a-group", Workspace: filepath.Join(codeRoot, "ws-g")},
+		&biz.AgentMeta{ID: "a-nested", Workspace: filepath.Join(codeRoot, "ws-n")},
+	)
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	items, err := uc.MigrateLegacyLinks(ctx, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byAgent := map[string]*biz.LegacyLinkMigrationItem{}
+	for _, it := range items {
+		byAgent[it.AgentID] = it
+	}
+	g, n := byAgent["a-group"], byAgent["a-nested"]
+	if g == nil || g.Action != biz.LegacyActionBindGroup || !g.Applied ||
+		!reflect.DeepEqual(g.AfterRoots, []string{"ws-g/code/r1", "ws-g/code/r2"}) {
+		t.Fatalf("a-group item = %#v", g)
+	}
+	if n == nil || n.Action != biz.LegacyActionManualMulti || n.Applied || n.Reason == "" ||
+		!reflect.DeepEqual(n.AfterRoots, []string{"ws-n/code/r1", "ws-n/code/sub/r2"}) {
+		t.Fatalf("a-nested item = %#v", n)
+	}
+	if bs, _ := repo.ListAgentBindings(ctx, "a-nested"); len(bs) != 0 {
+		t.Fatalf("nested group must not be auto-applied: %#v", bs)
+	}
+}
+
+func TestRepoRegistryUsecase_DeleteGroupInUse(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "svc"))
+	uc, _ := newUsecaseForTest(t, codeRoot, &biz.AgentMeta{ID: "ag"})
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g, err := uc.CreateManualGroup(ctx, "m", []string{mustListRepos(t, uc)[0].ID}, "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.ReplaceBindings(ctx, "ag", []*biz.AgentRepoBinding{{TargetKind: biz.RepoTargetGroup, TargetID: g.ID}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	err = uc.DeleteGroup(ctx, g.ID)
+	if !errors.Is(err, biz.ErrRepoGroupInUse) || !strings.Contains(err.Error(), "ag") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := uc.ReplaceBindings(ctx, "ag", []*biz.AgentRepoBinding{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.DeleteGroup(ctx, g.ID); err != nil {
+		t.Fatalf("unbound group delete: %v", err)
+	}
+}
+
+func TestRepoRegistryUsecase_HasBindings(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "svc"))
+	uc, _ := newUsecaseForTest(t, codeRoot, &biz.AgentMeta{ID: "ag"})
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := uc.HasBindings(ctx, "ag"); err != nil || has {
+		t.Fatalf("before: has=%v err=%v", has, err)
+	}
+	if _, err := uc.ReplaceBindings(ctx, "ag", []*biz.AgentRepoBinding{{TargetKind: biz.RepoTargetRepo, TargetID: mustListRepos(t, uc)[0].ID}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := uc.HasBindings(ctx, "ag"); err != nil || !has {
+		t.Fatalf("after: has=%v err=%v", has, err)
+	}
+}
+
+func TestAgentRepo_DeleteCascadesRepoBindings(t *testing.T) {
+	ctx := context.Background()
+	db := openRepoRegistryTestDB(t)
+	if err := db.AutoMigrate(&model.Agent{}, &model.AgentTool{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, id := range []string{"ag", "other"} {
+		if err := db.Create(&model.Agent{ID: id, Name: id, Workspace: "/w/" + id, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := NewRepoRegistryRepo(&Data{db: db}, log.DefaultLogger)
+	for _, id := range []string{"ag", "other"} {
+		if err := reg.ReplaceAgentBindings(ctx, id, []*biz.AgentRepoBinding{{AgentID: id, TargetKind: biz.RepoTargetRepo, TargetID: "r1", Mode: biz.RepoBindingInclude}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.ReplaceEffectiveRepos(ctx, id, []*biz.AgentEffectiveRepo{{AgentID: id, RepoID: "r1", ComputedAt: now}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agents := &agentRepo{db: db, log: log.NewHelper(log.DefaultLogger)}
+	if err := agents.Delete(ctx, "ag"); err != nil {
+		t.Fatal(err)
+	}
+	if bs, _ := reg.ListAgentBindings(ctx, "ag"); len(bs) != 0 {
+		t.Fatalf("bindings left: %#v", bs)
+	}
+	if eff, _ := reg.ListEffectiveRepos(ctx, "ag"); len(eff) != 0 {
+		t.Fatalf("effective rows left: %#v", eff)
+	}
+	if bs, _ := reg.ListAgentBindings(ctx, "other"); len(bs) != 1 {
+		t.Fatalf("other agent's bindings touched: %#v", bs)
+	}
+	if err := agents.Delete(ctx, "ag"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete err = %v", err)
 	}
 }

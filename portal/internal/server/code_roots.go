@@ -108,6 +108,8 @@ func matchConfiguredRoot(codeRoots []string, rootParam string) (string, error) {
 	return "", kratosErrors.BadRequest("INVALID_ARGUMENT", "root not in code_roots")
 }
 
+const repoBindingsOverrideWarning = "agent has repo bindings; RCA tools use bound repositories, not this link"
+
 // AgentWorkspaceLinkGetHandler serves GET /api/v1/agents/{agent_id}/workspace-link.
 // Returns whether workspace/code exists and its resolved target (for edit-form hydrate).
 func AgentWorkspaceLinkGetHandler(agentUC *biz.AgentUsecase) func(kratoshttp.Context) error {
@@ -132,7 +134,8 @@ func AgentWorkspaceLinkGetHandler(agentUC *biz.AgentUsecase) func(kratoshttp.Con
 
 // AgentWorkspaceLinkHandler serves POST /api/v1/agents/{agent_id}/workspace-link.
 // Body: {"target":"/abs/path/under/code/root"} — creates workspace/code → target symlink.
-// When repoUC is set and the agent has no repo bindings, an exact repo / dir-group match is bound too.
+// The link never creates repo bindings. When the agent already has bindings, RCA tools ignore
+// the link, so the response carries repo_bindings_override and a warning.
 func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string, repoUC *biz.RepoRegistryUsecase) func(kratoshttp.Context) error {
 	return func(ctx kratoshttp.Context) error {
 		agentID := strings.TrimSpace(ctx.Vars().Get("agent_id"))
@@ -160,12 +163,10 @@ func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string, re
 			if !ok {
 				return res, nil
 			}
-			target, _ := m["target"].(string)
-			bound, bindErr := repoUC.BindFromLegacyLink(c, agentID, target, requestActor(c))
-			if bindErr != nil {
-				m["repo_binding_error"] = bindErr.Error()
+			if has, hasErr := repoUC.HasBindings(c, agentID); hasErr == nil && has {
+				m["repo_bindings_override"] = true
+				m["warning"] = repoBindingsOverrideWarning
 			}
-			m["repo_binding_created"] = bound
 			return m, nil
 		})
 		if err != nil {

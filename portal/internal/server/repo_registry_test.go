@@ -25,6 +25,7 @@ func TestRepoRegistryErr(t *testing.T) {
 		{"invalid group", fmt.Errorf("%w: x", biz.ErrInvalidRepoGroup), 400},
 		{"not found", biz.ErrRepoNotFound, 404},
 		{"scan running", biz.ErrRepoScanRunning, 409},
+		{"group in use", fmt.Errorf("%w: bound by a1", biz.ErrRepoGroupInUse), 409},
 		{"kratos passthrough", kratosErrors.Forbidden("FORBIDDEN", "no"), 403},
 	}
 	for _, tc := range cases {

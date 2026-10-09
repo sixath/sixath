@@ -378,14 +378,20 @@ func (r *agentRepo) Update(ctx context.Context, id string, updates map[string]an
 func (r *agentRepo) Delete(ctx context.Context, id string) error {
 	// agent_tools 有 ON DELETE CASCADE，或手动删除
 	r.db.WithContext(ctx).Where("agent_id = ?", id).Delete(&model.AgentTool{})
-	res := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Agent{})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("id = ?", id).Delete(&model.Agent{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		// 仓库绑定表无外键，随 agent 一并删除。
+		if err := tx.Where("agent_id = ?", id).Delete(&model.AgentRepoBinding{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("agent_id = ?", id).Delete(&model.AgentEffectiveRepo{}).Error
+	})
 }
 
 func (r *agentRepo) BindTools(ctx context.Context, agentID string, toolIDs []string) error {

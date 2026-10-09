@@ -36,6 +36,7 @@ var (
 	ErrInvalidRepoBinding = errors.New("repo registry: invalid binding")
 	ErrInvalidRepoGroup   = errors.New("repo registry: invalid group")
 	ErrRepoScanRunning    = errors.New("repo registry: scan already running")
+	ErrRepoGroupInUse     = errors.New("repo registry: group is bound by agents")
 )
 
 type Repository struct {

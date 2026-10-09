@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -185,5 +186,53 @@ func TestPlanLegacyBinding(t *testing.T) {
 		if c.wantSub != nil && !reflect.DeepEqual(p.Bindings[0].SubPaths, c.wantSub) {
 			t.Fatalf("%s: sub = %v", c.target, p.Bindings[0].SubPaths)
 		}
+	}
+}
+
+func TestPlanLegacyBinding_GroupWithNestedRepoIsManual(t *testing.T) {
+	root := filepath.FromSlash("/codes")
+	repos := []*Repository{
+		repoFixture("r1", root, "cg/a", RepoStatusActive),
+		repoFixture("r2", root, "cg/sub/b", RepoStatusActive),
+	}
+	groups := []*RepoGroup{
+		{ID: "g1", Kind: RepoGroupDir, Rule: &RepoGroupRule{CodeRoot: root, RelPrefix: "cg"}},
+		{ID: "g2", Kind: RepoGroupDir, Rule: &RepoGroupRule{CodeRoot: root, RelPrefix: "cg/sub"}},
+	}
+	p := planLegacyBinding(filepath.Join(root, "cg"), repos, groups)
+	if p.Action != LegacyActionManualMulti || p.Reason == "" || len(p.Bindings) != 2 {
+		t.Fatalf("plan = %#v", p)
+	}
+	if p := planLegacyBinding(filepath.Join(root, "cg", "sub"), repos, groups); p.Action != LegacyActionBindGroup {
+		t.Fatalf("leaf group plan = %#v", p)
+	}
+}
+
+func TestPlanLegacyBinding_WindowsCaseInsensitive(t *testing.T) {
+	root := filepath.FromSlash("/codes")
+	repos := []*Repository{repoFixture("r1", root, "solo", RepoStatusActive)}
+	p := planLegacyBinding(filepath.Join(filepath.FromSlash("/CODES"), "SOLO"), repos, nil)
+	want := LegacyActionUnresolved
+	if runtime.GOOS == "windows" {
+		want = LegacyActionBindRepo
+	}
+	if p.Action != want {
+		t.Fatalf("action = %s, want %s", p.Action, want)
+	}
+}
+
+func TestLegacyAfterRoots(t *testing.T) {
+	root := filepath.FromSlash("/codes")
+	repos := map[string]*Repository{
+		"r1": repoFixture("r1", root, "cg/a", RepoStatusActive),
+		"r2": repoFixture("r2", root, "cg/b", RepoStatusActive),
+	}
+	bs := []*AgentRepoBinding{{TargetKind: RepoTargetGroup, TargetID: "g1", Mode: RepoBindingInclude}}
+	got := legacyAfterRoots(bs, map[string][]string{"g1": {"r2", "r1"}}, repos)
+	if !reflect.DeepEqual(got, []string{"cg/a", "cg/b"}) {
+		t.Fatalf("after roots = %v", got)
+	}
+	if got := legacyAfterRoots(nil, nil, repos); got != nil {
+		t.Fatalf("no bindings: %v", got)
 	}
 }
