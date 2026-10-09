@@ -28,28 +28,57 @@ func (u *usage) add(g *model.Generation) {
 	}
 }
 
+// llmMaxTokensCap is the largest max_tokens OpenAI-compatible providers reliably accept.
+// Reasoning models spend hidden tokens from the same budget, so a truncated reply without
+// a complete JSON object is retried once at this cap.
+const llmMaxTokensCap = 8192
+
 // llmJSON sends one system + user exchange and decodes the JSON object in the reply into out.
 func llmJSON(ctx context.Context, m model.Model, system, user string, maxTokens int, out any, u *usage) error {
-	g, err := m.Chat(ctx, []model.Message{{Role: "system", Content: system}, {Role: "user", Content: user}},
-		model.WithMaxTokens(maxTokens), model.WithTemperature(llmTemperature))
-	if err != nil {
-		return err
+	msgs := []model.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}
+	for {
+		g, err := m.Chat(ctx, msgs, model.WithMaxTokens(maxTokens), model.WithTemperature(llmTemperature))
+		if err != nil {
+			return err
+		}
+		if g == nil {
+			return fmt.Errorf("%w: no generation", errBadReply)
+		}
+		u.add(g)
+		raw := extractJSONObject(g.Text)
+		if g.FinishReason == "length" {
+			// Only an object starting at the first brace is complete; an inner object of a
+			// cut-off reply would otherwise pass as the answer.
+			raw = leadingJSONObject(g.Text)
+			if raw == "" {
+				if maxTokens >= llmMaxTokensCap {
+					return fmt.Errorf("%w: reply truncated at %d tokens", errBadReply, maxTokens)
+				}
+				maxTokens = llmMaxTokensCap
+				continue
+			}
+		}
+		if raw == "" {
+			return fmt.Errorf("%w: no JSON object", errBadReply)
+		}
+		if err := json.Unmarshal([]byte(raw), out); err != nil {
+			return fmt.Errorf("%w: %v", errBadReply, err)
+		}
+		return nil
 	}
-	if g == nil {
-		return fmt.Errorf("%w: no generation", errBadReply)
+}
+
+// leadingJSONObject decodes the JSON object that starts at the first '{' in s, or returns "".
+func leadingJSONObject(s string) string {
+	i := strings.IndexByte(s, '{')
+	if i < 0 {
+		return ""
 	}
-	u.add(g)
-	if g.FinishReason == "length" {
-		return fmt.Errorf("%w: reply truncated at %d tokens", errBadReply, maxTokens)
+	var raw json.RawMessage
+	if err := json.NewDecoder(strings.NewReader(s[i:])).Decode(&raw); err != nil {
+		return ""
 	}
-	raw := extractJSONObject(g.Text)
-	if raw == "" {
-		return fmt.Errorf("%w: no JSON object", errBadReply)
-	}
-	if err := json.Unmarshal([]byte(raw), out); err != nil {
-		return fmt.Errorf("%w: %v", errBadReply, err)
-	}
-	return nil
+	return string(raw)
 }
 
 // extractJSONObject returns the first JSON object in s, trying each '{' in order so prose

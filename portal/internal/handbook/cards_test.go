@@ -91,7 +91,7 @@ func (s *stubModel) Chat(context.Context, []model.Message, ...model.Option) (*mo
 func TestLLMJSON_ErrorKinds(t *testing.T) {
 	var out map[string]any
 	var u usage
-	truncated := &stubModel{gen: &model.Generation{Text: `{"a":1}`, FinishReason: "length"}}
+	truncated := &stubModel{gen: &model.Generation{Text: `{"a":1,"b":{"c":2},"d":`, FinishReason: "length"}}
 	if err := llmJSON(context.Background(), truncated, "s", "u", 10, &out, &u); !errors.Is(err, errBadReply) {
 		t.Fatalf("length: %v", err)
 	}
@@ -106,6 +106,69 @@ func TestLLMJSON_ErrorKinds(t *testing.T) {
 	ok := &stubModel{gen: &model.Generation{Text: `{"a":1}`, TokenUsage: &model.TokenUsage{InputTokens: 3}}}
 	if err := llmJSON(context.Background(), ok, "s", "u", 10, &out, nil); err != nil || out["a"] != float64(1) {
 		t.Fatalf("nil usage: %v %#v", err, out)
+	}
+}
+
+type seqModel struct {
+	fakeModel
+	gens []*model.Generation
+}
+
+func (s *seqModel) Chat(ctx context.Context, msgs []model.Message, opts ...model.Option) (*model.Generation, error) {
+	var cfg model.CallConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	s.maxTokens = append(s.maxTokens, cfg.MaxTokens)
+	g := s.gens[0]
+	if len(s.gens) > 1 {
+		s.gens = s.gens[1:]
+	}
+	return g, nil
+}
+
+func TestLLMJSON_RetriesTruncatedReplyWithLargerBudget(t *testing.T) {
+	var out map[string]any
+	var u usage
+	m := &seqModel{gens: []*model.Generation{
+		{Text: "", FinishReason: "length", TokenUsage: &model.TokenUsage{OutputTokens: 900}},
+		{Text: `{"a":1}`, FinishReason: "stop", TokenUsage: &model.TokenUsage{OutputTokens: 1200}},
+	}}
+	if err := llmJSON(context.Background(), m, "s", "u", 900, &out, &u); err != nil || out["a"] != float64(1) {
+		t.Fatalf("retry: %v %#v", err, out)
+	}
+	if len(m.maxTokens) != 2 || m.maxTokens[0] != 900 || m.maxTokens[1] != llmMaxTokensCap {
+		t.Fatalf("max tokens %v", m.maxTokens)
+	}
+	if u.out.Load() != 2100 {
+		t.Fatalf("usage must count both calls: %d", u.out.Load())
+	}
+
+	always := &seqModel{gens: []*model.Generation{{Text: "", FinishReason: "length"}}}
+	if err := llmJSON(context.Background(), always, "s", "u", 4000, &out, nil); !errors.Is(err, errBadReply) {
+		t.Fatalf("still truncated: %v", err)
+	}
+	if len(always.maxTokens) != 2 || always.maxTokens[1] != llmMaxTokensCap {
+		t.Fatalf("retry once at the cap: %v", always.maxTokens)
+	}
+
+	capped := &seqModel{gens: []*model.Generation{{Text: "", FinishReason: "length"}}}
+	if err := llmJSON(context.Background(), capped, "s", "u", llmMaxTokensCap, &out, nil); !errors.Is(err, errBadReply) || len(capped.maxTokens) != 1 {
+		t.Fatalf("no retry at cap: %v %v", err, capped.maxTokens)
+	}
+}
+
+func TestLLMJSON_TruncatedButCompleteObjectIsAccepted(t *testing.T) {
+	var out map[string]any
+	complete := &seqModel{gens: []*model.Generation{{Text: "```json\n{\"a\":1}\n```", FinishReason: "length"}}}
+	if err := llmJSON(context.Background(), complete, "s", "u", 900, &out, nil); err != nil || out["a"] != float64(1) || len(complete.maxTokens) != 1 {
+		t.Fatalf("complete object under length: %v %#v %v", err, out, complete.maxTokens)
+	}
+
+	out = nil
+	inner := &seqModel{gens: []*model.Generation{{Text: `{"purpose":"x","functions":[{"name":"F","summary":"s"},{"na`, FinishReason: "length"}}}
+	if err := llmJSON(context.Background(), inner, "s", "u", 900, &out, nil); !errors.Is(err, errBadReply) || out != nil {
+		t.Fatalf("inner object of a cut-off reply must not pass: %v %#v", err, out)
 	}
 }
 
