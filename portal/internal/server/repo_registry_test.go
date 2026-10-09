@@ -101,7 +101,7 @@ func TestHandbookRoutes_DisabledWithoutUsecase(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("config: status = %d body = %s err = %v", rec.Code, rec.Body.String(), err)
 	}
-	if cfg["model"] != "" || cfg["enabled"] != false {
+	if cfg["model"] != "" || cfg["enabled"] != false || cfg["available"] != false {
 		t.Fatalf("config without usecase = %v, want disabled", cfg)
 	}
 }
@@ -120,13 +120,29 @@ func TestHandbookConfigRoute(t *testing.T) {
 		t.Fatalf("status = %d body = %s err = %v", rec.Code, rec.Body.String(), err)
 	}
 	want := map[string]any{
-		"model": "qwen/qwen-max", "enabled": true, "concurrency": 2.0, "max_cards_per_run": 600.0,
+		"model": "qwen/qwen-max", "available": true, "enabled": true, "concurrency": 2.0, "max_cards_per_run": 600.0,
 		"max_file_kb": 24.0, "max_run_minutes": 15.0, "skeleton_rebuild_days": 30.0,
 	}
 	for k, v := range want {
 		if cfg[k] != v {
 			t.Errorf("%s = %v, want %v (body %s)", k, cfg[k], v, rec.Body.String())
 		}
+	}
+}
+
+func TestHandbookConfigRoute_NoResolver(t *testing.T) {
+	uc := biz.NewHandbookUsecase(nil, nil, t.TempDir(), log.DefaultLogger)
+	uc.SetLLM(biz.HandbookLLMConfig{Model: "qwen/qwen-max"}, nil)
+	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
+	srv.Route("/").GET("/api/v1/handbook/config", NewRepoRegistryHandlers(nil, nil).WithHandbook(uc).HandbookConfig())
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/handbook/config", nil))
+	var cfg map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s err = %v", rec.Code, rec.Body.String(), err)
+	}
+	if cfg["model"] != "qwen/qwen-max" || cfg["available"] != false || cfg["enabled"] != false {
+		t.Fatalf("config without resolver = %v, want model kept but unavailable and disabled", cfg)
 	}
 }
 

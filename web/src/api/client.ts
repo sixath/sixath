@@ -54,6 +54,22 @@ function httpErrorMessage(status: number, body: string): string {
   return parsed.message || body || `HTTP ${status}`
 }
 
+/** HTTP failure from request(); message matches the plain Error it replaces. */
+export class ApiError extends Error {
+  readonly status: number
+  readonly reason: string
+  constructor(message: string, status: number, reason = '') {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.reason = reason
+  }
+}
+
+export function isApiError(e: unknown): e is ApiError {
+  return e instanceof ApiError
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -72,7 +88,7 @@ async function request<T>(
     if (maybeUnauthorized(res.status, err)) {
       handleUnauthorized()
     }
-    throw new Error(httpErrorMessage(res.status, err))
+    throw new ApiError(httpErrorMessage(res.status, err), res.status, parseApiErrorBody(err).reason ?? '')
   }
   return res.json() as Promise<T>
 }

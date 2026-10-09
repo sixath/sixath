@@ -206,18 +206,22 @@ func (h *RepoRegistryHandlers) EnrichHandbook() func(kratoshttp.Context) error {
 	}
 }
 
-// GET /api/v1/handbook/config — the global LLM layer configuration; enabled when a global model is set.
+// GET /api/v1/handbook/config — the global LLM layer configuration. available: a model resolver
+// is installed (repo overrides can only run then); enabled: available and a global model is set.
 func (h *RepoRegistryHandlers) HandbookConfig() func(kratoshttp.Context) error {
 	return func(ctx kratoshttp.Context) error {
 		return h.serve(ctx, func(context.Context) (any, error) {
 			var cfg biz.HandbookLLMConfig
+			available := false
 			if h.handbook != nil {
 				cfg = h.handbook.LLMConfig()
+				available = h.handbook.LLMAvailable()
 			}
 			return struct {
 				biz.HandbookLLMConfig
-				Enabled bool `json:"enabled"`
-			}{cfg, cfg.Model != ""}, nil
+				Available bool `json:"available"`
+				Enabled   bool `json:"enabled"`
+			}{cfg, available, available && cfg.Model != ""}, nil
 		})
 	}
 }

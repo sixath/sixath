@@ -112,9 +112,9 @@ async function mockRepoRegistry(
   })
 }
 
-async function mockHandbookConfig(page: Page, model = 'qwen/qwen-max') {
+async function mockHandbookConfig(page: Page, model = 'qwen/qwen-max', available = true) {
   await page.route('**/api/v1/handbook/config', async (route: Route) => {
-    await route.fulfill({ json: { model, enabled: model !== '' } })
+    await route.fulfill({ json: { model, available, enabled: available && model !== '' } })
   })
 }
 
@@ -296,6 +296,64 @@ test.describe('Repo registry UI', () => {
     await page.goto('/repos')
     await expect(page.getByTestId('llm-state-r-a')).toContainText('部分完成 120/600')
     await expect(page.getByTestId('llm-state-r-b')).toContainText('未启用')
+  })
+
+  test('服务端没有模型解析器时所有仓库都显示 LLM 未启用', async ({ page }) => {
+    const override = { ...repoA, handbook_status: 'ready', handbook_commit: repoA.head_commit, handbook_model: 'qwen/qwen-max' }
+    await mockRepoRegistry(page, { repos: [override, repoB] })
+    await mockHandbookConfig(page, 'qwen/qwen-max', false)
+
+    await page.goto('/repos')
+    await expect(page.getByTestId('llm-state-r-a')).toHaveText('LLM 未启用')
+    await expect(page.getByTestId('llm-state-r-b')).toHaveText('LLM 未启用')
+  })
+
+  test('handbook 弹窗在增强完成后停止轮询并刷新页面内容', async ({ page }) => {
+    let running = true
+    let viewCalls = 0
+    let pageCalls = 0
+    const ready = { ...repoA, handbook_status: 'ready', handbook_commit: repoA.head_commit, handbook_version: 2 }
+    await mockRepoRegistry(page, { repos: [ready, repoB] })
+    await mockHandbookConfig(page)
+    await page.route(/\/api\/v1\/repos\/[^/]+\/handbook(\/[^?]*)?(\?.*)?$/, async (route: Route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname.endsWith('/handbook/page')) {
+        pageCalls++
+        await route.fulfill({ json: { path: 'SKILL.md', content: running ? 'Deterministic body' : 'Enriched body' } })
+        return
+      }
+      viewCalls++
+      await route.fulfill({
+        json: {
+          repo_id: 'r-a',
+          status: 'ready',
+          commit: repoA.head_commit,
+          head_commit: repoA.head_commit,
+          version: 2,
+          pages: ['SKILL.md'],
+          llm_model: 'qwen/qwen-max',
+          llm_running: running,
+          llm: running
+            ? { state: 'partial', commit: repoA.head_commit, cards_done: 10, cards_total: 600 }
+            : { state: 'complete', commit: repoA.head_commit, cards_done: 600, cards_total: 600 },
+        },
+      })
+    })
+
+    await page.goto('/repos')
+    await page.getByRole('button', { name: '查看 cloudgame/svc-a 的 handbook' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByTestId('handbook-llm-state')).toHaveText('增强中')
+    await expect(dialog.getByTestId('handbook-content')).toHaveText('Deterministic body')
+
+    running = false
+    await expect(dialog.getByTestId('handbook-llm-state')).toHaveText('已完成 600/600', { timeout: 10_000 })
+    await expect(dialog.getByTestId('handbook-content')).toHaveText('Enriched body')
+    expect(pageCalls).toBe(2)
+
+    const settled = viewCalls
+    await page.waitForTimeout(4000)
+    expect(viewCalls).toBe(settled)
   })
 
   test('编辑弹窗可设置 Handbook 模型', async ({ page }) => {

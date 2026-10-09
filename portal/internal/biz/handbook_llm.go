@@ -78,6 +78,10 @@ func (uc *HandbookUsecase) SetEnrichRunTimeout(d time.Duration) {
 // LLMConfig returns the effective LLM configuration.
 func (uc *HandbookUsecase) LLMConfig() HandbookLLMConfig { return uc.llm.Load().cfg }
 
+// LLMAvailable reports whether a model resolver is installed; without one no repository,
+// override or not, runs the LLM layer.
+func (uc *HandbookUsecase) LLMAvailable() bool { return uc.llm.Load().resolve != nil }
+
 // modelFor is the model name s uses for r; "" means its LLM layer is disabled.
 func modelFor(s *handbookLLMSettings, r *Repository) string {
 	switch {

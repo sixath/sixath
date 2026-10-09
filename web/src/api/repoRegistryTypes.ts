@@ -190,6 +190,9 @@ export interface HandbookView {
 
 export interface HandbookConfigView {
   model: string
+  /** A model resolver is installed; without one no repo runs the LLM layer, overrides included. */
+  available: boolean
+  /** available and a global model is set. */
   enabled: boolean
   concurrency?: number
   max_cards_per_run?: number

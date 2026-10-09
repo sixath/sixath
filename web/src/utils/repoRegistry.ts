@@ -3,6 +3,7 @@ import type {
   AgentRepoBinding,
   BindingRef,
   BindingTargetKind,
+  HandbookConfigView,
   HandbookLLMStats,
   HandbookView,
   LegacyAction,
@@ -284,45 +285,65 @@ export const LLM_FALLBACK_REASON_LABELS: Record<string, string> = {
   no_model: '未配置模型',
 }
 
-/** Model used for a repo's LLM layer: the repo override, else the global model; '' when disabled. */
-export function effectiveHandbookModel(repo: Pick<Repository, 'handbook_model'>, globalModel: string): string {
+export type HandbookLLMAvailability = Pick<HandbookConfigView, 'model' | 'available'>
+
+/**
+ * Model used for a repo's LLM layer: the repo override, else the global model; '' when
+ * disabled, including when the server has no model resolver at all.
+ */
+export function effectiveHandbookModel(
+  repo: Pick<Repository, 'handbook_model'>,
+  cfg: HandbookLLMAvailability,
+): string {
+  if (!cfg.available) return ''
   const own = (repo.handbook_model ?? '').trim()
   if (own.toLowerCase() === 'off') return ''
-  return own || globalModel.trim()
+  return own || (cfg.model ?? '').trim()
 }
 
+/**
+ * The backend retries a failed run once the commit or the model changes, so a failure only
+ * stands while both still match.
+ */
 function llmStateOf(
-  enabled: boolean,
+  model: string,
   running: boolean,
   llm: HandbookLLMStats | null | undefined,
   handbookCommit: string | undefined,
 ): LLMState {
-  if (!enabled) return 'off'
+  if (!model) return 'off'
   if (running) return 'running'
-  if (llm?.state === 'failed' && (!llm.failed_commit || llm.failed_commit === handbookCommit)) return 'failed'
+  if (
+    llm?.state === 'failed' &&
+    (!llm.failed_commit || llm.failed_commit === handbookCommit) &&
+    (!llm.model || llm.model.trim() === model)
+  ) {
+    return 'failed'
+  }
   if (!llm?.state || llm.state === 'failed' || llm.commit !== handbookCommit) return 'pending'
   return llm.state === 'complete' ? 'complete' : 'partial'
 }
 
-/** A failure on an older commit is retried after the next build, so it reads as pending. */
-export function llmState(repo: Repository, globalModel: string, now: number = Date.now()): LLMState {
-  return llmStateOf(
-    effectiveHandbookModel(repo, globalModel) !== '',
-    llmRunning(repo, now),
-    repo.handbook_llm,
-    repo.handbook_commit,
-  )
+export function llmState(repo: Repository, cfg: HandbookLLMAvailability, now: number = Date.now()): LLMState {
+  return llmStateOf(effectiveHandbookModel(repo, cfg), llmRunning(repo, now), repo.handbook_llm, repo.handbook_commit)
 }
 
+/** The view's llm_model is already '' when the server cannot run the LLM layer for the repo. */
 export function handbookViewLLMState(
   view: Pick<HandbookView, 'commit' | 'llm_model' | 'llm_running' | 'llm'>,
 ): LLMState {
-  return llmStateOf((view.llm_model ?? '').trim() !== '', !!view.llm_running, view.llm, view.commit)
+  return llmStateOf((view.llm_model ?? '').trim(), !!view.llm_running, view.llm, view.commit)
 }
 
 export function llmProgress(llm: HandbookLLMStats | null | undefined): string {
   if (!llm || llm.cards_total === undefined) return ''
   return `${llm.cards_done ?? 0}/${llm.cards_total}`
+}
+
+/** Card counts belong to the current commit's run only in the partial and complete states. */
+export function llmStateText(state: LLMState, llm: HandbookLLMStats | null | undefined): string {
+  const progress = state === 'partial' || state === 'complete' ? llmProgress(llm) : ''
+  return progress ? `${LLM_STATE_LABELS[state]} ${progress}` : LLM_STATE_LABELS[state]
 }
 
 export interface ModelOption {
@@ -332,9 +353,18 @@ export interface ModelOption {
 
 const OFF_OPTION: ModelOption = { value: 'off', label: '禁用该仓库的 LLM 增强' }
 
-/** Catalog choices as `<provider name or id>/<model>`, the form the backend resolves; 'off' first. */
+const PROVIDER_NAME_PREFIX = /^[^\s/]+$/
+
+/**
+ * Catalog choices as `<provider name or id>/<model>`, the form the backend resolves; the id is
+ * used when the name could not be parsed back. Disabled or keyless providers are skipped.
+ */
 export function handbookModelOptions(providers: ModelProvider[], entries: ModelCatalogEntry[]): ModelOption[] {
-  const prefix = new Map(providers.filter((p) => p.enabled).map((p) => [p.id, p.name.trim() || p.id]))
+  const prefix = new Map(
+    providers
+      .filter((p) => p.enabled && p.has_api_key)
+      .map((p) => [p.id, PROVIDER_NAME_PREFIX.test(p.name) ? p.name : p.id]),
+  )
   const seen = new Map<string, ModelOption>()
   for (const e of entries) {
     const p = prefix.get(e.provider_id)
@@ -345,20 +375,20 @@ export function handbookModelOptions(providers: ModelProvider[], entries: ModelC
   return [OFF_OPTION, ...[...seen.values()].sort((a, b) => cmp(a.value, b.value))]
 }
 
-const ENRICH_ERRORS: [RegExp, string][] = [
-  [/LLM layer is disabled|HANDBOOK_LLM_DISABLED/i, '该仓库未启用 LLM 增强（未配置全局模型或已设为 off）'],
-  [/not current|HANDBOOK_NOT_READY/i, 'handbook 不是最新，请先重建 handbook 再增强'],
-  [/build already running|HANDBOOK_BUILDING/i, 'handbook 正在生成中，请稍后再试'],
-  [/another LLM run|HANDBOOK_LLM_BUSY/i, '其他仓库的 LLM 增强正在运行，请稍后再试'],
-  [/not configured|HANDBOOK_DISABLED/i, '服务端未配置 handbook 功能'],
-  [/full must be a boolean|INVALID_ARGUMENT/i, '请求参数无效'],
-  [/not found/i, '仓库不存在或已被删除'],
-]
+const ENRICH_ERROR_TEXT: Record<string, string> = {
+  HANDBOOK_LLM_DISABLED: '该仓库未启用 LLM 增强（未配置模型或已设为 off）',
+  HANDBOOK_NOT_READY: 'handbook 不是最新，请先重建 handbook 再增强',
+  HANDBOOK_BUILDING: '该仓库正在构建或增强中',
+  HANDBOOK_LLM_BUSY: '其他仓库的 LLM 增强正在运行，请稍后再试',
+  HANDBOOK_DISABLED: '服务端未配置 handbook 功能',
+  INVALID_ARGUMENT: '请求参数无效',
+  NOT_FOUND: '仓库不存在或已被删除',
+}
 
-/** The API client only surfaces the server message, so known errors are matched on it. */
-export function enrichErrorMessage(message: string): string {
-  for (const [re, text] of ENRICH_ERRORS) if (re.test(message)) return text
-  return message
+/** Maps an enrich failure by its server reason; unknown reasons keep the server message. */
+export function enrichErrorMessage(err: { message: string; reason?: string; status?: number }): string {
+  const reason = err.reason || (err.status === 404 ? 'NOT_FOUND' : '')
+  return ENRICH_ERROR_TEXT[reason] ?? err.message
 }
 
 /** Orders pages as SKILL.md, then references/*.md, then area pages. */

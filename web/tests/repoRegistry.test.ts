@@ -23,6 +23,7 @@ import {
   llmProgress,
   llmRunning,
   llmState,
+  llmStateText,
   parseSubPaths,
   parseTags,
   pendingAutoApplyCount,
@@ -269,26 +270,37 @@ describe('handbookBuildActive', () => {
 })
 
 describe('effectiveHandbookModel', () => {
+  const cfg = (model: string) => ({ model, available: true })
   it('inherits the global model when the repo has no override', () => {
-    assert.equal(effectiveHandbookModel({ handbook_model: '' }, ' qwen/qwen-max '), 'qwen/qwen-max')
-    assert.equal(effectiveHandbookModel({}, 'qwen/qwen-max'), 'qwen/qwen-max')
-    assert.equal(effectiveHandbookModel({}, ''), '')
+    assert.equal(effectiveHandbookModel({ handbook_model: '' }, cfg(' qwen/qwen-max ')), 'qwen/qwen-max')
+    assert.equal(effectiveHandbookModel({}, cfg('qwen/qwen-max')), 'qwen/qwen-max')
+    assert.equal(effectiveHandbookModel({}, cfg('')), '')
   })
   it('prefers the repo override and treats off case-insensitively', () => {
-    assert.equal(effectiveHandbookModel({ handbook_model: ' ds/deepseek-v3 ' }, 'qwen/qwen-max'), 'ds/deepseek-v3')
-    assert.equal(effectiveHandbookModel({ handbook_model: 'ds/deepseek-v3' }, ''), 'ds/deepseek-v3')
-    assert.equal(effectiveHandbookModel({ handbook_model: 'off' }, 'qwen/qwen-max'), '')
-    assert.equal(effectiveHandbookModel({ handbook_model: ' OFF ' }, 'qwen/qwen-max'), '')
+    assert.equal(effectiveHandbookModel({ handbook_model: ' ds/deepseek-v3 ' }, cfg('qwen/qwen-max')), 'ds/deepseek-v3')
+    assert.equal(effectiveHandbookModel({ handbook_model: 'ds/deepseek-v3' }, cfg('')), 'ds/deepseek-v3')
+    assert.equal(effectiveHandbookModel({ handbook_model: 'off' }, cfg('qwen/qwen-max')), '')
+    assert.equal(effectiveHandbookModel({ handbook_model: ' OFF ' }, cfg('qwen/qwen-max')), '')
+  })
+  it('is disabled for every repo without a model resolver', () => {
+    assert.equal(effectiveHandbookModel({}, { model: 'qwen/qwen-max', available: false }), '')
+    assert.equal(effectiveHandbookModel({ handbook_model: 'ds/deepseek-v3' }, { model: '', available: false }), '')
   })
 })
 
 describe('llmState', () => {
   const now = Date.parse('2026-10-09T10:00:00Z')
   const base: Repository = { ...repo('r1', 'cg/a'), head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa', handbook_model: '' }
-  const g = 'qwen/qwen-max'
-  it('is off without an effective model', () => {
-    assert.equal(llmState(base, '', now), 'off')
+  const g = { model: 'qwen/qwen-max', available: true }
+  it('is off without an effective model or resolver', () => {
+    assert.equal(llmState(base, { model: '', available: true }, now), 'off')
     assert.equal(llmState({ ...base, handbook_model: 'off' }, g, now), 'off')
+    assert.equal(llmState({ ...base, handbook_model: 'ds/deepseek-v3' }, { model: '', available: false }, now), 'off')
+  })
+  it('a failure with another model is retried, so it is pending', () => {
+    const failed = { state: 'failed' as const, commit: 'aaa', failed_commit: 'aaa', model: 'qwen/qwen-max' }
+    assert.equal(llmState({ ...base, handbook_llm: failed }, g, now), 'failed')
+    assert.equal(llmState({ ...base, handbook_model: 'ds/deepseek-v3', handbook_llm: failed }, g, now), 'pending')
   })
   it('is running only under a live lease', () => {
     assert.equal(llmState({ ...base, handbook_llm_lease_until: '2026-10-09T10:05:00Z' }, g, now), 'running')
@@ -319,15 +331,29 @@ describe('handbookViewLLMState', () => {
     assert.equal(handbookViewLLMState(view), 'pending')
     assert.equal(handbookViewLLMState({ ...view, llm: { state: 'partial', commit: 'aaa' } }), 'partial')
     assert.equal(handbookViewLLMState({ ...view, llm: { state: 'failed', commit: 'aaa' } }), 'failed')
+    assert.equal(
+      handbookViewLLMState({ ...view, llm: { state: 'failed', commit: 'aaa', failed_commit: 'aaa', model: 'old/m' } }),
+      'pending',
+    )
   })
 })
 
-describe('llmProgress', () => {
+describe('llmProgress / llmStateText', () => {
   it('formats done/total', () => {
     assert.equal(llmProgress(undefined), '')
     assert.equal(llmProgress({ state: 'partial' }), '')
     assert.equal(llmProgress({ cards_total: 600 }), '0/600')
     assert.equal(llmProgress({ cards_total: 600, cards_done: 120 }), '120/600')
+  })
+  it('shows counts only for partial and complete', () => {
+    const llm = { cards_total: 600, cards_done: 120 }
+    assert.equal(llmStateText('partial', llm), '部分完成 120/600')
+    assert.equal(llmStateText('complete', llm), '已完成 120/600')
+    assert.equal(llmStateText('pending', llm), '待增强')
+    assert.equal(llmStateText('running', llm), '增强中')
+    assert.equal(llmStateText('failed', llm), '失败')
+    assert.equal(llmStateText('off', llm), '未启用')
+    assert.equal(llmStateText('partial', undefined), '部分完成')
   })
 })
 
@@ -348,9 +374,12 @@ describe('LLM leases keep polling alive', () => {
 
 describe('handbookModelOptions', () => {
   const providers = [
-    { id: 'p1', name: 'qwen', enabled: true },
-    { id: 'p2', name: '', enabled: true },
-    { id: 'p3', name: 'old', enabled: false },
+    { id: 'p1', name: 'qwen', enabled: true, has_api_key: true },
+    { id: 'p2', name: '', enabled: true, has_api_key: true },
+    { id: 'p3', name: 'old', enabled: false, has_api_key: true },
+    { id: 'p4', name: 'Ali Cloud', enabled: true, has_api_key: true },
+    { id: 'p5', name: 'a/b', enabled: true, has_api_key: true },
+    { id: 'p6', name: 'nokey', enabled: true, has_api_key: false },
   ] as ModelProvider[]
   const entries = [
     { id: 'e1', provider_id: 'p1', model: 'qwen-max', display_name: '通义千问 Max', hidden: false },
@@ -359,11 +388,16 @@ describe('handbookModelOptions', () => {
     { id: 'e4', provider_id: 'p3', model: 'gpt', display_name: '', hidden: false },
     { id: 'e5', provider_id: 'gone', model: 'x', display_name: '', hidden: false },
     { id: 'e6', provider_id: 'p1', model: 'qwen-max', display_name: 'dup', hidden: false },
+    { id: 'e7', provider_id: 'p4', model: 'm4', display_name: '', hidden: false },
+    { id: 'e8', provider_id: 'p5', model: 'm5', display_name: '', hidden: false },
+    { id: 'e9', provider_id: 'p6', model: 'm6', display_name: '', hidden: false },
   ] as ModelCatalogEntry[]
-  it('lists off first, then enabled providers and visible entries as provider/model', () => {
+  it('lists off first, then usable providers and visible entries as provider/model', () => {
     assert.deepEqual(handbookModelOptions(providers, entries), [
       { value: 'off', label: '禁用该仓库的 LLM 增强' },
       { value: 'p2/deepseek-v3', label: 'deepseek-v3' },
+      { value: 'p4/m4', label: 'm4' },
+      { value: 'p5/m5', label: 'm5' },
       { value: 'qwen/qwen-max', label: '通义千问 Max' },
     ])
   })
@@ -373,15 +407,20 @@ describe('handbookModelOptions', () => {
 })
 
 describe('enrichErrorMessage', () => {
-  it('maps known backend errors to friendly text', () => {
-    assert.match(enrichErrorMessage('handbook: LLM layer is disabled for this repository'), /未启用/)
-    assert.match(enrichErrorMessage('handbook: deterministic handbook is not current'), /先.*重建|不是最新/)
-    assert.match(enrichErrorMessage('handbook: build already running'), /生成中/)
-    assert.match(enrichErrorMessage('handbook: another LLM run is in progress'), /其他仓库/)
-    assert.match(enrichErrorMessage('repository handbooks are not configured'), /未配置/)
+  const err = (reason: string, status = 409) => ({ message: 'server says', reason, status })
+  it('maps known reasons to friendly text', () => {
+    assert.match(enrichErrorMessage(err('HANDBOOK_LLM_DISABLED', 400)), /未启用/)
+    assert.match(enrichErrorMessage(err('HANDBOOK_NOT_READY')), /不是最新/)
+    assert.equal(enrichErrorMessage(err('HANDBOOK_BUILDING')), '该仓库正在构建或增强中')
+    assert.match(enrichErrorMessage(err('HANDBOOK_LLM_BUSY')), /其他仓库/)
+    assert.match(enrichErrorMessage(err('HANDBOOK_DISABLED', 503)), /未配置/)
+    assert.match(enrichErrorMessage(err('INVALID_ARGUMENT', 400)), /参数/)
+    assert.match(enrichErrorMessage(err('NOT_FOUND', 404)), /不存在/)
+    assert.match(enrichErrorMessage({ message: 'x', status: 404 }), /不存在/)
   })
-  it('keeps unknown messages', () => {
-    assert.equal(enrichErrorMessage('boom'), 'boom')
+  it('falls back to the server message', () => {
+    assert.equal(enrichErrorMessage(err('SOMETHING_ELSE', 500)), 'server says')
+    assert.equal(enrichErrorMessage(new Error('boom')), 'boom')
   })
 })
 

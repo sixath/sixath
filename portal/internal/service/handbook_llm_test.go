@@ -79,6 +79,9 @@ func TestConfigureHandbookLLM(t *testing.T) {
 	if err := uc.RequestEnrich(ctx, "r1", false); !errors.Is(err, biz.ErrHandbookLLMDisabled) {
 		t.Fatalf("nil config: RequestEnrich err=%v, want LLM disabled", err)
 	}
+	if uc.LLMAvailable() {
+		t.Fatal("nil config: LLMAvailable = true, want false without a resolver")
+	}
 
 	ConfigureHandbookLLM(uc, &conf.HandbookConfig{Model: " qwen/qwen-max ", Concurrency: 2, MaxRunMinutes: 99}, fakeHandbookCatalog{})
 	got := uc.LLMConfig()
@@ -91,6 +94,9 @@ func TestConfigureHandbookLLM(t *testing.T) {
 	}
 	// An empty global model still installs the resolver for repo overrides.
 	ConfigureHandbookLLM(uc, &conf.HandbookConfig{}, fakeHandbookCatalog{})
+	if !uc.LLMAvailable() {
+		t.Fatal("empty model: LLMAvailable = false, want the resolver installed")
+	}
 	if err := uc.RequestEnrich(ctx, "r1", false); !errors.Is(err, biz.ErrHandbookLLMDisabled) {
 		t.Fatalf("empty model: RequestEnrich err=%v, want LLM disabled without a repo override", err)
 	}

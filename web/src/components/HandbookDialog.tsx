@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ApiError } from '../api/client'
 import { repoApi } from '../api/repoRegistry'
 import type { HandbookView, Repository } from '../api/repoRegistryTypes'
 import {
   HANDBOOK_STATE_LABELS,
   LLM_FALLBACK_REASON_LABELS,
-  LLM_STATE_LABELS,
   enrichErrorMessage,
   handbookState,
   handbookViewLLMState,
-  llmProgress,
+  llmStateText,
   shortCommit,
   sortHandbookPages,
 } from '../utils/repoRegistry'
@@ -43,7 +43,6 @@ function HandbookLLMSection({
 }) {
   const state = handbookViewLLMState(view)
   const llm = view.llm
-  const progress = llmProgress(llm)
   const failed = state === 'failed'
   const tokens = llm && (llm.tokens_in || llm.tokens_out)
   return (
@@ -51,8 +50,7 @@ function HandbookLLMSection({
       <div className="handbook-llm__head">
         <strong>LLM 增强</strong>
         <span className={`badge badge-llm-${state}`} data-testid="handbook-llm-state">
-          {LLM_STATE_LABELS[state]}
-          {state !== 'off' && progress ? ` ${progress}` : ''}
+          {llmStateText(state, llm)}
         </span>
         {view.llm_model ? (
           <span className="muted">
@@ -132,9 +130,9 @@ export function HandbookDialog({ repo, onClose, onEnrichStarted }: HandbookDialo
   const repoId = repo?.id ?? ''
 
   useEffect(() => {
+    setView(null)
     if (!repoId) return
     let cancelled = false
-    setView(null)
     setPage('')
     setContent('')
     setError('')
@@ -167,12 +165,23 @@ export function HandbookDialog({ repo, onClose, onEnrichStarted }: HandbookDialo
       .catch(() => {})
   }, [repoId])
 
-  const llmRunning = !!view?.llm_running
+  const llmRunning = !!repoId && !!view?.llm_running
   useEffect(() => {
-    if (!llmRunning) return
+    if (!repoId || !llmRunning) return
     const timer = window.setInterval(refreshView, LLM_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [llmRunning, refreshView])
+  }, [repoId, llmRunning, refreshView])
+
+  // A finished run re-renders the handbook, so the open page is reloaded.
+  const [contentRev, setContentRev] = useState(0)
+  const wasRunning = useRef(false)
+  useEffect(() => {
+    if (wasRunning.current && !llmRunning && view) {
+      setContentRev((n) => n + 1)
+      setEnrichNotice('')
+    }
+    wasRunning.current = llmRunning
+  }, [llmRunning, view])
 
   useEffect(() => {
     if (!repoId || !page) return
@@ -194,7 +203,7 @@ export function HandbookDialog({ repo, onClose, onEnrichStarted }: HandbookDialo
     return () => {
       cancelled = true
     }
-  }, [repoId, page])
+  }, [repoId, page, contentRev])
 
   useEffect(() => {
     if (!repoId) return
@@ -216,7 +225,7 @@ export function HandbookDialog({ repo, onClose, onEnrichStarted }: HandbookDialo
       refreshView()
       onEnrichStarted?.()
     } catch (e) {
-      setEnrichError(enrichErrorMessage((e as Error).message))
+      setEnrichError(enrichErrorMessage(e as ApiError))
     } finally {
       setEnriching(false)
     }

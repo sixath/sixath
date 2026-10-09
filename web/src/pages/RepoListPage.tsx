@@ -9,14 +9,13 @@ import { HandbookDialog } from '../components/HandbookDialog'
 import { RepoRegistryTabs } from '../components/RepoRegistryTabs'
 import {
   HANDBOOK_STATE_LABELS,
-  LLM_STATE_LABELS,
   REPO_STATUS_LABELS,
   anyHandbookBuildActive,
   groupNamesByRepo,
   handbookModelOptions,
   handbookState,
-  llmProgress,
   llmState,
+  llmStateText,
   parseTags,
   shortCommit,
   type ModelOption,
@@ -24,7 +23,7 @@ import {
 import './RepoRegistry.css'
 
 const HANDBOOK_POLL_MS = 3000
-const NO_HANDBOOK_CONFIG: HandbookConfigView = { model: '', enabled: false }
+const NO_HANDBOOK_CONFIG: HandbookConfigView = { model: '', available: false, enabled: false }
 
 interface EditState {
   repo: Repository
@@ -41,9 +40,8 @@ function formatTime(iso?: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
-function LLMBadge({ repo, globalModel }: { repo: Repository; globalModel: string }) {
-  const state = llmState(repo, globalModel)
-  const progress = state === 'off' ? '' : llmProgress(repo.handbook_llm)
+function LLMBadge({ repo, config }: { repo: Repository; config: HandbookConfigView }) {
+  const state = llmState(repo, config)
   return (
     <div className="repo-llm-badge">
       <span
@@ -51,8 +49,7 @@ function LLMBadge({ repo, globalModel }: { repo: Repository; globalModel: string
         data-testid={`llm-state-${repo.id}`}
         title={state === 'off' ? '' : (repo.handbook_llm?.last_error ?? '')}
       >
-        LLM {LLM_STATE_LABELS[state]}
-        {progress ? ` ${progress}` : ''}
+        LLM {llmStateText(state, repo.handbook_llm)}
       </span>
     </div>
   )
@@ -125,7 +122,7 @@ export default function RepoListPage() {
       .catch(() => setHandbookConfig(NO_HANDBOOK_CONFIG))
   }, [])
 
-  const globalModel = handbookConfig.model ?? ''
+  const globalModel = (handbookConfig.model ?? '').trim()
 
   const building = useMemo(() => anyHandbookBuildActive(repos), [repos])
   useEffect(() => {
@@ -376,7 +373,7 @@ export default function RepoListPage() {
                     >
                       {HANDBOOK_STATE_LABELS[handbookState(r)]}
                     </span>
-                    <LLMBadge repo={r} globalModel={globalModel} />
+                    <LLMBadge repo={r} config={handbookConfig} />
                   </td>
                   <td>{formatTime(r.last_scanned_at)}</td>
                   <td className="col-actions">
@@ -450,7 +447,13 @@ export default function RepoListPage() {
                 id="repo-handbook-model"
                 list="handbook-model-options"
                 value={edit.handbookModel}
-                placeholder={globalModel ? `继承全局（${globalModel}）` : '未配置全局模型'}
+                placeholder={
+                  !handbookConfig.available
+                    ? '服务端未启用 LLM 增强'
+                    : globalModel
+                      ? `继承全局（${globalModel}）`
+                      : '未配置全局模型'
+                }
                 onChange={(e) => setEdit({ ...edit, handbookModel: e.target.value })}
               />
               <datalist id="handbook-model-options">
