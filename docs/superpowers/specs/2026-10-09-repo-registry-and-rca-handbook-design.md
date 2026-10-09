@@ -348,7 +348,7 @@ P2b 实现：原设想的版本内 `generated/` 改为仓库级 `llm/` 缓存。
 
 **P2b 实现（LLM 层，计划 `docs/superpowers/plans/2026-10-09-repo-handbook-p2b.md`）**：
 
-两层：确定性层（P2a 的 `Build`）每次 HEAD 变化立即发布；LLM 层是独立的后台运行 `handbook.Enrich`（biz 侧 `EnrichPending` / `RequestEnrich`），持有独立租约，读已发布版本的 facts 与仓库检出，只写 `llm/` 缓存；运行改变了缓存时生成新的 `handbook_llm.rev`，触发一次确定性重建把新内容渲染发布。模型通过 `framework/model.Model` 注入，所有调用 `temperature = 0.2`（OpenAI 兼容实现会把 0 替换成默认值）；回复取第一个能解码的 JSON 对象，`finish_reason = length`、无 JSON、解码失败都算"回复不可用"（区别于传输错误）。
+两层：确定性层（P2a 的 `Build`）每次 HEAD 变化立即发布；LLM 层是独立的后台运行 `handbook.Enrich`（biz 侧 `EnrichPending` / `RequestEnrich`），持有独立租约，读已发布版本的 facts 与仓库检出，只写 `llm/` 缓存；运行改变了缓存时生成新的 `handbook_llm.rev`，触发一次确定性重建把新内容渲染发布。模型通过 `framework/model.Model` 注入，所有调用 `temperature = 0.2`（OpenAI 兼容实现会把 0 替换成默认值）；回复取第一个能解码的 JSON 对象，无 JSON、解码失败都算"回复不可用"（区别于传输错误）。推理模型（如 deepseek-v4-flash）的隐藏推理 token 计入 `max_tokens`，常以 `finish_reason = length` 结束且正文为空或已完整：`length` 时若从第一个 `{` 起能解码出完整对象即采用（不接受截断回复里的内层对象），否则以 `max_tokens = 8192` 重试一次，仍截断才算回复不可用（真实模型冒烟中该处理把卡片失败从 4/21 降到 0，骨架不再退化）。
 
 - **卡片资格**：非测试、非空、语言属于源码类（go、proto、sql、python、java、javascript、typescript、shell、lua、c、cpp、rust、php、ruby、kotlin、csharp、scala、vue）。文档、配置、测试只出现在清单与分区页。
 - **卡片生成**：提示词含仓库、路径、语言、行数、符号清单（最多 80 个，`functions.name` 只能从中原样选取）与文件内容（按 `max_file_kb` 截断在行边界并标注；代码围栏比内容中最长的反引号串更长）。输出 `purpose / description / role / lifecycle / functions(≤8)`，`max_tokens = 900`。校验：清单外或重复的函数丢弃，`role` 不在枚举内改为 `other`，各字段按 rune 截断（purpose 120、description 600、lifecycle 120、函数说明 160），`purpose` 为空视为回复不可用。文件经 `os.OpenInRoot` 读取（仅普通文件、≤ 512KB），内容哈希与 facts 不一致的文件本轮跳过。
