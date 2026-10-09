@@ -42,7 +42,7 @@ async function mockRepoRegistry(
     onMigrate?: (apply: boolean) => void
     onCreateGroup?: (body: GroupBody) => void
     bindings?: unknown[]
-    repos?: unknown[]
+    repos?: unknown[] | (() => unknown[])
   } = {},
 ) {
   const groups: Record<string, unknown>[] = [group]
@@ -75,9 +75,8 @@ async function mockRepoRegistry(
       return
     }
     if (url.pathname === '/api/v1/repos' && method === 'GET') {
-      await route.fulfill({
-        json: { items: opts.repos ?? [repoA, repoB], total: (opts.repos ?? [repoA, repoB]).length },
-      })
+      const items = (typeof opts.repos === 'function' ? opts.repos() : opts.repos) ?? [repoA, repoB]
+      await route.fulfill({ json: { items, total: items.length } })
       return
     }
     await route.continue()
@@ -246,5 +245,73 @@ test.describe('Repo registry UI', () => {
     await page.getByRole('button', { name: '重建 cloudgame/svc-b 的 handbook' }).click()
     await expect(page.getByTestId('handbook-state-r-b')).toHaveText('生成中')
     expect(rebuilt).toEqual(['r-b'])
+  })
+
+  test('生成中的仓库仍可重建并提示 409，构建完成后自动刷新', async ({ page }) => {
+    let finished = false
+    const building = {
+      ...repoA,
+      handbook_status: 'building',
+      handbook_lease_until: new Date(Date.now() + 30 * 60_000).toISOString(),
+    }
+    const ready = { ...repoA, handbook_status: 'ready', handbook_commit: repoA.head_commit, handbook_version: 1 }
+    await mockRepoRegistry(page, { repos: () => [finished ? ready : building, repoB] })
+    await page.route(/\/api\/v1\/repos\/[^/]+\/handbook\/rebuild$/, async (route: Route) => {
+      await route.fulfill({
+        status: 409,
+        json: { code: 409, reason: 'HANDBOOK_BUILDING', message: 'handbook: build already running' },
+      })
+    })
+
+    await page.goto('/repos')
+    await expect(page.getByTestId('handbook-state-r-a')).toHaveText('生成中')
+    const rebuild = page.getByRole('button', { name: '重建 cloudgame/svc-a 的 handbook' })
+    await expect(rebuild).toBeEnabled()
+    await rebuild.click()
+    await expect(page.getByTestId('repo-rebuild-error')).toContainText('handbook: build already running')
+
+    finished = true
+    await expect(page.getByTestId('handbook-state-r-a')).toHaveText('最新', { timeout: 10_000 })
+  })
+
+  test('handbook 弹窗显示加载中、以接口状态为准并可按 Esc 关闭', async ({ page }) => {
+    const snapshot = {
+      ...repoA,
+      handbook_status: 'ready',
+      handbook_commit: repoA.head_commit,
+      handbook_version: 3,
+    }
+    let releasePage: () => void = () => {}
+    const pageGate = new Promise<void>((resolve) => (releasePage = resolve))
+    await mockRepoRegistry(page, { repos: [snapshot, repoB] })
+    await page.route(/\/api\/v1\/repos\/[^/]+\/handbook(\/[^?]*)?(\?.*)?$/, async (route: Route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname.endsWith('/handbook/page')) {
+        await pageGate
+        await route.fulfill({ json: { path: 'SKILL.md', content: 'Handbook body' } })
+        return
+      }
+      await route.fulfill({
+        json: {
+          repo_id: 'r-a',
+          status: 'ready',
+          commit: 'ffff0000aaaa',
+          head_commit: repoA.head_commit,
+          version: 3,
+          pages: ['SKILL.md'],
+        },
+      })
+    })
+
+    await page.goto('/repos')
+    await page.getByRole('button', { name: '查看 cloudgame/svc-a 的 handbook' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByTestId('handbook-content')).toHaveText('加载中…')
+    await expect(dialog.getByTestId('handbook-dialog-meta')).toContainText('待更新')
+    await expect(dialog.getByTestId('handbook-dialog-meta')).toContainText('ffff0000')
+    releasePage()
+    await expect(dialog.getByTestId('handbook-content')).toHaveText('Handbook body')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
   })
 })

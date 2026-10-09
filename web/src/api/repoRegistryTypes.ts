@@ -26,6 +26,7 @@ export interface Repository {
   handbook_commit?: string
   handbook_version?: number
   handbook_stats?: HandbookStats | null
+  handbook_lease_until?: string
   owner_id: string
   last_scanned_at?: string
   created_at: string

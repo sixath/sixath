@@ -237,6 +237,23 @@ export function handbookState(
   return r.handbook_commit === r.head_commit ? 'ready' : 'outdated'
 }
 
+type HandbookBuildFields = Pick<Repository, 'handbook_status' | 'head_commit'> & {
+  handbook_commit?: string
+  handbook_lease_until?: string
+}
+
+/** A build is active while building under a live lease; an expired lease means it is stuck. */
+export function handbookBuildActive(r: HandbookBuildFields, now: number = Date.now()): boolean {
+  if (handbookState(r) !== 'building') return false
+  if (!r.handbook_lease_until) return true
+  const until = Date.parse(r.handbook_lease_until)
+  return Number.isNaN(until) || until > now
+}
+
+export function anyHandbookBuildActive(repos: HandbookBuildFields[], now: number = Date.now()): boolean {
+  return repos.some((r) => handbookBuildActive(r, now))
+}
+
 /** Orders pages as SKILL.md, then references/*.md, then area pages. */
 export function sortHandbookPages(pages: string[]): string[] {
   const rank = (p: string) => (p === 'SKILL.md' ? 0 : p.startsWith('references/areas/') ? 2 : 1)

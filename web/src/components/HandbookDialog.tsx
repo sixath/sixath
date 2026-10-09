@@ -14,6 +14,8 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
   const [page, setPage] = useState('')
   const [content, setContent] = useState('')
   const [error, setError] = useState('')
+  const [viewLoading, setViewLoading] = useState(false)
+  const [pageLoading, setPageLoading] = useState(false)
   const repoId = repo?.id ?? ''
 
   useEffect(() => {
@@ -23,6 +25,7 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
     setPage('')
     setContent('')
     setError('')
+    setViewLoading(true)
     repoApi
       .handbook(repoId)
       .then((v) => {
@@ -33,6 +36,9 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
       .catch((e) => {
         if (!cancelled) setError((e as Error).message)
       })
+      .finally(() => {
+        if (!cancelled) setViewLoading(false)
+      })
     return () => {
       cancelled = true
     }
@@ -42,6 +48,8 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
     if (!repoId || !page) return
     let cancelled = false
     setContent('')
+    setError('')
+    setPageLoading(true)
     repoApi
       .handbookPage(repoId, page)
       .then((p) => {
@@ -50,13 +58,26 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
       .catch((e) => {
         if (!cancelled) setError((e as Error).message)
       })
+      .finally(() => {
+        if (!cancelled) setPageLoading(false)
+      })
     return () => {
       cancelled = true
     }
   }, [repoId, page])
 
+  useEffect(() => {
+    if (!repoId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [repoId, onClose])
+
   if (!repo) return null
   const pages = view ? sortHandbookPages(view.pages) : []
+  const loading = viewLoading || pageLoading
   return (
     <div className="confirm-dialog-backdrop" role="presentation">
       <div
@@ -67,9 +88,23 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
       >
         <h2 id="handbook-dialog-title">Handbook · {repo.rel_path}</h2>
         {view ? (
-          <p className="muted">
-            {HANDBOOK_STATE_LABELS[handbookState(repo)]} · v{view.version} · commit{' '}
-            <code>{shortCommit(view.commit)}</code>
+          <p className="muted" data-testid="handbook-dialog-meta">
+            {
+              HANDBOOK_STATE_LABELS[
+                handbookState({
+                  handbook_status: view.status,
+                  handbook_commit: view.commit,
+                  head_commit: view.head_commit,
+                })
+              ]
+            }{' '}
+            · v{view.version} · commit <code title={view.commit}>{shortCommit(view.commit)}</code>
+            {view.head_commit && view.head_commit !== view.commit ? (
+              <>
+                {' '}
+                · HEAD <code title={view.head_commit}>{shortCommit(view.head_commit)}</code>
+              </>
+            ) : null}
           </p>
         ) : null}
         {error ? <div className="error">{error}</div> : null}
@@ -88,8 +123,8 @@ export function HandbookDialog({ repo, onClose }: HandbookDialogProps) {
               </li>
             ))}
           </ul>
-          <pre className="handbook-dialog__content" data-testid="handbook-content">
-            {content}
+          <pre className="handbook-dialog__content" data-testid="handbook-content" aria-busy={loading}>
+            {loading ? '加载中…' : content}
           </pre>
         </div>
         <div className="confirm-dialog-actions">

@@ -7,8 +7,10 @@ import type {
   Repository,
 } from '../src/api/repoRegistryTypes.ts'
 import {
+  anyHandbookBuildActive,
   bindingsEqual,
   groupNamesByRepo,
+  handbookBuildActive,
   handbookState,
   includeRepo,
   isGroupIncluded,
@@ -237,6 +239,24 @@ describe('handbookState', () => {
     assert.equal(handbookState({ ...base, handbook_status: 'building' }), 'building')
     assert.equal(handbookState({ ...base, handbook_status: 'failed' }), 'failed')
     assert.equal(handbookState({ head_commit: 'aaa', handbook_status: 'none' }), 'none')
+  })
+})
+
+describe('handbookBuildActive', () => {
+  const now = Date.parse('2026-10-09T10:00:00Z')
+  const building = { head_commit: 'aaa', handbook_status: 'building' }
+  it('is active while building under a live or unknown lease', () => {
+    assert.equal(handbookBuildActive(building, now), true)
+    assert.equal(handbookBuildActive({ ...building, handbook_lease_until: '2026-10-09T10:05:00Z' }, now), true)
+  })
+  it('is inactive once the lease expired or the build finished', () => {
+    assert.equal(handbookBuildActive({ ...building, handbook_lease_until: '2026-10-09T09:59:00Z' }, now), false)
+    assert.equal(handbookBuildActive({ head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa' }, now), false)
+  })
+  it('counts any active build in a list', () => {
+    const ready = { head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa' }
+    assert.equal(anyHandbookBuildActive([ready, building], now), true)
+    assert.equal(anyHandbookBuildActive([ready], now), false)
   })
 })
 

@@ -9,12 +9,15 @@ import { RepoRegistryTabs } from '../components/RepoRegistryTabs'
 import {
   HANDBOOK_STATE_LABELS,
   REPO_STATUS_LABELS,
+  anyHandbookBuildActive,
   groupNamesByRepo,
   handbookState,
   parseTags,
   shortCommit,
 } from '../utils/repoRegistry'
 import './RepoRegistry.css'
+
+const HANDBOOK_POLL_MS = 3000
 
 interface EditState {
   repo: Repository
@@ -48,17 +51,21 @@ export default function RepoListPage() {
   const [statusSaving, setStatusSaving] = useState(false)
   const [viewing, setViewing] = useState<Repository | null>(null)
   const [rebuildingId, setRebuildingId] = useState<string | null>(null)
+  const [rebuildError, setRebuildError] = useState('')
 
   const filterRef = useRef(filter)
   const loadSeq = useRef(0)
 
-  const loadRepos = useCallback(async (f: RepoFilter) => {
+  const loadRepos = useCallback(async (f: RepoFilter, quiet = false) => {
     const seq = ++loadSeq.current
-    setLoading(true)
-    setError('')
+    if (!quiet) {
+      setLoading(true)
+      setError('')
+    }
     try {
       const res = await repoApi.list(f)
       if (seq !== loadSeq.current) return
+      setError('')
       setRepos(res.items)
       setKnownRoots((prev) => [...new Set([...prev, ...res.items.map((r) => r.code_root)])].sort())
     } catch (e) {
@@ -83,6 +90,13 @@ export default function RepoListPage() {
   useEffect(() => {
     loadGroups()
   }, [loadGroups])
+
+  const building = useMemo(() => anyHandbookBuildActive(repos), [repos])
+  useEffect(() => {
+    if (!building) return
+    const timer = window.setInterval(() => void loadRepos(filterRef.current, true), HANDBOOK_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [building, loadRepos])
 
   const groupNames = useMemo(() => groupNamesByRepo(groups), [groups])
 
@@ -157,11 +171,16 @@ export default function RepoListPage() {
 
   const requestRebuild = async (repo: Repository) => {
     setRebuildingId(repo.id)
+    setRebuildError('')
     try {
       await repoApi.rebuildHandbook(repo.id)
-      setRepos((prev) => prev.map((r) => (r.id === repo.id ? { ...r, handbook_status: 'building' } : r)))
+      setRepos((prev) =>
+        prev.map((r) =>
+          r.id === repo.id ? { ...r, handbook_status: 'building', handbook_lease_until: undefined } : r,
+        ),
+      )
     } catch (e) {
-      alert((e as Error).message)
+      setRebuildError(`重建 ${repo.rel_path} 失败：${(e as Error).message}`)
     } finally {
       setRebuildingId(null)
     }
@@ -239,6 +258,11 @@ export default function RepoListPage() {
       </form>
 
       {error ? <div className="error">加载失败：{error}</div> : null}
+      {rebuildError ? (
+        <div className="error" role="alert" data-testid="repo-rebuild-error">
+          {rebuildError}
+        </div>
+      ) : null}
       {loading ? (
         <div className="loading">
           <div className="loading-spinner" />
@@ -322,7 +346,7 @@ export default function RepoListPage() {
                         type="button"
                         className="btn btn-ghost btn-sm"
                         aria-label={`重建 ${r.rel_path} 的 handbook`}
-                        disabled={r.status !== 'active' || rebuildingId === r.id || handbookState(r) === 'building'}
+                        disabled={r.status !== 'active' || rebuildingId === r.id}
                         onClick={() => void requestRebuild(r)}
                       >
                         重建
