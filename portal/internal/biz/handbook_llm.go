@@ -121,11 +121,16 @@ func llmTime(r *Repository, key string) (time.Time, bool) {
 // version, or its skeleton is due for a rebuild or a fallback retry. A failed run waits for
 // HEAD or the model to change.
 func needsEnrich(s *handbookLLMSettings, r *Repository, now time.Time) bool {
-	name := modelFor(s, r)
-	if name == "" || r.Status != RepoStatusActive || r.HandbookStatus == HandbookStatusBuilding || !handbookCurrent(r) {
+	if r.HandbookLLMLeaseUntil != nil && r.HandbookLLMLeaseUntil.After(now) {
 		return false
 	}
-	if r.HandbookLLMLeaseUntil != nil && r.HandbookLLMLeaseUntil.After(now) {
+	return enrichDue(s, r, now)
+}
+
+// enrichDue is needsEnrich without the lease check.
+func enrichDue(s *handbookLLMSettings, r *Repository, now time.Time) bool {
+	name := modelFor(s, r)
+	if name == "" || r.Status != RepoStatusActive || r.HandbookStatus == HandbookStatusBuilding || !handbookCurrent(r) {
 		return false
 	}
 	state, _ := r.HandbookLLM["state"].(string)
@@ -194,6 +199,9 @@ func (uc *HandbookUsecase) EnrichPending(ctx context.Context) (int, error) {
 			return n, ctx.Err()
 		}
 		token, ok, err := uc.claimEnrich(ctx, s, r.ID)
+		if err == nil && ok {
+			ok, err = uc.stillDue(ctx, s, r.ID, token)
+		}
 		if err != nil || !ok {
 			<-uc.enrichSlots
 			if err != nil {
@@ -205,6 +213,19 @@ func (uc *HandbookUsecase) EnrichPending(ctx context.Context) (int, error) {
 		uc.enrichInSlot(ctx, s, r.ID, token, false)
 	}
 	return n, nil
+}
+
+// stillDue re-reads a repo claimed from an older listing and releases the lease when a run
+// that finished meanwhile (such as a manual one) made it no longer due.
+func (uc *HandbookUsecase) stillDue(ctx context.Context, s *handbookLLMSettings, id, token string) (bool, error) {
+	r, err := uc.getRepo(ctx, id)
+	if err == nil && enrichDue(s, r, uc.now().UTC()) {
+		return true, nil
+	}
+	if errors.Is(err, ErrRepoNotFound) {
+		err = nil
+	}
+	return false, errors.Join(err, uc.releaseEnrich(ctx, id, token))
 }
 
 // RequestEnrich starts an asynchronous LLM run of one repo regardless of its LLM state; full

@@ -14,6 +14,7 @@ import (
 	"backend/internal/biz"
 	"backend/internal/handbook"
 
+	"github.com/go-kratos/kratos/v2/log"
 	"github.com/sixath/framework/model"
 )
 
@@ -860,6 +861,44 @@ func TestHandbookLLM_LocalErrorRetriesNextPass(t *testing.T) {
 	f.hb.Wait()
 	if r := f.get(t); llmString(r, "state") != handbook.LLMStateComplete || r.HandbookLLM["last_error"] != nil {
 		t.Fatalf("after the retry: %#v", r.HandbookLLM)
+	}
+}
+
+// enrichRaceRepo runs beforeClaim once before the next LLM claim.
+type enrichRaceRepo struct {
+	biz.RepoRegistryRepo
+	beforeClaim func()
+}
+
+func (h *enrichRaceRepo) ClaimHandbookEnrich(ctx context.Context, id string, now, leaseUntil time.Time) (string, bool, error) {
+	if fn := h.beforeClaim; fn != nil {
+		h.beforeClaim = nil
+		fn()
+	}
+	return h.RepoRegistryRepo.ClaimHandbookEnrich(ctx, id, now, leaseUntil)
+}
+
+func TestHandbookLLM_PendingSkipsRunFinishedBeforeClaim(t *testing.T) {
+	f := newHandbookFixture(t)
+	if _, err := f.hb.RebuildStale(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	race := &enrichRaceRepo{RepoRegistryRepo: f.repo, beforeClaim: func() {
+		// a manual run completes between the listing and the claim
+		patchLLM(t, f, f.repoID, func(m map[string]any) {
+			m["state"] = handbook.LLMStateComplete
+			m["commit"] = shaOf('a')
+			m["prompt_version"] = handbook.LLMPromptVersion
+		})
+	}}
+	hb := biz.NewHandbookUsecase(race, f.reg, f.dataRoot, log.DefaultLogger)
+	var names []string
+	hb.SetLLM(biz.HandbookLLMConfig{Model: "fake"}, fakeResolver(&llmFake{}, &names))
+	n, err := hb.EnrichPending(f.ctx)
+	mustCount(t, "enrich", n, err, 0)
+	hb.Wait()
+	if r := f.get(t); len(names) != 0 || r.HandbookLLMLeaseUntil != nil || r.HandbookLLM["run_at"] != nil {
+		t.Fatalf("a repo no longer due must be released without a run: resolved=%v repo=%#v", names, r)
 	}
 }
 
