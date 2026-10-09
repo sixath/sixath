@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { repoApi, repoGroupApi } from '../api/repoRegistry'
 import type { RepoFilter, RepoGroupView, RepoScanReport, Repository } from '../api/repoRegistryTypes'
@@ -39,17 +39,22 @@ export default function RepoListPage() {
   const [pendingStatus, setPendingStatus] = useState<Repository | null>(null)
   const [statusSaving, setStatusSaving] = useState(false)
 
+  const filterRef = useRef(filter)
+  const loadSeq = useRef(0)
+
   const loadRepos = useCallback(async (f: RepoFilter) => {
+    const seq = ++loadSeq.current
     setLoading(true)
     setError('')
     try {
       const res = await repoApi.list(f)
+      if (seq !== loadSeq.current) return
       setRepos(res.items)
       setKnownRoots((prev) => [...new Set([...prev, ...res.items.map((r) => r.code_root)])].sort())
     } catch (e) {
-      setError((e as Error).message)
+      if (seq === loadSeq.current) setError((e as Error).message)
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [])
 
@@ -61,6 +66,7 @@ export default function RepoListPage() {
   }, [])
 
   useEffect(() => {
+    filterRef.current = filter
     void loadRepos(filter)
   }, [filter, loadRepos])
 
@@ -86,7 +92,7 @@ export default function RepoListPage() {
     setScanReport(null)
     try {
       setScanReport(await repoApi.scan())
-      await loadRepos(filter)
+      await loadRepos(filterRef.current)
       loadGroups()
     } catch (e) {
       setScanError((e as Error).message)
@@ -127,11 +133,11 @@ export default function RepoListPage() {
     if (!pendingStatus) return
     setStatusSaving(true)
     try {
-      const updated = await repoApi.patch(pendingStatus.id, {
+      await repoApi.patch(pendingStatus.id, {
         status: pendingStatus.status === 'archived' ? 'active' : 'archived',
       })
-      setRepos((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
       setPendingStatus(null)
+      await loadRepos(filterRef.current)
     } catch (e) {
       alert((e as Error).message)
     } finally {

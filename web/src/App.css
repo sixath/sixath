@@ -1631,6 +1631,10 @@ code {
   font-size: 13px;
 }
 
+.muted {
+  color: var(--muted);
+}
+
 /* Loading */
 .loading {
   display: flex;

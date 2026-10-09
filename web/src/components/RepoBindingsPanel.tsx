@@ -14,6 +14,7 @@ import {
   parseSubPaths,
   previewEffective,
   removeRepoBinding,
+  pruneOrphanExcludes,
   toggleGroup,
   toggleRepoExclude,
   viaLabel,
@@ -188,7 +189,12 @@ export default function RepoBindingsPanel({ agentId }: { agentId: string }) {
             ) : null}
 
             <h3 className="repo-bindings__title">按分组绑定</h3>
-            <input value={groupQuery} onChange={(e) => setGroupQuery(e.target.value)} placeholder="搜索分组" />
+            <input
+              value={groupQuery}
+              onChange={(e) => setGroupQuery(e.target.value)}
+              placeholder="搜索分组"
+              aria-label="搜索分组"
+            />
             <ul className="repo-bindings__groups">
               {visibleGroups.map((g) => {
                 const included = isGroupIncluded(draft, g.id)
@@ -199,7 +205,7 @@ export default function RepoBindingsPanel({ agentId }: { agentId: string }) {
                         <input
                           type="checkbox"
                           checked={included}
-                          onChange={() => edit(toggleGroup(draft, g.id))}
+                          onChange={() => edit(pruneOrphanExcludes(toggleGroup(draft, g.id), groups))}
                           data-testid={`repo-group-${g.id}`}
                         />
                         {g.name}
@@ -275,6 +281,7 @@ export default function RepoBindingsPanel({ agentId }: { agentId: string }) {
                 value={addSubPaths}
                 onChange={(e) => setAddSubPaths(e.target.value)}
                 placeholder="子目录（可选，逗号分隔）"
+                aria-label="子目录"
               />
               <button type="button" className="btn btn-sm" disabled={!addRepoId} onClick={addRepo}>
                 添加
@@ -307,7 +314,7 @@ export default function RepoBindingsPanel({ agentId }: { agentId: string }) {
               >
                 清空绑定
               </button>
-              <select value={copyFromId} onChange={(e) => setCopyFromId(e.target.value)}>
+              <select value={copyFromId} onChange={(e) => setCopyFromId(e.target.value)} aria-label="复制来源 Agent">
                 <option value="">从其他 Agent 复制…</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>

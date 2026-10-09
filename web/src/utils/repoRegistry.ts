@@ -94,6 +94,15 @@ export function toggleGroup(bs: AgentRepoBinding[], groupId: string): AgentRepoB
   return [...bs, { target_kind: 'repo_group', target_id: groupId, mode: 'include' }]
 }
 
+/** Drops repo excludes whose repo is no longer a member of any included group. */
+export function pruneOrphanExcludes(bs: AgentRepoBinding[], groups: RepoGroupView[]): AgentRepoBinding[] {
+  const covered = new Set<string>()
+  for (const g of groups) {
+    if (isGroupIncluded(bs, g.id)) for (const id of g.repo_ids) covered.add(id)
+  }
+  return bs.filter((b) => !(b.target_kind === 'repo' && b.mode === 'exclude' && !covered.has(b.target_id)))
+}
+
 export function isRepoExcluded(bs: AgentRepoBinding[], repoId: string): boolean {
   return bs.some((b) => sameTarget(b, 'repo', repoId) && b.mode === 'exclude')
 }

@@ -16,6 +16,7 @@ import {
   parseTags,
   pendingAutoApplyCount,
   previewEffective,
+  pruneOrphanExcludes,
   removeRepoBinding,
   repoFilterQuery,
   shortCommit,
@@ -113,6 +114,26 @@ describe('binding edits', () => {
     ]
     assert.equal(bindingsEqual(a, b), true)
     assert.equal(bindingsEqual(a, a.slice(1)), false)
+  })
+})
+
+describe('pruneOrphanExcludes', () => {
+  const groups = [group('g1', 'cg', ['r1', 'r2']), group('g2', 'core', ['r2', 'r3'])]
+  it('drops excludes no longer covered by an included group', () => {
+    const bs: AgentRepoBinding[] = [
+      { target_kind: 'repo_group', target_id: 'g2', mode: 'include' },
+      { target_kind: 'repo', target_id: 'r1', mode: 'exclude' },
+      { target_kind: 'repo', target_id: 'r2', mode: 'exclude' },
+      { target_kind: 'repo', target_id: 'r4', mode: 'include' },
+    ]
+    assert.deepEqual(pruneOrphanExcludes(bs, groups), [
+      { target_kind: 'repo_group', target_id: 'g2', mode: 'include' },
+      { target_kind: 'repo', target_id: 'r2', mode: 'exclude' },
+      { target_kind: 'repo', target_id: 'r4', mode: 'include' },
+    ])
+  })
+  it('clears everything when only excludes remain', () => {
+    assert.deepEqual(pruneOrphanExcludes([{ target_kind: 'repo', target_id: 'r1', mode: 'exclude' }], groups), [])
   })
 })
 

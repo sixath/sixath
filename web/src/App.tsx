@@ -202,7 +202,7 @@ function AppShell() {
             </NavLink>
             <NavLink
               to="/repos"
-              className={() => `nav-item ${loc.pathname.startsWith('/repo') ? 'active' : ''}`}
+              className={() => `nav-item ${/^\/repo(s|-groups)(\/|$)/.test(loc.pathname) ? 'active' : ''}`}
             >
               <span className="nav-item__icon">📦</span>
               代码仓库

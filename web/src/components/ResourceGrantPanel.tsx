@@ -143,7 +143,7 @@ export default function ResourceGrantPanel({ resourceType, payloadRef }: Resourc
   const homeOrgId = resource?.home_org_id?.trim() || ''
 
   if (loading) return <div className="section-card"><p>Loading grants...</p></div>
-  if (error) return <div className="section-card"><p className="muted">{error}</p></div>
+  if (error) return <div className="section-card"><p className="error">{error}</p></div>
   if (!resource) return null
 
   return (
