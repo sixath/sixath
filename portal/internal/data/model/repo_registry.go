@@ -38,7 +38,7 @@ type RepoGroup struct {
 	Name            string         `gorm:"column:name;size:256;not null"`
 	Kind            string         `gorm:"column:kind;size:16;not null;index:idx_rg_kind"`
 	Rule            *RepoGroupRule `gorm:"column:rule;type:json"`
-	AutoApplyNew    bool           `gorm:"column:auto_apply_new;not null;default:true"`
+	AutoApplyNew    bool           `gorm:"column:auto_apply_new;not null"`
 	HandbookStatus  string         `gorm:"column:handbook_status;size:16;not null;default:none"`
 	HandbookVersion int            `gorm:"column:handbook_version;not null;default:0"`
 	OwnerID         string         `gorm:"column:owner_id;size:36;not null;default:''"`
@@ -56,7 +56,7 @@ type RepoGroupRule struct {
 	AnyOf     []string `json:"any_of,omitempty"`
 }
 
-func (r RepoGroupRule) Value() (driver.Value, error) { return json.Marshal(r) }
+func (r RepoGroupRule) Value() (driver.Value, error) { return jsonValue(r) }
 func (r *RepoGroupRule) Scan(v any) error            { return scanJSON(v, r) }
 
 type RepoGroupMember struct {
@@ -128,7 +128,9 @@ func jsonValue[T any](v T) (driver.Value, error) {
 	return string(b), nil
 }
 
-func scanJSON(value any, dst any) error {
+func scanJSON[T any](value any, dst *T) error {
+	var zero T
+	*dst = zero
 	switch v := value.(type) {
 	case nil:
 		return nil
