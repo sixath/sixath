@@ -20,6 +20,7 @@ import CronTaskForm from './pages/CronTaskForm'
 import CronTaskDetail from './pages/CronTaskDetail'
 import SessionHistoryPage from './pages/SessionHistoryPage'
 import EvolutionReviewPage from './pages/EvolutionReviewPage'
+import RepoListPage from './pages/RepoListPage'
 import SettingsPage from './pages/SettingsPage'
 import OrgListPage from './pages/OrgListPage'
 import OrgDetailPage from './pages/OrgDetailPage'
@@ -95,6 +96,12 @@ function Breadcrumb() {
   } else if (segments[0] === 'evolution-review') {
     current = '技能进化评审'
     icon = '🧬'
+  } else if (segments[0] === 'repos') {
+    current = segments[1] === 'migration' ? '旧链接迁移' : '代码仓库'
+    icon = '📦'
+  } else if (segments[0] === 'repo-groups') {
+    current = '仓库分组'
+    icon = '📦'
   }
 
   return (
@@ -190,6 +197,13 @@ function AppShell() {
             <NavLink to="/agents" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">🤖</span>
               Agent 管理
+            </NavLink>
+            <NavLink
+              to="/repos"
+              className={() => `nav-item ${loc.pathname.startsWith('/repo') ? 'active' : ''}`}
+            >
+              <span className="nav-item__icon">📦</span>
+              代码仓库
             </NavLink>
             <NavLink to="/channels" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className="nav-item__icon">📡</span>
@@ -303,6 +317,7 @@ function AppShell() {
             <Route path="/orgs" element={<OrgListPage />} />
             <Route path="/orgs/:id" element={<OrgDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/repos" element={<RepoListPage />} />
             <Route path="/evolution-review" element={<EvolutionReviewPage />} />
             <Route
               path="/terminal"
