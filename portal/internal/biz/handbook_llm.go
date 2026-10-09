@@ -391,18 +391,15 @@ func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMS
 		"skeleton_rebuilt": res.SkeletonRebuilt, "rebuild_reason": res.RebuildReason,
 		"tokens_in": res.TokensIn, "tokens_out": res.TokensOut,
 	}, nil)
-	if res.State != handbook.LLMStateComplete {
-		// Synthesis did not run: the cached skeleton, and what describes it, is unchanged.
-		for _, k := range []string{"stages", "fallback", "fallback_reason"} {
+	if !res.SkeletonBuiltAt.IsZero() {
+		llm["skeleton_built_at"] = res.SkeletonBuiltAt.UTC().Format(time.RFC3339)
+	} else {
+		// No skeleton was stored this run: the cached one, and what describes it, is unchanged.
+		for _, k := range []string{"stages", "fallback", "fallback_reason", "skeleton_built_at"} {
 			if v, ok := r.HandbookLLM[k]; ok {
 				llm[k] = v
 			}
 		}
-	}
-	if !res.SkeletonBuiltAt.IsZero() {
-		llm["skeleton_built_at"] = res.SkeletonBuiltAt.UTC().Format(time.RFC3339)
-	} else if v, ok := r.HandbookLLM["skeleton_built_at"]; ok {
-		llm["skeleton_built_at"] = v
 	}
 	if res.LastTransportError != "" {
 		llm["last_error"] = res.LastTransportError

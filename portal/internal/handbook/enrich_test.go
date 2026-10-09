@@ -468,7 +468,8 @@ func TestEnrich_DeadModelConvergesToFailure(t *testing.T) {
 	if !errors.Is(err, ErrModelUnavailable) || res.State != LLMStateFailed || res.LastTransportError != "503 upstream" {
 		t.Fatalf("synthesis with a dead model fails the run: %#v %v", res, err)
 	}
-	if sk, _ := cache.Skeleton(); sk.Commit != "c1" {
+	// the incremental update is checkpointed with the stage summary still owed
+	if sk, _ := cache.Skeleton(); sk.Commit != "c2" || !reflect.DeepEqual(sk.PendingStages, []string{"order"}) || sk.Stages[1].Summary != "阶段说明文本" {
 		t.Fatalf("skeleton %#v", sk)
 	}
 }
@@ -681,7 +682,7 @@ func TestEnrich_SynthesisRetriesTransientErrors(t *testing.T) {
 	}
 }
 
-func TestEnrich_SynthesisFailureKeepsStoredSkeleton(t *testing.T) {
+func TestEnrich_SynthesisFailureKeepsCheckpoint(t *testing.T) {
 	r := newEnrichRepo(t)
 	cache := LLMCache{Dir: t.TempDir()}
 	if _, err := Enrich(context.Background(), r.input(happyModel(), cache, EnrichOptions{})); err != nil {
@@ -702,23 +703,96 @@ func TestEnrich_SynthesisFailureKeepsStoredSkeleton(t *testing.T) {
 	if m.n != 1+synthesisRetries {
 		t.Fatalf("stage call attempted %d times", m.n)
 	}
-	if sk, _ := cache.Skeleton(); sk == nil || sk.Commit != "c1" {
-		t.Fatalf("a failed synthesis must not store a partial skeleton: %#v", sk)
+	// the change rebuilt the skeleton; it is stored with every summary still owed
+	sk, _ := cache.Skeleton()
+	if sk == nil || sk.Commit != "c2" || !reflect.DeepEqual(sk.PendingStages, []string{"boot", "order", "pay"}) || !sk.PendingOverview || !sk.PendingNotes {
+		t.Fatalf("a failed synthesis must keep its checkpoint: %#v", sk)
+	}
+	if !res.Changed {
+		t.Fatal("a stored checkpoint changes the handbook")
 	}
 }
 
-func TestEnrich_CancelDuringSynthesisWritesNothing(t *testing.T) {
+func TestEnrich_CancelDuringSynthesisKeepsCheckpoint(t *testing.T) {
 	r := newEnrichRepo(t)
 	cache := LLMCache{Dir: t.TempDir()}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := happyModel()
 	m.rules[2] = fakeRule{"仓库总览", func(string) string { cancel(); return `{"overview":"总览文本"}` }}
 	res, err := Enrich(ctx, r.input(m, cache, EnrichOptions{}))
-	if err != nil || res.State != LLMStatePartial || res.CardsDone != 4 || res.SkeletonRebuilt {
+	if err != nil || res.State != LLMStatePartial || res.CardsDone != 4 || !res.SkeletonRebuilt || !res.Changed || res.Stages != 3 {
 		t.Fatalf("%#v %v", res, err)
 	}
-	if sk, _ := cache.Skeleton(); sk != nil {
-		t.Fatalf("a cancelled synthesis stores nothing: %#v", sk)
+	sk, _ := cache.Skeleton()
+	if sk == nil || sk.Overview != "总览文本" || len(sk.PendingStages) != 0 || sk.PendingOverview || !sk.PendingNotes {
+		t.Fatalf("the cancelled run must store what it finished: %#v", sk)
+	}
+	m2 := happyModel()
+	res, err = Enrich(context.Background(), r.input(m2, cache, EnrichOptions{}))
+	if err != nil || res.State != LLMStateComplete || res.SkeletonRebuilt || !res.Changed {
+		t.Fatalf("resume %#v %v", res, err)
+	}
+	if n := m2.callCount(); n != 1 || countCalls(m2, "用途") != 1 {
+		t.Fatalf("the resumed run must only write register notes, got %d calls", n)
+	}
+	if sk, _ := cache.Skeleton(); sk.RegisterNotes["table:orders"] != "订单主表" || sk.PendingNotes {
+		t.Fatalf("after resume %#v", sk)
+	}
+}
+
+func TestEnrich_InterruptedStagesResume(t *testing.T) {
+	r := newEnrichRepo(t)
+	cache := LLMCache{Dir: t.TempDir()}
+	ctx, cancel := context.WithCancel(context.Background())
+	m := happyModel()
+	stageCalls := 0
+	m.rules[3] = fakeRule{"阶段说明", func(string) string {
+		if stageCalls++; stageCalls == 2 {
+			cancel() // the run's deadline passes during the second stage summary
+		}
+		return `{"summary":"阶段说明文本"}`
+	}}
+	res, err := Enrich(ctx, r.input(m, cache, EnrichOptions{}))
+	if err != nil || res.State != LLMStatePartial || !res.Changed {
+		t.Fatalf("%#v %v", res, err)
+	}
+	sk, _ := cache.Skeleton()
+	if sk == nil || !reflect.DeepEqual(sk.PendingStages, []string{"pay"}) || !sk.PendingOverview || !sk.PendingNotes ||
+		sk.Stages[0].Summary != "阶段说明文本" || sk.Stages[1].Summary != "阶段说明文本" || sk.Stages[2].Summary != "调用支付" {
+		t.Fatalf("checkpoint %#v", sk)
+	}
+	builtAt := sk.BuiltAt
+
+	m2 := happyModel()
+	in := r.input(m2, cache, EnrichOptions{})
+	in.Now = in.Now.Add(time.Hour)
+	res, err = Enrich(context.Background(), in)
+	if err != nil || res.State != LLMStateComplete || res.SkeletonRebuilt || !res.Changed {
+		t.Fatalf("resume %#v %v", res, err)
+	}
+	if n := countCalls(m2, "执行阶段"); n != 0 {
+		t.Fatalf("the skeleton must not be inferred again, got %d calls", n)
+	}
+	var stages []string
+	for _, c := range m2.calls {
+		if strings.Contains(c, "写阶段说明") {
+			stages = append(stages, c)
+		}
+	}
+	if len(stages) != 1 || !strings.Contains(stages[0], "（pay）") {
+		t.Fatalf("only the pending stage is summarized: %d calls", len(stages))
+	}
+	if countCalls(m2, "各阶段概要") != 1 || countCalls(m2, "用途") != 1 {
+		t.Fatalf("overview and notes are written once: %q", m2.calls)
+	}
+	sk, _ = cache.Skeleton()
+	if len(sk.PendingStages) != 0 || sk.PendingOverview || sk.PendingNotes || sk.Stages[2].Summary != "阶段说明文本" ||
+		sk.Overview != "总览文本" || !sk.BuiltAt.Equal(builtAt) {
+		t.Fatalf("after resume %#v", sk)
+	}
+	calls := m2.callCount()
+	if res, err := Enrich(context.Background(), in); err != nil || res.Changed || m2.callCount() != calls {
+		t.Fatalf("nothing left to do: %#v %v", res, err)
 	}
 }
 

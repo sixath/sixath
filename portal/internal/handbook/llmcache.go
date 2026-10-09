@@ -98,6 +98,11 @@ type Skeleton struct {
 	Files               map[string]FileAssign `json:"files"`
 	Overview            string                `json:"overview,omitempty"`
 	RegisterNotes       map[string]string     `json:"register_notes,omitempty"`
+	// Synthesis still owed by an interrupted run, resumed by the next one: stages whose
+	// summary needs (re)writing, the overview, and register notes (renewed in full).
+	PendingStages   []string `json:"pending_stages,omitempty"`
+	PendingOverview bool     `json:"pending_overview,omitempty"`
+	PendingNotes    bool     `json:"pending_notes,omitempty"`
 }
 
 // LLMCache stores LLM output of one repository outside its versioned dirs.

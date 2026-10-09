@@ -360,7 +360,7 @@ P2b 实现：原设想的版本内 `generated/` 改为仓库级 `llm/` 缓存。
 - **退化（按目录分区作阶段）**：`fallback_reason` 为 `too_large`（降级后仍放不下）、`bad_reply`（回复不可用）、`few_stages`（有效阶段 < 2）、`unassigned`（未归类 > 10%）、`no_model`。退化用 P2a 的目录分区作阶段，超过 15 个分区时保留最大的 14 个，其余并入"其他"。骨架推断的传输错误不退化，按合成失败处理。`bad_reply` 退化的骨架在 24 小时后重试模型（重建原因 `fallback_retry`）。仓库没有任何卡片资格文件时得到空骨架（0 个阶段）。
 - **重建判定**：`none`（无骨架）/ `prompt`（提示词版本变化）/ `age`（距上次重建 > `skeleton_rebuild_days`，默认 30）/ `fallback_retry` / `changes`（自上次重建累计改动的**不同**路径 × 5 > 重建时文件数，即 > 20%）/ `topdir`（出现新顶层目录，仓库根 `.` 除外）/ `unassigned`（增量归类后未归类 > 10%）/ `manual`（`full` 运行）。不依赖增量结果的条件先判断，避免对马上要重建的骨架白做增量；`unassigned` 在增量更新之后判断。
 - **增量更新**：删除的文件移出骨架；内容变化的文件保留阶段；新文件取同目录或最近上级目录的多数阶段；变得没有文件的阶段被删除；改动路径累计到 `ChangedPaths`（去重排序）。每个文件的归属 `FileAssign` 记 `Stage`、`Hash`（上次归类时的内容哈希）与 `CardHash`（展示的卡片）：当前内容有卡片时 `CardHash = Hash`，否则保留旧 `CardHash`，渲染为"已过期"。
-- **合成**：受影响阶段（文件集变化、文件内容变化、获得了当前卡片，或尚无说明；重建时为全部阶段）重写说明（提示词 ≤ 40KB，`max_tokens = 700`，≤ 1500 rune）；有阶段且有说明被重写、总览为空或阶段集变化时重写总览（`max_tokens = 1500`，≤ 4000 rune），**0 个阶段时不写总览**；寄存器用途只为引用次数最多的 60 个寄存器生成，每批 20 个（`max_tokens = 1500`，每条 ≤ 160 rune），已有用途的寄存器只有在读写位置所在文件改动时才重写（重建时全部重写，提示词版本未变则先沿用旧用途）。合成调用的传输错误重试 2 次（线性退避 1s、2s），仍失败则本轮失败且不写骨架；回复不可用时保留旧文本。所有步骤成功后，骨架有变化或 commit 变化才写入 `skeleton.json`。
+- **合成**：受影响阶段（文件集变化、文件内容变化、获得了当前卡片，或尚无说明；重建时为全部阶段）重写说明（提示词 ≤ 40KB，`max_tokens = 700`，≤ 1500 rune）；有阶段且有说明被重写、总览为空或阶段集变化时重写总览（`max_tokens = 1500`，≤ 4000 rune），**0 个阶段时不写总览**；寄存器用途只为引用次数最多的 60 个寄存器生成，每批 20 个（`max_tokens = 1500`，每条 ≤ 160 rune），已有用途的寄存器只有在读写位置所在文件改动时才重写（重建时全部重写，提示词版本未变则先沿用旧用途）。合成调用的传输错误重试 2 次（线性退避 1s、2s），仍失败则本轮失败；回复不可用时保留旧文本（该阶段/总览不再待写）。**检查点**：骨架重建或增量更新后（结构有变化时）先把骨架连同待办写入 `skeleton.json`——`pending_stages`（待写说明的阶段 id）、`pending_overview`、`pending_notes`（续跑时全部寄存器用途重写）——此后每写完一个阶段说明、写完总览都再存一次，寄存器用途写完后清空待办；骨架内容、commit 或待办有变化才写入。因此超时、取消或模型失败中断的合成会留下可用骨架（渲染已存内容，存过即 `Changed`、换新 rev），下一轮在提示词版本未变时只续做待办部分，大仓库不会因单轮时限反复从头合成。
 - **清理**：合成成功后删除当前 facts 与骨架 `CardHash` 都不再引用的卡片、其他提示词版本的卡片与失败集文件、超过 1 小时的临时文件；清理失败只记日志，不影响本轮结果。
 - **渲染**（`GeneratorVersion = p2b-1`，变化会触发全部仓库确定性重建一次）：`LoadLLMLayer` 读取卡片资格文件的当前卡片、骨架中旧 `CardHash` 对应的过期卡片，以及当前提示词版本的骨架。有阶段时：`SKILL.md` 换成按阶段组织的模板（§7.2 模板）；`references/index.md` 标题改为"索引"，先列"执行阶段"表（阶段、文件数、说明首句、页面），再列"未归类文件""已过期文件"（各最多 100 个），之后是目录分区；`references/stages/<id>.md` 为阶段说明 + 每个文件的卡片（职责与 role、说明、执行时机、关键函数及 facts 中的行号；过期卡片标"已过期，以源码为准，改用 rca_grep"）；`references/overview.md` 增加"系统总览（LLM 生成）"与阶段列表；`references/registers.md` 每个寄存器加"用途："；分区页每个文件加"职责"行（过期标注）。没有阶段但有卡片时仍按 P2a 模板渲染并带卡片职责。
 - **渲染净化**：LLM 文本在渲染时再次按上限截断；单行字段折叠空白，表格单元格转义 `|`，行首的 `#`、`>`、`-`、`+`、`*`、`=`、`|`、反引号、`~`、`<` 与有序列表标记被转义；多行 Markdown（总览、阶段说明）的标题降级到 `####` 以下，setext 下划线与 HTML 块起始被转义，未闭合的代码围栏补闭合；非法或重复的阶段 id 跳过，函数名去掉反引号。
@@ -374,7 +374,7 @@ P2b 实现：原设想的版本内 `generated/` 改为仓库级 `llm/` 缓存。
 | `model` / `commit` / `prompt_version` | 本轮使用的模型名（配置值）、基于的 handbook commit、`LLMPromptVersion` |
 | `cards_total` / `cards_done` / `cards_new` | 需要卡片的文件数 / 有当前卡片的文件数 / 本轮新生成卡片覆盖的文件数（均按文件计，同内容文件共享卡片） |
 | `card_errors` / `card_transport_errors` | 失败集中的文件数（等内容变化或手动重新生成）/ 本轮调用出错、下轮重试的文件数 |
-| `stages` / `fallback` / `fallback_reason` / `skeleton_rebuilt` / `rebuild_reason` / `skeleton_built_at` | 骨架信息；未合成的轮次沿用上一轮的 `stages`、`fallback`、`fallback_reason`、`skeleton_built_at` |
+| `stages` / `fallback` / `fallback_reason` / `skeleton_rebuilt` / `rebuild_reason` / `skeleton_built_at` | 骨架信息；本轮未写入骨架（含检查点）时沿用上一轮的 `stages`、`fallback`、`fallback_reason`、`skeleton_built_at` |
 | `tokens_in` / `tokens_out` | 本轮 token |
 | `run_at` / `duration_ms` | 本轮开始时间与耗时 |
 | `rev` | 内容修订号；变化即触发确定性重渲染（确定性构建把它写进 `handbook_stats.llm_rev`） |

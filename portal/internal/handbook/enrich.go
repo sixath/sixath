@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -106,9 +107,9 @@ type cardJob struct {
 
 // Enrich generates missing file cards within budget and, once every card-eligible file has
 // been attempted, synthesizes the skeleton. Cancelling ctx stops the run and reports partial
-// progress without error; everything already generated stays cached. Any other error leaves
-// the cached skeleton untouched and reports state failed; local cache errors wrap
-// ErrCacheWrite or ErrCacheRead.
+// progress without error; everything already generated, including synthesis checkpoints,
+// stays cached. Any other error reports state failed; local cache errors wrap ErrCacheWrite
+// or ErrCacheRead.
 func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 	o := in.Opts.withDefaults()
 	var u usage
@@ -420,9 +421,25 @@ func pointCards(sk, prev *Skeleton, files []File, cards map[string]*Card) (map[s
 	return gained, moved
 }
 
-// synthesizeAll rebuilds or incrementally updates the skeleton, rewrites affected stage
-// summaries, the overview and register notes, and stores the skeleton only when every step
-// succeeded. Pruning unused cards afterwards is best effort.
+// pendingWork is the synthesis a skeleton records as still owed.
+type pendingWork struct {
+	stages          []string
+	overview, notes bool
+}
+
+func pendingOf(sk *Skeleton) pendingWork {
+	return pendingWork{stages: slices.Clone(sk.PendingStages), overview: sk.PendingOverview, notes: sk.PendingNotes}
+}
+
+func (p pendingWork) equal(q pendingWork) bool {
+	return slices.Equal(p.stages, q.stages) && p.overview == q.overview && p.notes == q.notes
+}
+
+// synthesizeAll rebuilds or incrementally updates the skeleton, then rewrites affected stage
+// summaries, the overview and register notes. The updated skeleton is stored with the work
+// still owed (Pending*) before any summary is written and again after each summary and the
+// overview, so a run cut short by its deadline or a model error leaves a usable skeleton and
+// the next run resumes only what is pending. Pruning unused cards afterwards is best effort.
 func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards map[string]*Card, res *EnrichResult, u *usage) error {
 	m := retryModel{Model: in.Model, retries: synthesisRetries, backoff: o.RetryBackoff}
 	sk, err := in.Cache.Skeleton()
@@ -430,9 +447,14 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 		return err
 	}
 	prev, prevStages, storedCommit := sk, stageSignature(sk), ""
+	var resume pendingWork
 	if sk != nil {
 		storedCommit = sk.Commit
+		if sk.PromptVersion == LLMPromptVersion {
+			resume = pendingOf(sk)
+		}
 	}
+	onDisk := resume
 	reason := "manual"
 	if !o.Full {
 		// Decide what does not depend on the incremental update first, so a skeleton that is
@@ -464,64 +486,105 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 	for s := range gained {
 		affected[s] = true
 	}
-	dirty := rebuilt || moved || len(changed) > 0
+	for _, s := range resume.stages {
+		affected[s] = true
+	}
+	notesChanged := changed
+	if rebuilt || resume.notes {
+		notesChanged = map[string]bool{}
+		for p := range sk.Files {
+			notesChanged[p] = true
+		}
+	}
+	sk.PendingStages = nil
+	for _, st := range sk.Stages {
+		if affected[st.ID] || st.Summary == "" {
+			sk.PendingStages = append(sk.PendingStages, st.ID)
+		}
+	}
+	sk.PendingOverview = len(sk.Stages) > 0 && (resume.overview || sk.Overview == "" || stageSignature(sk) != prevStages)
+	sk.PendingNotes = len(notesChanged) > 0
+
+	report := func() {
+		res.Stages, res.Fallback, res.FallbackReason, res.SkeletonBuiltAt = len(sk.Stages), sk.FallbackAreas, sk.FallbackReason, sk.BuiltAt
+		res.SkeletonRebuilt = rebuilt
+		if rebuilt {
+			res.RebuildReason = reason
+		}
+	}
+	// unsaved marks rendered content not yet stored; storing it changes the handbook.
+	unsaved := rebuilt || moved || len(changed) > 0
+	save := func() error {
+		sk.Commit, sk.UpdatedAt = in.Commit, in.Now
+		if err := in.Cache.PutSkeleton(sk); err != nil {
+			return err
+		}
+		report()
+		res.Changed = res.Changed || unsaved
+		unsaved, storedCommit, onDisk = false, in.Commit, pendingOf(sk)
+		return nil
+	}
+	if unsaved {
+		if err := save(); err != nil {
+			return err
+		}
+	}
 
 	filesOf := map[string][]string{}
 	for p, a := range sk.Files {
 		filesOf[a.Stage] = append(filesOf[a.Stage], p)
 	}
-	rewritten := 0
-	for i, st := range sk.Stages {
-		if !affected[st.ID] && st.Summary != "" {
+	for i := range sk.Stages {
+		st := sk.Stages[i]
+		if !slices.Contains(sk.PendingStages, st.ID) {
 			continue
 		}
 		files := filesOf[st.ID]
 		sort.Strings(files)
 		s, err := summarizeStage(ctx, m, in.RelPath, st, files, cards, u)
-		if err != nil {
-			if errors.Is(err, errBadReply) {
-				continue
-			}
+		if err != nil && !errors.Is(err, errBadReply) {
 			return modelErr(err)
 		}
+		sk.PendingStages = slices.DeleteFunc(sk.PendingStages, func(id string) bool { return id == st.ID })
+		if err != nil {
+			continue
+		}
 		sk.Stages[i].Summary = s
-		rewritten++
+		sk.PendingOverview = true
+		unsaved = true
+		if err := save(); err != nil {
+			return err
+		}
 	}
-	if len(sk.Stages) > 0 && (rewritten > 0 || sk.Overview == "" || stageSignature(sk) != prevStages) {
+	if sk.PendingOverview {
 		ov, err := writeOverview(ctx, m, in.RelPath, in.Facts, sk, u)
 		switch {
 		case err == nil:
-			dirty = dirty || ov != sk.Overview
+			unsaved = unsaved || ov != sk.Overview
 			sk.Overview = ov
 		case !errors.Is(err, errBadReply):
 			return modelErr(err)
 		}
-	}
-	notesChanged := changed
-	if rebuilt {
-		notesChanged = map[string]bool{}
-		for p := range sk.Files {
-			notesChanged[p] = true
+		sk.PendingOverview = false
+		if unsaved {
+			if err := save(); err != nil {
+				return err
+			}
 		}
 	}
 	notes, err := registerNotes(ctx, m, in.RelPath, in.Facts.Registers, cards, notesChanged, sk.RegisterNotes, u)
 	if err != nil {
 		return modelErr(err)
 	}
-	dirty = dirty || rewritten > 0 || !maps.Equal(notes, sk.RegisterNotes)
+	unsaved = unsaved || !maps.Equal(notes, sk.RegisterNotes)
 	sk.RegisterNotes = notes
-	if dirty || storedCommit != in.Commit {
-		sk.Commit, sk.UpdatedAt = in.Commit, in.Now
-		if err := in.Cache.PutSkeleton(sk); err != nil {
+	sk.PendingNotes = false
+	if unsaved || storedCommit != in.Commit || !pendingOf(sk).equal(onDisk) {
+		if err := save(); err != nil {
 			return err
 		}
 	}
-	res.Stages, res.Fallback, res.FallbackReason, res.SkeletonBuiltAt = len(sk.Stages), sk.FallbackAreas, sk.FallbackReason, sk.BuiltAt
-	res.SkeletonRebuilt = rebuilt
-	if rebuilt {
-		res.RebuildReason = reason
-	}
-	res.Changed = res.Changed || dirty
+	report()
 
 	keep := map[string]bool{}
 	for _, f := range in.Facts.Files {
