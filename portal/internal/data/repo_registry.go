@@ -13,12 +13,15 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var _ biz.RepoRegistryRepo = (*repoRegistryRepo)(nil)
 
 // dirGroupNamespace derives stable dir-group ids from (code_root, rel_prefix).
 var dirGroupNamespace = uuid.MustParse("6f1f0f2e-8a7c-4c1e-9b7d-3c2a1e5d4f60")
+
+const repoRegistryBatchSize = 500
 
 type repoRegistryRepo struct {
 	db  *gorm.DB
@@ -36,39 +39,60 @@ func (r *repoRegistryRepo) UpsertScannedRepository(ctx context.Context, in *biz.
 	var out *biz.Repository
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var m model.Repository
-		err := tx.Where("code_root = ? AND rel_path = ?", in.CodeRoot, in.RelPath).First(&m).Error
-		switch {
-		case errors.Is(err, gorm.ErrRecordNotFound):
+		byKey := func(q *gorm.DB) *gorm.DB {
+			return q.Where("code_root = ? AND rel_path = ?", in.CodeRoot, in.RelPath).Limit(1)
+		}
+		res := byKey(tx).Find(&m)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
 			m = model.Repository{
 				ID: uuid.NewString(), CodeRoot: in.CodeRoot, RelPath: in.RelPath, Name: in.Name,
 				GitRemote: in.GitRemote, GitBranch: in.GitBranch, HeadCommit: in.HeadCommit,
 				SyncMode: biz.RepoSyncRegistryOnly, Status: biz.RepoStatusActive,
 				HandbookStatus: biz.HandbookStatusNone, LastScannedAt: in.LastScannedAt,
 			}
-			if err := tx.Create(&m).Error; err != nil {
-				return err
+			ins := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&m)
+			if ins.Error != nil {
+				return ins.Error
 			}
-		case err != nil:
+			if ins.RowsAffected > 0 {
+				out = repositoryToBiz(&m)
+				return nil
+			}
+			// A locking read sees the concurrent writer's committed row under REPEATABLE READ.
+			m = model.Repository{}
+			res = byKey(tx.Clauses(clause.Locking{Strength: "UPDATE"})).Find(&m)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return biz.ErrRepoNotFound
+			}
+		}
+		if err := refreshScannedRepository(tx, &m, in); err != nil {
 			return err
-		default:
-			updates := map[string]any{
-				"git_remote": in.GitRemote, "git_branch": in.GitBranch,
-				"head_commit": in.HeadCommit, "last_scanned_at": in.LastScannedAt,
-			}
-			if m.Status != biz.RepoStatusArchived {
-				updates["status"] = biz.RepoStatusActive
-			}
-			if err := tx.Model(&m).Updates(updates).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("id = ?", m.ID).First(&m).Error; err != nil {
-				return err
-			}
 		}
 		out = repositoryToBiz(&m)
 		return nil
 	})
 	return out, err
+}
+
+// refreshScannedRepository updates scan-owned fields of an existing row and reloads it.
+func refreshScannedRepository(tx *gorm.DB, m *model.Repository, in *biz.Repository) error {
+	updates := map[string]any{
+		"git_remote": in.GitRemote, "git_branch": in.GitBranch,
+		"head_commit": in.HeadCommit, "last_scanned_at": in.LastScannedAt,
+	}
+	if m.Status != biz.RepoStatusArchived {
+		updates["status"] = biz.RepoStatusActive
+	}
+	if err := tx.Model(m).Updates(updates).Error; err != nil {
+		return err
+	}
+	return tx.Where("id = ?", m.ID).Take(m).Error
 }
 
 func (r *repoRegistryRepo) ListRepositories(ctx context.Context, f biz.RepoFilter) ([]*biz.Repository, error) {
@@ -165,10 +189,15 @@ func (r *repoRegistryRepo) UpsertDirGroup(ctx context.Context, codeRoot, relPref
 		HandbookStatus: biz.HandbookStatusNone,
 		Rule:           &model.RepoGroupRule{CodeRoot: codeRoot, RelPrefix: relPrefix},
 	}
-	if err := r.db.WithContext(ctx).Where("id = ?", id).FirstOrCreate(&m).Error; err != nil {
+	db := r.db.WithContext(ctx)
+	if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&m).Error; err != nil {
 		return nil, err
 	}
-	return repoGroupToBiz(&m), nil
+	var stored model.RepoGroup
+	if err := db.Where("id = ?", id).Take(&stored).Error; err != nil {
+		return nil, err
+	}
+	return repoGroupToBiz(&stored), nil
 }
 
 func (r *repoRegistryRepo) CreateGroup(ctx context.Context, g *biz.RepoGroup) (*biz.RepoGroup, error) {
@@ -232,20 +261,22 @@ func (r *repoRegistryRepo) DeleteGroup(ctx context.Context, id string) error {
 	})
 }
 
+// ReplaceGroupMembers requires a group's members to come from a single source (PK is (group_id, repo_id)).
 func (r *repoRegistryRepo) ReplaceGroupMembers(ctx context.Context, groupID, source string, repoIDs []string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("group_id = ? AND source = ?", groupID, source).Delete(&model.RepoGroupMember{}).Error; err != nil {
 			return err
 		}
-		if len(repoIDs) == 0 {
+		ids := dedupeStrings(repoIDs)
+		if len(ids) == 0 {
 			return nil
 		}
 		now := time.Now()
-		rows := make([]model.RepoGroupMember, 0, len(repoIDs))
-		for _, id := range dedupeStrings(repoIDs) {
+		rows := make([]model.RepoGroupMember, 0, len(ids))
+		for _, id := range ids {
 			rows = append(rows, model.RepoGroupMember{GroupID: groupID, RepoID: id, Source: source, State: biz.RepoMemberActive, CreatedAt: now})
 		}
-		return tx.Create(&rows).Error
+		return tx.CreateInBatches(&rows, repoRegistryBatchSize).Error
 	})
 }
 
@@ -281,6 +312,7 @@ func (r *repoRegistryRepo) ListAgentBindings(ctx context.Context, agentID string
 	return out, nil
 }
 
+// ReplaceAgentBindings expects callers to pass deduplicated bindings.
 func (r *repoRegistryRepo) ReplaceAgentBindings(ctx context.Context, agentID string, bs []*biz.AgentRepoBinding) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("agent_id = ?", agentID).Delete(&model.AgentRepoBinding{}).Error; err != nil {
@@ -296,7 +328,7 @@ func (r *repoRegistryRepo) ReplaceAgentBindings(ctx context.Context, agentID str
 				SubPaths: model.JSONStrings(b.SubPaths), Priority: b.Priority, CreatedBy: b.CreatedBy,
 			})
 		}
-		return tx.Create(&rows).Error
+		return tx.CreateInBatches(&rows, repoRegistryBatchSize).Error
 	})
 }
 
@@ -314,6 +346,7 @@ func (r *repoRegistryRepo) ListAgentIDsBoundToGroup(ctx context.Context, groupID
 	return ids, err
 }
 
+// ReplaceEffectiveRepos expects callers to pass deduplicated rows.
 func (r *repoRegistryRepo) ReplaceEffectiveRepos(ctx context.Context, agentID string, rows []*biz.AgentEffectiveRepo) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("agent_id = ?", agentID).Delete(&model.AgentEffectiveRepo{}).Error; err != nil {
@@ -333,7 +366,7 @@ func (r *repoRegistryRepo) ReplaceEffectiveRepos(ctx context.Context, agentID st
 				SubPaths: model.JSONStrings(e.SubPaths), ComputedAt: e.ComputedAt,
 			})
 		}
-		return tx.Create(&ms).Error
+		return tx.CreateInBatches(&ms, repoRegistryBatchSize).Error
 	})
 }
 

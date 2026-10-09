@@ -2,6 +2,8 @@ package data
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -145,5 +147,95 @@ func TestRepoRegistryRepo_DeleteGroupCascades(t *testing.T) {
 	}
 	if m, _ := r.ListActiveGroupMembers(ctx, []string{g.ID}); len(m[g.ID]) != 0 {
 		t.Fatalf("members must be removed: %#v", m)
+	}
+}
+
+func TestRepoRegistryRepo_UpsertRestoresMissing(t *testing.T) {
+	ctx := context.Background()
+	r := newRepoRegistryRepoForTest(t)
+	a, err := r.UpsertScannedRepository(ctx, &biz.Repository{CodeRoot: "/c", RelPath: "a", Name: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetRepositoryStatus(ctx, a.ID, biz.RepoStatusMissing); err != nil {
+		t.Fatal(err)
+	}
+	b, err := r.UpsertScannedRepository(ctx, &biz.Repository{CodeRoot: "/c", RelPath: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.ID != a.ID || b.Status != biz.RepoStatusActive {
+		t.Fatalf("missing must be restored to active: %#v", b)
+	}
+}
+
+func TestRepoRegistryRepo_UpsertDirGroupKeepsExisting(t *testing.T) {
+	ctx := context.Background()
+	db := openRepoRegistryTestDB(t)
+	r := NewRepoRegistryRepo(&Data{db: db}, log.DefaultLogger)
+	g, err := r.UpsertDirGroup(ctx, "/c", "cg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.RepoGroup{}).Where("id = ?", g.ID).Update("name", "renamed").Error; err != nil {
+		t.Fatal(err)
+	}
+	g2, err := r.UpsertDirGroup(ctx, "/c", "cg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g2.ID != g.ID || g2.Name != "renamed" {
+		t.Fatalf("existing dir group must not be overwritten: %#v", g2)
+	}
+}
+
+func TestRepoRegistryRepo_NotFound(t *testing.T) {
+	ctx := context.Background()
+	r := newRepoRegistryRepoForTest(t)
+	if err := r.SetRepositoryStatus(ctx, "nope", biz.RepoStatusArchived); !errors.Is(err, biz.ErrRepoNotFound) {
+		t.Fatalf("SetRepositoryStatus err = %v", err)
+	}
+	if err := r.DeleteGroup(ctx, "nope"); !errors.Is(err, biz.ErrRepoNotFound) {
+		t.Fatalf("DeleteGroup err = %v", err)
+	}
+	desc := "x"
+	if _, err := r.UpdateRepositoryMeta(ctx, "nope", biz.RepoMetaPatch{Description: &desc}); !errors.Is(err, biz.ErrRepoNotFound) {
+		t.Fatalf("UpdateRepositoryMeta err = %v", err)
+	}
+}
+
+func TestRepoRegistryRepo_ReplaceGroupMembersDedupes(t *testing.T) {
+	ctx := context.Background()
+	r := newRepoRegistryRepoForTest(t)
+	if err := r.ReplaceGroupMembers(ctx, "g", biz.RepoMemberSourceManual, []string{"r2", "", "r1", "r2"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := r.ListActiveGroupMembers(ctx, []string{"g"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m["g"], []string{"r1", "r2"}) {
+		t.Fatalf("members = %v", m["g"])
+	}
+}
+
+func TestRepoRegistryRepo_ReplaceEffectiveReposBatches(t *testing.T) {
+	ctx := context.Background()
+	r := newRepoRegistryRepoForTest(t)
+	now := time.Now()
+	rows := make([]*biz.AgentEffectiveRepo, 0, 1200)
+	for i := 0; i < 1200; i++ {
+		id := fmt.Sprintf("r%04d", i)
+		rows = append(rows, &biz.AgentEffectiveRepo{AgentID: "ag", RepoID: id, Via: []biz.BindingRef{{Kind: "repo", ID: id}}, ComputedAt: now})
+	}
+	if err := r.ReplaceEffectiveRepos(ctx, "ag", rows); err != nil {
+		t.Fatal(err)
+	}
+	eff, err := r.ListEffectiveRepos(ctx, "ag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(eff) != 1200 {
+		t.Fatalf("effective rows = %d, want 1200", len(eff))
 	}
 }
