@@ -718,6 +718,25 @@ func TestRepoRegistryUsecase_ReplaceBindingsUnknownAgent(t *testing.T) {
 	}
 }
 
+func TestRepoRegistryUsecase_CopyBindingsUnknownSourceKeepsTarget(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "svc"))
+	uc, repo := newUsecaseForTest(t, codeRoot, &biz.AgentMeta{ID: "ag"})
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.ReplaceBindings(ctx, "ag", []*biz.AgentRepoBinding{{TargetKind: biz.RepoTargetRepo, TargetID: mustListRepos(t, uc)[0].ID}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.CopyBindings(ctx, "ghost", "ag", ""); !errors.Is(err, biz.ErrAgentNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	if bs, _ := repo.ListAgentBindings(ctx, "ag"); len(bs) != 1 {
+		t.Fatalf("target bindings wiped: %#v", bs)
+	}
+}
+
 func TestRepoRegistryUsecase_RecomputeSkipsUnchanged(t *testing.T) {
 	ctx := context.Background()
 	codeRoot := t.TempDir()

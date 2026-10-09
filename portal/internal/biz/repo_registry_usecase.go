@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -51,10 +52,10 @@ func cleanCodeRoots(in []string) []repoCodeRoot {
 		if err != nil {
 			abs = filepath.Clean(r)
 		}
-		if _, ok := seen[abs]; ok {
+		if _, ok := seen[pathKey(abs)]; ok {
 			continue
 		}
-		seen[abs] = struct{}{}
+		seen[pathKey(abs)] = struct{}{}
 		resolved := abs
 		if ev, err := filepath.EvalSymlinks(abs); err == nil {
 			resolved = filepath.Clean(ev)
@@ -64,7 +65,21 @@ func cleanCodeRoots(in []string) []repoCodeRoot {
 	return out
 }
 
-// pathWithin reports whether p equals root or lies under it.
+// pathKey normalizes p for equality checks; Windows paths compare case-insensitively.
+func pathKey(p string) string {
+	p = filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(p)
+	}
+	return p
+}
+
+func samePath(a, b string) bool {
+	return pathKey(a) == pathKey(b)
+}
+
+// pathWithin reports whether p equals root or lies under it. filepath.Rel already folds
+// case on Windows.
 func pathWithin(root, p string) bool {
 	rel, err := filepath.Rel(root, p)
 	if err != nil || filepath.IsAbs(rel) {
@@ -105,7 +120,7 @@ func (uc *RepoRegistryUsecase) lockAgent(agentID string) func() {
 
 func (uc *RepoRegistryUsecase) configuredRoot(codeRoot string) (repoCodeRoot, bool) {
 	for _, r := range uc.codeRoots {
-		if r.path == codeRoot {
+		if samePath(r.path, codeRoot) {
 			return r, true
 		}
 	}
@@ -384,12 +399,8 @@ func (uc *RepoRegistryUsecase) recomputeAgents(ctx context.Context, ids []string
 // a non-nil (possibly empty) slice is authoritative. Repos under code roots that are no longer
 // configured, and paths that vanished or resolve outside their code root, are dropped.
 func (uc *RepoRegistryUsecase) RCARootsForAgent(ctx context.Context, agentID string) ([]tool.RCARoot, error) {
-	bs, err := uc.repo.ListAgentBindings(ctx, agentID)
-	if err != nil || len(bs) == 0 {
-		return nil, err
-	}
-	eff, err := uc.repo.ListEffectiveRepos(ctx, agentID)
-	if err != nil {
+	bound, eff, err := uc.readAgentEffective(ctx, agentID)
+	if err != nil || !bound {
 		return nil, err
 	}
 	ids := make([]string, 0, len(eff))
@@ -402,45 +413,81 @@ func (uc *RepoRegistryUsecase) RCARootsForAgent(ctx context.Context, agentID str
 	}
 	kept := make([]*AgentEffectiveRepo, 0, len(eff))
 	for _, e := range eff {
-		if r := repos[e.RepoID]; r != nil {
-			if _, ok := uc.configuredRoot(r.CodeRoot); ok {
-				kept = append(kept, e)
-			}
-		}
-	}
-	sort.Slice(kept, func(i, j int) bool {
-		return repos[kept[i].RepoID].RelPath < repos[kept[j].RepoID].RelPath
-	})
-	out := []tool.RCARoot{}
-	for _, root := range buildRCARoots(kept, repos) {
-		if err := uc.checkRootPath(root.Path); err != nil {
-			uc.log.Warnf("rca roots for agent %s: drop %s: %v", agentID, root.Path, err)
+		r := repos[e.RepoID]
+		if r == nil {
 			continue
 		}
-		out = append(out, root)
+		cr, ok := uc.configuredRoot(r.CodeRoot)
+		if !ok {
+			continue
+		}
+		base := r.AbsPath()
+		if len(e.SubPaths) == 0 {
+			if err := checkRootPath(cr, base); err != nil {
+				uc.log.Warnf("rca roots for agent %s: drop %s: %v", agentID, base, err)
+				continue
+			}
+			kept = append(kept, e)
+			continue
+		}
+		var subs []string
+		for _, sp := range e.SubPaths {
+			p := filepath.Join(base, filepath.FromSlash(sp))
+			if err := checkRootPath(cr, p); err != nil {
+				uc.log.Warnf("rca roots for agent %s: drop %s: %v", agentID, p, err)
+				continue
+			}
+			subs = append(subs, sp)
+		}
+		if len(subs) == 0 {
+			continue
+		}
+		c := *e
+		c.SubPaths = subs
+		kept = append(kept, &c)
+	}
+	sort.Slice(kept, func(i, j int) bool {
+		ri, rj := repos[kept[i].RepoID], repos[kept[j].RepoID]
+		if ri.RelPath != rj.RelPath {
+			return ri.RelPath < rj.RelPath
+		}
+		return ri.CodeRoot < rj.CodeRoot
+	})
+	out := buildRCARoots(kept, repos)
+	if out == nil {
+		out = []tool.RCARoot{}
 	}
 	return out, nil
 }
 
-// checkRootPath requires p to exist and, with symlinks resolved, stay inside the resolved
-// form of the configured code root that contains it.
-func (uc *RepoRegistryUsecase) checkRootPath(p string) error {
-	var cr *repoCodeRoot
-	for i := range uc.codeRoots {
-		r := &uc.codeRoots[i]
-		if pathWithin(r.path, p) && (cr == nil || len(r.path) > len(cr.path)) {
-			cr = r
-		}
+// readAgentEffective reads bindings and effective rows under the agent lock so a concurrent
+// first bind is observed either before or after its recompute, never in between.
+func (uc *RepoRegistryUsecase) readAgentEffective(ctx context.Context, agentID string) (bool, []*AgentEffectiveRepo, error) {
+	defer uc.lockAgent(agentID)()
+	bs, err := uc.repo.ListAgentBindings(ctx, agentID)
+	if err != nil || len(bs) == 0 {
+		return false, nil, err
 	}
-	if cr == nil {
-		return errors.New("not under a configured code root")
+	eff, err := uc.repo.ListEffectiveRepos(ctx, agentID)
+	if err != nil {
+		return false, nil, err
+	}
+	return true, eff, nil
+}
+
+// checkRootPath requires p to exist and, with symlinks resolved, stay inside the repo's code
+// root. The root is re-resolved on every call so a root mounted after startup still works.
+func checkRootPath(cr repoCodeRoot, p string) error {
+	rootResolved := cr.resolved
+	if ev, err := filepath.EvalSymlinks(cr.path); err == nil {
+		rootResolved = ev
 	}
 	resolved, err := filepath.EvalSymlinks(p)
 	if err != nil {
 		return err
 	}
-	if !pathWithin(cr.resolved, resolved) {
-		return fmt.Errorf("resolves to %s outside code root %s", resolved, cr.resolved)
+	if !pathWithin(rootResolved, resolved) {
+		return fmt.Errorf("resolves to %s outside code root %s", resolved, rootResolved)
 	}
 	return nil
 }
@@ -695,6 +742,9 @@ func (uc *RepoRegistryUsecase) replaceBindingsLocked(ctx context.Context, agentI
 }
 
 func (uc *RepoRegistryUsecase) CopyBindings(ctx context.Context, fromAgentID, toAgentID, actor string) (*AgentRepoBindingsView, error) {
+	if err := uc.requireAgent(ctx, fromAgentID); err != nil {
+		return nil, err
+	}
 	src, err := uc.repo.ListAgentBindings(ctx, fromAgentID)
 	if err != nil {
 		return nil, err

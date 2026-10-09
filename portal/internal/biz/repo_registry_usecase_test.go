@@ -1,7 +1,10 @@
 package biz
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +44,37 @@ func TestPathWithin(t *testing.T) {
 		if got := pathWithin(root, c.p); got != c.want {
 			t.Errorf("pathWithin(%q) = %v, want %v", c.p, got, c.want)
 		}
+	}
+}
+
+func TestSamePath(t *testing.T) {
+	a := filepath.Join(string(filepath.Separator), "Data", "Code")
+	b := filepath.Join(string(filepath.Separator), "data", "code")
+	if got, want := samePath(a, b), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("samePath(%q, %q) = %v, want %v", a, b, got, want)
+	}
+	if !samePath(a, a+string(filepath.Separator)) {
+		t.Fatal("trailing separator must not matter")
+	}
+	roots := cleanCodeRoots([]string{t.TempDir()})
+	upper := strings.ToUpper(roots[0].path)
+	if got := len(cleanCodeRoots([]string{roots[0].path, upper})); runtime.GOOS == "windows" && got != 1 {
+		t.Fatalf("case variants must dedupe on windows, got %d roots", got)
+	}
+}
+
+func TestCheckRootPathReResolvesRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "svc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// resolved cached from a failed startup evaluation (root not mounted yet)
+	cr := repoCodeRoot{path: dir, resolved: filepath.Join(dir, "not-mounted")}
+	if err := checkRootPath(cr, filepath.Join(dir, "svc")); err != nil {
+		t.Fatalf("checkRootPath = %v", err)
+	}
+	if err := checkRootPath(cr, filepath.Join(dir, "gone")); err == nil {
+		t.Fatal("missing path must be rejected")
 	}
 }
 
