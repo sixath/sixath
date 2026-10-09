@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -350,23 +351,111 @@ func TestEnrich_BadRepliesDoNotBlockSynthesis(t *testing.T) {
 	if err != nil || res.State != LLMStateComplete || res.CardErrors != 0 || res.CardsDone != 4 || res.CardsNew != 1 {
 		t.Fatalf("a full run retries failed cards: %#v %v", res, err)
 	}
-	if failed, _ := cache.FailedCards(); len(failed) != 0 {
-		t.Fatalf("failed set %v", failed)
+	if cf, _ := cache.CardFailures(); len(cf.Failed) != 0 {
+		t.Fatalf("failed set %v", cf.Failed)
+	}
+	if _, err := os.Stat(filepath.Join(cache.Dir, "failed-"+LLMPromptVersion+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an empty failure record removes its file: %v", err)
 	}
 }
 
-func TestEnrich_FailedSetFollowsFacts(t *testing.T) {
+func TestEnrich_CardFailuresFollowFacts(t *testing.T) {
 	r := newEnrichRepo(t)
 	cache := LLMCache{Dir: t.TempDir()}
-	gone := hashOf("gone")
-	if err := cache.PutFailedCards(map[string]bool{gone: true}); err != nil {
+	gone, gone2 := hashOf("gone"), hashOf("gone2")
+	if err := cache.PutCardFailures(&CardFailures{Failed: map[string]bool{gone: true}, Transport: map[string]int{gone2: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(cache.Dir, "failed-p2a-0.json")
+	if err := os.WriteFile(old, []byte(`["x"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Enrich(context.Background(), r.input(happyModel(), cache, EnrichOptions{})); err != nil {
 		t.Fatal(err)
 	}
-	if failed, _ := cache.FailedCards(); failed[gone] {
-		t.Fatalf("hashes no longer in the facts are dropped: %v", failed)
+	if cf, _ := cache.CardFailures(); len(cf.Failed) != 0 || len(cf.Transport) != 0 {
+		t.Fatalf("hashes no longer in the facts are dropped: %#v", cf)
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failures of another prompt version are pruned: %v", err)
+	}
+}
+
+func TestLLMCache_CardFailuresOfUnknownFormatReadAsNone(t *testing.T) {
+	cache := LLMCache{Dir: t.TempDir()}
+	if err := os.WriteFile(filepath.Join(cache.Dir, "failed-"+LLMPromptVersion+".json"), []byte(`["`+hashOf("a")+`"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cf, err := cache.CardFailures()
+	if err != nil || len(cf.Failed) != 0 || len(cf.Transport) != 0 {
+		t.Fatalf("%#v %v", cf, err)
+	}
+	want := &CardFailures{Failed: map[string]bool{hashOf("a"): true}, Transport: map[string]int{hashOf("b"): 2}}
+	if err := cache.PutCardFailures(want); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := cache.CardFailures(); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip %#v %v", got, err)
+	}
+}
+
+func TestEnrich_PersistentTransportErrorEscalates(t *testing.T) {
+	r := newEnrichRepo(t)
+	cache := LLMCache{Dir: t.TempDir()}
+	const p = "internal/pay/client.go"
+	m := &flakyModel{fakeModel: happyModel(), match: cardOf(p), fails: func(int) bool { return true }}
+	for round := 1; round < cardTransportRounds; round++ {
+		res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{}))
+		if err != nil || res.State != LLMStatePartial || res.CardTransportErrors != 1 || res.LastTransportError != "connection reset" {
+			t.Fatalf("round %d: %#v %v", round, res, err)
+		}
+		if sk, _ := cache.Skeleton(); sk != nil {
+			t.Fatalf("round %d synthesized", round)
+		}
+	}
+	res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{}))
+	if err != nil || res.State != LLMStateComplete || res.CardErrors != 1 || res.CardTransportErrors != 0 || res.CardsDone != 3 || res.LastTransportError == "" {
+		t.Fatalf("after %d rounds the card counts as failed and synthesis runs: %#v %v", cardTransportRounds, res, err)
+	}
+	if sk, _ := cache.Skeleton(); sk == nil || sk.Files[p].Stage != "pay" {
+		t.Fatalf("skeleton %#v", sk)
+	}
+	calls := m.n
+	if res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{})); err != nil || res.State != LLMStateComplete || m.n != calls {
+		t.Fatalf("a failed card is not retried: %#v %v", res, err)
+	}
+}
+
+func TestEnrich_DeadModelConvergesToFailure(t *testing.T) {
+	r := newEnrichRepo(t)
+	cache := LLMCache{Dir: t.TempDir()}
+	if _, err := Enrich(context.Background(), r.input(happyModel(), cache, EnrichOptions{})); err != nil {
+		t.Fatal(err)
+	}
+	sk0, _ := cache.Skeleton()
+	sk0.BaseFiles = 100
+	if err := cache.PutSkeleton(sk0); err != nil {
+		t.Fatal(err)
+	}
+	for i, f := range r.facts.Files {
+		if f.Path == "internal/order/service.go" {
+			r.facts.Files[i] = writeRepoFile(t, r.root, f.Path, "package order\n// v2\n")
+		}
+	}
+	m := &fakeModel{failErr: errors.New("503 upstream")}
+	in := r.input(m, cache, EnrichOptions{})
+	in.Commit = "c2"
+	for round := 1; round < cardTransportRounds; round++ {
+		if res, err := Enrich(context.Background(), in); err != nil || res.State != LLMStatePartial {
+			t.Fatalf("round %d: %#v %v", round, res, err)
+		}
+	}
+	res, err := Enrich(context.Background(), in)
+	if !errors.Is(err, ErrModelUnavailable) || res.State != LLMStateFailed || res.LastTransportError != "503 upstream" {
+		t.Fatalf("synthesis with a dead model fails the run: %#v %v", res, err)
+	}
+	if sk, _ := cache.Skeleton(); sk.Commit != "c1" {
+		t.Fatalf("skeleton %#v", sk)
 	}
 }
 
@@ -397,12 +486,15 @@ func TestEnrich_CardTransportErrorsRetryNextRun(t *testing.T) {
 	if err != nil || res.State != LLMStatePartial || res.CardTransportErrors != 1 || res.CardErrors != 0 || res.CardsDone != 3 {
 		t.Fatalf("%#v %v", res, err)
 	}
-	if failed, _ := cache.FailedCards(); len(failed) != 0 {
-		t.Fatalf("transport errors are not remembered as failed: %v", failed)
+	if cf, _ := cache.CardFailures(); len(cf.Failed) != 0 || len(cf.Transport) != 1 {
+		t.Fatalf("a transport error is counted, not marked failed: %#v", cf)
 	}
 	res, err = Enrich(context.Background(), r.input(m, cache, EnrichOptions{Concurrency: 1}))
 	if err != nil || res.State != LLMStateComplete || res.CardsDone != 4 || res.CardsNew != 1 || m.n != 2 {
 		t.Fatalf("retried next run: %#v %v (calls %d)", res, err, m.n)
+	}
+	if cf, _ := cache.CardFailures(); len(cf.Transport) != 0 {
+		t.Fatalf("success clears the count: %#v", cf)
 	}
 }
 

@@ -25,6 +25,10 @@ const (
 
 	maxConsecutiveCallErrors = 5
 	synthesisRetries         = 2
+	// cardTransportRounds runs with a failed card call put a hash in the failed set, so a card
+	// the provider always rejects cannot hold back synthesis.
+	cardTransportRounds = 3
+	maxErrorRunes       = 300
 )
 
 // ErrModelUnavailable aborts a run whose model calls keep failing.
@@ -79,8 +83,9 @@ type EnrichResult struct {
 	CardsTotal          int
 	CardsDone           int
 	CardsNew            int
-	CardErrors          int // files whose card got an unusable reply; not retried until their content changes
-	CardTransportErrors int // files whose card call failed this run; retried next run
+	CardErrors          int    // files whose card failed for good (unusable reply or persistent transport errors); retried when their content changes
+	CardTransportErrors int    // files whose card call failed this run and will be retried next run
+	LastTransportError  string // last failed model call of the run (card or synthesis), clipped
 	Stages              int
 	Fallback            bool
 	SkeletonRebuilt     bool
@@ -116,11 +121,15 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 		return res, err
 	}
 
-	storedFailed, err := in.Cache.FailedCards()
+	stored, err := in.Cache.CardFailures()
 	if err != nil {
 		return fail(err)
 	}
-	failed := map[string]bool{}
+	prior := stored
+	if o.Full {
+		prior = &CardFailures{}
+	}
+	failures := &CardFailures{Failed: map[string]bool{}, Transport: map[string]int{}}
 	files := eligibleFiles(in.Facts)
 	res.CardsTotal = len(files)
 	cards := map[string]*Card{}
@@ -143,9 +152,12 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 		switch {
 		case c != nil:
 			cards[f.Path] = c
-		case storedFailed[f.Hash] && !o.Full:
-			failed[f.Hash] = true
+		case prior.Failed[f.Hash]:
+			failures.Failed[f.Hash] = true
 		default:
+			if n := prior.Transport[f.Hash]; n > 0 {
+				failures.Transport[f.Hash] = n
+			}
 			todo = append(todo, j)
 		}
 	}
@@ -166,24 +178,24 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 		}
 		return a.Path < b.Path
 	})
-	cut, err := generateCards(ctx, in, o, todo, cards, failed, res, &u)
+	cut, err := generateCards(ctx, in, o, todo, cards, failures, res, &u)
 	res.CardsDone = len(cards)
 	for _, f := range files {
-		if failed[f.Hash] {
+		if failures.Failed[f.Hash] {
 			res.CardErrors++
 		}
 	}
 	res.Changed = res.CardsNew > 0
-	if !maps.Equal(failed, storedFailed) {
-		if perr := in.Cache.PutFailedCards(failed); perr != nil && err == nil {
+	if !maps.Equal(failures.Failed, stored.Failed) || !maps.Equal(failures.Transport, stored.Transport) {
+		if perr := in.Cache.PutCardFailures(failures); perr != nil && err == nil {
 			err = perr
 		}
 	}
 	if err != nil {
 		return fail(err)
 	}
-	// Cards that failed in transit are retried next run, like cards cut by the budget; only
-	// failed-set hashes may stay missing when synthesizing.
+	// Cards that failed in transit are retried next run, like cards cut by the budget, until
+	// they move to the failed set; only failed-set hashes may stay missing when synthesizing.
 	if cut || ctx.Err() != nil || res.CardTransportErrors > 0 {
 		res.State = LLMStatePartial
 		return res, nil
@@ -193,6 +205,9 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 			res.State = LLMStatePartial
 			return res, nil
 		}
+		if errors.Is(err, ErrModelUnavailable) {
+			res.LastTransportError = transportMessage(err)
+		}
 		return fail(err)
 	}
 	res.State = LLMStateComplete
@@ -200,10 +215,11 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 }
 
 // generateCards runs the card jobs in order with at most o.MaxCardsPerRun model calls and
-// reports whether jobs were left untried for lack of budget. Unusable replies add the hash to
-// failed; maxConsecutiveCallErrors failed calls in a row abort with ErrModelUnavailable and a
-// failed cache write aborts with that error.
-func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []*cardJob, cards map[string]*Card, failed map[string]bool, res *EnrichResult, u *usage) (bool, error) {
+// reports whether jobs were left untried for lack of budget. Unusable replies, and transport
+// errors in cardTransportRounds runs, add the hash to the failed set; maxConsecutiveCallErrors
+// failed calls in a row abort with ErrModelUnavailable and a failed cache write aborts with
+// that error.
+func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []*cardJob, cards map[string]*Card, failures *CardFailures, res *EnrichResult, u *usage) (bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (
@@ -258,14 +274,21 @@ func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []
 						cards[f.Path] = card
 					}
 					res.CardsNew += len(j.files)
-					delete(failed, j.hash)
+					delete(failures.Transport, j.hash)
 					consecutive = 0
 				case ctx.Err() != nil:
 				case errors.Is(err, errBadReply):
-					failed[j.hash] = true
+					failures.Failed[j.hash] = true
+					delete(failures.Transport, j.hash)
 					consecutive = 0
 				default:
-					res.CardTransportErrors += len(j.files)
+					res.LastTransportError = transportMessage(err)
+					if failures.Transport[j.hash]++; failures.Transport[j.hash] >= cardTransportRounds {
+						failures.Failed[j.hash] = true
+						delete(failures.Transport, j.hash)
+					} else {
+						res.CardTransportErrors += len(j.files)
+					}
 					consecutive++
 					if consecutive >= maxConsecutiveCallErrors {
 						abort(fmt.Errorf("%w: %w", ErrModelUnavailable, err))
@@ -344,6 +367,11 @@ func (m retryModel) Chat(ctx context.Context, msgs []model.Message, opts ...mode
 }
 
 func modelErr(err error) error { return fmt.Errorf("%w: %w", ErrModelUnavailable, err) }
+
+// transportMessage is the clipped message of a failed model call.
+func transportMessage(err error) string {
+	return clipRunes(strings.TrimPrefix(err.Error(), ErrModelUnavailable.Error()+": "), maxErrorRunes)
+}
 
 func stageSignature(sk *Skeleton) string {
 	if sk == nil {

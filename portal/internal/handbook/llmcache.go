@@ -162,36 +162,53 @@ func (c LLMCache) failedPath() string {
 	return filepath.Join(c.Dir, "failed-"+LLMPromptVersion+".json")
 }
 
-// FailedCards returns the content hashes whose card got an unusable reply. They are not
-// retried until their content changes or a full run clears the set.
-func (c LLMCache) FailedCards() (map[string]bool, error) {
-	var hashes []string
-	if _, err := readCacheJSON(c.failedPath(), &hashes); err != nil {
-		return nil, err
-	}
-	set := make(map[string]bool, len(hashes))
-	for _, h := range hashes {
-		if validHash(h) {
-			set[h] = true
-		}
-	}
-	return set, nil
+// CardFailures tracks content hashes whose card could not be generated. Failed hashes are
+// not retried until their content changes or a full run clears them; Transport counts the
+// runs in which a hash's card call failed in transit.
+type CardFailures struct {
+	Failed    map[string]bool
+	Transport map[string]int
 }
 
-// PutFailedCards stores the set of failed content hashes.
-func (c LLMCache) PutFailedCards(set map[string]bool) error {
-	if len(set) == 0 {
+type cardFailuresJSON struct {
+	Failed    []string       `json:"failed,omitempty"`
+	Transport map[string]int `json:"transport,omitempty"`
+}
+
+// CardFailures returns the stored card failures; a file of another format reads as none.
+func (c LLMCache) CardFailures() (*CardFailures, error) {
+	var raw cardFailuresJSON
+	if _, err := readCacheJSON(c.failedPath(), &raw); err != nil {
+		return nil, err
+	}
+	cf := &CardFailures{Failed: map[string]bool{}, Transport: map[string]int{}}
+	for _, h := range raw.Failed {
+		if validHash(h) {
+			cf.Failed[h] = true
+		}
+	}
+	for h, n := range raw.Transport {
+		if validHash(h) && n > 0 {
+			cf.Transport[h] = n
+		}
+	}
+	return cf, nil
+}
+
+// PutCardFailures stores the card failures, removing the file when there are none.
+func (c LLMCache) PutCardFailures(cf *CardFailures) error {
+	if len(cf.Failed) == 0 && len(cf.Transport) == 0 {
 		if err := os.Remove(c.failedPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
-	hashes := make([]string, 0, len(set))
-	for h := range set {
-		hashes = append(hashes, h)
+	raw := cardFailuresJSON{Transport: cf.Transport}
+	for h := range cf.Failed {
+		raw.Failed = append(raw.Failed, h)
 	}
-	sort.Strings(hashes)
-	return writeJSON(c.failedPath(), hashes)
+	sort.Strings(raw.Failed)
+	return writeJSON(c.failedPath(), raw)
 }
 
 // Skeleton returns the cached skeleton, or nil when there is none.
@@ -209,11 +226,25 @@ func (c LLMCache) Skeleton() (*Skeleton, error) {
 // PutSkeleton stores the skeleton.
 func (c LLMCache) PutSkeleton(sk *Skeleton) error { return writeJSON(c.skeletonPath(), sk) }
 
-// PruneCards removes cached cards whose content hash is not in keep and returns how many
-// were removed.
+// PruneCards removes cached cards whose content hash is not in keep and the card failures of
+// other prompt versions, and returns how many cards were removed.
 func (c LLMCache) PruneCards(keep map[string]bool) (int, error) {
+	entries, err := os.ReadDir(c.Dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return 0, err
+	}
+	current := filepath.Base(c.failedPath())
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || name == current || !strings.HasPrefix(name, "failed-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(c.Dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return 0, err
+		}
+	}
 	n := 0
-	err := filepath.WalkDir(filepath.Join(c.Dir, "cards"), func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(filepath.Join(c.Dir, "cards"), func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil
