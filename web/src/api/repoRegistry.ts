@@ -2,6 +2,7 @@ import { request } from './client'
 import type {
   AgentRepoBinding,
   AgentRepoBindingsView,
+  HandbookConfigView,
   HandbookView,
   LegacyLinkMigrationItem,
   RepoDetail,
@@ -31,11 +32,17 @@ export const repoApi = {
     request<{ path: string; content: string }>(`/repos/${enc(id)}/handbook/page?path=${enc(path)}`),
   rebuildHandbook: (id: string) =>
     request<{ accepted: boolean }>(`/repos/${enc(id)}/handbook/rebuild`, send('POST')),
+  enrichHandbook: (id: string, full: boolean) =>
+    request<{ accepted: boolean }>(`/repos/${enc(id)}/handbook/enrich${full ? '?full=1' : ''}`, send('POST')),
   migrateLegacyLinks: (apply: boolean) =>
     request<{ apply: boolean; items: LegacyLinkMigrationItem[] }>(
       `/repos/migrate-legacy-links${apply ? '?apply=true' : ''}`,
       send('POST'),
     ),
+}
+
+export const handbookConfigApi = {
+  get: () => request<HandbookConfigView>('/handbook/config'),
 }
 
 export const repoGroupApi = {

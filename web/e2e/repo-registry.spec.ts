@@ -112,6 +112,12 @@ async function mockRepoRegistry(
   })
 }
 
+async function mockHandbookConfig(page: Page, model = 'qwen/qwen-max') {
+  await page.route('**/api/v1/handbook/config', async (route: Route) => {
+    await route.fulfill({ json: { model, enabled: model !== '' } })
+  })
+}
+
 test.describe('Repo registry UI', () => {
   test('仓库列表展示仓库并可手动扫描', async ({ page }) => {
     await mockRepoRegistry(page)
@@ -272,6 +278,131 @@ test.describe('Repo registry UI', () => {
 
     finished = true
     await expect(page.getByTestId('handbook-state-r-a')).toHaveText('最新', { timeout: 10_000 })
+  })
+
+  test('仓库列表展示 LLM 增强状态与进度', async ({ page }) => {
+    const partial = {
+      ...repoA,
+      handbook_status: 'ready',
+      handbook_commit: repoA.head_commit,
+      handbook_version: 2,
+      handbook_model: '',
+      handbook_llm: { state: 'partial', commit: repoA.head_commit, cards_done: 120, cards_total: 600 },
+    }
+    const off = { ...repoB, handbook_model: 'off' }
+    await mockRepoRegistry(page, { repos: [partial, off] })
+    await mockHandbookConfig(page)
+
+    await page.goto('/repos')
+    await expect(page.getByTestId('llm-state-r-a')).toContainText('部分完成 120/600')
+    await expect(page.getByTestId('llm-state-r-b')).toContainText('未启用')
+  })
+
+  test('编辑弹窗可设置 Handbook 模型', async ({ page }) => {
+    let patched: Record<string, unknown> | null = null
+    await mockRepoRegistry(page)
+    await mockHandbookConfig(page)
+    await page.route(/\/api\/v1\/model-providers(\?.*)?$/, async (route: Route) => {
+      await route.fulfill({
+        json: { providers: [{ id: 'p1', name: 'qwen', kind: 'openai_compat', base_url: '', has_api_key: true, enabled: true }] },
+      })
+    })
+    await page.route(/\/api\/v1\/model-catalog(\?.*)?$/, async (route: Route) => {
+      await route.fulfill({
+        json: { items: [{ id: 'e1', provider_id: 'p1', model: 'qwen-max', display_name: 'Qwen Max', hidden: false, source: 'sync' }] },
+      })
+    })
+    await page.route(/\/api\/v1\/repos\/r-a$/, async (route: Route) => {
+      if (route.request().method() === 'PATCH') {
+        patched = route.request().postDataJSON() as Record<string, unknown>
+        await route.fulfill({ json: { ...repoA, handbook_model: patched.handbook_model } })
+        return
+      }
+      await route.fulfill({ json: { repository: repoA, agent_ids: [] } })
+    })
+
+    await page.goto('/repos')
+    await page.getByRole('row', { name: /cloudgame\/svc-a/ }).getByRole('button', { name: '编辑' }).click()
+    const dialog = page.getByRole('dialog')
+    const model = dialog.getByLabel('Handbook 模型')
+    await expect(model).toHaveAttribute('placeholder', '继承全局（qwen/qwen-max）')
+    await expect(dialog.locator('#handbook-model-options option[value="qwen/qwen-max"]')).toHaveCount(1)
+    await model.fill(' off ')
+    await dialog.getByRole('button', { name: '保存' }).click()
+    await expect(dialog).toHaveCount(0)
+    expect(patched).not.toBeNull()
+    expect(patched!.handbook_model).toBe('off')
+    await expect(page.getByTestId('llm-state-r-a')).toContainText('未启用')
+  })
+
+  test('handbook 弹窗展示 LLM 区块并可重新生成', async ({ page }) => {
+    const enriched: string[] = []
+    let enrichStatus = 409
+    const ready = { ...repoA, handbook_status: 'ready', handbook_commit: repoA.head_commit, handbook_version: 2 }
+    await mockRepoRegistry(page, { repos: [ready, repoB] })
+    await mockHandbookConfig(page)
+    await page.route(/\/api\/v1\/repos\/[^/]+\/handbook(\/[^?]*)?(\?.*)?$/, async (route: Route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname.endsWith('/handbook/enrich')) {
+        enriched.push(url.search)
+        if (enrichStatus === 409) {
+          await route.fulfill({
+            status: 409,
+            json: { code: 409, reason: 'HANDBOOK_LLM_BUSY', message: 'handbook: another LLM run is in progress' },
+          })
+          return
+        }
+        await route.fulfill({ json: { accepted: true } })
+        return
+      }
+      if (url.pathname.endsWith('/handbook/page')) {
+        await route.fulfill({ json: { path: 'SKILL.md', content: 'Handbook body' } })
+        return
+      }
+      await route.fulfill({
+        json: {
+          repo_id: 'r-a',
+          status: 'ready',
+          commit: repoA.head_commit,
+          head_commit: repoA.head_commit,
+          version: 2,
+          pages: ['SKILL.md'],
+          llm_model: 'qwen/qwen-max',
+          llm_running: false,
+          llm: {
+            state: 'complete',
+            commit: repoA.head_commit,
+            cards_done: 598,
+            cards_total: 600,
+            card_errors: 2,
+            stages: 6,
+            fallback: true,
+            fallback_reason: 'bad_reply',
+            tokens_in: 1200,
+            tokens_out: 300,
+            last_error: 'skeleton reply truncated',
+          },
+        },
+      })
+    })
+
+    await page.goto('/repos')
+    await page.getByRole('button', { name: '查看 cloudgame/svc-a 的 handbook' }).click()
+    const section = page.getByRole('dialog').getByTestId('handbook-llm')
+    await expect(section.getByTestId('handbook-llm-state')).toHaveText('已完成 598/600')
+    await expect(section).toContainText('2 个文件生成失败')
+    await expect(section).toContainText('按目录分区')
+    await expect(section).toContainText('输入 1200 / 输出 300')
+    await expect(section.getByTestId('handbook-llm-error')).toContainText('最近一轮有错误')
+
+    const regenerate = section.getByRole('button', { name: '重新生成 LLM 内容' })
+    await regenerate.click()
+    await expect(section.getByTestId('handbook-llm-enrich-error')).toContainText('其他仓库的 LLM 增强正在运行')
+
+    enrichStatus = 200
+    await regenerate.click()
+    await expect(section.getByTestId('handbook-llm-notice')).toContainText('已开始')
+    expect(enriched).toEqual(['?full=1', '?full=1'])
   })
 
   test('handbook 弹窗显示加载中、以接口状态为准并可按 Esc 关闭', async ({ page }) => {

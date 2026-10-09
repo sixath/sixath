@@ -180,6 +180,70 @@
   color: #4b5563;
 }
 
+.repo-llm-badge {
+  margin-top: 0.25rem;
+}
+
+.badge-llm-running {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.badge-llm-complete {
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+  color: var(--ok);
+}
+
+.badge-llm-failed {
+  background: color-mix(in srgb, var(--destructive) 15%, transparent);
+  color: var(--destructive);
+}
+
+.badge-llm-partial,
+.badge-llm-pending {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: #b45309;
+}
+
+.badge-llm-off {
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  color: var(--muted);
+}
+
+.handbook-llm {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.handbook-llm__head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.handbook-llm__action {
+  margin-left: auto;
+}
+
+.handbook-llm__facts {
+  margin: 0.4rem 0 0 1.25rem;
+  padding: 0;
+}
+
+.handbook-llm__warn {
+  margin-top: 0.4rem;
+  color: #b45309;
+}
+
+.handbook-llm .error,
+.handbook-llm .success {
+  margin-top: 0.4rem;
+}
+
 .handbook-dialog {
   width: min(1100px, 94vw);
   max-width: none;

@@ -6,15 +6,23 @@ import type {
   RepoGroupView,
   Repository,
 } from '../src/api/repoRegistryTypes.ts'
+import type { ModelCatalogEntry, ModelProvider } from '../src/api/client.ts'
 import {
   anyHandbookBuildActive,
   bindingsEqual,
+  effectiveHandbookModel,
+  enrichErrorMessage,
   groupNamesByRepo,
   handbookBuildActive,
+  handbookModelOptions,
   handbookState,
+  handbookViewLLMState,
   includeRepo,
   isGroupIncluded,
   isRepoExcluded,
+  llmProgress,
+  llmRunning,
+  llmState,
   parseSubPaths,
   parseTags,
   pendingAutoApplyCount,
@@ -257,6 +265,123 @@ describe('handbookBuildActive', () => {
     const ready = { head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa' }
     assert.equal(anyHandbookBuildActive([ready, building], now), true)
     assert.equal(anyHandbookBuildActive([ready], now), false)
+  })
+})
+
+describe('effectiveHandbookModel', () => {
+  it('inherits the global model when the repo has no override', () => {
+    assert.equal(effectiveHandbookModel({ handbook_model: '' }, ' qwen/qwen-max '), 'qwen/qwen-max')
+    assert.equal(effectiveHandbookModel({}, 'qwen/qwen-max'), 'qwen/qwen-max')
+    assert.equal(effectiveHandbookModel({}, ''), '')
+  })
+  it('prefers the repo override and treats off case-insensitively', () => {
+    assert.equal(effectiveHandbookModel({ handbook_model: ' ds/deepseek-v3 ' }, 'qwen/qwen-max'), 'ds/deepseek-v3')
+    assert.equal(effectiveHandbookModel({ handbook_model: 'ds/deepseek-v3' }, ''), 'ds/deepseek-v3')
+    assert.equal(effectiveHandbookModel({ handbook_model: 'off' }, 'qwen/qwen-max'), '')
+    assert.equal(effectiveHandbookModel({ handbook_model: ' OFF ' }, 'qwen/qwen-max'), '')
+  })
+})
+
+describe('llmState', () => {
+  const now = Date.parse('2026-10-09T10:00:00Z')
+  const base: Repository = { ...repo('r1', 'cg/a'), head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa', handbook_model: '' }
+  const g = 'qwen/qwen-max'
+  it('is off without an effective model', () => {
+    assert.equal(llmState(base, '', now), 'off')
+    assert.equal(llmState({ ...base, handbook_model: 'off' }, g, now), 'off')
+  })
+  it('is running only under a live lease', () => {
+    assert.equal(llmState({ ...base, handbook_llm_lease_until: '2026-10-09T10:05:00Z' }, g, now), 'running')
+    assert.equal(llmState({ ...base, handbook_llm_lease_until: '2026-10-09T09:59:00Z' }, g, now), 'pending')
+  })
+  it('maps stored state and commit drift', () => {
+    assert.equal(llmState(base, g, now), 'pending')
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'partial', commit: 'aaa' } }, g, now), 'partial')
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'complete', commit: 'aaa' } }, g, now), 'complete')
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'complete', commit: 'old' } }, g, now), 'pending')
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'failed', commit: 'aaa', failed_commit: 'aaa' } }, g, now), 'failed')
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'failed', commit: 'aaa' } }, g, now), 'failed')
+  })
+  it('a failure on an older commit is retried, so it is pending', () => {
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'failed', commit: 'old', failed_commit: 'old' } }, g, now), 'pending')
+  })
+  it('last_error alone is not a failure', () => {
+    assert.equal(llmState({ ...base, handbook_llm: { last_error: 'disk full' } }, g, now), 'pending')
+    assert.equal(llmState({ ...base, handbook_llm: { state: 'complete', commit: 'aaa', last_error: 'x' } }, g, now), 'complete')
+  })
+})
+
+describe('handbookViewLLMState', () => {
+  const view = { commit: 'aaa', llm_model: 'qwen/qwen-max', llm_running: false }
+  it('follows the same rules as llmState', () => {
+    assert.equal(handbookViewLLMState({ ...view, llm_model: '' }), 'off')
+    assert.equal(handbookViewLLMState({ ...view, llm_running: true }), 'running')
+    assert.equal(handbookViewLLMState(view), 'pending')
+    assert.equal(handbookViewLLMState({ ...view, llm: { state: 'partial', commit: 'aaa' } }), 'partial')
+    assert.equal(handbookViewLLMState({ ...view, llm: { state: 'failed', commit: 'aaa' } }), 'failed')
+  })
+})
+
+describe('llmProgress', () => {
+  it('formats done/total', () => {
+    assert.equal(llmProgress(undefined), '')
+    assert.equal(llmProgress({ state: 'partial' }), '')
+    assert.equal(llmProgress({ cards_total: 600 }), '0/600')
+    assert.equal(llmProgress({ cards_total: 600, cards_done: 120 }), '120/600')
+  })
+})
+
+describe('LLM leases keep polling alive', () => {
+  const now = Date.parse('2026-10-09T10:00:00Z')
+  const ready = { head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa' }
+  it('llmRunning checks the lease', () => {
+    assert.equal(llmRunning(ready, now), false)
+    assert.equal(llmRunning({ ...ready, handbook_llm_lease_until: '2026-10-09T10:05:00Z' }, now), true)
+    assert.equal(llmRunning({ ...ready, handbook_llm_lease_until: '2026-10-09T09:59:00Z' }, now), false)
+    assert.equal(llmRunning({ ...ready, handbook_llm_lease_until: 'bad' }, now), false)
+  })
+  it('anyHandbookBuildActive counts live LLM leases', () => {
+    assert.equal(anyHandbookBuildActive([ready, { ...ready, handbook_llm_lease_until: '2026-10-09T10:05:00Z' }], now), true)
+    assert.equal(anyHandbookBuildActive([{ ...ready, handbook_llm_lease_until: '2026-10-09T09:00:00Z' }], now), false)
+  })
+})
+
+describe('handbookModelOptions', () => {
+  const providers = [
+    { id: 'p1', name: 'qwen', enabled: true },
+    { id: 'p2', name: '', enabled: true },
+    { id: 'p3', name: 'old', enabled: false },
+  ] as ModelProvider[]
+  const entries = [
+    { id: 'e1', provider_id: 'p1', model: 'qwen-max', display_name: '通义千问 Max', hidden: false },
+    { id: 'e2', provider_id: 'p1', model: 'qwen-hidden', display_name: '', hidden: true },
+    { id: 'e3', provider_id: 'p2', model: 'deepseek-v3', display_name: '', hidden: false },
+    { id: 'e4', provider_id: 'p3', model: 'gpt', display_name: '', hidden: false },
+    { id: 'e5', provider_id: 'gone', model: 'x', display_name: '', hidden: false },
+    { id: 'e6', provider_id: 'p1', model: 'qwen-max', display_name: 'dup', hidden: false },
+  ] as ModelCatalogEntry[]
+  it('lists off first, then enabled providers and visible entries as provider/model', () => {
+    assert.deepEqual(handbookModelOptions(providers, entries), [
+      { value: 'off', label: '禁用该仓库的 LLM 增强' },
+      { value: 'p2/deepseek-v3', label: 'deepseek-v3' },
+      { value: 'qwen/qwen-max', label: '通义千问 Max' },
+    ])
+  })
+  it('falls back to off only', () => {
+    assert.deepEqual(handbookModelOptions([], []), [{ value: 'off', label: '禁用该仓库的 LLM 增强' }])
+  })
+})
+
+describe('enrichErrorMessage', () => {
+  it('maps known backend errors to friendly text', () => {
+    assert.match(enrichErrorMessage('handbook: LLM layer is disabled for this repository'), /未启用/)
+    assert.match(enrichErrorMessage('handbook: deterministic handbook is not current'), /先.*重建|不是最新/)
+    assert.match(enrichErrorMessage('handbook: build already running'), /生成中/)
+    assert.match(enrichErrorMessage('handbook: another LLM run is in progress'), /其他仓库/)
+    assert.match(enrichErrorMessage('repository handbooks are not configured'), /未配置/)
+  })
+  it('keeps unknown messages', () => {
+    assert.equal(enrichErrorMessage('boom'), 'boom')
   })
 })
 

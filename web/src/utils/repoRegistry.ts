@@ -1,7 +1,10 @@
+import type { ModelCatalogEntry, ModelProvider } from '../api/client'
 import type {
   AgentRepoBinding,
   BindingRef,
   BindingTargetKind,
+  HandbookLLMStats,
+  HandbookView,
   LegacyAction,
   LegacyLinkMigrationItem,
   RepoFilter,
@@ -240,6 +243,7 @@ export function handbookState(
 type HandbookBuildFields = Pick<Repository, 'handbook_status' | 'head_commit'> & {
   handbook_commit?: string
   handbook_lease_until?: string
+  handbook_llm_lease_until?: string
 }
 
 /** A build is active while building under a live lease; an expired lease means it is stuck. */
@@ -250,8 +254,111 @@ export function handbookBuildActive(r: HandbookBuildFields, now: number = Date.n
   return Number.isNaN(until) || until > now
 }
 
+export function llmRunning(r: Pick<Repository, 'handbook_llm_lease_until'>, now: number = Date.now()): boolean {
+  if (!r.handbook_llm_lease_until) return false
+  const until = Date.parse(r.handbook_llm_lease_until)
+  return !Number.isNaN(until) && until > now
+}
+
+/** True while any deterministic build or LLM run is in flight, so the list keeps polling. */
 export function anyHandbookBuildActive(repos: HandbookBuildFields[], now: number = Date.now()): boolean {
-  return repos.some((r) => handbookBuildActive(r, now))
+  return repos.some((r) => handbookBuildActive(r, now) || llmRunning(r, now))
+}
+
+export type LLMState = 'off' | 'running' | 'pending' | 'partial' | 'complete' | 'failed'
+
+export const LLM_STATE_LABELS: Record<LLMState, string> = {
+  off: '未启用',
+  running: '增强中',
+  pending: '待增强',
+  partial: '部分完成',
+  complete: '已完成',
+  failed: '失败',
+}
+
+export const LLM_FALLBACK_REASON_LABELS: Record<string, string> = {
+  bad_reply: '模型回复不可用',
+  too_large: '仓库过大',
+  few_stages: '模型给出的阶段过少',
+  unassigned: '未归类目录过多',
+  no_model: '未配置模型',
+}
+
+/** Model used for a repo's LLM layer: the repo override, else the global model; '' when disabled. */
+export function effectiveHandbookModel(repo: Pick<Repository, 'handbook_model'>, globalModel: string): string {
+  const own = (repo.handbook_model ?? '').trim()
+  if (own.toLowerCase() === 'off') return ''
+  return own || globalModel.trim()
+}
+
+function llmStateOf(
+  enabled: boolean,
+  running: boolean,
+  llm: HandbookLLMStats | null | undefined,
+  handbookCommit: string | undefined,
+): LLMState {
+  if (!enabled) return 'off'
+  if (running) return 'running'
+  if (llm?.state === 'failed' && (!llm.failed_commit || llm.failed_commit === handbookCommit)) return 'failed'
+  if (!llm?.state || llm.state === 'failed' || llm.commit !== handbookCommit) return 'pending'
+  return llm.state === 'complete' ? 'complete' : 'partial'
+}
+
+/** A failure on an older commit is retried after the next build, so it reads as pending. */
+export function llmState(repo: Repository, globalModel: string, now: number = Date.now()): LLMState {
+  return llmStateOf(
+    effectiveHandbookModel(repo, globalModel) !== '',
+    llmRunning(repo, now),
+    repo.handbook_llm,
+    repo.handbook_commit,
+  )
+}
+
+export function handbookViewLLMState(
+  view: Pick<HandbookView, 'commit' | 'llm_model' | 'llm_running' | 'llm'>,
+): LLMState {
+  return llmStateOf((view.llm_model ?? '').trim() !== '', !!view.llm_running, view.llm, view.commit)
+}
+
+export function llmProgress(llm: HandbookLLMStats | null | undefined): string {
+  if (!llm || llm.cards_total === undefined) return ''
+  return `${llm.cards_done ?? 0}/${llm.cards_total}`
+}
+
+export interface ModelOption {
+  value: string
+  label: string
+}
+
+const OFF_OPTION: ModelOption = { value: 'off', label: '禁用该仓库的 LLM 增强' }
+
+/** Catalog choices as `<provider name or id>/<model>`, the form the backend resolves; 'off' first. */
+export function handbookModelOptions(providers: ModelProvider[], entries: ModelCatalogEntry[]): ModelOption[] {
+  const prefix = new Map(providers.filter((p) => p.enabled).map((p) => [p.id, p.name.trim() || p.id]))
+  const seen = new Map<string, ModelOption>()
+  for (const e of entries) {
+    const p = prefix.get(e.provider_id)
+    if (e.hidden || !p || !e.model) continue
+    const value = `${p}/${e.model}`
+    if (!seen.has(value)) seen.set(value, { value, label: e.display_name.trim() || e.model })
+  }
+  return [OFF_OPTION, ...[...seen.values()].sort((a, b) => cmp(a.value, b.value))]
+}
+
+const ENRICH_ERRORS: [RegExp, string][] = [
+  [/LLM layer is disabled|HANDBOOK_LLM_DISABLED/i, '该仓库未启用 LLM 增强（未配置全局模型或已设为 off）'],
+  [/not current|HANDBOOK_NOT_READY/i, 'handbook 不是最新，请先重建 handbook 再增强'],
+  [/build already running|HANDBOOK_BUILDING/i, 'handbook 正在生成中，请稍后再试'],
+  [/another LLM run|HANDBOOK_LLM_BUSY/i, '其他仓库的 LLM 增强正在运行，请稍后再试'],
+  [/not configured|HANDBOOK_DISABLED/i, '服务端未配置 handbook 功能'],
+  [/full must be a boolean|INVALID_ARGUMENT/i, '请求参数无效'],
+  [/not found/i, '仓库不存在或已被删除'],
+]
+
+/** The API client only surfaces the server message, so known errors are matched on it. */
+export function enrichErrorMessage(message: string): string {
+  for (const [re, text] of ENRICH_ERRORS) if (re.test(message)) return text
+  return message
 }
 
 /** Orders pages as SKILL.md, then references/*.md, then area pages. */

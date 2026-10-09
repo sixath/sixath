@@ -1,29 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { repoApi, repoGroupApi } from '../api/repoRegistry'
-import type { RepoFilter, RepoGroupView, RepoScanReport, Repository } from '../api/repoRegistryTypes'
+import { modelCatalogApi } from '../api/client'
+import { handbookConfigApi, repoApi, repoGroupApi } from '../api/repoRegistry'
+import type { HandbookConfigView, RepoFilter, RepoGroupView, RepoScanReport, Repository } from '../api/repoRegistryTypes'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { FormDialog } from '../components/FormDialog'
 import { HandbookDialog } from '../components/HandbookDialog'
 import { RepoRegistryTabs } from '../components/RepoRegistryTabs'
 import {
   HANDBOOK_STATE_LABELS,
+  LLM_STATE_LABELS,
   REPO_STATUS_LABELS,
   anyHandbookBuildActive,
   groupNamesByRepo,
+  handbookModelOptions,
   handbookState,
+  llmProgress,
+  llmState,
   parseTags,
   shortCommit,
+  type ModelOption,
 } from '../utils/repoRegistry'
 import './RepoRegistry.css'
 
 const HANDBOOK_POLL_MS = 3000
+const NO_HANDBOOK_CONFIG: HandbookConfigView = { model: '', enabled: false }
 
 interface EditState {
   repo: Repository
   name: string
   description: string
   tags: string
+  handbookModel: string
   agentIds: string[] | null
 }
 
@@ -31,6 +39,23 @@ function formatTime(iso?: string): string {
   if (!iso) return '—'
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
+function LLMBadge({ repo, globalModel }: { repo: Repository; globalModel: string }) {
+  const state = llmState(repo, globalModel)
+  const progress = state === 'off' ? '' : llmProgress(repo.handbook_llm)
+  return (
+    <div className="repo-llm-badge">
+      <span
+        className={`badge badge-llm-${state}`}
+        data-testid={`llm-state-${repo.id}`}
+        title={state === 'off' ? '' : (repo.handbook_llm?.last_error ?? '')}
+      >
+        LLM {LLM_STATE_LABELS[state]}
+        {progress ? ` ${progress}` : ''}
+      </span>
+    </div>
+  )
 }
 
 export default function RepoListPage() {
@@ -52,6 +77,8 @@ export default function RepoListPage() {
   const [viewing, setViewing] = useState<Repository | null>(null)
   const [rebuildingId, setRebuildingId] = useState<string | null>(null)
   const [rebuildError, setRebuildError] = useState('')
+  const [handbookConfig, setHandbookConfig] = useState<HandbookConfigView>(NO_HANDBOOK_CONFIG)
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>(() => handbookModelOptions([], []))
 
   const filterRef = useRef(filter)
   const loadSeq = useRef(0)
@@ -91,6 +118,15 @@ export default function RepoListPage() {
     loadGroups()
   }, [loadGroups])
 
+  useEffect(() => {
+    handbookConfigApi
+      .get()
+      .then(setHandbookConfig)
+      .catch(() => setHandbookConfig(NO_HANDBOOK_CONFIG))
+  }, [])
+
+  const globalModel = handbookConfig.model ?? ''
+
   const building = useMemo(() => anyHandbookBuildActive(repos), [repos])
   useEffect(() => {
     if (!building) return
@@ -127,11 +163,21 @@ export default function RepoListPage() {
 
   const openEdit = (repo: Repository) => {
     setEditError('')
-    setEdit({ repo, name: repo.name, description: repo.description, tags: repo.tags.join(', '), agentIds: null })
+    setEdit({
+      repo,
+      name: repo.name,
+      description: repo.description,
+      tags: repo.tags.join(', '),
+      handbookModel: repo.handbook_model ?? '',
+      agentIds: null,
+    })
     repoApi
       .get(repo.id)
       .then((d) => setEdit((prev) => (prev && prev.repo.id === repo.id ? { ...prev, agentIds: d.agent_ids } : prev)))
       .catch(() => {})
+    Promise.all([modelCatalogApi.listProviders(), modelCatalogApi.listCatalog()])
+      .then(([providers, entries]) => setModelOptions(handbookModelOptions(providers, entries)))
+      .catch(() => setModelOptions(handbookModelOptions([], [])))
   }
 
   const saveEdit = async () => {
@@ -143,6 +189,7 @@ export default function RepoListPage() {
         name: edit.name.trim(),
         description: edit.description.trim(),
         tags: parseTags(edit.tags),
+        handbook_model: edit.handbookModel.trim(),
       })
       setRepos((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
       setEdit(null)
@@ -329,6 +376,7 @@ export default function RepoListPage() {
                     >
                       {HANDBOOK_STATE_LABELS[handbookState(r)]}
                     </span>
+                    <LLMBadge repo={r} globalModel={globalModel} />
                   </td>
                   <td>{formatTime(r.last_scanned_at)}</td>
                   <td className="col-actions">
@@ -397,6 +445,24 @@ export default function RepoListPage() {
               <input value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} />
             </div>
             <div className="form-group">
+              <label htmlFor="repo-handbook-model">Handbook 模型</label>
+              <input
+                id="repo-handbook-model"
+                list="handbook-model-options"
+                value={edit.handbookModel}
+                placeholder={globalModel ? `继承全局（${globalModel}）` : '未配置全局模型'}
+                onChange={(e) => setEdit({ ...edit, handbookModel: e.target.value })}
+              />
+              <datalist id="handbook-model-options">
+                {modelOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </datalist>
+              <span className="muted">留空继承全局，填 off 禁用该仓库的 LLM 增强；格式为模型名或「提供方/模型名」。</span>
+            </div>
+            <div className="form-group">
               <label>使用该仓库的 Agent</label>
               {edit.agentIds === null ? (
                 <span className="muted">加载中…</span>
@@ -433,7 +499,11 @@ export default function RepoListPage() {
         onCancel={() => setPendingStatus(null)}
         onConfirm={() => void confirmStatus()}
       />
-      <HandbookDialog repo={viewing} onClose={() => setViewing(null)} />
+      <HandbookDialog
+        repo={viewing}
+        onClose={() => setViewing(null)}
+        onEnrichStarted={() => void loadRepos(filterRef.current, true)}
+      />
     </div>
   )
 }
