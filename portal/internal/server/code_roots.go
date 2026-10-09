@@ -132,7 +132,8 @@ func AgentWorkspaceLinkGetHandler(agentUC *biz.AgentUsecase) func(kratoshttp.Con
 
 // AgentWorkspaceLinkHandler serves POST /api/v1/agents/{agent_id}/workspace-link.
 // Body: {"target":"/abs/path/under/code/root"} — creates workspace/code → target symlink.
-func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string) func(kratoshttp.Context) error {
+// When repoUC is set and the agent has no repo bindings, an exact repo / dir-group match is bound too.
+func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string, repoUC *biz.RepoRegistryUsecase) func(kratoshttp.Context) error {
 	return func(ctx kratoshttp.Context) error {
 		agentID := strings.TrimSpace(ctx.Vars().Get("agent_id"))
 		if agentID == "" {
@@ -151,7 +152,21 @@ func AgentWorkspaceLinkHandler(agentUC *biz.AgentUsecase, codeRoots []string) fu
 			if err != nil {
 				return nil, err
 			}
-			return linkWorkspaceCode(agent.Workspace, req.Target, codeRoots)
+			res, err := linkWorkspaceCode(agent.Workspace, req.Target, codeRoots)
+			if err != nil || repoUC == nil {
+				return res, err
+			}
+			m, ok := res.(map[string]any)
+			if !ok {
+				return res, nil
+			}
+			target, _ := m["target"].(string)
+			bound, bindErr := repoUC.BindFromLegacyLink(c, agentID, target, requestActor(c))
+			if bindErr != nil {
+				m["repo_binding_error"] = bindErr.Error()
+			}
+			m["repo_binding_created"] = bound
+			return m, nil
 		})
 		if err != nil {
 			return err

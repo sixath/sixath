@@ -16,7 +16,16 @@ type Scheduler struct {
 	interval    time.Duration
 	evolutionUC *biz.EvolutionUsecase
 	log         *log.Helper
+
+	repoUC           *biz.RepoRegistryUsecase
+	repoScanInterval time.Duration
 }
+
+// DefaultRepoScanInterval is how often code roots are rescanned for repositories.
+const DefaultRepoScanInterval = 10 * time.Minute
+
+// maxLoggedRepoScanErrors caps per-scan error lines so one bad root cannot flood the log.
+const maxLoggedRepoScanErrors = 5
 
 // NewScheduler 创建调度器，interval 为扫描间隔（如 30s）
 func NewScheduler(cronUC *biz.CronUsecase, exec *Executor, interval time.Duration, logger log.Logger) *Scheduler {
@@ -37,6 +46,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 	defer ticker.Stop()
 
 	go s.evolutionCleanupLoop(ctx)
+	if s.repoUC != nil {
+		go s.repoScanLoop(ctx)
+	}
 
 	for {
 		select {
@@ -64,6 +76,44 @@ func (s *Scheduler) tick(ctx context.Context) {
 // SetEvolutionUsecase wires the evolution usecase for weekly proposal expiry cleanup.
 func (s *Scheduler) SetEvolutionUsecase(uc *biz.EvolutionUsecase) {
 	s.evolutionUC = uc
+}
+
+// SetRepoRegistry enables periodic repository scans.
+func (s *Scheduler) SetRepoRegistry(uc *biz.RepoRegistryUsecase, interval time.Duration) {
+	if interval <= 0 {
+		interval = DefaultRepoScanInterval
+	}
+	s.repoUC = uc
+	s.repoScanInterval = interval
+}
+
+// repoScanLoop scans once at startup, then every repoScanInterval.
+func (s *Scheduler) repoScanLoop(ctx context.Context) {
+	s.runRepoScan(ctx)
+	ticker := time.NewTicker(s.repoScanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runRepoScan(ctx)
+		}
+	}
+}
+
+func (s *Scheduler) runRepoScan(ctx context.Context) {
+	rep, err := s.repoUC.Scan(ctx)
+	if err != nil {
+		s.log.Warnf("repo scan: %v", err)
+		return
+	}
+	errs := rep.Errors
+	if len(errs) > maxLoggedRepoScanErrors {
+		errs = errs[:maxLoggedRepoScanErrors]
+	}
+	s.log.Infof("repo scan: roots=%d found=%d added=%d restored=%d missing=%d errors=%d first_errors=%q",
+		rep.Roots, rep.Found, rep.Added, rep.Restored, rep.Missing, len(rep.Errors), errs)
 }
 
 // evolutionCleanupLoop runs weekly expiry of old pending proposals.

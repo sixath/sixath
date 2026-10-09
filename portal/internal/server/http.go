@@ -31,7 +31,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager, agentRepo biz.AgentRepo, toolUC *biz.ToolUsecase, evolutionUC *biz.EvolutionUsecase) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager, agentRepo biz.AgentRepo, toolUC *biz.ToolUsecase, evolutionUC *biz.EvolutionUsecase, repoUC *biz.RepoRegistryUsecase) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -108,7 +108,7 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/code-roots", CodeRootsListHandler(codeRoots))
 	r.GET("/api/v1/code-roots/browse", CodeRootsBrowseHandler(codeRoots))
 	r.GET("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkGetHandler(agentUC))
-	r.POST("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkHandler(agentUC, codeRoots))
+	r.POST("/api/v1/agents/{agent_id}/workspace-link", AgentWorkspaceLinkHandler(agentUC, codeRoots, repoUC))
 	r.GET("/api/v1/agents/{agent_id}/cases", AgentCasesListHandler(agentUC))
 	r.GET("/api/v1/agents/{agent_id}/cases/{case_id}", AgentCaseGetHandler(agentUC))
 	r.PATCH("/api/v1/agents/{agent_id}/cases/{case_id}", AgentCasePatchHandler(agentUC))
@@ -146,7 +146,7 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/terminal/sessions/{id}", GetTerminalSessionHandler(terminalMgr))
 	r.DELETE("/api/v1/terminal/sessions/{id}", DeleteTerminalSessionHandler(terminalMgr))
 	r.GET("/api/v1/terminal/sessions/{id}/ws", TerminalWSHandler(terminalMgr))
-		r.POST("/api/v1/terminal/chat", TerminalChatHandler(terminalMgr, agentRepo, toolUC))
+	r.POST("/api/v1/terminal/chat", TerminalChatHandler(terminalMgr, agentRepo, toolUC))
 	r.POST("/api/v1/agents/{id}/mcp-servers", BindAgentMcpServersHandler(mcpServer))
 	r.DELETE("/api/v1/agents/{id}/mcp-servers", UnbindAgentMcpServersHandler(mcpServer))
 	// Runtime (/runtime/v1): Gateway service-token surface; auth applied per-handler.
@@ -160,6 +160,20 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.PATCH("/api/v1/evolution/proposals/{id}", evHandlers.PatchProposal())
 	r.GET("/api/v1/evolution/config", evHandlers.GetConfig())
 	r.PUT("/api/v1/evolution/config", evHandlers.PutConfig())
+	// Repo registry: login only (no global admin role exists); agent bindings require agent edit.
+	repoH := NewRepoRegistryHandlers(repoUC, agentUC)
+	r.GET("/api/v1/repos", repoH.ListRepos())
+	r.POST("/api/v1/repos/scan", repoH.Scan())
+	r.POST("/api/v1/repos/migrate-legacy-links", repoH.MigrateLegacyLinks())
+	r.GET("/api/v1/repos/{id}", repoH.GetRepo())
+	r.PATCH("/api/v1/repos/{id}", repoH.PatchRepo())
+	r.GET("/api/v1/repo-groups", repoH.ListGroups())
+	r.POST("/api/v1/repo-groups", repoH.CreateGroup())
+	r.PUT("/api/v1/repo-groups/{id}/members", repoH.SetGroupMembers())
+	r.DELETE("/api/v1/repo-groups/{id}", repoH.DeleteGroup())
+	r.GET("/api/v1/agents/{agent_id}/repo-bindings", repoH.GetBindings())
+	r.PUT("/api/v1/agents/{agent_id}/repo-bindings", repoH.PutBindings())
+	r.POST("/api/v1/agents/{agent_id}/repo-bindings/copy-from/{other_id}", repoH.CopyBindings())
 	srv.Handle("/healthz", healthzHandler())
 	srv.Handle("/readyz", readyzHandler(pinger))
 	setupPrometheusEndpoint(srv)
