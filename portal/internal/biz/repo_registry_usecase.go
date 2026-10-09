@@ -460,6 +460,56 @@ func (uc *RepoRegistryUsecase) RCARootsForAgent(ctx context.Context, agentID str
 	return out, nil
 }
 
+// EffectiveRepository is one effective repo of an agent with its optional sub-path filter.
+type EffectiveRepository struct {
+	Repo     *Repository
+	SubPaths []string
+}
+
+// EffectiveRepositories returns the agent's effective repos sorted by rel_path; bound is
+// false when the agent has no repo bindings.
+func (uc *RepoRegistryUsecase) EffectiveRepositories(ctx context.Context, agentID string) (bool, []EffectiveRepository, error) {
+	bound, eff, err := uc.readAgentEffective(ctx, agentID)
+	if err != nil || !bound {
+		return false, nil, err
+	}
+	ids := make([]string, 0, len(eff))
+	for _, e := range eff {
+		ids = append(ids, e.RepoID)
+	}
+	repos, err := uc.repo.GetRepositoriesByIDs(ctx, ids)
+	if err != nil {
+		return true, nil, err
+	}
+	out := make([]EffectiveRepository, 0, len(eff))
+	for _, e := range eff {
+		if r := repos[e.RepoID]; r != nil {
+			out = append(out, EffectiveRepository{Repo: r, SubPaths: e.SubPaths})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Repo.RelPath != out[j].Repo.RelPath {
+			return out[i].Repo.RelPath < out[j].Repo.RelPath
+		}
+		return out[i].Repo.CodeRoot < out[j].Repo.CodeRoot
+	})
+	return true, out, nil
+}
+
+// ResolveRepoPath returns the repo root with symlinks resolved. Repos under code roots that
+// are no longer configured, missing paths and paths escaping their code root are rejected.
+func (uc *RepoRegistryUsecase) ResolveRepoPath(r *Repository) (string, error) {
+	cr, ok := uc.configuredRoot(r.CodeRoot)
+	if !ok {
+		return "", fmt.Errorf("%w: code root %s is not configured", ErrInvalidRepo, r.CodeRoot)
+	}
+	p := r.AbsPath()
+	if err := checkRootPath(cr, p); err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(p)
+}
+
 // readAgentEffective reads bindings and effective rows under the agent lock so a concurrent
 // first bind is observed either before or after its recompute, never in between.
 func (uc *RepoRegistryUsecase) readAgentEffective(ctx context.Context, agentID string) (bool, []*AgentEffectiveRepo, error) {
