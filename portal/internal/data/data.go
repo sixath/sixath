@@ -94,6 +94,8 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 		&model.ModelProvider{}, &model.ModelCatalogEntry{},
 		&model.ChannelDelivery{},
 		&EvolutionProposal{},
+		&model.Repository{}, &model.RepoGroup{}, &model.RepoGroupMember{},
+		&model.AgentRepoBinding{}, &model.AgentEffectiveRepo{},
 	); err != nil {
 		return nil, nil, err
 	}
