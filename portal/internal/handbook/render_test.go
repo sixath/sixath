@@ -19,7 +19,7 @@ func renderSample(t *testing.T) map[string]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Render(RenderMeta{RelPath: "cloudgame/svc-a", Commit: "0123456789abcdef", GeneratedAt: time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)}, f)
+	return Render(RenderMeta{RelPath: "cloudgame/svc-a", Commit: "0123456789abcdef", GeneratedAt: time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)}, f, nil)
 }
 
 func TestRender_PagesAndContent(t *testing.T) {
@@ -157,7 +157,7 @@ func TestRender_LargeRepoPagesWithinCap(t *testing.T) {
 		}
 		f.Registers = append(f.Registers, RegisterHit{Kind: RegTable, Name: fmt.Sprintf("table_%03d", i), Access: AccessRead, Path: p, Line: 1})
 	}
-	pages := Render(RenderMeta{RelPath: "big/repo", Commit: "c", GeneratedAt: time.Unix(0, 0)}, f)
+	pages := Render(RenderMeta{RelPath: "big/repo", Commit: "c", GeneratedAt: time.Unix(0, 0)}, f, nil)
 	for p, c := range pages {
 		if len(c) > MaxPageBytes {
 			t.Fatalf("%s is %d bytes > %d", p, len(c), MaxPageBytes)
@@ -174,7 +174,7 @@ func TestRender_LargeRepoPagesWithinCap(t *testing.T) {
 func TestRender_TimestampsUTC(t *testing.T) {
 	f := &Facts{Symbols: map[string][]Symbol{}}
 	at := time.Date(2026, 10, 9, 16, 30, 0, 0, time.FixedZone("CST", 8*3600))
-	pages := Render(RenderMeta{RelPath: "svc", Commit: "c", GeneratedAt: at}, f)
+	pages := Render(RenderMeta{RelPath: "svc", Commit: "c", GeneratedAt: at}, f, nil)
 	for _, p := range []string{"SKILL.md", "references/overview.md"} {
 		if !strings.Contains(pages[p], "2026-10-09 08:30") {
 			t.Fatalf("%s timestamp not UTC:\n%s", p, pages[p])

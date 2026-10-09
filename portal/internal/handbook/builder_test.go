@@ -36,4 +36,53 @@ func TestBuild(t *testing.T) {
 	if !strings.Contains(string(out.Files["skill/SKILL.md"]), "name: "+SkillName("cloudgame/svc-a")+"\n") {
 		t.Fatal("skill name")
 	}
+	if s.Cards != 0 || s.StaleCards != 0 || s.Stages != 0 || s.LLMRev != "" {
+		t.Fatalf("LLM stats without LLMDir = %#v", s)
+	}
+}
+
+func TestBuild_ReadsLLMCache(t *testing.T) {
+	root := sampleRepo(t)
+	facts, err := CollectFacts(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := LLMCache{Dir: t.TempDir()}
+	var target File
+	for _, f := range facts.Files {
+		if CardEligible(f) {
+			target = f
+			break
+		}
+	}
+	if target.Path == "" {
+		t.Fatal("no card-eligible file in the sample repo")
+	}
+	if err := cache.PutCard(target.Hash, &Card{Purpose: "缓存里的职责", Hash: target.Hash, PromptVersion: LLMPromptVersion}); err != nil {
+		t.Fatal(err)
+	}
+	sk := &Skeleton{PromptVersion: LLMPromptVersion, Stages: []Stage{{ID: "main", Title: "主流程"}},
+		Files: map[string]FileAssign{target.Path: {Stage: "main", CardHash: target.Hash, Hash: target.Hash}}}
+	if err := cache.PutSkeleton(sk); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Build(context.Background(), BuildInput{RepoID: "r", RelPath: "svc", Root: root, Commit: "c", LLMDir: cache.Dir, LLMRev: "7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Stats.Cards != 1 || out.Stats.Stages != 1 || out.Stats.LLMRev != "7" || out.Stats.GeneratorVersion != "p2b-1" {
+		t.Fatalf("stats %#v", out.Stats)
+	}
+	if _, ok := out.Files["skill/references/stages/main.md"]; !ok {
+		t.Fatal("stage page not rendered")
+	}
+	found := false
+	for p, b := range out.Files {
+		if strings.HasPrefix(p, "skill/references/areas/") && strings.Contains(string(b), "缓存里的职责") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("card not rendered")
+	}
 }

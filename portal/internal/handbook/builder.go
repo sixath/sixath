@@ -8,7 +8,7 @@ import (
 
 // GeneratorVersion changes whenever the output format changes; repos built by an older
 // generator are rebuilt on the next pass.
-const GeneratorVersion = "p2a-2"
+const GeneratorVersion = "p2b-1"
 
 // BuildInput identifies the checkout to build from.
 type BuildInput struct {
@@ -17,6 +17,8 @@ type BuildInput struct {
 	Root    string // absolute repository root with symlinks resolved
 	Commit  string
 	Now     time.Time
+	LLMDir  string // LLM cache directory; empty renders without LLM content
+	LLMRev  string // LLM content revision, recorded in Stats
 }
 
 // Stats is stored in repositories.handbook_stats.
@@ -30,6 +32,10 @@ type Stats struct {
 	Symbols          int    `json:"symbols"`
 	Registers        int    `json:"registers"`
 	Truncated        bool   `json:"truncated"`
+	Cards            int    `json:"cards"`
+	StaleCards       int    `json:"stale_cards"`
+	Stages           int    `json:"stages"`
+	LLMRev           string `json:"llm_rev,omitempty"`
 }
 
 // Map converts stats to the JSON object stored in the database.
@@ -62,12 +68,18 @@ func Build(ctx context.Context, in BuildInput) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
+	var layer *LLMLayer
+	if in.LLMDir != "" {
+		if layer, err = LoadLLMLayer(LLMCache{Dir: in.LLMDir}, facts); err != nil {
+			return nil, err
+		}
+	}
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}
 	meta := RenderMeta{RelPath: in.RelPath, Commit: in.Commit, GeneratedAt: in.Now}
 	out := &Output{Files: map[string][]byte{}}
-	for p, c := range Render(meta, facts) {
+	for p, c := range Render(meta, facts, layer) {
 		out.Files["skill/"+p] = []byte(c)
 	}
 	regNames := map[[2]string]bool{}
@@ -77,7 +89,11 @@ func Build(ctx context.Context, in BuildInput) (*Output, error) {
 	stats := Stats{
 		GeneratorVersion: GeneratorVersion, BuiltAt: in.Now.UTC().Format(time.RFC3339),
 		Files: len(facts.Files), Packages: len(facts.Packages), Areas: len(buildAreas(facts)),
-		Registers: len(regNames), Truncated: facts.Coverage.Truncated,
+		Registers: len(regNames), Truncated: facts.Coverage.Truncated, LLMRev: in.LLMRev,
+	}
+	if layer != nil {
+		stats.Cards, stats.StaleCards = len(layer.Cards), len(layer.Stale)
+		stats.Stages = len(validStages(layer.Skeleton))
 	}
 	for _, f := range facts.Files {
 		if f.Lang == "go" {
