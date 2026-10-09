@@ -8,6 +8,8 @@
 
 **Tech Stack:** Go 1.26（`go/parser`、`regexp`、GORM + MySQL/SQLite 测试）、kratos HTTP、React 19 + TypeScript + Vite、node:test、Playwright。
 
+> **实施后说明：** 评审修复（提交 1f011bc、a76262f、612da25、736a8d3）偏离了下文任务中的代码，以设计文档为准（§7.2"P2a 实现 / P2a 渲染"、§8.2"P2a 实现"、§11、§12）。主要差异：`GeneratorVersion` 为 `p2a-2`；skill 名在 slug 有损或被截断时追加 `-<sha256(rel_path) 前 8 位>`（总长 ≤ 60）；每页（含 `index.md`）≤ 48KB 分页、超大节截断、寄存器名 > 200 字节丢弃；`ReadSkillFile` 按段白名单 + `filepath.IsLocal` + `os.OpenInRoot` 读取并拒绝目录；租约增加 `handbook_lease_token`，Finish/Release 校验 token（`ErrHandbookLeaseLost`），单次构建 25 分钟超时记为失败，父 context 取消时释放租约并恢复原状态，租约过期的 `building` 由 `RebuildStale` 重新认领，全局并发 2（手动重建忙时 409），认领后跳过已归档仓库，`Publish` 写唯一临时目录且从不覆盖已有版本（顺延最多 3 次）；前端构建中仍可重建（409 内联显示）、有活跃构建时每 3 秒轮询、弹窗有加载/错误状态并支持 Esc；设计文档中 `rca_feedback` 迁移改为 `021`。
+
 **设计文档:** `docs/superpowers/specs/2026-10-09-repo-registry-and-rca-handbook-design.md` §6.2、§7、§8、§15。P2b（LLM 文件卡片、行为阶段、总览、增量刷新与骨架重建、冻结）另立计划。
 
 ---

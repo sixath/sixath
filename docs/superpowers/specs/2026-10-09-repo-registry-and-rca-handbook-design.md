@@ -113,7 +113,8 @@ agent_effective_repos  ──►  RCA roots  +  可见 handbook  +  code-map 入
 | handbook_status | VARCHAR(16) | `none` / `building` / `ready` / `stale` / `failed` |
 | handbook_commit | VARCHAR(64) | handbook 对应 commit |
 | handbook_version | INT | 原子切换用的版本号 |
-| handbook_stats | JSON | 冻结比例、未归类文件比例、文件数、stage 数、register 数 |
+| handbook_stats | JSON | 冻结比例、未归类文件比例、文件数、stage 数、register 数；P2a 实际为 `generator_version`、`built_at`、文件/Go 文件/包/分区/符号/寄存器数、`truncated`、`duration_ms`，失败时含 `last_error`、`failed_commit` |
+| handbook_lease_until / handbook_lease_token | DATETIME(3) / VARCHAR(36) | P2a 构建租约（migration `020_repo_handbook.sql`，§8.2） |
 | owner_id | VARCHAR(36) | 负责人 |
 | last_scanned_at / created_at / updated_at | DATETIME(3) | |
 
@@ -276,24 +277,28 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
 ```
 /data/portal/handbooks/
   repos/<repo_id>/
-    current -> v<N>/                  # 原子切换的指针（写 current.json 记录版本，避免依赖 symlink）
+    current.json                      # 原子切换的指针 {"version":N}（不依赖 symlink）
     v<N>/
-      manifest.json                   # commit、generator_version、leaf_mode=file、生成时间、配置 Θ
+      manifest.json                   # commit、generator_version、leaf_mode=file、生成时间、stats
       facts/
-        files.json                    # path、语言、大小、content_hash
-        graph.json                    # 符号与调用边（Go 有；其他语言见 §7.3）
-      generated/
+        files.json                    # P2a：path、语言、大小、sha256
+        symbols.json                  # P2a：Go 符号（含 body 指纹）
+        registers.json                # P2a：寄存器候选（kind、name、access、path:line）
+        packages.json                 # P2a：Go 包目录、包名、包注释、文件数、是否 main
+        graph.json                    # P2b：调用边（P2a 不做，coverage.graph = "none"）
+      generated/                      # P2b（LLM 产物）
         cards/<path-hash>.json        # file card
         stages.json                   # stage 骨架与文件归属
         overview.md                   # L1
-        registers.json                # 状态寄存器及读写位置
-      coverage.json                   # 未归类文件、冻结条目、未解析调用
+        registers.json                # 状态寄存器说明
+      coverage.json                   # 未归类文件、冻结条目、未解析调用；P2a 记录跳过统计与截断
       skill/                          # 对 Agent 暴露（渲染产物）
         SKILL.md
         references/overview.md
-        references/index.md
-        references/registers.md
-        references/stages/<id>.md
+        references/index.md           # 超过 48KB 时分页：index.p2.md、index.p3.md …
+        references/registers.md       # 同上分页
+        references/areas/<id>.md      # P2a：目录分区（同上分页）
+        references/stages/<id>.md     # P2b：LLM 行为阶段
     overlay/                          # 不随版本切换，永不被生成覆盖
       notes.jsonl
   groups/<group_id>/
@@ -311,6 +316,17 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
   - 非 Go（约 5%）：只做文件级（清单、哈希、寄存器候选的字面量匹配），不产出符号与调用边，`coverage.json` 标注 `graph: none`。**不引入 tree-sitter 等多语言解析**，避免 cgo/外部依赖。
 - 未解析调用写入 `coverage.json`，不猜测目标。
 - 抽取"寄存器候选"：DB 表名（SQL 字面量 / ORM tag）、缓存 key 前缀、MQ topic、HTTP/RPC 路由与客户端调用、配置键。均为字面量匹配，带 `file:line`。
+
+**P2a 实现（确定性，无 LLM）**：
+
+- 不解析 `.gitignore`；固定跳过隐藏目录（`.` 开头）与 `vendor`、`node_modules`、`third_party`、`testdata`、`dist`、`build`、`target`、`out`；跳过锁文件（`go.sum`、`package-lock.json` 等）、生成代码（`Code generated … DO NOT EDIT`、`*.pb.go` 等）、二进制、> 512KB 的文件；单仓库最多 20000 个文件，超出在 `coverage.truncated` 标注。
+- Go 用 `go/parser` 产出包、包注释、导出与非导出符号（类型、函数、方法）及函数 body 指纹（sha256 前 12 位），读取 `go.mod` 直接依赖；**不做调用图**（`coverage.graph = "none"`），解析失败的文件记入 `coverage.go_parse_errors`。
+- 寄存器候选四类，均为正则：
+  - 表：`INSERT INTO` / `UPDATE … SET` / `DELETE FROM`（写）与 `FROM` / `JOIN`（读）、GORM `.Table("x")`；`.sql` 文件大小写不敏感，**源码只匹配大写 SQL 关键字**（英文字符串中的 "from" 太常见）；`TableName()` 返回的字符串字面量记为表引用；
+  - 路由：`.GET/.POST/…/.Handle/.HandleFunc("/…")` 与 proto `get: "/…"` 等注解；
+  - topic：名字含 `topic` 的变量/字段/YAML 键的字符串赋值；
+  - 缓存键：含 `:` 的字符串字面量，且同一行出现 redis/cache/rdb/key 上下文。
+- 名字超过 200 字节的寄存器候选丢弃。
 
 **Phase II：行为组织（LLM）**
 
@@ -352,6 +368,13 @@ hidden_from_summary: true
 5. 结论只能基于你读到的源码，不能基于 handbook 的描述。
 ```
 
+**P2a 渲染（`generator_version = p2a-2`）**：
+
+- 页面为 `SKILL.md`、`references/overview.md`、`references/index.md`、`references/registers.md`、`references/areas/<id>.md`；"阶段"由目录分区代替（按首级目录分区，`internal`/`pkg`/`cmd`/`app(s)`/`src`/`service(s)`/`api` 下取两级）。
+- **Skill 名**：`handbook-<slug>`，slug 为 `rel_path` 小写后把 `[a-z0-9]` 以外的连续字符替换为 `-`。slug 有损（`rel_path` 含 `[a-z0-9-]` 以外的字符，如嵌套路径 `group/svc`、大写、下划线）或超长被截断时，追加 `-<sha256(rel_path) 前 8 位十六进制>`，slug 部分总长 ≤ 60 字符，保证不同仓库的 skill 名不冲突。
+- **页面大小**：每页（含 `index.md`）不超过 `MaxPageBytes` = 48KB，能被一次 `read_skill_file` 读完；超出时按节分页，首页列出续页 `<base>.p2.md`、`<base>.p3.md` …；单节超过一页时在 rune 边界截断并标注 `…（已截断）`。每文件符号、每寄存器位置、index 表格行数另有上限。
+- `generator_version` 变化会触发所有仓库重建。
+
 ### 7.3 组级 handbook（L0）
 
 - **服务清单**：每个成员仓库一行（名称、角色、L1 首句）。
@@ -378,6 +401,8 @@ description: 你可访问的代码仓库目录。排查与代码相关的问题�
 （无 handbook 的仓库标注"暂无 handbook，直接用 rca_grep"）
 ```
 
+P2a 实现：每个 agent 一份 `handbooks/agents/<agent_id>/code-map/SKILL.md`（`summary_pinned: true`），按 `path.Dir(rel_path)` 分组列出有效仓库（无组级 handbook）；内容不变时不重写。实际 skill 名按 §7.2 规则生成，嵌套路径会带哈希后缀，例如 `cloudgame/svc-a` → `handbook-cloudgame-svc-a-<8 位十六进制>`，以 code-map 中列出的名字为准。
+
 有效仓库集或任一 handbook 状态变化时重渲染。
 
 ---
@@ -402,9 +427,19 @@ description: 你可访问的代码仓库目录。排查与代码相关的问题�
 
 ### 8.2 并发与一致性
 
-- 每个仓库同一时刻只允许一个构建任务：DB 行级租约（`handbook_status=building` + `lease_until`），过期可抢占。
+- 每个仓库同一时刻只允许一个构建任务：DB 行级租约（`handbook_status=building` + `handbook_lease_until` + `handbook_lease_token`），过期可抢占。
 - 新版本写入 `v<N+1>/`，完成后更新 `current.json` 与 `handbook_version`；正在运行的 RCA 继续读已打开的旧版本。保留最近 2 个版本，其余由清理循环删除。
 - 构建失败 → `handbook_status=failed`，保留旧版本继续服务。
+
+**P2a 实现**：
+
+- **租约**：列 `handbook_lease_until` + `handbook_lease_token`（migration `020_repo_handbook.sql`）。`ClaimHandbookBuild` 在未 building 或租约已过期时置 `building`、租约 30 分钟并生成新 token；`FinishHandbookBuild` / `ReleaseHandbookBuild` 只在 token 仍匹配时生效，否则返回 `ErrHandbookLeaseLost`，结果被丢弃（另一个构建已接管）。
+- **超时**：单次构建上限 25 分钟（短于租约）；超时按失败记录（`failed`，`handbook_stats.failed_commit = HEAD`，`last_error` 注明"构建超时"），不会每轮扫描反复重试。
+- **取消**：父 context 取消（进程关闭）、仓库读取失败时释放租约并恢复认领前的状态（原状态为卡住的 `building` 时恢复为 `ready`/`none`），不记失败；认领后发现仓库已不是 `active`（如已归档）同样释放跳过。
+- **重试**：失败的 commit 不自动重试，HEAD 变化或手动重建才重试；`generator_version` 变化触发全部重建；租约过期仍停在 `building` 的仓库由 `RebuildStale` 重新认领。
+- **并发**：全局最多 2 个构建同时运行（`RebuildStale` 与手动重建共用槽位）；手动重建在仓库正在构建或没有空闲槽位时返回 409 `HANDBOOK_BUILDING`。`RebuildStale` 在每次仓库扫描成功后由 cron 触发，同一时刻只跑一轮。
+- **发布**：先写入 `v<N>.tmp-*` 唯一临时目录再 rename 为 `v<N>`，**从不覆盖已存在的版本目录**（`ErrVersionExists`）；遇到失去租约的构建遗留的目录时版本号顺延，最多尝试 3 次；成功后原子写 `current.json`，保留最近 2 版，超过 1 小时的临时目录由清理删除。
+- **读取**：`ReadSkillFile` 校验 repo id（`[A-Za-z0-9_-]`）与路径每一段（白名单字符、不以 `.` 结尾），再经 `filepath.IsLocal`（拒绝 Windows 设备名）与 `os.OpenInRoot` 打开，拒绝目录，单次最多 256KB。
 
 ### 8.3 冻结条目的呈现
 
@@ -522,9 +557,17 @@ P1 已实现的接口（列表接口不分页，返回全量）：
 | PUT | `/api/v1/agents/{agent_id}/repo-bindings` | 整体替换绑定（含排除），`{"bindings":[]}` 表示清空；返回新的有效仓库集 |
 | POST | `/api/v1/agents/{agent_id}/repo-bindings/copy-from/{other_id}` | 复制其他 agent 的绑定 |
 
-错误码：参数非法 400 `INVALID_ARGUMENT`；仓库/组不存在 404 `NOT_FOUND`；agent 不存在沿用 `AGENT_NOT_FOUND`；409 见上表。
+P2a 已实现的 handbook 接口：
 
-后续阶段的接口：`POST /api/v1/repos/{id}/handbook/rebuild`、`GET /api/v1/repos/{id}/handbook`、`POST /api/v1/repos/batch`、`POST /api/v1/repo-groups/{id}/members/confirm`，以及 tag 组的创建与修改。
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/repos/{id}/handbook` | handbook 状态、commit、HEAD、版本、stats 与已发布版本的页面列表 |
+| GET | `/api/v1/repos/{id}/handbook/page?path=` | 读取已发布版本的一个页面（相对 skill 目录，如 `references/index.md`）；路径非法 400 |
+| POST | `/api/v1/repos/{id}/handbook/rebuild` | 异步重建（不论是否过期）；仓库非 `active` 400；正在构建或全局构建槽位已满 409 `HANDBOOK_BUILDING` |
+
+错误码：参数非法 400 `INVALID_ARGUMENT`；仓库/组不存在 404 `NOT_FOUND`；agent 不存在沿用 `AGENT_NOT_FOUND`；409 见上表；handbook 未发布或页面不存在 404 `HANDBOOK_NOT_FOUND`；未配置 handbook 503 `HANDBOOK_DISABLED`。
+
+后续阶段的接口：`POST /api/v1/repos/batch`、`POST /api/v1/repo-groups/{id}/members/confirm`，以及 tag 组的创建与修改。
 
 ---
 
@@ -540,7 +583,13 @@ P1b 已实现（侧栏「代码仓库」入口，页内标签切换）：
 
 P1b 的限制：仓库表没有"使用 agent 数"列（列表接口不返回，改在编辑弹窗列出使用该仓库的 agent）；"从其他 agent 复制"只列前 100 个 agent；读取绑定需要 agent 编辑权限，只有查看权限时区块显示无法加载。
 
-后续阶段：仓库页的 handbook 状态、落后天数、冻结比例、漏召回率列与 handbook 浏览抽屉（P2）；仓库批量操作；tag 组与 pending 成员确认（P4）。
+P2a 已实现：
+
+- 仓库表新增 **Handbook 列**：未生成 / 生成中 / 最新 / 待更新 / 失败（悬停显示 `last_error`）。
+- **重建按钮**：仓库为 `active` 即可点击，构建中也可以点（后端返回 409 时在列表上方内联显示"重建 … 失败：…"）；列表中存在租约未过期的构建时每 3 秒静默刷新一次，没有活跃构建（含租约已过期、卡住的 `building`）时停止轮询。
+- **查看弹窗** `HandbookDialog`：状态、版本、commit 与 HEAD 取自弹窗内获取的 handbook 视图（不依赖列表行的旧数据）；左侧页面列表（SKILL.md → references → areas）、右侧页面内容；视图与页面加载时显示"加载中…"，失败时显示错误；Esc 关闭。
+
+后续阶段：落后天数、冻结比例、漏召回率列（P2b/P3）；仓库批量操作；tag 组与 pending 成员确认（P4）。
 
 ---
 
@@ -586,7 +635,8 @@ workspace-link 接口不再自动绑定（§6.3）。
 | 期 | 内容 | 验收 |
 |----|------|------|
 | P1 | 仓库表、扫描、dir 组、绑定（repo/group/排除）、有效仓库集、**RCA 仓库逻辑名（§6.1.1）**、运行时 RCA roots、迁移、仓库与绑定 UI | 30 仓库 agent 一次勾选完成绑定；basename 重名的两个仓库 `rca_read` 读取正确；旧 agent 行为不变 |
-| P2 | 仓库级 handbook（file-as-leaf）、code-map、`hidden_from_summary`、三层维护、冻结 | 选 1 个业务仓库跑通；HEAD 变化后 10 分钟内增量刷新 |
+| P2a | 确定性 handbook（Phase I 事实 + 目录分区渲染，无 LLM）、code-map、`hidden_from_summary` / `summary_pinned`、保留名、租约与版本化发布、HEAD 变化自动全量重建、仓库页 Handbook 列/查看/重建（计划 `docs/superpowers/plans/2026-10-09-repo-handbook-p2a.md`） | 任选 1 个业务仓库生成 handbook；agent 绑定后 `code-map` 出现在摘要首位、handbook 不进摘要；HEAD 变化后下一次扫描内重建 |
+| P2b | LLM 文件卡片、行为阶段（`references/stages/`）、总览、增量刷新、骨架重建、冻结 | 选 1 个业务仓库跑通；HEAD 变化后 10 分钟内增量刷新 |
 | P3 | RCA 确认信号（反馈按钮 + 文本分类 + 修复提交命中）、RCA 定位 A/B 评测、漏召回统计 | 反馈可在 web 提交；修复提交命中可在仓库页展示；A/B 报告进 nightly |
 | P4 | 组级 handbook、按 agent 裁剪视图、tag 组、规则绑定 | 跨服务问题样例中组级 handbook 被路由命中 |
 | P5 | overlay 提案接入 evolution 流水线 | 确认的 RCA 能产生可评审 overlay 提案 |
@@ -607,7 +657,10 @@ P1 独立有价值（解决多仓库绑定与可观测性），不依赖 handboo
 | CREATE | `portal/internal/data/repository_repo.go` | Repo 实现 |
 | CREATE | `portal/internal/biz/repo_registry.go` | 扫描、分组、绑定展开 Usecase |
 | CREATE | `portal/internal/biz/handbook.go` | handbook 构建/刷新/校验编排 |
-| CREATE | `portal/internal/handbook/`（facts、cards、organize、synthesize、render、validate、group_join） | handbook 生成管线 |
+| CREATE | `portal/internal/handbook/`（P2a 已实现：`facts.go`、`gosyms.go`、`registers.go`、`render.go`、`codemap.go`、`store.go`、`builder.go`；P2b 及以后：cards、organize、synthesize、validate、group_join） | handbook 生成管线 |
+| CREATE | `portal/migrations/020_repo_handbook.sql` | P2a：`handbook_lease_until`、`handbook_lease_token` |
+| CREATE | `portal/internal/service/handbook_dirs.go` | P2a：`HandbookSkillDirResolver`，`sharedSkillDirs` 末尾追加 code-map 与 handbook 目录（fail-open） |
+| CREATE | `web/src/components/HandbookDialog.tsx` | P2a：handbook 查看弹窗 |
 | CREATE | `portal/internal/server/repos.go` | HTTP handlers |
 | CREATE | `portal/cmd/migrate-repo-bindings/main.go` | 迁移 |
 | MODIFY | `portal/internal/chat/code_roots.go` | `MergeRCARoots` 增加 effective roots 优先级 |
@@ -621,7 +674,7 @@ P1 独立有价值（解决多仓库绑定与可观测性），不依赖 handboo
 | MODIFY | `framework/skills/index.go`、`skills/prompt.go`、`skills/route.go`、`skills/embed_route.go` | 支持 `hidden_from_summary`（不进摘要、不参与自动路由） |
 | MODIFY | `framework/tool/call_graph.go` | 包级调用图（Go 仓库 Phase I） |
 | MODIFY | `framework/tool/rca_repos.go`、`rca_code_tools.go`、`rca_symbol_tool.go` | 命名 root（`RCARoot{Name, Path}`）；`[]string` 入口检测 basename 重名 |
-| CREATE | `portal/migrations/020_rca_feedback.sql`、`portal/internal/biz/feedback.go`、`server/feedback.go` | RCA 确认反馈（已解决 / 根因正确 / 纠正根因位置） |
+| CREATE | `portal/migrations/021_rca_feedback.sql`、`portal/internal/biz/feedback.go`、`server/feedback.go` | RCA 确认反馈（已解决 / 根因正确 / 纠正根因位置） |
 | MODIFY | `gateway/internal/wecom/frame.go`、`wsclient.go` | 卡片按钮事件回调帧、发送/更新模板卡片 |
 | CREATE | `gateway/internal/wecom/feedback_card.go` | 反馈卡片构造、token 映射 |
 | MODIFY | `gateway/internal/adapter/wecom_bot.go` | 最终回复后发反馈卡片（仅本轮用过 `rca_*`）；事件回调转 portal 反馈 API |
@@ -659,10 +712,11 @@ P1 独立有价值（解决多仓库绑定与可观测性），不依赖 handboo
 - ~~`agent_asset_bindings` 归属~~：Loadout 仍在推进 → 仓库绑定改用独立表 `agent_repo_bindings`；与 Loadout 的唯一交点是 Skill 保留名（§4.2）。
 - ~~企微渠道反馈~~：支持交互卡片 → 最终回复后另发反馈卡片（§9.2.1）。
 - ~~修复提交命中的时间窗与粒度~~：上线前历史回放 + 人工标注校准（§9.2.2）。
+- ~~handbook 生成模型与预算~~：handbook 生成模型（P2b）从模型目录按 `provider/model` 选择（同 critic 模型解析方式）；预算在 P2b 计划中定。P2a 不使用 LLM。
 
 待决：
 
-1. **handbook 生成模型与预算**：card 生成默认模型（建议与 evolution classifier 同级的低价模型），单仓库首次构建 token 上限。
+1. ~~handbook 生成模型与预算~~（已决，见上）。
 2. **组级 handbook 按 agent 裁剪**的渲染成本：agent 数 × 组数较大时是否改为运行时过滤而非预渲染。
 3. **Loadout 保留名例外**：需 Loadout 设计 owner 确认在其 §9.1 加入"`code-map` / `handbook-` 前缀不受同名覆盖规则约束"的例外。
 4. **回放标注人力**：§9.2.2 每个网格点 50 条，共 16 个网格点约 800 条，需要业务方安排标注人。
