@@ -171,6 +171,9 @@ func (r *repoRegistryRepo) UpdateRepositoryMeta(ctx context.Context, id string, 
 	if p.Status != nil {
 		updates["status"] = *p.Status
 	}
+	if p.HandbookModel != nil {
+		updates["handbook_model"] = *p.HandbookModel
+	}
 	db := r.db.WithContext(ctx)
 	if len(updates) > 0 {
 		if err := db.Model(&model.Repository{}).Where("id = ?", id).Updates(updates).Error; err != nil {
@@ -450,14 +453,54 @@ func (r *repoRegistryRepo) releaseLease(ctx context.Context, id, token string, u
 	return nil
 }
 
+func (r *repoRegistryRepo) ClaimHandbookEnrich(ctx context.Context, id string, now, leaseUntil time.Time) (string, bool, error) {
+	token := uuid.NewString()
+	res := r.db.WithContext(ctx).Model(&model.Repository{}).
+		Where("id = ? AND (handbook_llm_lease_until IS NULL OR handbook_llm_lease_until < ?)", id, now.UTC()).
+		Updates(map[string]any{
+			"handbook_llm_lease_until": leaseUntil.UTC(),
+			"handbook_llm_lease_token": token,
+		})
+	if res.Error != nil || res.RowsAffected == 0 {
+		return "", false, res.Error
+	}
+	return token, true, nil
+}
+
+func (r *repoRegistryRepo) FinishHandbookEnrich(ctx context.Context, id, token string, llm map[string]any) error {
+	return r.releaseEnrichLease(ctx, id, token, map[string]any{"handbook_llm": model.JSONObject(llm)})
+}
+
+func (r *repoRegistryRepo) ReleaseHandbookEnrich(ctx context.Context, id, token string) error {
+	return r.releaseEnrichLease(ctx, id, token, map[string]any{})
+}
+
+func (r *repoRegistryRepo) releaseEnrichLease(ctx context.Context, id, token string, updates map[string]any) error {
+	if token == "" {
+		return biz.ErrHandbookLeaseLost
+	}
+	updates["handbook_llm_lease_until"] = nil
+	updates["handbook_llm_lease_token"] = nil
+	res := r.db.WithContext(ctx).Model(&model.Repository{}).
+		Where("id = ? AND handbook_llm_lease_token = ?", id, token).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return biz.ErrHandbookLeaseLost
+	}
+	return nil
+}
+
 func repositoryToBiz(m *model.Repository) *biz.Repository {
 	return &biz.Repository{
 		ID: m.ID, CodeRoot: m.CodeRoot, RelPath: m.RelPath, Name: m.Name, Description: m.Description,
 		Tags: []string(m.Tags), GitRemote: m.GitRemote, GitBranch: m.GitBranch, HeadCommit: m.HeadCommit,
 		SyncMode: m.SyncMode, Status: m.Status, HandbookStatus: m.HandbookStatus, OwnerID: m.OwnerID,
 		HandbookCommit: m.HandbookCommit, HandbookVersion: m.HandbookVersion, HandbookStats: map[string]any(m.HandbookStats),
-		HandbookLeaseUntil: m.HandbookLeaseUntil,
-		LastScannedAt:      m.LastScannedAt, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+		HandbookLeaseUntil: m.HandbookLeaseUntil, HandbookModel: m.HandbookModel,
+		HandbookLLM: map[string]any(m.HandbookLLM), HandbookLLMLeaseUntil: m.HandbookLLMLeaseUntil,
+		LastScannedAt: m.LastScannedAt, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }
 

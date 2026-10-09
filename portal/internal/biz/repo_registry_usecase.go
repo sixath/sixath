@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	pkgErrors "backend/internal/pkg/errors"
 
@@ -596,6 +597,13 @@ func (uc *RepoRegistryUsecase) GetRepo(ctx context.Context, id string) (*RepoDet
 func (uc *RepoRegistryUsecase) PatchRepo(ctx context.Context, id string, p RepoMetaPatch) (*Repository, error) {
 	if p.Status != nil && *p.Status != RepoStatusActive && *p.Status != RepoStatusArchived {
 		return nil, fmt.Errorf("%w: status must be active or archived", ErrInvalidRepo)
+	}
+	if p.HandbookModel != nil {
+		s := strings.TrimSpace(*p.HandbookModel)
+		if len(s) > maxHandbookModelLen || strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+			return nil, fmt.Errorf("%w: handbook_model must be at most %d characters without whitespace", ErrInvalidRepo, maxHandbookModelLen)
+		}
+		p.HandbookModel = &s
 	}
 	var prevStatus string
 	if p.Status != nil {

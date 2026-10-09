@@ -31,6 +31,10 @@ const (
 
 	RepoBindingInclude = "include"
 	RepoBindingExclude = "exclude"
+
+	// HandbookModelOff as a repository's handbook model disables its LLM layer.
+	HandbookModelOff    = "off"
+	maxHandbookModelLen = 255
 )
 
 var (
@@ -60,10 +64,16 @@ type Repository struct {
 	HandbookStats   map[string]any `json:"handbook_stats,omitempty"`
 	// HandbookLeaseUntil is set while a build holds the lease; a past value means it is stuck.
 	HandbookLeaseUntil *time.Time `json:"handbook_lease_until,omitempty"`
-	OwnerID            string     `json:"owner_id"`
-	LastScannedAt      *time.Time `json:"last_scanned_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	// HandbookModel overrides the global handbook model: "" inherits it, "off" disables the LLM layer.
+	HandbookModel string `json:"handbook_model"`
+	// HandbookLLM is the state of the LLM layer (see the P2b plan for fields).
+	HandbookLLM map[string]any `json:"handbook_llm,omitempty"`
+	// HandbookLLMLeaseUntil is set while an LLM run holds its lease.
+	HandbookLLMLeaseUntil *time.Time `json:"handbook_llm_lease_until,omitempty"`
+	OwnerID               string     `json:"owner_id"`
+	LastScannedAt         *time.Time `json:"last_scanned_at,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 // AbsPath is the repository root on disk.
@@ -133,6 +143,8 @@ type RepoMetaPatch struct {
 	Tags        *[]string `json:"tags"`
 	OwnerID     *string   `json:"owner_id"`
 	Status      *string   `json:"status"`
+	// HandbookModel sets the per-repo handbook model override; "" clears it.
+	HandbookModel *string `json:"handbook_model,omitempty"`
 }
 
 // HandbookBuildResult is the outcome of one handbook build. Commit and Version are written
@@ -185,4 +197,14 @@ type RepoRegistryRepo interface {
 	// ReleaseHandbookBuild releases the lease held by token and restores status without
 	// recording an outcome; ErrHandbookLeaseLost when token no longer holds the lease.
 	ReleaseHandbookBuild(ctx context.Context, id, token, status string) error
+
+	// ClaimHandbookEnrich takes the LLM run lease when it is free or expired and returns its
+	// token. It is independent of the build lease and never touches handbook_status.
+	ClaimHandbookEnrich(ctx context.Context, id string, now, leaseUntil time.Time) (token string, ok bool, err error)
+	// FinishHandbookEnrich stores the LLM state and clears the lease; ErrHandbookLeaseLost when
+	// the token no longer matches.
+	FinishHandbookEnrich(ctx context.Context, id, token string, llm map[string]any) error
+	// ReleaseHandbookEnrich clears the lease without touching the LLM state;
+	// ErrHandbookLeaseLost when the token no longer matches.
+	ReleaseHandbookEnrich(ctx context.Context, id, token string) error
 }

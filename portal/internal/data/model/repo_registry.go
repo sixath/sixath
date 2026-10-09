@@ -9,27 +9,31 @@ import (
 
 // Repository is one git repository discovered under a code root.
 type Repository struct {
-	ID                 string      `gorm:"column:id;primaryKey;size:36"`
-	CodeRoot           string      `gorm:"column:code_root;size:255;not null;uniqueIndex:uk_repo_root_rel"`
-	RelPath            string      `gorm:"column:rel_path;size:512;not null;uniqueIndex:uk_repo_root_rel"`
-	Name               string      `gorm:"column:name;size:256;not null;default:''"`
-	Description        string      `gorm:"column:description;type:text"`
-	Tags               JSONStrings `gorm:"column:tags;type:json"`
-	GitRemote          string      `gorm:"column:git_remote;size:512;not null;default:''"`
-	GitBranch          string      `gorm:"column:git_branch;size:256;not null;default:''"`
-	HeadCommit         string      `gorm:"column:head_commit;size:64;not null;default:''"`
-	SyncMode           string      `gorm:"column:sync_mode;size:16;not null;default:registry_only"`
-	Status             string      `gorm:"column:status;size:16;not null;default:active;index:idx_repo_status"`
-	HandbookStatus     string      `gorm:"column:handbook_status;size:16;not null;default:none"`
-	HandbookCommit     string      `gorm:"column:handbook_commit;size:64;not null;default:''"`
-	HandbookVersion    int         `gorm:"column:handbook_version;not null;default:0"`
-	HandbookStats      JSONObject  `gorm:"column:handbook_stats;type:json"`
-	HandbookLeaseUntil *time.Time  `gorm:"column:handbook_lease_until"`
-	HandbookLeaseToken *string     `gorm:"column:handbook_lease_token;size:36"`
-	OwnerID            string      `gorm:"column:owner_id;size:36;not null;default:''"`
-	LastScannedAt      *time.Time  `gorm:"column:last_scanned_at"`
-	CreatedAt          time.Time   `gorm:"column:created_at;not null"`
-	UpdatedAt          time.Time   `gorm:"column:updated_at;not null"`
+	ID                    string      `gorm:"column:id;primaryKey;size:36"`
+	CodeRoot              string      `gorm:"column:code_root;size:255;not null;uniqueIndex:uk_repo_root_rel"`
+	RelPath               string      `gorm:"column:rel_path;size:512;not null;uniqueIndex:uk_repo_root_rel"`
+	Name                  string      `gorm:"column:name;size:256;not null;default:''"`
+	Description           string      `gorm:"column:description;type:text"`
+	Tags                  JSONStrings `gorm:"column:tags;type:json"`
+	GitRemote             string      `gorm:"column:git_remote;size:512;not null;default:''"`
+	GitBranch             string      `gorm:"column:git_branch;size:256;not null;default:''"`
+	HeadCommit            string      `gorm:"column:head_commit;size:64;not null;default:''"`
+	SyncMode              string      `gorm:"column:sync_mode;size:16;not null;default:registry_only"`
+	Status                string      `gorm:"column:status;size:16;not null;default:active;index:idx_repo_status"`
+	HandbookStatus        string      `gorm:"column:handbook_status;size:16;not null;default:none"`
+	HandbookCommit        string      `gorm:"column:handbook_commit;size:64;not null;default:''"`
+	HandbookVersion       int         `gorm:"column:handbook_version;not null;default:0"`
+	HandbookStats         JSONObject  `gorm:"column:handbook_stats;type:json"`
+	HandbookLeaseUntil    *time.Time  `gorm:"column:handbook_lease_until"`
+	HandbookLeaseToken    *string     `gorm:"column:handbook_lease_token;size:36"`
+	HandbookModel         string      `gorm:"column:handbook_model;size:255;not null;default:''"`
+	HandbookLLM           JSONObject  `gorm:"column:handbook_llm;type:json"`
+	HandbookLLMLeaseUntil *time.Time  `gorm:"column:handbook_llm_lease_until"`
+	HandbookLLMLeaseToken *string     `gorm:"column:handbook_llm_lease_token;size:36"`
+	OwnerID               string      `gorm:"column:owner_id;size:36;not null;default:''"`
+	LastScannedAt         *time.Time  `gorm:"column:last_scanned_at"`
+	CreatedAt             time.Time   `gorm:"column:created_at;not null"`
+	UpdatedAt             time.Time   `gorm:"column:updated_at;not null"`
 }
 
 func (Repository) TableName() string { return "repositories" }
