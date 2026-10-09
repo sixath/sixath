@@ -176,6 +176,38 @@ func (s Store) prune(id string, current, keep int) {
 	}
 }
 
+// LLMCache returns the LLM cache of a repository; the directory is created on first write.
+func (s Store) LLMCache(id string) (LLMCache, error) {
+	if err := checkID(id); err != nil {
+		return LLMCache{}, err
+	}
+	return LLMCache{Dir: filepath.Join(s.repoDir(id), "llm")}, nil
+}
+
+// ReadFacts loads the facts of a published version.
+func (s Store) ReadFacts(id string, v int) (*Facts, error) {
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(s.VersionDir(id, v), "facts")
+	f := &Facts{Symbols: map[string][]Symbol{}}
+	for name, dst := range map[string]any{
+		"files.json": &f.Files, "symbols.json": &f.Symbols, "registers.json": &f.Registers, "packages.json": &f.Packages,
+	} {
+		ok, err := readJSON(filepath.Join(dir, name), dst)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("handbook: %s v%d: missing facts/%s: %w", id, v, name, fs.ErrNotExist)
+		}
+	}
+	if f.Symbols == nil {
+		f.Symbols = map[string][]Symbol{}
+	}
+	return f, nil
+}
+
 // ListSkillFiles lists the files of a version's skill directory as sorted slash paths.
 func (s Store) ListSkillFiles(id string, v int) ([]string, error) {
 	if err := checkID(id); err != nil {
