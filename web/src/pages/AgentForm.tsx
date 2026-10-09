@@ -16,6 +16,8 @@ import {
   type RuntimeToolsConfig,
 } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
+import { repoBindingApi } from '../api/repoRegistry'
+import './RepoRegistry.css'
 
 const emptyRuntimeTools = (): RuntimeToolsConfig => ({})
 
@@ -61,6 +63,7 @@ export default function AgentForm() {
   const [proxies, setProxies] = useState<Proxy[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [boundCount, setBoundCount] = useState(0)
 
   const loadBrowse = useCallback(async (root: string, path = '') => {
     if (!root) {
@@ -129,6 +132,14 @@ export default function AgentForm() {
         .catch(() => setExistingLinkTarget(''))
     }
   }, [id, isEdit])
+
+  useEffect(() => {
+    if (!isEdit || !id) return
+    repoBindingApi
+      .get(id)
+      .then((v) => setBoundCount(v.bindings.length))
+      .catch(() => setBoundCount(0))
+  }, [isEdit, id])
 
   const toggleRuntimeTool = (key: keyof RuntimeToolsConfig, checked: boolean) => {
     setRuntimeTools((prev) => ({ ...prev, [key]: checked }))
@@ -257,6 +268,12 @@ export default function AgentForm() {
 
             <div className="form-group">
               <label>浏览代码根</label>
+              {boundCount > 0 && id ? (
+                <p className="detail-kv__hint repo-bindings__warn" data-testid="workspace-link-override-hint">
+                  该 Agent 已有 {boundCount} 条代码仓库绑定，RCA 代码工具使用绑定的仓库；这里的 workspace/code 链接只影响工作区文件浏览。到{' '}
+                  <Link to={`/agents/${id}`}>Agent 详情</Link> 管理代码仓库。
+                </p>
+              ) : null}
               {codeRoots.length === 0 ? (
                 <p className="form-panel__desc">未配置 code_roots，请手动填写工作空间路径。</p>
               ) : (
