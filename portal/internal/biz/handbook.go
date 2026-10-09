@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"backend/internal/handbook"
@@ -43,6 +44,10 @@ type HandbookView struct {
 	Version    int            `json:"version"`
 	Stats      map[string]any `json:"stats,omitempty"`
 	Pages      []string       `json:"pages"`
+	// LLM is the handbook_llm state; LLMModel the model the repo uses ("" = LLM layer off).
+	LLM        map[string]any `json:"llm,omitempty"`
+	LLMModel   string         `json:"llm_model"`
+	LLMRunning bool           `json:"llm_running"`
 }
 
 // HandbookUsecase builds repository handbooks and assembles per-agent handbook skill dirs.
@@ -56,17 +61,24 @@ type HandbookUsecase struct {
 	// slots caps concurrent builds across RebuildStale and RequestRebuild.
 	slots        chan struct{}
 	buildTimeout time.Duration
-	wg           sync.WaitGroup
-	now          func() time.Time
-	log          *log.Helper
+	llm          atomic.Pointer[handbookLLMSettings]
+	enrichMu     sync.Mutex
+	// enrichSlots caps concurrent LLM runs across EnrichPending and RequestEnrich.
+	enrichSlots chan struct{}
+	// wg covers the goroutines of RequestRebuild and RequestEnrich.
+	wg  sync.WaitGroup
+	now func() time.Time
+	log *log.Helper
 }
 
 func NewHandbookUsecase(repo RepoRegistryRepo, registry *RepoRegistryUsecase, dataRoot string, logger log.Logger) *HandbookUsecase {
-	return &HandbookUsecase{
+	uc := &HandbookUsecase{
 		repo: repo, registry: registry, store: handbook.Store{Root: filepath.Join(dataRoot, "handbooks")},
 		build: handbook.Build, slots: make(chan struct{}, handbookMaxBuilds), buildTimeout: handbookBuildTimeout,
-		now: time.Now, log: log.NewHelper(logger),
+		enrichSlots: make(chan struct{}, 1), now: time.Now, log: log.NewHelper(logger),
 	}
+	uc.SetLLM(HandbookLLMConfig{}, nil)
+	return uc
 }
 
 // SetBuilder replaces the handbook generator.
@@ -75,11 +87,13 @@ func (uc *HandbookUsecase) SetBuilder(b HandbookBuilder) { uc.build = b }
 // SetBuildTimeout overrides how long one build may run; it must stay below the lease.
 func (uc *HandbookUsecase) SetBuildTimeout(d time.Duration) { uc.buildTimeout = d }
 
-// Wait blocks until rebuilds started by RequestRebuild have finished.
+// Wait blocks until runs started by RequestRebuild and RequestEnrich, and the re-renders
+// they trigger, have finished.
 func (uc *HandbookUsecase) Wait() { uc.wg.Wait() }
 
-// handbookNeedsRebuild also picks up builds stuck in building after their lease expired.
-func handbookNeedsRebuild(r *Repository, now time.Time) bool {
+// needsRebuild also picks up builds stuck in building after their lease expired, and
+// re-renders when the LLM revision the handbook shows is not the expected one.
+func (uc *HandbookUsecase) needsRebuild(r *Repository, now time.Time) bool {
 	if r.Status != RepoStatusActive || r.HeadCommit == "" {
 		return false
 	}
@@ -91,7 +105,8 @@ func handbookNeedsRebuild(r *Repository, now time.Time) bool {
 		return failed != r.HeadCommit
 	}
 	gen, _ := r.HandbookStats["generator_version"].(string)
-	return r.HandbookCommit != r.HeadCommit || gen != handbook.GeneratorVersion
+	rev, _ := r.HandbookStats["llm_rev"].(string)
+	return r.HandbookCommit != r.HeadCommit || gen != handbook.GeneratorVersion || rev != uc.expectedLLMRev(r)
 }
 
 // statusBeforeClaim is the status restored when a claimed build is released without an
@@ -123,7 +138,7 @@ func (uc *HandbookUsecase) RebuildStale(ctx context.Context) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		if !handbookNeedsRebuild(r, uc.now().UTC()) {
+		if !uc.needsRebuild(r, uc.now().UTC()) {
 			continue
 		}
 		select {
@@ -209,7 +224,13 @@ func (uc *HandbookUsecase) runClaimed(ctx context.Context, id, token, prevStatus
 	if err != nil {
 		return uc.finishFailed(ctx, r, token, err)
 	}
-	out, err := uc.build(bctx, handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start})
+	in := handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start, LLMRev: uc.expectedLLMRev(r)}
+	if uc.modelFor(r) != "" {
+		if c, err := uc.store.LLMCache(r.ID); err == nil {
+			in.LLMDir = c.Dir
+		}
+	}
+	out, err := uc.build(bctx, in)
 	if err != nil {
 		switch {
 		case ctx.Err() != nil:
@@ -307,6 +328,8 @@ func (uc *HandbookUsecase) GetHandbook(ctx context.Context, id string) (*Handboo
 	v := &HandbookView{
 		RepoID: r.ID, Status: r.HandbookStatus, Commit: r.HandbookCommit, HeadCommit: r.HeadCommit,
 		Version: r.HandbookVersion, Stats: r.HandbookStats, Pages: []string{},
+		LLM: r.HandbookLLM, LLMModel: uc.modelFor(r),
+		LLMRunning: r.HandbookLLMLeaseUntil != nil && r.HandbookLLMLeaseUntil.After(uc.now().UTC()),
 	}
 	if r.HandbookVersion > 0 {
 		pages, err := uc.store.ListSkillFiles(r.ID, r.HandbookVersion)
