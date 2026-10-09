@@ -78,6 +78,10 @@
   border-radius: var(--radius-md);
 }
 
+.repo-filter-bar .repo-filter-bar__bulk {
+  margin-left: auto;
+}
+
 .repo-filter-bar input:focus {
   outline: none;
   border-color: var(--accent);

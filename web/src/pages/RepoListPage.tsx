@@ -40,6 +40,39 @@ function formatTime(iso?: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+function HandbookModelField({
+  id,
+  listId,
+  value,
+  placeholder,
+  options,
+  hint,
+  onChange,
+}: {
+  id: string
+  listId: string
+  value: string
+  placeholder: string
+  options: ModelOption[]
+  hint: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="form-group">
+      <label htmlFor={id}>Handbook 模型</label>
+      <input id={id} list={listId} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+      <datalist id={listId}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </datalist>
+      <span className="muted">{hint}</span>
+    </div>
+  )
+}
+
 function LLMBadge({ repo, config }: { repo: Repository; config: HandbookConfigView }) {
   const state = llmState(repo, config)
   return (
@@ -76,6 +109,10 @@ export default function RepoListPage() {
   const [rebuildError, setRebuildError] = useState('')
   const [handbookConfig, setHandbookConfig] = useState<HandbookConfigView>(NO_HANDBOOK_CONFIG)
   const [modelOptions, setModelOptions] = useState<ModelOption[]>(() => handbookModelOptions([], []))
+  const [bulkModel, setBulkModel] = useState<string | null>(null)
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const [bulkError, setBulkError] = useState('')
+  const [bulkResult, setBulkResult] = useState('')
 
   const filterRef = useRef(filter)
   const loadSeq = useRef(0)
@@ -123,6 +160,11 @@ export default function RepoListPage() {
   }, [])
 
   const globalModel = (handbookConfig.model ?? '').trim()
+  const modelPlaceholder = !handbookConfig.available
+    ? '服务端未启用 LLM 增强'
+    : globalModel
+      ? `继承全局（${globalModel}）`
+      : '未配置全局模型'
 
   const building = useMemo(() => anyHandbookBuildActive(repos), [repos])
   useEffect(() => {
@@ -172,9 +214,44 @@ export default function RepoListPage() {
       .get(repo.id)
       .then((d) => setEdit((prev) => (prev && prev.repo.id === repo.id ? { ...prev, agentIds: d.agent_ids } : prev)))
       .catch(() => {})
+    loadModelOptions()
+  }
+
+  const loadModelOptions = () => {
     Promise.all([modelCatalogApi.listProviders(), modelCatalogApi.listCatalog()])
       .then(([providers, entries]) => setModelOptions(handbookModelOptions(providers, entries)))
       .catch(() => setModelOptions(handbookModelOptions([], [])))
+  }
+
+  const openBulkModel = () => {
+    setBulkError('')
+    setBulkResult('')
+    setBulkModel('')
+    loadModelOptions()
+  }
+
+  const saveBulkModel = async () => {
+    if (bulkModel === null) return
+    const value = bulkModel.trim()
+    setBulkSaving(true)
+    setBulkError('')
+    try {
+      const { matched } = await repoApi.setHandbookModel(
+        repos.map((r) => r.id),
+        value,
+      )
+      setBulkModel(null)
+      setBulkResult(
+        value
+          ? `已为 ${matched} 个仓库设置 Handbook 模型 ${value}`
+          : `已清除 ${matched} 个仓库的 Handbook 模型覆盖，改为继承全局`,
+      )
+      await loadRepos(filterRef.current, true)
+    } catch (e) {
+      setBulkError((e as Error).message)
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   const saveEdit = async () => {
@@ -299,7 +376,21 @@ export default function RepoListPage() {
         <button type="button" className="btn btn-ghost btn-sm" onClick={resetFilter}>
           重置
         </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm repo-filter-bar__bulk"
+          disabled={loading || repos.length === 0}
+          onClick={openBulkModel}
+        >
+          批量设置模型
+        </button>
       </form>
+
+      {bulkResult ? (
+        <div className="success repo-scan-report" data-testid="repo-bulk-model-result">
+          {bulkResult}
+        </div>
+      ) : null}
 
       {error ? <div className="error">加载失败：{error}</div> : null}
       {rebuildError ? (
@@ -441,30 +532,15 @@ export default function RepoListPage() {
               <label>标签（逗号分隔）</label>
               <input value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} />
             </div>
-            <div className="form-group">
-              <label htmlFor="repo-handbook-model">Handbook 模型</label>
-              <input
-                id="repo-handbook-model"
-                list="handbook-model-options"
-                value={edit.handbookModel}
-                placeholder={
-                  !handbookConfig.available
-                    ? '服务端未启用 LLM 增强'
-                    : globalModel
-                      ? `继承全局（${globalModel}）`
-                      : '未配置全局模型'
-                }
-                onChange={(e) => setEdit({ ...edit, handbookModel: e.target.value })}
-              />
-              <datalist id="handbook-model-options">
-                {modelOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </datalist>
-              <span className="muted">留空继承全局，填 off 禁用该仓库的 LLM 增强；格式为模型名或「提供方/模型名」。</span>
-            </div>
+            <HandbookModelField
+              id="repo-handbook-model"
+              listId="handbook-model-options"
+              value={edit.handbookModel}
+              placeholder={modelPlaceholder}
+              options={modelOptions}
+              hint="留空继承全局，填 off 禁用该仓库的 LLM 增强；格式为模型名或「提供方/模型名」。"
+              onChange={(v) => setEdit({ ...edit, handbookModel: v })}
+            />
             <div className="form-group">
               <label>使用该仓库的 Agent</label>
               {edit.agentIds === null ? (
@@ -481,6 +557,32 @@ export default function RepoListPage() {
                 </div>
               )}
             </div>
+          </>
+        ) : null}
+      </FormDialog>
+
+      <FormDialog
+        open={bulkModel !== null}
+        title="批量设置 Handbook 模型"
+        loading={bulkSaving}
+        error={bulkError}
+        onCancel={() => setBulkModel(null)}
+        onConfirm={() => void saveBulkModel()}
+      >
+        {bulkModel !== null ? (
+          <>
+            <p>
+              将应用到当前列表中的 {repos.length} 个仓库（按当前筛选条件），覆盖它们各自已有的模型设置；之后新加入的仓库不受影响。
+            </p>
+            <HandbookModelField
+              id="repo-bulk-handbook-model"
+              listId="handbook-bulk-model-options"
+              value={bulkModel}
+              placeholder={modelPlaceholder}
+              options={modelOptions}
+              hint="留空则清除这些仓库的覆盖、改为继承全局；填 off 禁用它们的 LLM 增强；格式为模型名或「提供方/模型名」。"
+              onChange={setBulkModel}
+            />
           </>
         ) : null}
       </FormDialog>

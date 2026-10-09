@@ -599,12 +599,9 @@ func (uc *RepoRegistryUsecase) PatchRepo(ctx context.Context, id string, p RepoM
 		return nil, fmt.Errorf("%w: status must be active or archived", ErrInvalidRepo)
 	}
 	if p.HandbookModel != nil {
-		s := strings.TrimSpace(*p.HandbookModel)
-		if len(s) > maxHandbookModelLen || strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-			return nil, fmt.Errorf("%w: handbook_model must be at most %d characters without whitespace", ErrInvalidRepo, maxHandbookModelLen)
-		}
-		if strings.EqualFold(s, HandbookModelOff) {
-			s = HandbookModelOff
+		s, err := normalizeHandbookModel(*p.HandbookModel)
+		if err != nil {
+			return nil, err
 		}
 		p.HandbookModel = &s
 	}
@@ -638,6 +635,42 @@ func (uc *RepoRegistryUsecase) PatchRepo(ctx context.Context, id string, p RepoM
 		}
 	}
 	return repoView(r), nil
+}
+
+// normalizeHandbookModel trims a handbook model override and lowercases "off".
+func normalizeHandbookModel(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if len(s) > maxHandbookModelLen || strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return "", fmt.Errorf("%w: handbook_model must be at most %d characters without whitespace", ErrInvalidRepo, maxHandbookModelLen)
+	}
+	if strings.EqualFold(s, HandbookModelOff) {
+		s = HandbookModelOff
+	}
+	return s, nil
+}
+
+// SetHandbookModel sets the handbook model override of the given repositories ("" clears it)
+// and returns how many of them exist; unknown ids are ignored.
+func (uc *RepoRegistryUsecase) SetHandbookModel(ctx context.Context, ids []string, modelName string) (int, error) {
+	s, err := normalizeHandbookModel(modelName)
+	if err != nil {
+		return 0, err
+	}
+	seen := make(map[string]bool, len(ids))
+	uniq := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+			seen[id] = true
+			uniq = append(uniq, id)
+		}
+	}
+	if len(uniq) == 0 {
+		return 0, fmt.Errorf("%w: repo_ids is required", ErrInvalidRepo)
+	}
+	if len(uniq) > maxBulkRepoIDs {
+		return 0, fmt.Errorf("%w: at most %d repo_ids per request", ErrInvalidRepo, maxBulkRepoIDs)
+	}
+	return uc.repo.SetRepositoriesHandbookModel(ctx, uniq, s)
 }
 
 // ---- groups ----

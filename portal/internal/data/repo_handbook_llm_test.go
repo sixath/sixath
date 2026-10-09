@@ -140,6 +140,73 @@ func TestPatchRepo_HandbookModel(t *testing.T) {
 	}
 }
 
+func TestSetHandbookModel_Bulk(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	for _, p := range []string{"cloudgame/svc-a", "cloudgame/svc-b", "other/svc-c"} {
+		mkRepoDir(t, codeRoot+"/"+p)
+	}
+	uc, _ := newUsecaseForTest(t, codeRoot)
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repos, err := uc.ListRepos(ctx, biz.RepoFilter{})
+	if err != nil || len(repos) != 3 {
+		t.Fatalf("repos = %v err=%v", repos, err)
+	}
+	byPath := map[string]string{}
+	for _, r := range repos {
+		byPath[r.RelPath] = r.ID
+	}
+	a, b, c := byPath["cloudgame/svc-a"], byPath["cloudgame/svc-b"], byPath["other/svc-c"]
+	models := func() map[string]string {
+		rs, err := uc.ListRepos(ctx, biz.RepoFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, r := range rs {
+			out[r.ID] = r.HandbookModel
+		}
+		return out
+	}
+
+	n, err := uc.SetHandbookModel(ctx, []string{a, " " + b + " ", a, "missing-id"}, " OFF ")
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v, want 2 matched (duplicates and unknown ids ignored)", n, err)
+	}
+	if m := models(); m[a] != biz.HandbookModelOff || m[b] != biz.HandbookModelOff || m[c] != "" {
+		t.Fatalf("after off: %v", m)
+	}
+	if n, err := uc.SetHandbookModel(ctx, []string{a, b, c}, "qwen/qwen-max"); err != nil || n != 3 {
+		t.Fatalf("set all: n=%d err=%v", n, err)
+	}
+	if n, err := uc.SetHandbookModel(ctx, []string{b}, ""); err != nil || n != 1 {
+		t.Fatalf("clear: n=%d err=%v", n, err)
+	}
+	if m := models(); m[a] != "qwen/qwen-max" || m[b] != "" || m[c] != "qwen/qwen-max" {
+		t.Fatalf("after clear: %v", m)
+	}
+
+	tooMany := make([]string, 1001)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("id-%d", i)
+	}
+	for name, call := range map[string]func() (int, error){
+		"bad model": func() (int, error) { return uc.SetHandbookModel(ctx, []string{a}, "a b") },
+		"no ids":    func() (int, error) { return uc.SetHandbookModel(ctx, nil, "m") },
+		"blank ids": func() (int, error) { return uc.SetHandbookModel(ctx, []string{" ", ""}, "m") },
+		"too many":  func() (int, error) { return uc.SetHandbookModel(ctx, tooMany, "m") },
+	} {
+		if _, err := call(); !errors.Is(err, biz.ErrInvalidRepo) {
+			t.Fatalf("%s: err = %v, want ErrInvalidRepo", name, err)
+		}
+	}
+	if m := models(); m[a] != "qwen/qwen-max" || m[b] != "" || m[c] != "qwen/qwen-max" {
+		t.Fatalf("rejected calls must not write: %v", m)
+	}
+}
+
 // llmFake answers handbook prompts by their system prompt. The skeleton reply is unusable,
 // so the skeleton falls back to one stage per area.
 type llmFake struct {

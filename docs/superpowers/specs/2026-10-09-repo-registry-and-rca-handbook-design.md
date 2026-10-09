@@ -638,6 +638,7 @@ P2b 新增与变更的接口：
 | POST | `/api/v1/repos/{id}/handbook/enrich?full=` | 异步启动该仓库的 LLM 运行，成功 200 `{"accepted":true}`。`full` 用 `strconv.ParseBool` 解析（`1`/`true`/`0`/`false` 等），非法 400 `INVALID_ARGUMENT`；`full=true` 重建骨架并重试失败集。错误：仓库非 `active` 400 `INVALID_ARGUMENT`；LLM 层禁用 400 `HANDBOOK_LLM_DISABLED`；handbook 不是当前 HEAD/生成器 409 `HANDBOOK_NOT_READY`；该仓库 LLM 运行中 409 `HANDBOOK_BUILDING`；其他仓库 LLM 运行中 409 `HANDBOOK_LLM_BUSY`；仓库不存在 404 `NOT_FOUND`；未配置 handbook 503 `HANDBOOK_DISABLED` |
 | GET | `/api/v1/handbook/config` | 全局 LLM 配置（已套默认值与上限）：`model`、`concurrency`、`max_cards_per_run`、`max_file_kb`、`max_run_minutes`、`skeleton_rebuild_days`，以及 `available`（已安装模型解析器；否则任何仓库包括覆盖都不运行）与 `enabled`（`available` 且全局模型非空） |
 | GET | `/api/v1/repos/{id}/handbook` | 新增 `llm`（`handbook_llm`）、`llm_model`（该仓库实际使用的模型，`""` = LLM 层关闭）、`llm_running`（LLM 租约未过期） |
+| POST | `/api/v1/repos/handbook-model` | 批量设置 `handbook_model`：`{"repo_ids":[...],"handbook_model":"..."}`，校验与规范化同 PATCH（`""` 清除覆盖），`handbook_model` 必填；`repo_ids` 去空白去重后须有 1–1000 个，否则 400 `INVALID_ARGUMENT`。一个事务内更新，不存在的 id 忽略，返回 `{"matched":N}`（存在的仓库数）。只写入一次，之后新加入分组的仓库不继承 |
 
 `GET /api/v1/repos`、`/repos/{id}` 的仓库对象新增 `handbook_model`、`handbook_llm`、`handbook_llm_lease_until`。
 
@@ -653,7 +654,7 @@ handbook:
   skeleton_rebuild_days: 30
 ```
 
-配置只在进程启动时读取；仓库级覆盖经 PATCH 立即生效。
+配置只在进程启动时读取；仓库级覆盖经 PATCH 或批量接口立即生效。
 
 后续阶段的接口：`POST /api/v1/repos/batch`、`POST /api/v1/repo-groups/{id}/members/confirm`，以及 tag 组的创建与修改。
 
@@ -681,6 +682,7 @@ P2b 已实现：
 
 - **LLM 徽章**（仓库表 Handbook 列下方）：未启用 / 增强中 / 待增强 / 部分完成 x/y / 已完成 x/y / 失败，悬停显示 `last_error`。前端按 `/handbook/config` 与仓库字段计算：服务端无模型解析器（`available=false`）、仓库设为 `off`、或既无覆盖也无全局模型 → 未启用；LLM 租约未过期 → 增强中；`failed` 只在 `failed_commit` 仍等于 `handbook_commit` 且模型未变时显示为失败（否则后端会重试，显示待增强）；无状态或 `commit` 不是当前 handbook commit → 待增强。进度 x/y 只在部分完成与已完成时显示。列表在有活跃构建**或**活跃 LLM 运行时每 3 秒静默刷新。
 - **编辑弹窗**新增"Handbook 模型"输入框，候选来自模型目录（仅启用且有 API key 的 provider、非隐藏条目，取值 `<provider 名称或 ID>/<模型名>`，名称含空白或 `/` 时用 ID）以及 `off`；占位提示显示继承的全局模型或"服务端未启用 LLM 增强"。
+- **批量设置模型**（筛选栏右侧按钮）：对当前列表（即当前筛选结果，例如按分组筛选后的整组）调用 `POST /repos/handbook-model`，弹窗显示受影响的仓库数，输入框与编辑弹窗相同；成功后在列表上方提示设置了多少个仓库并静默刷新列表。
 - **HandbookDialog 的 LLM 区块**：状态徽章、所用模型、卡片 x/y（本轮新增、生成失败、调用出错待重试）、阶段数（退化时注明原因）、最近一轮时间/耗时/token；`last_error` 在失败时显示为错误、否则显示为"最近一轮有错误"警告。"重新生成 LLM 内容"按钮调用 `enrich?full=1`（LLM 关闭或运行中时禁用），失败按服务端 `reason`（`ApiError` 携带 HTTP 状态与 reason）映射成中文提示；运行期间每 3 秒刷新视图，运行结束后自动重新加载当前页面内容；触发成功后通知列表刷新。
 
 后续阶段：落后天数、冻结比例、漏召回率列（P3）；仓库批量操作；tag 组与 pending 成员确认（P4）。

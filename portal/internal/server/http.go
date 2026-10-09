@@ -165,6 +165,7 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/repos", repoH.ListRepos())
 	r.POST("/api/v1/repos/scan", repoH.Scan())
 	r.POST("/api/v1/repos/migrate-legacy-links", repoH.MigrateLegacyLinks())
+	r.POST("/api/v1/repos/handbook-model", repoH.SetHandbookModel())
 	r.GET("/api/v1/repos/{id}", repoH.GetRepo())
 	r.PATCH("/api/v1/repos/{id}", repoH.PatchRepo())
 	r.GET("/api/v1/repos/{id}/handbook", repoH.GetHandbook())

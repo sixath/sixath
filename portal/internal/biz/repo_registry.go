@@ -35,6 +35,7 @@ const (
 	// HandbookModelOff as a repository's handbook model disables its LLM layer.
 	HandbookModelOff    = "off"
 	maxHandbookModelLen = 255
+	maxBulkRepoIDs      = 1000
 )
 
 var (
@@ -168,6 +169,9 @@ type RepoRegistryRepo interface {
 	// and reports whether it changed; archived and already-missing rows are left alone.
 	MarkRepositoryMissingIfActive(ctx context.Context, id string) (bool, error)
 	UpdateRepositoryMeta(ctx context.Context, id string, p RepoMetaPatch) (*Repository, error)
+	// SetRepositoriesHandbookModel sets handbook_model of the given ids in one transaction and
+	// returns how many of them exist.
+	SetRepositoriesHandbookModel(ctx context.Context, ids []string, model string) (int, error)
 
 	// UpsertDirGroup returns the dir group for (codeRoot, relPrefix), creating it with a stable id.
 	UpsertDirGroup(ctx context.Context, codeRoot, relPrefix string) (*RepoGroup, error)

@@ -190,6 +190,17 @@ func (r *repoRegistryRepo) UpdateRepositoryMeta(ctx context.Context, id string, 
 	return repositoryToBiz(&m), nil
 }
 
+func (r *repoRegistryRepo) SetRepositoriesHandbookModel(ctx context.Context, ids []string, modelName string) (int, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Repository{}).Where("id IN ?", ids).Count(&n).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Repository{}).Where("id IN ?", ids).Update("handbook_model", modelName).Error
+	})
+	return int(n), err
+}
+
 func (r *repoRegistryRepo) UpsertDirGroup(ctx context.Context, codeRoot, relPrefix string) (*biz.RepoGroup, error) {
 	id := uuid.NewSHA1(dirGroupNamespace, []byte(codeRoot+"\x00"+relPrefix)).String()
 	m := model.RepoGroup{

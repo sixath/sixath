@@ -137,6 +137,29 @@ func (h *RepoRegistryHandlers) PatchRepo() func(kratoshttp.Context) error {
 	}
 }
 
+// POST /api/v1/repos/handbook-model {"repo_ids":[...],"handbook_model":"..."} — "" clears the overrides.
+func (h *RepoRegistryHandlers) SetHandbookModel() func(kratoshttp.Context) error {
+	return func(ctx kratoshttp.Context) error {
+		var body struct {
+			RepoIDs       []string `json:"repo_ids"`
+			HandbookModel *string  `json:"handbook_model"`
+		}
+		if err := decodeJSONBody(ctx, &body); err != nil {
+			return err
+		}
+		if body.HandbookModel == nil {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "handbook_model is required")
+		}
+		return h.serve(ctx, func(c context.Context) (any, error) {
+			n, err := h.uc.SetHandbookModel(c, body.RepoIDs, *body.HandbookModel)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"matched": n}, nil
+		})
+	}
+}
+
 // GET /api/v1/repos/{id}/handbook
 func (h *RepoRegistryHandlers) GetHandbook() func(kratoshttp.Context) error {
 	return func(ctx kratoshttp.Context) error {

@@ -27,6 +27,12 @@ export const repoApi = {
   get: (id: string) => request<RepoDetail>(`/repos/${enc(id)}`),
   patch: (id: string, p: RepoMetaPatch) => request<Repository>(`/repos/${enc(id)}`, send('PATCH', p)),
   scan: () => request<RepoScanReport>('/repos/scan', send('POST')),
+  /** Sets handbook_model of every given repo; '' clears the overrides. */
+  setHandbookModel: (repoIds: string[], handbookModel: string) =>
+    request<{ matched: number }>(
+      '/repos/handbook-model',
+      send('POST', { repo_ids: repoIds, handbook_model: handbookModel }),
+    ),
   handbook: (id: string) => request<HandbookView>(`/repos/${enc(id)}/handbook`),
   handbookPage: (id: string, path: string) =>
     request<{ path: string; content: string }>(`/repos/${enc(id)}/handbook/page?path=${enc(path)}`),

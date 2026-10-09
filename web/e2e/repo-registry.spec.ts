@@ -393,6 +393,36 @@ test.describe('Repo registry UI', () => {
     await expect(page.getByTestId('llm-state-r-a')).toContainText('未启用')
   })
 
+  test('可为当前列表批量设置 Handbook 模型', async ({ page }) => {
+    let model = ''
+    let posted: { repo_ids: string[]; handbook_model: string } | null = null
+    await mockRepoRegistry(page, { repos: () => [repoA, repoB].map((r) => ({ ...r, handbook_model: model })) })
+    await mockHandbookConfig(page, '')
+    await page.route(/\/api\/v1\/model-providers(\?.*)?$/, async (route: Route) => {
+      await route.fulfill({ json: { providers: [] } })
+    })
+    await page.route(/\/api\/v1\/model-catalog(\?.*)?$/, async (route: Route) => {
+      await route.fulfill({ json: { items: [] } })
+    })
+    await page.route('**/api/v1/repos/handbook-model', async (route: Route) => {
+      posted = route.request().postDataJSON() as { repo_ids: string[]; handbook_model: string }
+      model = posted.handbook_model.trim()
+      await route.fulfill({ json: { matched: posted.repo_ids.length } })
+    })
+
+    await page.goto('/repos')
+    await expect(page.getByTestId('llm-state-r-a')).toContainText('未启用')
+    await page.getByRole('button', { name: '批量设置模型' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toContainText('当前列表中的 2 个仓库')
+    await dialog.getByLabel('Handbook 模型').fill('deepseek-v4-flash')
+    await dialog.getByRole('button', { name: '保存' }).click()
+    await expect(dialog).toHaveCount(0)
+    expect(posted).toEqual({ repo_ids: ['r-a', 'r-b'], handbook_model: 'deepseek-v4-flash' })
+    await expect(page.getByTestId('repo-bulk-model-result')).toContainText('已为 2 个仓库设置 Handbook 模型 deepseek-v4-flash')
+    await expect(page.getByTestId('llm-state-r-a')).not.toContainText('未启用')
+  })
+
   test('handbook 弹窗展示 LLM 区块并可重新生成', async ({ page }) => {
     const enriched: string[] = []
     let enrichStatus = 409

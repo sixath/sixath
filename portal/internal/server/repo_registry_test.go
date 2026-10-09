@@ -146,6 +146,55 @@ func TestHandbookConfigRoute_NoResolver(t *testing.T) {
 	}
 }
 
+// bulkModelRegistry records bulk handbook model writes and knows the ids in known.
+type bulkModelRegistry struct {
+	biz.RepoRegistryRepo
+	known map[string]bool
+	ids   []string
+	model string
+}
+
+func (r *bulkModelRegistry) SetRepositoriesHandbookModel(_ context.Context, ids []string, m string) (int, error) {
+	r.ids, r.model = ids, m
+	n := 0
+	for _, id := range ids {
+		if r.known[id] {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func TestSetHandbookModelRoute(t *testing.T) {
+	reg := &bulkModelRegistry{known: map[string]bool{"r1": true, "r2": true}}
+	uc := biz.NewRepoRegistryUsecase(reg, nil, nil, log.DefaultLogger)
+	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
+	srv.Route("/").POST("/api/v1/repos/handbook-model", NewRepoRegistryHandlers(uc, nil).SetHandbookModel())
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/repos/handbook-model", strings.NewReader(body)))
+		return rec
+	}
+
+	rec := post(`{"repo_ids":["r1","r2","r9"],"handbook_model":" Off "}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"matched":2`) {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if reg.model != biz.HandbookModelOff || len(reg.ids) != 3 {
+		t.Fatalf("wrote ids=%v model=%q", reg.ids, reg.model)
+	}
+	for _, body := range []string{
+		`{"repo_ids":["r1"]}`,
+		`{"repo_ids":[],"handbook_model":"m"}`,
+		`{"repo_ids":["r1"],"handbook_model":"a b"}`,
+	} {
+		reg.ids = nil
+		if rec := post(body); rec.Code != http.StatusBadRequest || reg.ids != nil {
+			t.Fatalf("%s: status = %d body = %s wrote=%v", body, rec.Code, rec.Body.String(), reg.ids)
+		}
+	}
+}
+
 // missingRepoRegistry knows no repositories; other methods are not used.
 type missingRepoRegistry struct{ biz.RepoRegistryRepo }
 
