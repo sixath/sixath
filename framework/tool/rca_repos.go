@@ -20,7 +20,7 @@ type RCARoot struct {
 }
 
 // NamedRCARoots 为路径列表生成逻辑名：默认取 basename；basename 冲突时逐级加上父目录
-// （如 cloudgame/gateway 与 migu/gateway），直到唯一。空路径与重复路径被丢弃。
+// （如 cloudgame/gateway 与 migu/gateway），直到唯一；仍冲突时改用完整路径。空路径与重复路径被丢弃。
 func NamedRCARoots(paths []string) []RCARoot {
 	out := make([]RCARoot, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))
@@ -52,10 +52,16 @@ func NamedRCARoots(paths []string) []RCARoot {
 			}
 		}
 		if !changed {
-			slog.Warn("rca: repo names still collide after qualification", "names", sortedNameSet(dups))
+			// 路径段完全相同（如 /a/gw 与 a/gw）时无法再加父目录，退回完整路径；路径已去重，故必唯一。
+			for i := range out {
+				if _, ok := dups[out[i].Name]; ok {
+					out[i].Name = filepath.ToSlash(out[i].Path)
+				}
+			}
+			slog.Warn("rca: repo names still collide after qualification; using full paths", "names", sortedNameSet(dups))
 			return out
 		}
-		slog.Warn("rca: repo basenames collide; using parent-qualified names", "names", sortedNameSet(dups))
+		slog.Info("rca: repo basenames collide; using parent-qualified names", "names", sortedNameSet(dups))
 	}
 }
 

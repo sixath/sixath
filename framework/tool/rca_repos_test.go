@@ -31,6 +31,21 @@ func TestNamedRCARoots_QualifiesUntilUnique(t *testing.T) {
 	}
 }
 
+func TestNamedRCARoots_FallsBackToFullPathWhenSegmentsIdentical(t *testing.T) {
+	got := NamedRCARoots([]string{"/a/gw", "a/gw"})
+	if len(got) != 2 {
+		t.Fatalf("got %#v", got)
+	}
+	want0 := filepath.ToSlash(filepath.Clean("/a/gw"))
+	want1 := filepath.ToSlash(filepath.Clean("a/gw"))
+	if got[0].Name != want0 || got[1].Name != want1 {
+		t.Fatalf("names = %q, %q; want %q, %q", got[0].Name, got[1].Name, want0, want1)
+	}
+	if err := validateRCARoots(got); err != nil {
+		t.Fatalf("validateRCARoots: %v", err)
+	}
+}
+
 func TestNamedRCARoots_DropsEmptyAndDuplicatePaths(t *testing.T) {
 	got := NamedRCARoots([]string{"", "  ", "/codes/a", "/codes/a/", "/codes/a"})
 	if len(got) != 1 || got[0].Name != "a" {
