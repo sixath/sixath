@@ -3,11 +3,15 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"backend/internal/biz"
 
 	kratosErrors "github.com/go-kratos/kratos/v2/errors"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func TestRepoRegistryErr(t *testing.T) {
@@ -37,5 +41,18 @@ func TestRepoRegistryErr(t *testing.T) {
 	plain := errors.New("db down")
 	if !errors.Is(repoRegistryErr(plain), plain) {
 		t.Fatal("unknown errors should pass through unchanged")
+	}
+}
+
+func TestPutBindings_MissingFieldRejected(t *testing.T) {
+	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
+	srv.Route("/").PUT("/api/v1/agents/{agent_id}/repo-bindings", NewRepoRegistryHandlers(nil, nil).PutBindings())
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/agents/ag/repo-bindings", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "bindings is required") {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }

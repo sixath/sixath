@@ -494,8 +494,31 @@ func checkRootPath(cr repoCodeRoot, p string) error {
 
 // ---- repositories ----
 
+// nonNilStrings keeps API slices encoding as [] rather than null.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// repoView normalizes r in place for API responses; nil-safe.
+func repoView(r *Repository) *Repository {
+	if r != nil {
+		r.Tags = nonNilStrings(r.Tags)
+	}
+	return r
+}
+
 func (uc *RepoRegistryUsecase) ListRepos(ctx context.Context, f RepoFilter) ([]*Repository, error) {
-	return uc.repo.ListRepositories(ctx, f)
+	rs, err := uc.repo.ListRepositories(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rs {
+		repoView(r)
+	}
+	return rs, nil
 }
 
 type RepoDetail struct {
@@ -516,7 +539,7 @@ func (uc *RepoRegistryUsecase) GetRepo(ctx context.Context, id string) (*RepoDet
 	if err != nil {
 		return nil, err
 	}
-	return &RepoDetail{Repository: r, AgentIDs: agents}, nil
+	return &RepoDetail{Repository: repoView(r), AgentIDs: nonNilStrings(agents)}, nil
 }
 
 // PatchRepo updates user-editable fields; status may only be set to active or archived.
@@ -553,7 +576,7 @@ func (uc *RepoRegistryUsecase) PatchRepo(ctx context.Context, id string, p RepoM
 			uc.log.Warnf("recompute after repo status change: %v", err)
 		}
 	}
-	return r, nil
+	return repoView(r), nil
 }
 
 // ---- groups ----
@@ -578,7 +601,7 @@ func (uc *RepoRegistryUsecase) ListGroups(ctx context.Context, kind string) ([]*
 	}
 	out := make([]*RepoGroupView, 0, len(groups))
 	for _, g := range groups {
-		out = append(out, &RepoGroupView{RepoGroup: g, RepoIDs: members[g.ID]})
+		out = append(out, &RepoGroupView{RepoGroup: g, RepoIDs: nonNilStrings(members[g.ID])})
 	}
 	return out, nil
 }
@@ -598,7 +621,7 @@ func (uc *RepoRegistryUsecase) CreateManualGroup(ctx context.Context, name strin
 	if err := uc.repo.ReplaceGroupMembers(ctx, g.ID, RepoMemberSourceManual, repoIDs); err != nil {
 		return nil, err
 	}
-	return &RepoGroupView{RepoGroup: g, RepoIDs: repoIDs}, nil
+	return &RepoGroupView{RepoGroup: g, RepoIDs: nonNilStrings(repoIDs)}, nil
 }
 
 func (uc *RepoRegistryUsecase) SetManualGroupMembers(ctx context.Context, groupID string, repoIDs []string) error {
@@ -761,9 +784,15 @@ func (uc *RepoRegistryUsecase) bindingsView(ctx context.Context, bs []*AgentRepo
 	if err != nil {
 		return nil, err
 	}
+	if bs == nil {
+		bs = []*AgentRepoBinding{}
+	}
 	view := &AgentRepoBindingsView{Bindings: bs, Effective: make([]*EffectiveRepoView, 0, len(eff))}
 	for _, e := range eff {
-		view.Effective = append(view.Effective, &EffectiveRepoView{AgentEffectiveRepo: e, Repository: repos[e.RepoID]})
+		if e.Via == nil {
+			e.Via = []BindingRef{}
+		}
+		view.Effective = append(view.Effective, &EffectiveRepoView{AgentEffectiveRepo: e, Repository: repoView(repos[e.RepoID])})
 	}
 	return view, nil
 }
@@ -783,7 +812,8 @@ type LegacyLinkMigrationItem struct {
 
 // MigrateLegacyLinks maps each agent's workspace/code link to repo bindings. With apply=false
 // it only reports; with apply=true it writes bindings only for exact repo / dir-group matches.
-func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply bool) ([]*LegacyLinkMigrationItem, error) {
+// When allow is non-nil, agents it rejects are left out of both the report and apply.
+func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply bool, allow func(context.Context, string) bool) ([]*LegacyLinkMigrationItem, error) {
 	repos, err := uc.repo.ListRepositories(ctx, RepoFilter{Status: RepoStatusActive})
 	if err != nil {
 		return nil, err
@@ -814,6 +844,9 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 		for _, a := range agents {
 			target := fwws.ResolveCodeMount(a.Workspace)
 			if target == "" {
+				continue
+			}
+			if allow != nil && !allow(ctx, a.ID) {
 				continue
 			}
 			target = mapTargetToConfiguredRoot(target, uc.codeRoots)

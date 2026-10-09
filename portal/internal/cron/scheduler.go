@@ -103,8 +103,16 @@ func (s *Scheduler) repoScanLoop(ctx context.Context) {
 }
 
 func (s *Scheduler) runRepoScan(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Errorf("repo scan panic: %v", r)
+		}
+	}()
 	rep, err := s.repoUC.Scan(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		s.log.Warnf("repo scan: %v", err)
 		return
 	}

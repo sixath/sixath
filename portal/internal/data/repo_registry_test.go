@@ -397,7 +397,7 @@ func TestRepoRegistryUsecase_MigrateLegacyLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := uc.MigrateLegacyLinks(ctx, false)
+	items, err := uc.MigrateLegacyLinks(ctx, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func TestRepoRegistryUsecase_MigrateLegacyLinks(t *testing.T) {
 		t.Fatal("agents without workspace/code are not reported")
 	}
 
-	if _, err := uc.MigrateLegacyLinks(ctx, true); err != nil {
+	if _, err := uc.MigrateLegacyLinks(ctx, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if bs, _ := repo.ListAgentBindings(ctx, "a-repo"); len(bs) != 1 {
@@ -425,7 +425,7 @@ func TestRepoRegistryUsecase_MigrateLegacyLinks(t *testing.T) {
 	if bs, _ := repo.ListAgentBindings(ctx, "a-multi"); len(bs) != 0 {
 		t.Fatalf("manual cases must not be applied: %#v", bs)
 	}
-	items, _ = uc.MigrateLegacyLinks(ctx, true)
+	items, _ = uc.MigrateLegacyLinks(ctx, true, nil)
 	for _, it := range items {
 		if it.AgentID == "a-repo" && it.Action != biz.LegacyActionSkipHasBindings {
 			t.Fatalf("second run must skip bound agents: %#v", it)
@@ -506,7 +506,7 @@ func TestRepoRegistryUsecase_MigratePaginatesWithoutSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := uc.MigrateLegacyLinks(ctx, false)
+	items, err := uc.MigrateLegacyLinks(ctx, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func TestRepoRegistryUsecase_MigratePaginatesWithoutSymlinks(t *testing.T) {
 		}
 	}
 
-	items, err = uc.MigrateLegacyLinks(ctx, true)
+	items, err = uc.MigrateLegacyLinks(ctx, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,6 +555,66 @@ func TestRepoRegistryUsecase_MigratePaginatesWithoutSymlinks(t *testing.T) {
 	roots, err := uc.RCARootsForAgent(ctx, "a-repo")
 	if err != nil || len(roots) != 1 || roots[0].Name != "ws-repo/code" {
 		t.Fatalf("a-repo roots = %#v, err = %v", roots, err)
+	}
+}
+
+func TestRepoRegistryUsecase_MigrateLegacyLinksFilter(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "ws-a", "code"))
+	mkRepoDir(t, filepath.Join(codeRoot, "ws-b", "code"))
+	uc, repo := newUsecaseForTest(t, codeRoot,
+		&biz.AgentMeta{ID: "a-allowed", Workspace: filepath.Join(codeRoot, "ws-a")},
+		&biz.AgentMeta{ID: "a-denied", Workspace: filepath.Join(codeRoot, "ws-b")},
+	)
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	allow := func(_ context.Context, id string) bool { return id == "a-allowed" }
+	for _, apply := range []bool{false, true} {
+		items, err := uc.MigrateLegacyLinks(ctx, apply, allow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 || items[0].AgentID != "a-allowed" {
+			t.Fatalf("apply=%v report = %#v", apply, items)
+		}
+	}
+	if bs, _ := repo.ListAgentBindings(ctx, "a-allowed"); len(bs) != 1 {
+		t.Fatalf("a-allowed bindings = %#v", bs)
+	}
+	if bs, _ := repo.ListAgentBindings(ctx, "a-denied"); len(bs) != 0 {
+		t.Fatalf("filtered agent must not be applied: %#v", bs)
+	}
+}
+
+func TestRepoRegistryUsecase_ViewsUseEmptySlices(t *testing.T) {
+	ctx := context.Background()
+	codeRoot := t.TempDir()
+	mkRepoDir(t, filepath.Join(codeRoot, "solo"))
+	uc, _ := newUsecaseForTest(t, codeRoot, &biz.AgentMeta{ID: "ag"})
+	if _, err := uc.Scan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repos, err := uc.ListRepos(ctx, biz.RepoFilter{})
+	if err != nil || len(repos) != 1 || repos[0].Tags == nil {
+		t.Fatalf("repos = %#v, err = %v", repos, err)
+	}
+	detail, err := uc.GetRepo(ctx, repos[0].ID)
+	if err != nil || detail.AgentIDs == nil || detail.Repository.Tags == nil {
+		t.Fatalf("detail = %#v, err = %v", detail, err)
+	}
+	g, err := uc.CreateManualGroup(ctx, "empty", nil, "u")
+	if err != nil || g.RepoIDs == nil {
+		t.Fatalf("group = %#v, err = %v", g, err)
+	}
+	groups, err := uc.ListGroups(ctx, biz.RepoGroupManual)
+	if err != nil || len(groups) != 1 || groups[0].RepoIDs == nil {
+		t.Fatalf("groups = %#v, err = %v", groups, err)
+	}
+	view, err := uc.GetBindings(ctx, "ag")
+	if err != nil || view.Bindings == nil || view.Effective == nil {
+		t.Fatalf("bindings view = %#v, err = %v", view, err)
 	}
 }
 

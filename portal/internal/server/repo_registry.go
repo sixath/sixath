@@ -127,7 +127,11 @@ func (h *RepoRegistryHandlers) MigrateLegacyLinks() func(kratoshttp.Context) err
 	return func(ctx kratoshttp.Context) error {
 		apply := strings.EqualFold(strings.TrimSpace(ctx.Query().Get("apply")), "true")
 		return h.serve(ctx, func(c context.Context) (any, error) {
-			items, err := h.uc.MigrateLegacyLinks(c, apply)
+			canEdit := func(c context.Context, agentID string) bool {
+				_, err := h.agentUC.GetForEdit(c, agentID)
+				return err == nil
+			}
+			items, err := h.uc.MigrateLegacyLinks(c, apply, canEdit)
 			if err != nil {
 				return nil, err
 			}
@@ -211,21 +215,25 @@ func (h *RepoRegistryHandlers) GetBindings() func(kratoshttp.Context) error {
 	}
 }
 
-// PUT /api/v1/agents/{agent_id}/repo-bindings {"bindings":[...]}
+// PUT /api/v1/agents/{agent_id}/repo-bindings {"bindings":[...]}; "bindings":[] clears.
 func (h *RepoRegistryHandlers) PutBindings() func(kratoshttp.Context) error {
 	return func(ctx kratoshttp.Context) error {
 		agentID := strings.TrimSpace(ctx.Vars().Get("agent_id"))
 		var req struct {
-			Bindings []*biz.AgentRepoBinding `json:"bindings"`
+			Bindings *[]*biz.AgentRepoBinding `json:"bindings"`
 		}
 		if err := decodeJSONBody(ctx, &req); err != nil {
 			return err
 		}
+		if req.Bindings == nil {
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "bindings is required")
+		}
+		bindings := *req.Bindings
 		return h.serve(ctx, func(c context.Context) (any, error) {
 			if _, err := h.agentUC.GetForEdit(c, agentID); err != nil {
 				return nil, err
 			}
-			return h.uc.ReplaceBindings(c, agentID, req.Bindings, requestActor(c))
+			return h.uc.ReplaceBindings(c, agentID, bindings, requestActor(c))
 		})
 	}
 }
