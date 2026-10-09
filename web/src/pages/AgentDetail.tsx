@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { agentApi, toolApi, mcpServerApi, proxyApi, RUNTIME_TOOL_FIELDS, type Agent, type Tool, type McpServer, type Proxy, type SkillMeta } from '../api/client'
 import { getResourceByPayload, type ResourceInfo } from '../api/resource'
 import ResourceGrantPanel from '../components/ResourceGrantPanel'
+import RepoBindingsPanel from '../components/RepoBindingsPanel'
 import { SearchableToolSelect } from '../components/SearchableToolSelect'
 
 /** 绑定下拉预拉上限；本地模糊过滤，一般足够覆盖常用环境。 */
@@ -429,6 +430,8 @@ export default function AgentDetail() {
           </div>
         </div>
       </section>
+
+      {id ? <RepoBindingsPanel agentId={id} /> : null}
 
       <section className="section">
         <h2 className="section-title">技能管理</h2>
