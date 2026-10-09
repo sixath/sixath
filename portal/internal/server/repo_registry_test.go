@@ -141,9 +141,21 @@ func TestEnrichHandbook_UnknownRepo(t *testing.T) {
 	uc := biz.NewHandbookUsecase(missingRepoRegistry{}, nil, t.TempDir(), log.DefaultLogger)
 	srv := khttp.NewServer(khttp.ErrorEncoder(errorEncoder))
 	srv.Route("/").POST("/api/v1/repos/{id}/handbook/enrich", NewRepoRegistryHandlers(nil, nil).WithHandbook(uc).EnrichHandbook())
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/repos/r1/handbook/enrich", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	for _, tc := range []struct {
+		url    string
+		code   int
+		reason string
+	}{
+		{"/api/v1/repos/r1/handbook/enrich", http.StatusNotFound, "NOT_FOUND"},
+		{"/api/v1/repos/r1/handbook/enrich?full=", http.StatusNotFound, "NOT_FOUND"},
+		{"/api/v1/repos/r1/handbook/enrich?full=1", http.StatusNotFound, "NOT_FOUND"},
+		{"/api/v1/repos/r1/handbook/enrich?full=false", http.StatusNotFound, "NOT_FOUND"},
+		{"/api/v1/repos/r1/handbook/enrich?full=yes", http.StatusBadRequest, "INVALID_ARGUMENT"},
+	} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.url, nil))
+		if rec.Code != tc.code || !strings.Contains(rec.Body.String(), tc.reason) {
+			t.Fatalf("%s: status = %d body = %s, want %d %s", tc.url, rec.Code, rec.Body.String(), tc.code, tc.reason)
+		}
 	}
 }

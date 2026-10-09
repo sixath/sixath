@@ -23,7 +23,7 @@ type modelBuilder func(provider, modelName, apiKey, baseURL string) (model.Model
 
 // criticModelResolver 按 hooks.yaml critic.model 在模型目录中查找可用模型：
 // 先按模型名精确匹配，再按 "<provider 名称或 ID>/<模型名>" 匹配。
-func criticModelResolver(cat criticModelCatalog, build func(provider, modelName, apiKey, baseURL string) (model.Model, error)) func(name string) (model.Model, error) {
+func criticModelResolver(cat criticModelCatalog, build modelBuilder) func(name string) (model.Model, error) {
 	return func(name string) (model.Model, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), criticModelLookupTimeout)
 		defer cancel()
@@ -32,7 +32,7 @@ func criticModelResolver(cat criticModelCatalog, build func(provider, modelName,
 }
 
 // catalogModelResolver resolves "model" or "<provider name or ID>/<model>" among usable catalog models.
-func catalogModelResolver(cat criticModelCatalog, build func(provider, modelName, apiKey, baseURL string) (model.Model, error)) func(ctx context.Context, name string) (model.Model, error) {
+func catalogModelResolver(cat criticModelCatalog, build modelBuilder) func(ctx context.Context, name string) (model.Model, error) {
 	return func(ctx context.Context, name string) (model.Model, error) {
 		return lookupCatalogModel(ctx, cat, build, "model", name)
 	}

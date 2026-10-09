@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 
 	"backend/internal/biz"
@@ -188,9 +189,16 @@ func (h *RepoRegistryHandlers) EnrichHandbook() func(kratoshttp.Context) error {
 			return errHandbookDisabled
 		}
 		id := strings.TrimSpace(ctx.Vars().Get("id"))
-		full := strings.ToLower(strings.TrimSpace(ctx.Query().Get("full")))
+		full := false
+		if v := strings.TrimSpace(ctx.Query().Get("full")); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return kratosErrors.BadRequest("INVALID_ARGUMENT", "full must be a boolean")
+			}
+			full = b
+		}
 		return h.serve(ctx, func(c context.Context) (any, error) {
-			if err := h.handbook.RequestEnrich(c, id, full == "1" || full == "true"); err != nil {
+			if err := h.handbook.RequestEnrich(c, id, full); err != nil {
 				return nil, err
 			}
 			return map[string]any{"accepted": true}, nil

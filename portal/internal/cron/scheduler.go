@@ -19,7 +19,13 @@ type Scheduler struct {
 
 	repoUC           *biz.RepoRegistryUsecase
 	repoScanInterval time.Duration
-	handbookUC       *biz.HandbookUsecase
+	handbookUC       handbookJobs
+}
+
+// handbookJobs is the part of biz.HandbookUsecase the scheduler runs.
+type handbookJobs interface {
+	RebuildStale(ctx context.Context) (int, error)
+	EnrichPending(ctx context.Context) (int, error)
 }
 
 // DefaultRepoScanInterval is how often code roots are rescanned for repositories.
@@ -91,6 +97,10 @@ func (s *Scheduler) SetRepoRegistry(uc *biz.RepoRegistryUsecase, interval time.D
 // SetHandbook rebuilds stale repository handbooks, then runs their pending LLM layer, after
 // every successful repo scan.
 func (s *Scheduler) SetHandbook(uc *biz.HandbookUsecase) {
+	if uc == nil {
+		s.handbookUC = nil
+		return
+	}
 	s.handbookUC = uc
 }
 
