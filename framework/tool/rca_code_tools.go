@@ -12,14 +12,22 @@ const (
 	ToolsetRCA           = "rca"
 
 	rcaOptionalRepoDesc = "Optional repository name (one of the configured repos); omit to search all."
-	rcaRequiredRepoDesc = "Repository name (one of the configured repos, i.e. basename of a code root)."
+	rcaRequiredRepoDesc = "Repository name (one of the configured repos, as returned in the repo field of rca_grep / rca_glob)."
 )
 
 // RegisterRCACodeTools 注册 rca_grep / rca_glob / rca_read 三个多仓库代码检索工具。
-// roots 为允许检索的仓库根白名单（workspace.ResolveWorkspacePath 守卫作用于每个根）。
+// roots 为允许检索的仓库根白名单；逻辑名取 basename，重名时自动加父目录消歧。
 func RegisterRCACodeTools(reg *Registry, roots []string) error {
+	return RegisterRCACodeToolsNamed(reg, NamedRCARoots(roots))
+}
+
+// RegisterRCACodeToolsNamed 与 RegisterRCACodeTools 相同，但由调用方指定每个根的逻辑名（必须唯一）。
+func RegisterRCACodeToolsNamed(reg *Registry, roots []RCARoot) error {
 	if reg == nil {
 		return errors.New("rca code tools: registry is nil")
+	}
+	if err := validateRCARoots(roots); err != nil {
+		return err
 	}
 	if err := registerRCAGrepTool(reg, roots); err != nil {
 		return err
@@ -30,7 +38,7 @@ func RegisterRCACodeTools(reg *Registry, roots []string) error {
 	return registerRCAReadTool(reg, roots)
 }
 
-func registerRCAGrepTool(reg *Registry, roots []string) error {
+func registerRCAGrepTool(reg *Registry, roots []RCARoot) error {
 	return reg.Register(Tool{
 		Name: "rca_grep",
 		Description: "Search source code by regex across configured code roots (multi-repo). " +
@@ -79,12 +87,12 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 					break
 				}
 				remaining := maxResults - len(matches)
-				res, err := searchRCAFileContents(root, pattern, glob, remaining+1)
+				res, err := searchRCAFileContents(root.Path, pattern, glob, remaining+1)
 				if err != nil {
 					return stampRCAGrepErr(ctx, rcaErrFrom(toolName, err), repo), nil
 				}
-				res = attachRCAGrepContext(root, res, contextLines)
-				name := repoNameFromRoot(root)
+				res = attachRCAGrepContext(root.Path, res, contextLines)
+				name := root.Name
 				for _, cm := range res {
 					if len(matches) >= maxResults {
 						truncated = true
@@ -100,7 +108,7 @@ func registerRCAGrepTool(reg *Registry, roots []string) error {
 			}
 			topRepo := strings.TrimSpace(repo)
 			if topRepo == "" && len(sel) > 0 {
-				topRepo = repoNameFromRoot(sel[0])
+				topRepo = sel[0].Name
 			}
 			payload := map[string]any{"matches": matches, "truncated": truncated}
 			payload = StampHitContract(payload, HitStamp{
@@ -123,7 +131,7 @@ func stampRCAGrepErr(ctx context.Context, out map[string]any, repo string) map[s
 	return StampHitContract(out, s)
 }
 
-func registerRCAGlobTool(reg *Registry, roots []string) error {
+func registerRCAGlobTool(reg *Registry, roots []RCARoot) error {
 	return reg.Register(Tool{
 		Name: "rca_glob",
 		Description: "Find files by glob across configured code roots (multi-repo). " +
@@ -163,19 +171,19 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 			truncated := false
 			var missing []string
 			for _, root := range sel {
-				if st, err := os.Stat(root); err != nil || !st.IsDir() {
-					missing = append(missing, repoNameFromRoot(root))
+				if st, err := os.Stat(root.Path); err != nil || !st.IsDir() {
+					missing = append(missing, root.Name)
 					continue
 				}
 				if len(matches) >= maxResults {
 					break
 				}
 				remaining := maxResults - len(matches)
-				res, err := searchFilesByGlob(root, root, pattern, "", remaining+1, 0)
+				res, err := searchFilesByGlob(root.Path, root.Path, pattern, "", remaining+1, 0)
 				if err != nil {
 					return rcaErrFrom(toolName, err), nil
 				}
-				name := repoNameFromRoot(root)
+				name := root.Name
 				for _, fm := range res {
 					if len(matches) >= maxResults {
 						truncated = true
@@ -204,7 +212,7 @@ func registerRCAGlobTool(reg *Registry, roots []string) error {
 }
 
 // registerRCAReadTool 注册 rca_read:按仓库读取文件并带行号,路径经守卫限制在仓库根内。
-func registerRCAReadTool(reg *Registry, roots []string) error {
+func registerRCAReadTool(reg *Registry, roots []RCARoot) error {
 	return reg.Register(Tool{
 		Name: "rca_read",
 		Description: "Read a source file from a specific configured code root with line numbers (LINE_NUM|CONTENT). " +

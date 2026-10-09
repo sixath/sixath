@@ -622,7 +622,7 @@ func TestResolveSymbolCandidates_LongLineAndSkipGit(t *testing.T) {
 	long := strings.Repeat("x", bufio.MaxScanTokenSize+1024)
 	writeRCASymbolSource(t, repo, "long.go", "package main\n\n"+long+"\nfunc TargetAlso() {}\n")
 
-	locations, unique, _, err := resolveSymbolCandidates([]string{repo}, "cloudgame", "Target", 10)
+	locations, unique, _, err := resolveSymbolCandidates(NamedRCARoots([]string{repo}), "cloudgame", "Target", 10)
 	if err != nil {
 		t.Fatalf("resolveSymbolCandidates: %v", err)
 	}

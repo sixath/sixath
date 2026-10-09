@@ -17,7 +17,7 @@ func TestResolveInRepos_HappyAndTraversal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	roots := []string{repoA, repoB}
+	roots := NamedRCARoots([]string{repoA, repoB})
 
 	full, root, err := resolveInRepos(roots, "service-b", "sub/x.go")
 	if err != nil {
@@ -46,12 +46,6 @@ func TestResolveInRepos_HappyAndTraversal(t *testing.T) {
 	// empty repo with valid roots must hit the "repo is required" guard
 	if _, _, err := resolveInRepos(roots, "", "x.go"); err == nil {
 		t.Fatal("expected 'repo is required' error for empty repo, got nil err")
-	}
-}
-
-func TestRepoNameFromRoot(t *testing.T) {
-	if got := repoNameFromRoot("/a/b/service-a"); got != "service-a" {
-		t.Fatalf("repoNameFromRoot = %q, want service-a", got)
 	}
 }
 
@@ -628,5 +622,77 @@ func TestRCAGrep_DescriptionSaysQuotedErrorFirst(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(tl.Description), "error") && !strings.Contains(tl.Description, "报错") {
 		t.Fatalf("rca_grep should mention quoted error strings, got %q", tl.Description)
+	}
+}
+
+func TestRCARead_BasenameCollisionReadsCorrectRepo(t *testing.T) {
+	base := t.TempDir()
+	a := filepath.Join(base, "cloudgame", "gateway")
+	b := filepath.Join(base, "migu", "gateway")
+	writeFile(t, filepath.Join(a, "main.go"), "package a\n// from cloudgame\n")
+	writeFile(t, filepath.Join(b, "main.go"), "package b\n// from migu\n")
+	reg := newRCARegistry(t, []string{a, b})
+
+	tl, ok := reg.Get("rca_read")
+	if !ok {
+		t.Fatal("rca_read not registered")
+	}
+	out, err := tl.Execute(context.Background(), map[string]any{"repo": "migu/gateway", "file": "main.go"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	content, _ := out.(map[string]any)["content"].(string)
+	if !strings.Contains(content, "from migu") {
+		t.Fatalf("read wrong repo, content = %q", content)
+	}
+
+	out, _ = tl.Execute(context.Background(), map[string]any{"repo": "gateway", "file": "main.go"})
+	if _, hasErr := out.(map[string]any)["error"]; !hasErr {
+		t.Fatalf("ambiguous basename must be rejected, got %#v", out)
+	}
+}
+
+func TestRCAGrep_CollisionUsesQualifiedRepoNames(t *testing.T) {
+	base := t.TempDir()
+	a := filepath.Join(base, "cloudgame", "gateway")
+	b := filepath.Join(base, "migu", "gateway")
+	writeFile(t, filepath.Join(a, "x.go"), "package a\n// Marker\n")
+	writeFile(t, filepath.Join(b, "x.go"), "package b\n// Marker\n")
+	reg := newRCARegistry(t, []string{a, b})
+
+	tl, _ := reg.Get("rca_grep")
+	out, err := tl.Execute(context.Background(), map[string]any{"pattern": "Marker"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	repos := map[string]bool{}
+	for _, m := range out.(map[string]any)["matches"].([]map[string]any) {
+		repos[m["repo"].(string)] = true
+	}
+	if !repos["cloudgame/gateway"] || !repos["migu/gateway"] {
+		t.Fatalf("repos = %v", repos)
+	}
+}
+
+func TestRegisterRCACodeToolsNamed_UsesGivenNames(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "svc-a")
+	writeFile(t, filepath.Join(root, "a.go"), "package a\n// Needle\n")
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	if err := RegisterRCACodeToolsNamed(reg, []RCARoot{{Name: "cloudgame/svc-a", Path: root}}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	tl, _ := reg.Get("rca_grep")
+	out, _ := tl.Execute(context.Background(), map[string]any{"pattern": "Needle", "repo": "cloudgame/svc-a"})
+	matches := out.(map[string]any)["matches"].([]map[string]any)
+	if len(matches) != 1 || matches[0]["repo"] != "cloudgame/svc-a" {
+		t.Fatalf("matches = %#v", matches)
+	}
+}
+
+func TestRegisterRCACodeToolsNamed_RejectsDuplicateNames(t *testing.T) {
+	reg := &Registry{tools: map[string]Tool{}, mcpServerIDs: map[string]struct{}{}}
+	err := RegisterRCACodeToolsNamed(reg, []RCARoot{{Name: "a", Path: "/x/a"}, {Name: "a", Path: "/y/a"}})
+	if err == nil {
+		t.Fatal("expected duplicate name error")
 	}
 }

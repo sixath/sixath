@@ -35,7 +35,7 @@ type symbolCandidate struct {
 
 // resolveSymbolCandidates finds symbol occurrences in Go files under one guarded repo root.
 // The returned unique value indicates whether the best candidate can be used for LSP navigation.
-func resolveSymbolCandidates(roots []string, repo, symbol string, maxResults int) ([]lsp.Location, bool, bool, error) {
+func resolveSymbolCandidates(roots []RCARoot, repo, symbol string, maxResults int) ([]lsp.Location, bool, bool, error) {
 	root, err := resolveRCASymbolRoot(roots, repo)
 	if err != nil {
 		return nil, false, false, err
@@ -113,7 +113,7 @@ func resolveSymbolCandidates(roots []string, repo, symbol string, maxResults int
 	return locations, unique, truncated, nil
 }
 
-func resolveRCASymbolRoot(roots []string, repo string) (string, error) {
+func resolveRCASymbolRoot(roots []RCARoot, repo string) (string, error) {
 	root, _, err := resolveInRepos(roots, repo, ".")
 	return root, err
 }
