@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,10 +33,10 @@ var ErrModelUnavailable = errors.New("handbook: model calls keep failing")
 // EnrichOptions bounds one LLM run; zero values take defaults.
 type EnrichOptions struct {
 	Concurrency         int
-	MaxCardsPerRun      int // model calls for cards; files with identical content share one
+	MaxCardsPerRun      int // card model calls; files with identical content share one
 	MaxFileBytes        int
 	SkeletonRebuildDays int
-	Full                bool          // rebuild the skeleton regardless of thresholds
+	Full                bool          // rebuild the skeleton and retry failed cards regardless of thresholds
 	RetryBackoff        time.Duration // base delay between retries of a failed synthesis call
 }
 
@@ -74,19 +75,21 @@ type EnrichInput struct {
 // EnrichResult summarizes one run. Card counts are in files; files with identical content
 // share one card.
 type EnrichResult struct {
-	State           string
-	CardsTotal      int
-	CardsDone       int
-	CardsNew        int
-	CardErrors      int
-	Stages          int
-	Fallback        bool
-	SkeletonRebuilt bool
-	RebuildReason   string
-	SkeletonBuiltAt time.Time
-	TokensIn        int64
-	TokensOut       int64
-	Changed         bool // cache content changed; the handbook needs a re-render
+	State               string
+	CardsTotal          int
+	CardsDone           int
+	CardsNew            int
+	CardErrors          int // files whose card got an unusable reply; not retried until their content changes
+	CardTransportErrors int // files whose card call failed this run; retried next run
+	Stages              int
+	Fallback            bool
+	SkeletonRebuilt     bool
+	RebuildReason       string
+	SkeletonBuiltAt     time.Time
+	TokensIn            int64
+	TokensOut           int64
+	Changed             bool  // cache content changed; the handbook needs a re-render
+	PruneError          error // cleanup of unused cards failed; the run itself succeeded
 }
 
 // cardJob is one model call: a content hash and the files that have it.
@@ -108,7 +111,16 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 		res.State = LLMStateFailed
 		return res, errors.New("handbook: no model")
 	}
+	fail := func(err error) (*EnrichResult, error) {
+		res.State = LLMStateFailed
+		return res, err
+	}
 
+	storedFailed, err := in.Cache.FailedCards()
+	if err != nil {
+		return fail(err)
+	}
+	failed := map[string]bool{}
 	files := eligibleFiles(in.Facts)
 	res.CardsTotal = len(files)
 	cards := map[string]*Card{}
@@ -124,14 +136,16 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 		}
 		c, err := in.Cache.Card(f.Hash)
 		if err != nil {
-			res.State = LLMStateFailed
-			return res, err
+			return fail(err)
 		}
 		j := &cardJob{hash: f.Hash, files: []File{f}}
 		byHash[f.Hash] = j
-		if c != nil {
+		switch {
+		case c != nil:
 			cards[f.Path] = c
-		} else {
+		case storedFailed[f.Hash] && !o.Full:
+			failed[f.Hash] = true
+		default:
 			todo = append(todo, j)
 		}
 	}
@@ -152,16 +166,21 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 		}
 		return a.Path < b.Path
 	})
-	cut := len(todo) > o.MaxCardsPerRun
-	if cut {
-		todo = todo[:o.MaxCardsPerRun]
-	}
-	err := generateCards(ctx, in, o, todo, cards, res, &u)
+	cut, err := generateCards(ctx, in, o, todo, cards, failed, res, &u)
 	res.CardsDone = len(cards)
+	for _, f := range files {
+		if failed[f.Hash] {
+			res.CardErrors++
+		}
+	}
 	res.Changed = res.CardsNew > 0
+	if !maps.Equal(failed, storedFailed) {
+		if perr := in.Cache.PutFailedCards(failed); perr != nil && err == nil {
+			err = perr
+		}
+	}
 	if err != nil {
-		res.State = LLMStateFailed
-		return res, err
+		return fail(err)
 	}
 	if cut || ctx.Err() != nil {
 		res.State = LLMStatePartial
@@ -172,42 +191,58 @@ func Enrich(ctx context.Context, in EnrichInput) (*EnrichResult, error) {
 			res.State = LLMStatePartial
 			return res, nil
 		}
-		res.State = LLMStateFailed
-		return res, err
+		return fail(err)
 	}
 	res.State = LLMStateComplete
 	return res, nil
 }
 
-// generateCards runs the card jobs concurrently. Unusable replies count as card errors;
-// maxConsecutiveCallErrors failed calls in a row abort with ErrModelUnavailable and a failed
-// cache write aborts with that error.
-func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []*cardJob, cards map[string]*Card, res *EnrichResult, u *usage) error {
+// generateCards runs the card jobs in order with at most o.MaxCardsPerRun model calls and
+// reports whether jobs were left untried for lack of budget. Unusable replies add the hash to
+// failed; maxConsecutiveCallErrors failed calls in a row abort with ErrModelUnavailable and a
+// failed cache write aborts with that error.
+func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []*cardJob, cards map[string]*Card, failed map[string]bool, res *EnrichResult, u *usage) (bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (
 		mu          sync.Mutex
 		consecutive int
+		calls       int
+		exhausted   bool
 		fatal       error
 		wg          sync.WaitGroup
+		stopOnce    sync.Once
 	)
+	stop := make(chan struct{})
 	abort := func(err error) {
 		if fatal == nil {
 			fatal = err
 			cancel()
 		}
 	}
-	limit := min(maxConsecutiveCallErrors, len(todo))
+	limit := min(maxConsecutiveCallErrors, len(todo), o.MaxCardsPerRun)
 	jobs := make(chan *cardJob)
 	for i := 0; i < o.Concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
 				f, content, ok := readJob(in.Root, j)
 				if !ok {
 					continue
 				}
+				mu.Lock()
+				if calls >= o.MaxCardsPerRun {
+					exhausted = true
+					mu.Unlock()
+					stopOnce.Do(func() { close(stop) })
+					continue
+				}
+				calls++
+				mu.Unlock()
 				card, err := generateCard(ctx, in.Model, in.ModelName, in.RelPath, f, in.Facts.Symbols[f.Path], content, o.MaxFileBytes, u)
 				var putErr error
 				if err == nil {
@@ -222,12 +257,14 @@ func generateCards(ctx context.Context, in EnrichInput, o EnrichOptions, todo []
 						cards[f.Path] = card
 					}
 					res.CardsNew += len(j.files)
+					delete(failed, j.hash)
 					consecutive = 0
 				case ctx.Err() != nil:
 				case errors.Is(err, errBadReply):
-					res.CardErrors += len(j.files)
+					failed[j.hash] = true
 					consecutive = 0
 				default:
+					res.CardTransportErrors += len(j.files)
 					consecutive++
 					if consecutive >= limit {
 						abort(fmt.Errorf("%w: %w", ErrModelUnavailable, err))
@@ -241,13 +278,15 @@ feed:
 	for _, j := range todo {
 		select {
 		case jobs <- j:
+		case <-stop:
+			break feed
 		case <-ctx.Done():
 			break feed
 		}
 	}
 	close(jobs)
 	wg.Wait()
-	return fatal
+	return exhausted, fatal
 }
 
 // readJob returns the first file of a job whose checkout content still matches its hash.
@@ -260,13 +299,17 @@ func readJob(root string, j *cardJob) (File, []byte, bool) {
 	return File{}, nil, false
 }
 
-// readMatching reads a file of the checkout and reports whether it still matches the facts.
+// readMatching reads a regular file of the checkout and reports whether it still matches the
+// facts.
 func readMatching(root string, f File) ([]byte, bool) {
 	fh, err := os.OpenInRoot(root, filepath.FromSlash(f.Path))
 	if err != nil {
 		return nil, false
 	}
 	defer fh.Close()
+	if st, err := fh.Stat(); err != nil || !st.Mode().IsRegular() {
+		return nil, false
+	}
 	b, err := io.ReadAll(io.LimitReader(fh, MaxFileBytes+1))
 	if err != nil || len(b) > MaxFileBytes {
 		return nil, false
@@ -301,16 +344,61 @@ func (m retryModel) Chat(ctx context.Context, msgs []model.Message, opts ...mode
 
 func modelErr(err error) error { return fmt.Errorf("%w: %w", ErrModelUnavailable, err) }
 
+func stageSignature(sk *Skeleton) string {
+	if sk == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, s := range sk.Stages {
+		b.WriteString(s.ID + "\x00" + s.Title + "\x00")
+	}
+	return b.String()
+}
+
+// pointCards makes CardHash name the card shown for each file: the card of its current
+// content when one exists, otherwise its previous card (rendered as stale), otherwise none.
+// It returns the stages that gained a current card and whether any CardHash changed.
+func pointCards(sk, prev *Skeleton, files []File, cards map[string]*Card) (map[string]bool, bool) {
+	gained, moved := map[string]bool{}, false
+	for _, f := range files {
+		a, ok := sk.Files[f.Path]
+		if !ok {
+			continue
+		}
+		want := a.CardHash
+		switch {
+		case cards[f.Path] != nil:
+			want = f.Hash
+		case want == f.Hash || want == "":
+			want = ""
+			if prev != nil {
+				if p, ok := prev.Files[f.Path]; ok && p.CardHash != f.Hash {
+					want = p.CardHash
+				}
+			}
+		}
+		if want == a.CardHash {
+			continue
+		}
+		if want == f.Hash && a.Stage != "" {
+			gained[a.Stage] = true
+		}
+		a.CardHash, moved = want, true
+		sk.Files[f.Path] = a
+	}
+	return gained, moved
+}
+
 // synthesizeAll rebuilds or incrementally updates the skeleton, rewrites affected stage
 // summaries, the overview and register notes, and stores the skeleton only when every step
-// succeeded.
+// succeeded. Pruning unused cards afterwards is best effort.
 func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards map[string]*Card, res *EnrichResult, u *usage) error {
 	m := retryModel{Model: in.Model, retries: synthesisRetries, backoff: o.RetryBackoff}
 	sk, err := in.Cache.Skeleton()
 	if err != nil {
 		return err
 	}
-	storedCommit := ""
+	prev, prevStages, storedCommit := sk, stageSignature(sk), ""
 	if sk != nil {
 		storedCommit = sk.Commit
 	}
@@ -329,20 +417,23 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 	}
 	rebuilt := reason != ""
 	if rebuilt {
-		old := sk
 		sk, err = inferSkeleton(ctx, m, in.RelPath, in.Facts, cards, in.Commit, in.Now, u)
 		if err != nil {
 			return modelErr(err)
 		}
-		if old != nil && old.PromptVersion == LLMPromptVersion {
-			sk.RegisterNotes = old.RegisterNotes
+		if prev != nil && prev.PromptVersion == LLMPromptVersion {
+			sk.RegisterNotes = prev.RegisterNotes
 		}
 		affected, changed = map[string]bool{}, nil
 		for _, s := range sk.Stages {
 			affected[s.ID] = true
 		}
 	}
-	dirty := rebuilt || len(changed) > 0
+	gained, moved := pointCards(sk, prev, eligibleFiles(in.Facts), cards)
+	for s := range gained {
+		affected[s] = true
+	}
+	dirty := rebuilt || moved || len(changed) > 0
 
 	filesOf := map[string][]string{}
 	for p, a := range sk.Files {
@@ -365,7 +456,7 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 		sk.Stages[i].Summary = s
 		rewritten++
 	}
-	if len(sk.Stages) > 0 && (rewritten > 0 || sk.Overview == "") {
+	if len(sk.Stages) > 0 && (rewritten > 0 || sk.Overview == "" || stageSignature(sk) != prevStages) {
 		ov, err := writeOverview(ctx, m, in.RelPath, in.Facts, sk, u)
 		switch {
 		case err == nil:
@@ -394,6 +485,13 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 			return err
 		}
 	}
+	res.Stages, res.Fallback, res.SkeletonBuiltAt = len(sk.Stages), sk.FallbackAreas, sk.BuiltAt
+	res.SkeletonRebuilt = rebuilt
+	if rebuilt {
+		res.RebuildReason = reason
+	}
+	res.Changed = res.Changed || dirty
+
 	keep := map[string]bool{}
 	for _, f := range in.Facts.Files {
 		keep[f.Hash] = true
@@ -402,13 +500,7 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 		keep[a.CardHash] = true
 	}
 	if _, err := in.Cache.PruneCards(keep); err != nil {
-		return err
+		res.PruneError = err
 	}
-	res.Stages, res.Fallback, res.SkeletonBuiltAt = len(sk.Stages), sk.FallbackAreas, sk.BuiltAt
-	res.SkeletonRebuilt = rebuilt
-	if rebuilt {
-		res.RebuildReason = reason
-	}
-	res.Changed = res.Changed || dirty
 	return nil
 }

@@ -301,7 +301,7 @@ func inferSkeleton(ctx context.Context, m model.Model, relPath string, f *Facts,
 			}
 		}
 		for _, file := range d.Files {
-			sk.Files[file.Path] = FileAssign{Stage: stage, CardHash: file.Hash}
+			sk.Files[file.Path] = FileAssign{Stage: stage, CardHash: file.Hash, Hash: file.Hash}
 		}
 		if stage != "" {
 			counts[stage] += len(d.Files)
@@ -403,7 +403,7 @@ func fallbackSkeleton(f *Facts, commit string, now time.Time, reason string) *Sk
 			sk.Stages = append(sk.Stages, Stage{ID: a.ID, Title: a.Name})
 		}
 		for _, file := range a.Files {
-			sk.Files[file.Path] = FileAssign{Stage: id, CardHash: file.Hash}
+			sk.Files[file.Path] = FileAssign{Stage: id, CardHash: file.Hash, Hash: file.Hash}
 		}
 	}
 	if hasOther {
@@ -421,7 +421,8 @@ func firstNonEmpty(a, b string) string {
 
 // updateSkeleton applies file changes since the skeleton was last updated. It returns the
 // remaining stages whose file set or file contents changed and the changed paths. Stages left
-// without files are removed.
+// without files are removed. CardHash of changed files is left for the caller, which knows
+// whether a card of the new content exists.
 func updateSkeleton(sk *Skeleton, f *Facts, commit string, now time.Time) (map[string]bool, map[string]bool) {
 	if sk.Files == nil {
 		sk.Files = map[string]FileAssign{}
@@ -447,8 +448,8 @@ func updateSkeleton(sk *Skeleton, f *Facts, commit string, now time.Time) (map[s
 			added = append(added, file)
 			continue
 		}
-		if a.CardHash != file.Hash {
-			a.CardHash = file.Hash
+		if a.organizedHash() != file.Hash {
+			a.Hash = file.Hash
 			sk.Files[p] = a
 			changed[p] = true
 			if a.Stage != "" {
@@ -460,7 +461,7 @@ func updateSkeleton(sk *Skeleton, f *Facts, commit string, now time.Time) (map[s
 	ix := newStageIndex(sk.Files)
 	for _, file := range added {
 		stage := ix.guess(path.Dir(file.Path))
-		sk.Files[file.Path] = FileAssign{Stage: stage, CardHash: file.Hash}
+		sk.Files[file.Path] = FileAssign{Stage: stage, CardHash: file.Hash, Hash: file.Hash}
 		ix.add(file.Path, stage)
 		changed[file.Path] = true
 		if stage != "" {

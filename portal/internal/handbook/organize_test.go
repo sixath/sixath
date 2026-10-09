@@ -287,8 +287,11 @@ func TestUpdateSkeleton_Incremental(t *testing.T) {
 	if _, ok := sk.Files["internal/gone/x.go"]; ok {
 		t.Fatal("removed file must be dropped")
 	}
-	if sk.Files["internal/order/service.go"].CardHash != hashOf("3") {
-		t.Fatal("changed file must point at its new hash")
+	if a := sk.Files["internal/order/service.go"]; a.Hash != hashOf("3") || a.CardHash != hashOf("0") {
+		t.Fatalf("changed file records its new hash and keeps its old card: %#v", a)
+	}
+	if a := sk.Files["internal/order/refund/refund.go"]; a.Hash != hashOf("7") || a.CardHash != hashOf("7") {
+		t.Fatalf("new file %#v", a)
 	}
 	if sk.Files["internal/order/refund/refund.go"].Stage != "order" {
 		t.Fatalf("new file must inherit the majority stage of its nearest directory: %#v", sk.Files["internal/order/refund/refund.go"])
@@ -301,6 +304,10 @@ func TestUpdateSkeleton_Incremental(t *testing.T) {
 	}
 	if sk.ChangedSinceRebuild != 4 || sk.Commit != "c2" || !sk.UpdatedAt.Equal(now) {
 		t.Fatalf("meta %#v", sk)
+	}
+	again, changedAgain := updateSkeleton(sk, f, "c3", now)
+	if len(again) != 0 || len(changedAgain) != 0 {
+		t.Fatalf("a file keeping an old card is not changed again: %v %v", again, changedAgain)
 	}
 }
 

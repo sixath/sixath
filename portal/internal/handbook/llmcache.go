@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -50,11 +51,22 @@ type Stage struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-// FileAssign records a card-eligible file's stage ("" = unassigned) and the content hash of
-// the card it was organized with.
+// FileAssign records a card-eligible file's stage ("" = unassigned), the content hash it was
+// last organized with and the content hash of the card shown for it. CardHash differs from
+// Hash while the card of the current content is missing: the older card is shown as stale.
 type FileAssign struct {
 	Stage    string `json:"stage,omitempty"`
 	CardHash string `json:"card_hash"`
+	Hash     string `json:"hash,omitempty"`
+}
+
+// organizedHash is the content hash the file was last organized with; skeletons written
+// before Hash existed only have CardHash.
+func (a FileAssign) organizedHash() string {
+	if a.Hash != "" {
+		return a.Hash
+	}
+	return a.CardHash
 }
 
 // Skeleton is the LLM organization of a repository: stages, file assignment, overview and
@@ -144,6 +156,42 @@ func (c LLMCache) PutCard(hash string, card *Card) error {
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
 	return err
+}
+
+func (c LLMCache) failedPath() string {
+	return filepath.Join(c.Dir, "failed-"+LLMPromptVersion+".json")
+}
+
+// FailedCards returns the content hashes whose card got an unusable reply. They are not
+// retried until their content changes or a full run clears the set.
+func (c LLMCache) FailedCards() (map[string]bool, error) {
+	var hashes []string
+	if _, err := readCacheJSON(c.failedPath(), &hashes); err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		if validHash(h) {
+			set[h] = true
+		}
+	}
+	return set, nil
+}
+
+// PutFailedCards stores the set of failed content hashes.
+func (c LLMCache) PutFailedCards(set map[string]bool) error {
+	if len(set) == 0 {
+		if err := os.Remove(c.failedPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	hashes := make([]string, 0, len(set))
+	for h := range set {
+		hashes = append(hashes, h)
+	}
+	sort.Strings(hashes)
+	return writeJSON(c.failedPath(), hashes)
 }
 
 // Skeleton returns the cached skeleton, or nil when there is none.
