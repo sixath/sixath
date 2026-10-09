@@ -100,7 +100,7 @@ agent_effective_repos  ──►  RCA roots  +  可见 handbook  +  code-map 入
 | 列 | 类型 | 说明 |
 |----|------|------|
 | id | VARCHAR(36) PK | UUID |
-| code_root | VARCHAR(512) | 所属 code root 绝对路径（如 `/mnt/codes`） |
+| code_root | VARCHAR(255) | 所属 code root 绝对路径（如 `/mnt/codes`）；255 是为了让 `UNIQUE(code_root, rel_path)` 在 utf8mb4 下不超过 InnoDB 3072 字节上限 |
 | rel_path | VARCHAR(512) | 相对 code root 的路径，必须是 git 根；`UNIQUE(code_root, rel_path)` |
 | name | VARCHAR(256) | 展示名，默认 = rel_path 最后一段 |
 | description | TEXT | 可选；为空时取 handbook L1 摘要首句 |
