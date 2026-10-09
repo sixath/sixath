@@ -863,6 +863,45 @@ func TestHandbookLLM_LocalErrorRetriesNextPass(t *testing.T) {
 	}
 }
 
+func TestHandbookLLM_ShutdownCancelsManualRun(t *testing.T) {
+	f := newHandbookFixture(t)
+	called := make(chan struct{})
+	var once sync.Once
+	fake := &llmFake{block: true, onCall: func() { once.Do(func() { close(called) }) }}
+	var names []string
+	f.hb.SetLLM(biz.HandbookLLMConfig{Model: "fake"}, fakeResolver(fake, &names))
+	if _, err := f.hb.RebuildStale(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	reqCtx, cancelReq := context.WithCancel(f.ctx)
+	if err := f.hb.RequestEnrich(reqCtx, f.repoID, false); err != nil {
+		t.Fatal(err)
+	}
+	cancelReq() // the HTTP request ending must not stop the run
+	<-called
+	if r := f.get(t); r.HandbookLLMLeaseUntil == nil {
+		t.Fatal("the run must hold its lease")
+	}
+	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+	defer cancel()
+	if err := f.hb.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := f.get(t)
+	if r.HandbookLLMLeaseUntil != nil || len(r.HandbookLLM) != 0 || r.HandbookVersion != 1 {
+		t.Fatalf("a run cancelled by shutdown must release without recording: %#v", r)
+	}
+	if err := f.hb.RequestEnrich(f.ctx, f.repoID, false); !errors.Is(err, biz.ErrHandbookShutdown) {
+		t.Fatalf("after shutdown: err = %v, want ErrHandbookShutdown", err)
+	}
+	if err := f.hb.RequestRebuild(f.ctx, f.repoID); !errors.Is(err, biz.ErrHandbookShutdown) {
+		t.Fatalf("rebuild after shutdown: err = %v, want ErrHandbookShutdown", err)
+	}
+	if n, err := f.hb.EnrichPending(f.ctx); n != 0 || err == nil {
+		t.Fatalf("EnrichPending after shutdown: n=%d err=%v", n, err)
+	}
+}
+
 func TestHandbookLLM_CacheWriteErrorRetriesNextPass(t *testing.T) {
 	f := newHandbookFixture(t)
 	fake := &llmFake{}

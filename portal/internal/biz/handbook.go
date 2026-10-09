@@ -24,12 +24,18 @@ const (
 	// handbookPublishAttempts bounds version bumps past directories left by builds that lost their lease.
 	handbookPublishAttempts = 3
 	maxHandbookErrorLen     = 500
+	// handbookStoreTimeout bounds recording a result or releasing a lease, which must still
+	// happen after the run's context was cancelled.
+	handbookStoreTimeout = 10 * time.Second
+	// HandbookShutdownTimeout bounds how long shutdown waits for asynchronous runs.
+	HandbookShutdownTimeout = 15 * time.Second
 )
 
 var (
 	ErrHandbookBuilding  = errors.New("handbook: build already running")
 	ErrHandbookNotFound  = errors.New("handbook: not found")
 	ErrHandbookLeaseLost = errors.New("handbook: build lease lost")
+	ErrHandbookShutdown  = errors.New("handbook: shutting down")
 )
 
 // HandbookBuilder builds the handbook files of one checkout.
@@ -65,20 +71,89 @@ type HandbookUsecase struct {
 	enrichMu     sync.Mutex
 	// enrichSlots caps concurrent LLM runs across EnrichPending and RequestEnrich.
 	enrichSlots chan struct{}
-	// wg covers the goroutines of RequestRebuild and RequestEnrich.
-	wg  sync.WaitGroup
-	now func() time.Time
-	log *log.Helper
+	// wg covers the goroutines of RequestRebuild and RequestEnrich, which run under base.
+	wg sync.WaitGroup
+	// base is cancelled by Shutdown; closed (under closeMu) refuses new asynchronous runs.
+	base    context.Context
+	stop    context.CancelFunc
+	closeMu sync.Mutex
+	closed  bool
+	now     func() time.Time
+	log     *log.Helper
 }
 
 func NewHandbookUsecase(repo RepoRegistryRepo, registry *RepoRegistryUsecase, dataRoot string, logger log.Logger) *HandbookUsecase {
+	base, stop := context.WithCancel(context.Background())
 	uc := &HandbookUsecase{
 		repo: repo, registry: registry, store: handbook.Store{Root: filepath.Join(dataRoot, "handbooks")},
 		build: handbook.Build, slots: make(chan struct{}, handbookMaxBuilds), buildTimeout: handbookBuildTimeout,
-		enrichSlots: make(chan struct{}, 1), now: time.Now, log: log.NewHelper(logger),
+		enrichSlots: make(chan struct{}, 1), base: base, stop: stop, now: time.Now, log: log.NewHelper(logger),
 	}
 	uc.SetLLM(HandbookLLMConfig{}, nil)
 	return uc
+}
+
+// ProvideHandbookUsecase is NewHandbookUsecase with a cleanup that shuts the usecase down
+// within HandbookShutdownTimeout.
+func ProvideHandbookUsecase(repo RepoRegistryRepo, registry *RepoRegistryUsecase, dataRoot string, logger log.Logger) (*HandbookUsecase, func()) {
+	uc := NewHandbookUsecase(repo, registry, dataRoot, logger)
+	return uc, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), HandbookShutdownTimeout)
+		defer cancel()
+		if err := uc.Shutdown(ctx); err != nil {
+			uc.log.Warnf("handbook shutdown: %v", err)
+		}
+	}
+}
+
+// Shutdown refuses new asynchronous runs, cancels running ones (they release their leases)
+// and waits for them until ctx is done.
+func (uc *HandbookUsecase) Shutdown(ctx context.Context) error {
+	uc.closeMu.Lock()
+	uc.closed = true
+	uc.closeMu.Unlock()
+	uc.stop()
+	done := make(chan struct{})
+	go func() {
+		uc.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("handbook: runs still active: %w", ctx.Err())
+	}
+}
+
+// begin registers an asynchronous run in wg; it fails once Shutdown has started.
+func (uc *HandbookUsecase) begin() bool {
+	uc.closeMu.Lock()
+	defer uc.closeMu.Unlock()
+	if uc.closed {
+		return false
+	}
+	uc.wg.Add(1)
+	return true
+}
+
+// bound derives a context from ctx that Shutdown also cancels.
+func (uc *HandbookUsecase) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	if uc.base.Err() != nil {
+		cancel()
+	}
+	unhook := context.AfterFunc(uc.base, cancel)
+	return ctx, func() {
+		unhook()
+		cancel()
+	}
+}
+
+// detached is a short context for recording results and releasing leases; it outlives the
+// cancellation of ctx.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), handbookStoreTimeout)
 }
 
 // SetBuilder replaces the handbook generator.
@@ -129,6 +204,8 @@ func (uc *HandbookUsecase) RebuildStale(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	defer uc.staleMu.Unlock()
+	ctx, cancel := uc.bound(ctx)
+	defer cancel()
 	repos, err := uc.repo.ListRepositories(ctx, RepoFilter{Status: RepoStatusActive})
 	if err != nil {
 		return 0, err
@@ -161,7 +238,9 @@ func (uc *HandbookUsecase) RebuildStale(ctx context.Context) (int, error) {
 }
 
 // RequestRebuild starts an asynchronous rebuild of one active repo regardless of staleness.
-// It returns ErrHandbookBuilding when the repo is already building or no build slot is free.
+// It returns ErrHandbookBuilding when the repo is already building or no build slot is free,
+// and ErrHandbookShutdown once Shutdown has started. The build runs until Shutdown, not
+// until ctx ends.
 func (uc *HandbookUsecase) RequestRebuild(ctx context.Context, id string) error {
 	r, err := uc.getRepo(ctx, id)
 	if err != nil {
@@ -170,6 +249,15 @@ func (uc *HandbookUsecase) RequestRebuild(ctx context.Context, id string) error 
 	if r.Status != RepoStatusActive {
 		return fmt.Errorf("%w: repository is %s", ErrInvalidRepo, r.Status)
 	}
+	if !uc.begin() {
+		return ErrHandbookShutdown
+	}
+	started := false
+	defer func() {
+		if !started {
+			uc.wg.Done()
+		}
+	}()
 	select {
 	case uc.slots <- struct{}{}:
 	default:
@@ -183,10 +271,10 @@ func (uc *HandbookUsecase) RequestRebuild(ctx context.Context, id string) error 
 		}
 		return ErrHandbookBuilding
 	}
-	uc.wg.Add(1)
+	started = true
 	go func() {
 		defer uc.wg.Done()
-		uc.buildInSlot(context.WithoutCancel(ctx), id, token, statusBeforeClaim(r))
+		uc.buildInSlot(uc.base, id, token, statusBeforeClaim(r))
 	}()
 	return nil
 }
@@ -274,7 +362,9 @@ func (uc *HandbookUsecase) finishFailed(ctx context.Context, r *Repository, toke
 
 // finish drops the result when another build has taken over the lease.
 func (uc *HandbookUsecase) finish(ctx context.Context, id, token string, res HandbookBuildResult) error {
-	err := uc.repo.FinishHandbookBuild(context.WithoutCancel(ctx), id, token, res)
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	err := uc.repo.FinishHandbookBuild(ctx, id, token, res)
 	if errors.Is(err, ErrHandbookLeaseLost) {
 		uc.log.Warnf("handbook rebuild %s: lease lost, dropping %s result", id, res.Status)
 		return nil
@@ -283,7 +373,9 @@ func (uc *HandbookUsecase) finish(ctx context.Context, id, token string, res Han
 }
 
 func (uc *HandbookUsecase) release(ctx context.Context, id, token, status string) error {
-	err := uc.repo.ReleaseHandbookBuild(context.WithoutCancel(ctx), id, token, status)
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	err := uc.repo.ReleaseHandbookBuild(ctx, id, token, status)
 	if errors.Is(err, ErrHandbookLeaseLost) {
 		return nil
 	}

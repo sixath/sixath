@@ -51,7 +51,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	agentService := service.NewAgentService(agentUsecase, toolUsecase, mcpServerUsecase, skillResourceUsecase, channelUsecase, proxyRepo, v, logger)
 	repoRegistryRepo := data.NewRepoRegistryRepo(dataData, logger)
 	repoRegistryUsecase := biz.NewRepoRegistryUsecase(repoRegistryRepo, agentRepo, v, logger)
-	handbookUsecase := biz.NewHandbookUsecase(repoRegistryRepo, repoRegistryUsecase, string2, logger)
+	handbookUsecase, cleanup2 := biz.ProvideHandbookUsecase(repoRegistryRepo, repoRegistryUsecase, string2, logger)
 	service.ConfigureHandbookLLM(handbookUsecase, handbookConfig, data.NewModelCatalogStore(dataData.DB()))
 	agentService.SetRCARootResolver(repoRegistryUsecase)
 	agentService.SetHandbookSkillDirs(handbookUsecase)
@@ -97,6 +97,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	cronServer := cron.NewServer(scheduler)
 	app := newApp(logger, grpcServer, httpServer, cronServer)
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }

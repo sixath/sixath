@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"backend/internal/biz"
@@ -20,6 +21,9 @@ type Scheduler struct {
 	repoUC           *biz.RepoRegistryUsecase
 	repoScanInterval time.Duration
 	handbookUC       handbookJobs
+
+	// wg covers Start and the loops and handbook jobs it spawns; Wait drains it.
+	wg sync.WaitGroup
 }
 
 // handbookJobs is the part of biz.HandbookUsecase the scheduler runs.
@@ -49,12 +53,52 @@ func NewScheduler(cronUC *biz.CronUsecase, exec *Executor, interval time.Duratio
 
 // Start 启动调度循环，阻塞直到 ctx 取消
 func (s *Scheduler) Start(ctx context.Context) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	s.run(ctx)
+}
+
+// startAsync runs Start in a goroutine that Wait already covers when it returns.
+func (s *Scheduler) startAsync(ctx context.Context) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.run(ctx)
+	}()
+}
+
+// Wait blocks until Start, its loops and the handbook jobs they started have returned
+// (after ctx passed to Start is cancelled), or ctx is done.
+func (s *Scheduler) Wait(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// spawn runs fn in a goroutine covered by wg; callers must themselves be covered.
+func (s *Scheduler) spawn(fn func()) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		fn()
+	}()
+}
+
+func (s *Scheduler) run(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
-	go s.evolutionCleanupLoop(ctx)
+	s.spawn(func() { s.evolutionCleanupLoop(ctx) })
 	if s.repoUC != nil {
-		go s.repoScanLoop(ctx)
+		s.spawn(func() { s.repoScanLoop(ctx) })
 	}
 
 	for {
@@ -140,7 +184,7 @@ func (s *Scheduler) runRepoScan(ctx context.Context) {
 	s.log.Infof("repo scan: roots=%d found=%d added=%d restored=%d missing=%d errors=%d first_errors=%q",
 		rep.Roots, rep.Found, rep.Added, rep.Restored, rep.Missing, len(rep.Errors), errs)
 	if s.handbookUC != nil {
-		go s.runHandbookRebuild(ctx)
+		s.spawn(func() { s.runHandbookRebuild(ctx) })
 	}
 }
 

@@ -161,6 +161,8 @@ func (uc *HandbookUsecase) EnrichPending(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	defer uc.enrichMu.Unlock()
+	ctx, cancel := uc.bound(ctx)
+	defer cancel()
 	start := uc.now()
 	s := uc.llm.Load()
 	repos, err := uc.repo.ListRepositories(ctx, RepoFilter{Status: RepoStatusActive})
@@ -207,7 +209,9 @@ func (uc *HandbookUsecase) EnrichPending(ctx context.Context) (int, error) {
 
 // RequestEnrich starts an asynchronous LLM run of one repo regardless of its LLM state; full
 // rebuilds the skeleton and retries failed cards. It returns ErrHandbookBuilding when an LLM
-// run holds the repo's lease and ErrHandbookLLMBusy when another repo's run is in progress.
+// run holds the repo's lease, ErrHandbookLLMBusy when another repo's run is in progress and
+// ErrHandbookShutdown once Shutdown has started. The run lasts until Shutdown, not until ctx
+// ends.
 func (uc *HandbookUsecase) RequestEnrich(ctx context.Context, id string, full bool) error {
 	s := uc.llm.Load()
 	r, err := uc.getRepo(ctx, id)
@@ -226,6 +230,15 @@ func (uc *HandbookUsecase) RequestEnrich(ctx context.Context, id string, full bo
 	if r.HandbookLLMLeaseUntil != nil && r.HandbookLLMLeaseUntil.After(uc.now().UTC()) {
 		return ErrHandbookBuilding
 	}
+	if !uc.begin() {
+		return ErrHandbookShutdown
+	}
+	started := false
+	defer func() {
+		if !started {
+			uc.wg.Done()
+		}
+	}()
 	select {
 	case uc.enrichSlots <- struct{}{}:
 	default:
@@ -239,10 +252,10 @@ func (uc *HandbookUsecase) RequestEnrich(ctx context.Context, id string, full bo
 		}
 		return ErrHandbookBuilding
 	}
-	uc.wg.Add(1)
+	started = true
 	go func() {
 		defer uc.wg.Done()
-		uc.enrichInSlot(context.WithoutCancel(ctx), s, id, token, full)
+		uc.enrichInSlot(uc.base, s, id, token, full)
 	}()
 	return nil
 }
@@ -292,6 +305,9 @@ func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMS
 		return llm
 	}
 	retryLater := func(cause error, res *handbook.EnrichResult) error {
+		if ctx.Err() != nil {
+			return errors.Join(cause, uc.releaseEnrich(ctx, id, token))
+		}
 		llm := stamp(nil, cause)
 		if res != nil && res.Changed {
 			llm["rev"] = uc.newLLMRev()
@@ -299,6 +315,9 @@ func (uc *HandbookUsecase) runEnrichClaimed(ctx context.Context, s *handbookLLMS
 		return errors.Join(cause, uc.storeEnrich(ctx, id, token, llm, prevRev))
 	}
 	fail := func(cause error, res *handbook.EnrichResult) error {
+		if ctx.Err() != nil {
+			return errors.Join(cause, uc.releaseEnrich(ctx, id, token))
+		}
 		llm := stamp(nil, cause)
 		llm["state"] = handbook.LLMStateFailed
 		llm["failed_commit"] = r.HandbookCommit
@@ -379,7 +398,9 @@ func (uc *HandbookUsecase) newLLMRev() string { return strconv.FormatInt(uc.now(
 // storeEnrich records llm and releases the lease, then re-renders the handbook when the rev
 // moved. A result whose lease was taken over is dropped.
 func (uc *HandbookUsecase) storeEnrich(ctx context.Context, id, token string, llm map[string]any, prevRev string) error {
-	err := uc.repo.FinishHandbookEnrich(context.WithoutCancel(ctx), id, token, llm)
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	err := uc.repo.FinishHandbookEnrich(ctx, id, token, llm)
 	if errors.Is(err, ErrHandbookLeaseLost) {
 		uc.log.Warnf("handbook enrich %s: lease lost, dropping %v result", id, llm["state"])
 		return nil
@@ -388,7 +409,8 @@ func (uc *HandbookUsecase) storeEnrich(ctx context.Context, id, token string, ll
 		return err
 	}
 	if rev, _ := llm["rev"].(string); rev != prevRev {
-		if err := uc.RequestRebuild(context.WithoutCancel(ctx), id); err != nil && !errors.Is(err, ErrHandbookBuilding) {
+		// After Shutdown the re-render is left to RebuildStale, which sees the llm_rev lag.
+		if err := uc.RequestRebuild(ctx, id); err != nil && !errors.Is(err, ErrHandbookBuilding) && !errors.Is(err, ErrHandbookShutdown) {
 			uc.log.Warnf("handbook re-render %s: %v", id, err)
 		}
 	}
@@ -396,7 +418,9 @@ func (uc *HandbookUsecase) storeEnrich(ctx context.Context, id, token string, ll
 }
 
 func (uc *HandbookUsecase) releaseEnrich(ctx context.Context, id, token string) error {
-	err := uc.repo.ReleaseHandbookEnrich(context.WithoutCancel(ctx), id, token)
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	err := uc.repo.ReleaseHandbookEnrich(ctx, id, token)
 	if errors.Is(err, ErrHandbookLeaseLost) {
 		return nil
 	}

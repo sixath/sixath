@@ -495,10 +495,11 @@ P2a 实现：每个 agent 一份 `handbooks/agents/<agent_id>/code-map/SKILL.md`
 
 - **租约**：列 `handbook_llm_lease_until` + `handbook_llm_lease_token`（migration `021_repo_handbook_llm.sql`），与构建租约互相独立，不改 `handbook_status`。`ClaimHandbookEnrich` 在租约为空或已过期时认领，时长 = 运行超时（`max_run_minutes`）+ 10 分钟；`FinishHandbookEnrich` / `ReleaseHandbookEnrich` 只在 token 匹配时生效，否则结果被丢弃（`ErrHandbookLeaseLost`）。
 - **并发**：全局同时最多 1 个 LLM 运行（`enrichSlots` 容量 1，`EnrichPending` 与 `RequestEnrich` 共用）。`EnrichPending` 由 cron 在每次扫描成功、`RebuildStale` 之后于同一 goroutine 调用，`TryLock` 保证同一时刻只有一轮；待运行仓库按上次 `run_at` 升序（从未运行过的最先），逐个同步运行，本次调用已用时超过运行超时后不再启动新的运行，剩余仓库留给下一次扫描。
-- **手动**：`RequestEnrich(id, full)` 不论状态都可触发（含 `failed`）；仓库非 `active` → `ErrInvalidRepo`，模型为空 → `ErrHandbookLLMDisabled`，handbook 不是当前 HEAD + 当前生成器 → `ErrHandbookNotReady`，该仓库 LLM 租约被占 → `ErrHandbookBuilding`，其他仓库正在运行（槽位满）→ `ErrHandbookLLMBusy`。认领成功后异步运行（`context.WithoutCancel`）。
+- **手动**：`RequestEnrich(id, full)` 不论状态都可触发（含 `failed`）；仓库非 `active` → `ErrInvalidRepo`，模型为空 → `ErrHandbookLLMDisabled`，handbook 不是当前 HEAD + 当前生成器 → `ErrHandbookNotReady`，该仓库 LLM 租约被占 → `ErrHandbookBuilding`，其他仓库正在运行（槽位满）→ `ErrHandbookLLMBusy`，已开始关闭 → `ErrHandbookShutdown`。认领成功后异步运行，context 派生自 usecase 的基础 context（不受 HTTP 请求结束影响，关闭时取消）；`RequestRebuild` 同理。
+- **关闭**：`kratos` 传给 cron Server 的 context 不会在停止时取消，cron `Server.Stop` 自行取消调度器并等待其循环与扫描后启动的 handbook 任务（`RebuildStale` + `EnrichPending`）退出，最多 15 秒。之后 wire cleanup 先调用 `HandbookUsecase.Shutdown`（拒绝新的异步运行、取消基础 context、最多等 15 秒让手动构建/LLM 运行退出），再关闭数据库。`RebuildStale` / `EnrichPending` 的 context 也随基础 context 取消。被取消的运行释放租约；写结果与释放租约使用脱离取消、10 秒超时的 context。
 - **配置**：`handbook:` 段（§11），`concurrency` 上限 16、`max_file_kb` 上限 256、`max_run_minutes` 上限 20，0 或不填取默认。模型名优先级：仓库 `handbook_model`（`off` 禁用）> 全局 `handbook.model`（环境变量 `SATH_HANDBOOK_MODEL` 覆盖）。按模型目录解析（与 critic 相同：精确模型名，或 `<provider 名称或 ID>/<模型名>`），每次解析有超时。只要有模型目录就安装解析器，因此即使没有全局模型，仓库级覆盖也能运行。
 - **失败与重试**：解析模型失败或 `Enrich` 返回模型相关错误（连续调用失败、合成传输错误）→ `state = failed`、`failed_commit` = 当前 commit、`model` = 所用模型，HEAD 或模型变化、或手动重新生成前不自动重试；失败轮次若已改变缓存（如生成了部分卡片）仍会换新 rev 触发重渲染。读取 facts、解析仓库路径、打开缓存目录、缓存读写失败（`ErrCacheRead` / `ErrCacheWrite`，如 Windows 下读者占用导致 rename 失败）等**基础设施错误**不记失败，只写 `last_error`、`run_at`、`duration_ms`（`state` 不变；本轮已改变缓存时换新 rev），下一次扫描重试。
-- **取消**：父 context 取消（进程关闭）、仓库读取失败、认领后发现仓库已非 `active` / handbook 不再是当前版本 / 模型被禁用时，释放租约，不记录任何状态。
+- **取消**：父 context 取消（进程关闭）、仓库读取失败、认领后发现仓库已非 `active` / handbook 不再是当前版本 / 模型被禁用时，释放租约，不记录任何状态；context 已取消时出现的错误（如解析模型失败）也按取消处理，不记失败。
 - **重渲染**：运行改变了缓存（新卡片或骨架变化）或此前没有 rev 时生成新 `rev`（`now` 的 36 进制纳秒），写库后调用 `RequestRebuild`；`RebuildStale` 也会把 `handbook_stats.llm_rev` 与期望值（LLM 层禁用时为空）不一致的仓库视为过期，保证重渲染最终发生。确定性构建只在仓库的模型非空时读取 `llm/`。
 
 ### 8.3 冻结条目的呈现
