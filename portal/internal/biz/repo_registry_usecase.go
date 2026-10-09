@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	pkgErrors "backend/internal/pkg/errors"
+
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/sixath/framework/tool"
 	fwws "github.com/sixath/framework/workspace"
@@ -18,33 +20,96 @@ import (
 
 // RepoRegistryUsecase maintains the repository registry and agent repo bindings.
 type RepoRegistryUsecase struct {
-	repo      RepoRegistryRepo
-	agents    AgentRepo
-	codeRoots []string
-	scanMu    sync.Mutex
-	log       *log.Helper
+	repo       RepoRegistryRepo
+	agents     AgentRepo
+	codeRoots  []repoCodeRoot
+	scanMu     sync.Mutex
+	agentLocks sync.Map // agent id -> *sync.Mutex
+	log        *log.Helper
+}
+
+// repoCodeRoot is a configured code root. path is stored as repositories.code_root;
+// resolved has symlinks evaluated (equal to path when evaluation fails).
+type repoCodeRoot struct {
+	path     string
+	resolved string
 }
 
 func NewRepoRegistryUsecase(repo RepoRegistryRepo, agents AgentRepo, codeRoots []string, logger log.Logger) *RepoRegistryUsecase {
 	return &RepoRegistryUsecase{repo: repo, agents: agents, codeRoots: cleanCodeRoots(codeRoots), log: log.NewHelper(logger)}
 }
 
-func cleanCodeRoots(in []string) []string {
+func cleanCodeRoots(in []string) []repoCodeRoot {
 	seen := map[string]struct{}{}
-	var out []string
+	var out []repoCodeRoot
 	for _, r := range in {
 		r = strings.TrimSpace(r)
 		if r == "" {
 			continue
 		}
-		r = filepath.Clean(r)
-		if _, ok := seen[r]; ok {
+		abs, err := filepath.Abs(r)
+		if err != nil {
+			abs = filepath.Clean(r)
+		}
+		if _, ok := seen[abs]; ok {
 			continue
 		}
-		seen[r] = struct{}{}
-		out = append(out, r)
+		seen[abs] = struct{}{}
+		resolved := abs
+		if ev, err := filepath.EvalSymlinks(abs); err == nil {
+			resolved = filepath.Clean(ev)
+		}
+		out = append(out, repoCodeRoot{path: abs, resolved: resolved})
 	}
 	return out
+}
+
+// pathWithin reports whether p equals root or lies under it.
+func pathWithin(root, p string) bool {
+	rel, err := filepath.Rel(root, p)
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// mapTargetToConfiguredRoot rewrites a symlink-resolved path under a code root's resolved
+// form back to the configured root, so it compares equal to stored repository paths.
+func mapTargetToConfiguredRoot(target string, roots []repoCodeRoot) string {
+	target = filepath.Clean(target)
+	for _, r := range roots {
+		if pathWithin(r.path, target) {
+			return target
+		}
+	}
+	best := -1
+	for i, r := range roots {
+		if pathWithin(r.resolved, target) && (best < 0 || len(r.resolved) > len(roots[best].resolved)) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return target
+	}
+	rel, _ := filepath.Rel(roots[best].resolved, target)
+	return filepath.Join(roots[best].path, rel)
+}
+
+// lockAgent serializes binding writes and effective-set recomputation per agent.
+func (uc *RepoRegistryUsecase) lockAgent(agentID string) func() {
+	v, _ := uc.agentLocks.LoadOrStore(agentID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func (uc *RepoRegistryUsecase) configuredRoot(codeRoot string) (repoCodeRoot, bool) {
+	for _, r := range uc.codeRoots {
+		if r.path == codeRoot {
+			return r, true
+		}
+	}
+	return repoCodeRoot{}, false
 }
 
 type RepoScanReport struct {
@@ -57,7 +122,8 @@ type RepoScanReport struct {
 }
 
 // Scan discovers repositories under every code root, refreshes dir groups and recomputes
-// effective repo sets. An unreadable code root is reported and its repos are left untouched.
+// effective repo sets. An unreadable code root is reported and its repos are left untouched;
+// active repos under code roots that are no longer configured are marked missing.
 func (uc *RepoRegistryUsecase) Scan(ctx context.Context) (*RepoScanReport, error) {
 	if !uc.scanMu.TryLock() {
 		return nil, ErrRepoScanRunning
@@ -65,14 +131,51 @@ func (uc *RepoRegistryUsecase) Scan(ctx context.Context) (*RepoScanReport, error
 	defer uc.scanMu.Unlock()
 	rep := &RepoScanReport{}
 	for _, root := range uc.codeRoots {
-		if err := uc.scanRoot(ctx, root, rep); err != nil {
-			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", root, err))
+		if err := ctx.Err(); err != nil {
+			return rep, err
 		}
+		if err := uc.scanRoot(ctx, root.path, rep); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return rep, ctxErr
+			}
+			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", root.path, err))
+		}
+	}
+	if err := uc.markRemovedRoots(ctx, rep); err != nil {
+		return rep, err
 	}
 	if err := uc.RecomputeAll(ctx); err != nil {
 		return rep, err
 	}
 	return rep, nil
+}
+
+// markRemovedRoots is a no-op when no code root is configured, so an empty config does not
+// mark the whole registry missing.
+func (uc *RepoRegistryUsecase) markRemovedRoots(ctx context.Context, rep *RepoScanReport) error {
+	if len(uc.codeRoots) == 0 {
+		return nil
+	}
+	repos, err := uc.repo.ListRepositories(ctx, RepoFilter{Status: RepoStatusActive})
+	if err != nil {
+		return err
+	}
+	for _, r := range repos {
+		if _, ok := uc.configuredRoot(r.CodeRoot); ok {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		changed, err := uc.repo.MarkRepositoryMissingIfActive(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		if changed {
+			rep.Missing++
+		}
+	}
+	return nil
 }
 
 func (uc *RepoRegistryUsecase) scanRoot(ctx context.Context, root string, rep *RepoScanReport) error {
@@ -96,10 +199,17 @@ func (uc *RepoRegistryUsecase) scanRoot(ctx context.Context, root string, rep *R
 	seen := make(map[string]bool, len(rels))
 	dirMembers := map[string][]string{}
 	for _, rel := range rels {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		seen[rel] = true
+		prev := byRel[rel]
 		info, gerr := ReadGitInfo(filepath.Join(root, filepath.FromSlash(rel)))
 		if gerr != nil {
 			uc.log.Warnf("repo scan: read git info %s/%s: %v", root, rel, gerr)
+			if prev != nil {
+				info = GitInfo{Branch: prev.GitBranch, Commit: prev.HeadCommit, Remote: prev.GitRemote}
+			}
 		}
 		saved, err := uc.repo.UpsertScannedRepository(ctx, &Repository{
 			CodeRoot: root, RelPath: rel, Name: path.Base(rel),
@@ -109,10 +219,10 @@ func (uc *RepoRegistryUsecase) scanRoot(ctx context.Context, root string, rep *R
 			return err
 		}
 		rep.Found++
-		switch prev := byRel[rel]; {
+		switch {
 		case prev == nil:
 			rep.Added++
-		case prev.Status == RepoStatusMissing:
+		case prev.Status == RepoStatusMissing && saved.Status == RepoStatusActive:
 			rep.Restored++
 		}
 		if parent := path.Dir(rel); parent != "." {
@@ -130,10 +240,13 @@ func (uc *RepoRegistryUsecase) scanRoot(ctx context.Context, root string, rep *R
 			}
 			continue
 		}
-		if err := uc.repo.SetRepositoryStatus(ctx, r.ID, RepoStatusMissing); err != nil {
+		changed, err := uc.repo.MarkRepositoryMissingIfActive(ctx, r.ID)
+		if err != nil {
 			return err
 		}
-		rep.Missing++
+		if changed {
+			rep.Missing++
+		}
 	}
 	return uc.syncDirGroups(ctx, root, dirMembers)
 }
@@ -166,6 +279,13 @@ func (uc *RepoRegistryUsecase) syncDirGroups(ctx context.Context, root string, m
 
 // RecomputeAgent rebuilds agent_effective_repos for one agent.
 func (uc *RepoRegistryUsecase) RecomputeAgent(ctx context.Context, agentID string) ([]*AgentEffectiveRepo, error) {
+	defer uc.lockAgent(agentID)()
+	return uc.recomputeAgentLocked(ctx, agentID)
+}
+
+// recomputeAgentLocked requires the caller to hold lockAgent(agentID). The stored rows are
+// only rewritten when the set (repo, sub_paths, via) changed.
+func (uc *RepoRegistryUsecase) recomputeAgentLocked(ctx context.Context, agentID string) ([]*AgentEffectiveRepo, error) {
 	bs, err := uc.repo.ListAgentBindings(ctx, agentID)
 	if err != nil {
 		return nil, err
@@ -191,10 +311,49 @@ func (uc *RepoRegistryUsecase) RecomputeAgent(ctx context.Context, agentID strin
 		return nil, err
 	}
 	eff := ExpandRepoBindings(agentID, bs, members, repos, time.Now())
+	cur, err := uc.repo.ListEffectiveRepos(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	if sameEffectiveSet(cur, eff) {
+		computedAt := make(map[string]time.Time, len(cur))
+		for _, c := range cur {
+			computedAt[c.RepoID] = c.ComputedAt
+		}
+		for _, e := range eff {
+			e.ComputedAt = computedAt[e.RepoID]
+		}
+		return eff, nil
+	}
 	if err := uc.repo.ReplaceEffectiveRepos(ctx, agentID, eff); err != nil {
 		return nil, err
 	}
 	return eff, nil
+}
+
+func sameEffectiveSet(a, b []*AgentEffectiveRepo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	key := func(e *AgentEffectiveRepo) string {
+		var sb strings.Builder
+		sb.WriteString(strings.Join(e.SubPaths, "\x00"))
+		for _, v := range e.Via {
+			sb.WriteString("\x01" + v.Kind + "\x00" + v.ID)
+		}
+		return sb.String()
+	}
+	byRepo := make(map[string]string, len(a))
+	for _, e := range a {
+		byRepo[e.RepoID] = key(e)
+	}
+	for _, e := range b {
+		k, ok := byRepo[e.RepoID]
+		if !ok || k != key(e) {
+			return false
+		}
+	}
+	return true
 }
 
 // RecomputeAll recomputes every agent that has bindings; errors are joined, not fatal.
@@ -209,6 +368,10 @@ func (uc *RepoRegistryUsecase) RecomputeAll(ctx context.Context) error {
 func (uc *RepoRegistryUsecase) recomputeAgents(ctx context.Context, ids []string) error {
 	var errs []error
 	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
 		if _, err := uc.RecomputeAgent(ctx, id); err != nil {
 			errs = append(errs, fmt.Errorf("agent %s: %w", id, err))
 		}
@@ -216,11 +379,17 @@ func (uc *RepoRegistryUsecase) recomputeAgents(ctx context.Context, ids []string
 	return errors.Join(errs...)
 }
 
-// RCARootsForAgent returns RCA roots for the agent's effective repos; nil means the agent
-// has no repo bindings and callers should fall back to the legacy workspace/code link.
+// RCARootsForAgent returns RCA roots for the agent's effective repos. A nil slice means the
+// agent has no repo bindings and callers should fall back to the legacy workspace/code link;
+// a non-nil (possibly empty) slice is authoritative. Repos under code roots that are no longer
+// configured, and paths that vanished or resolve outside their code root, are dropped.
 func (uc *RepoRegistryUsecase) RCARootsForAgent(ctx context.Context, agentID string) ([]tool.RCARoot, error) {
+	bs, err := uc.repo.ListAgentBindings(ctx, agentID)
+	if err != nil || len(bs) == 0 {
+		return nil, err
+	}
 	eff, err := uc.repo.ListEffectiveRepos(ctx, agentID)
-	if err != nil || len(eff) == 0 {
+	if err != nil {
 		return nil, err
 	}
 	ids := make([]string, 0, len(eff))
@@ -231,14 +400,49 @@ func (uc *RepoRegistryUsecase) RCARootsForAgent(ctx context.Context, agentID str
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(eff, func(i, j int) bool {
-		ri, rj := repos[eff[i].RepoID], repos[eff[j].RepoID]
-		if ri == nil || rj == nil {
-			return ri != nil
+	kept := make([]*AgentEffectiveRepo, 0, len(eff))
+	for _, e := range eff {
+		if r := repos[e.RepoID]; r != nil {
+			if _, ok := uc.configuredRoot(r.CodeRoot); ok {
+				kept = append(kept, e)
+			}
 		}
-		return ri.RelPath < rj.RelPath
+	}
+	sort.Slice(kept, func(i, j int) bool {
+		return repos[kept[i].RepoID].RelPath < repos[kept[j].RepoID].RelPath
 	})
-	return buildRCARoots(eff, repos), nil
+	out := []tool.RCARoot{}
+	for _, root := range buildRCARoots(kept, repos) {
+		if err := uc.checkRootPath(root.Path); err != nil {
+			uc.log.Warnf("rca roots for agent %s: drop %s: %v", agentID, root.Path, err)
+			continue
+		}
+		out = append(out, root)
+	}
+	return out, nil
+}
+
+// checkRootPath requires p to exist and, with symlinks resolved, stay inside the resolved
+// form of the configured code root that contains it.
+func (uc *RepoRegistryUsecase) checkRootPath(p string) error {
+	var cr *repoCodeRoot
+	for i := range uc.codeRoots {
+		r := &uc.codeRoots[i]
+		if pathWithin(r.path, p) && (cr == nil || len(r.path) > len(cr.path)) {
+			cr = r
+		}
+	}
+	if cr == nil {
+		return errors.New("not under a configured code root")
+	}
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return err
+	}
+	if !pathWithin(cr.resolved, resolved) {
+		return fmt.Errorf("resolves to %s outside code root %s", resolved, cr.resolved)
+	}
+	return nil
 }
 
 // ---- repositories ----
@@ -271,13 +475,24 @@ func (uc *RepoRegistryUsecase) GetRepo(ctx context.Context, id string) (*RepoDet
 // PatchRepo updates user-editable fields; status may only be set to active or archived.
 func (uc *RepoRegistryUsecase) PatchRepo(ctx context.Context, id string, p RepoMetaPatch) (*Repository, error) {
 	if p.Status != nil && *p.Status != RepoStatusActive && *p.Status != RepoStatusArchived {
-		return nil, fmt.Errorf("%w: status must be active or archived", ErrInvalidRepoBinding)
+		return nil, fmt.Errorf("%w: status must be active or archived", ErrInvalidRepo)
+	}
+	var prevStatus string
+	if p.Status != nil {
+		m, err := uc.repo.GetRepositoriesByIDs(ctx, []string{id})
+		if err != nil {
+			return nil, err
+		}
+		if m[id] == nil {
+			return nil, ErrRepoNotFound
+		}
+		prevStatus = m[id].Status
 	}
 	r, err := uc.repo.UpdateRepositoryMeta(ctx, id, p)
 	if err != nil {
 		return nil, err
 	}
-	if p.Status != nil {
+	if p.Status != nil && *p.Status != prevStatus {
 		agents, err := uc.repo.ListAgentIDsByEffectiveRepo(ctx, id)
 		if err != nil {
 			return nil, err
@@ -424,9 +639,29 @@ func (uc *RepoRegistryUsecase) GetBindings(ctx context.Context, agentID string) 
 }
 
 // ReplaceBindings validates and replaces all bindings of an agent, then recomputes its effective set.
+// An unknown agent yields ErrAgentNotFound.
 func (uc *RepoRegistryUsecase) ReplaceBindings(ctx context.Context, agentID string, in []*AgentRepoBinding, actor string) (*AgentRepoBindingsView, error) {
+	defer uc.lockAgent(agentID)()
+	return uc.replaceBindingsLocked(ctx, agentID, in, actor)
+}
+
+func (uc *RepoRegistryUsecase) requireAgent(ctx context.Context, agentID string) error {
+	if _, err := uc.agents.GetByID(ctx, agentID); err != nil {
+		if errors.Is(err, pkgErrors.ErrNotFound) || errors.Is(err, ErrAgentNotFound) {
+			return ErrAgentNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// replaceBindingsLocked requires the caller to hold lockAgent(agentID).
+func (uc *RepoRegistryUsecase) replaceBindingsLocked(ctx context.Context, agentID string, in []*AgentRepoBinding, actor string) (*AgentRepoBindingsView, error) {
 	bs, err := normalizeRepoBindings(agentID, actor, in)
 	if err != nil {
+		return nil, err
+	}
+	if err := uc.requireAgent(ctx, agentID); err != nil {
 		return nil, err
 	}
 	var repoIDs, groupIDs []string
@@ -452,7 +687,7 @@ func (uc *RepoRegistryUsecase) ReplaceBindings(ctx context.Context, agentID stri
 	if err := uc.repo.ReplaceAgentBindings(ctx, agentID, bs); err != nil {
 		return nil, err
 	}
-	eff, err := uc.RecomputeAgent(ctx, agentID)
+	eff, err := uc.recomputeAgentLocked(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -516,9 +751,13 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 		hasBindings[id] = true
 	}
 	var items []*LegacyLinkMigrationItem
-	const pageSize = 200
+	// agentRepo.List clamps page sizes above 100 to 10.
+	const pageSize = 100
 	for page := int32(1); ; page++ {
-		agents, _, err := uc.agents.List(ctx, page, pageSize)
+		if err := ctx.Err(); err != nil {
+			return items, err
+		}
+		agents, total, err := uc.agents.List(ctx, page, pageSize)
 		if err != nil {
 			return items, err
 		}
@@ -527,6 +766,7 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 			if target == "" {
 				continue
 			}
+			target = mapTargetToConfiguredRoot(target, uc.codeRoots)
 			item := &LegacyLinkMigrationItem{AgentID: a.ID, Target: target}
 			items = append(items, item)
 			if hasBindings[a.ID] {
@@ -538,16 +778,34 @@ func (uc *RepoRegistryUsecase) MigrateLegacyLinks(ctx context.Context, apply boo
 			if !apply || !plan.AutoApply() {
 				continue
 			}
-			if _, err := uc.ReplaceBindings(ctx, a.ID, plan.Bindings, "legacy-migration"); err != nil {
+			applied, err := uc.applyLegacyPlan(ctx, a.ID, plan, "legacy-migration")
+			switch {
+			case err != nil:
 				item.Error = err.Error()
-				continue
+			case applied:
+				item.Applied = true
+			default:
+				item.Action, item.Bindings = LegacyActionSkipHasBindings, nil
 			}
-			item.Applied = true
 		}
-		if len(agents) < pageSize {
+		if len(agents) == 0 || int(page)*pageSize >= total {
 			return items, nil
 		}
 	}
+}
+
+// applyLegacyPlan writes plan's bindings unless the agent gained bindings meanwhile;
+// applied=false with a nil error means the agent was already bound.
+func (uc *RepoRegistryUsecase) applyLegacyPlan(ctx context.Context, agentID string, plan legacyPlan, actor string) (bool, error) {
+	defer uc.lockAgent(agentID)()
+	existing, err := uc.repo.ListAgentBindings(ctx, agentID)
+	if err != nil || len(existing) > 0 {
+		return false, err
+	}
+	if _, err := uc.replaceBindingsLocked(ctx, agentID, plan.Bindings, actor); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // BindFromLegacyLink keeps the old workspace-link API in sync: when the agent has no
@@ -565,12 +823,9 @@ func (uc *RepoRegistryUsecase) BindFromLegacyLink(ctx context.Context, agentID, 
 	if err != nil {
 		return false, err
 	}
-	plan := planLegacyBinding(target, repos, groups)
+	plan := planLegacyBinding(mapTargetToConfiguredRoot(target, uc.codeRoots), repos, groups)
 	if !plan.AutoApply() {
 		return false, nil
 	}
-	if _, err := uc.ReplaceBindings(ctx, agentID, plan.Bindings, actor); err != nil {
-		return false, err
-	}
-	return true, nil
+	return uc.applyLegacyPlan(ctx, agentID, plan, actor)
 }

@@ -32,6 +32,7 @@ const (
 
 var (
 	ErrRepoNotFound       = errors.New("repo registry: not found")
+	ErrInvalidRepo        = errors.New("repo registry: invalid repository")
 	ErrInvalidRepoBinding = errors.New("repo registry: invalid binding")
 	ErrInvalidRepoGroup   = errors.New("repo registry: invalid group")
 	ErrRepoScanRunning    = errors.New("repo registry: scan already running")
@@ -133,6 +134,9 @@ type RepoRegistryRepo interface {
 	ListRepositories(ctx context.Context, f RepoFilter) ([]*Repository, error)
 	GetRepositoriesByIDs(ctx context.Context, ids []string) (map[string]*Repository, error)
 	SetRepositoryStatus(ctx context.Context, id, status string) error
+	// MarkRepositoryMissingIfActive sets status=missing only when the row is still active
+	// and reports whether it changed; archived and already-missing rows are left alone.
+	MarkRepositoryMissingIfActive(ctx context.Context, id string) (bool, error)
 	UpdateRepositoryMeta(ctx context.Context, id string, p RepoMetaPatch) (*Repository, error)
 
 	// UpsertDirGroup returns the dir group for (codeRoot, relPrefix), creating it with a stable id.

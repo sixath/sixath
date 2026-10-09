@@ -238,7 +238,7 @@ func (r *agentRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.Agen
 	offset := int((page - 1) * pageSize)
 
 	var rows []model.Agent
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Offset(offset).Limit(int(pageSize)).Find(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Offset(offset).Limit(int(pageSize)).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -264,7 +264,7 @@ func (r *agentRepo) ListByIDs(ctx context.Context, ids []string, page, pageSize 
 	var rows []model.Agent
 	if err := r.db.WithContext(ctx).
 		Where("id IN ?", ids).
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(int(pageSize)).
 		Find(&rows).Error; err != nil {

@@ -85,9 +85,8 @@ func refreshScannedRepository(tx *gorm.DB, m *model.Repository, in *biz.Reposito
 	updates := map[string]any{
 		"git_remote": in.GitRemote, "git_branch": in.GitBranch,
 		"head_commit": in.HeadCommit, "last_scanned_at": in.LastScannedAt,
-	}
-	if m.Status != biz.RepoStatusArchived {
-		updates["status"] = biz.RepoStatusActive
+		// Decided in SQL so an archive committed after our read is not overwritten.
+		"status": gorm.Expr("CASE WHEN status = ? THEN status ELSE ? END", biz.RepoStatusArchived, biz.RepoStatusActive),
 	}
 	if err := tx.Model(m).Updates(updates).Error; err != nil {
 		return err
@@ -147,6 +146,12 @@ func (r *repoRegistryRepo) SetRepositoryStatus(ctx context.Context, id, status s
 		return biz.ErrRepoNotFound
 	}
 	return nil
+}
+
+func (r *repoRegistryRepo) MarkRepositoryMissingIfActive(ctx context.Context, id string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Repository{}).
+		Where("id = ? AND status = ?", id, biz.RepoStatusActive).Update("status", biz.RepoStatusMissing)
+	return res.RowsAffected > 0, res.Error
 }
 
 func (r *repoRegistryRepo) UpdateRepositoryMeta(ctx context.Context, id string, p biz.RepoMetaPatch) (*biz.Repository, error) {
