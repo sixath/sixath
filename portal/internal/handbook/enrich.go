@@ -88,6 +88,7 @@ type EnrichResult struct {
 	LastTransportError  string // last failed model call of the run (card or synthesis), clipped
 	Stages              int
 	Fallback            bool
+	FallbackReason      string // Skeleton.FallbackReason when Fallback
 	SkeletonRebuilt     bool
 	RebuildReason       string
 	SkeletonBuiltAt     time.Time
@@ -514,7 +515,7 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 			return err
 		}
 	}
-	res.Stages, res.Fallback, res.SkeletonBuiltAt = len(sk.Stages), sk.FallbackAreas, sk.BuiltAt
+	res.Stages, res.Fallback, res.FallbackReason, res.SkeletonBuiltAt = len(sk.Stages), sk.FallbackAreas, sk.FallbackReason, sk.BuiltAt
 	res.SkeletonRebuilt = rebuilt
 	if rebuilt {
 		res.RebuildReason = reason

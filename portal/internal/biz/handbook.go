@@ -106,7 +106,7 @@ func (uc *HandbookUsecase) needsRebuild(r *Repository, now time.Time) bool {
 	}
 	gen, _ := r.HandbookStats["generator_version"].(string)
 	rev, _ := r.HandbookStats["llm_rev"].(string)
-	return r.HandbookCommit != r.HeadCommit || gen != handbook.GeneratorVersion || rev != uc.expectedLLMRev(r)
+	return r.HandbookCommit != r.HeadCommit || gen != handbook.GeneratorVersion || rev != expectedLLMRev(uc.llm.Load(), r)
 }
 
 // statusBeforeClaim is the status restored when a claimed build is released without an
@@ -224,8 +224,9 @@ func (uc *HandbookUsecase) runClaimed(ctx context.Context, id, token, prevStatus
 	if err != nil {
 		return uc.finishFailed(ctx, r, token, err)
 	}
-	in := handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start, LLMRev: uc.expectedLLMRev(r)}
-	if uc.modelFor(r) != "" {
+	s := uc.llm.Load()
+	in := handbook.BuildInput{RepoID: r.ID, RelPath: r.RelPath, Root: root, Commit: r.HeadCommit, Now: start, LLMRev: expectedLLMRev(s, r)}
+	if modelFor(s, r) != "" {
 		if c, err := uc.store.LLMCache(r.ID); err == nil {
 			in.LLMDir = c.Dir
 		}
@@ -328,7 +329,7 @@ func (uc *HandbookUsecase) GetHandbook(ctx context.Context, id string) (*Handboo
 	v := &HandbookView{
 		RepoID: r.ID, Status: r.HandbookStatus, Commit: r.HandbookCommit, HeadCommit: r.HeadCommit,
 		Version: r.HandbookVersion, Stats: r.HandbookStats, Pages: []string{},
-		LLM: r.HandbookLLM, LLMModel: uc.modelFor(r),
+		LLM: r.HandbookLLM, LLMModel: modelFor(uc.llm.Load(), r),
 		LLMRunning: r.HandbookLLMLeaseUntil != nil && r.HandbookLLMLeaseUntil.After(uc.now().UTC()),
 	}
 	if r.HandbookVersion > 0 {

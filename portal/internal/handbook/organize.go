@@ -14,19 +14,22 @@ import (
 )
 
 const (
-	minStages             = 2
-	maxStages             = 15
-	skeletonInputBudget   = 120 << 10
-	skeletonBaseTokens    = 1000
-	skeletonTokensPerDir  = 20
-	skeletonMaxTokensCap  = 8192 // many OpenAI-compatible providers reject larger max_tokens
-	skeletonMaxDirs       = (skeletonMaxTokensCap - skeletonBaseTokens) / skeletonTokensPerDir
-	maxDirPurposes        = 3
-	rebuildChangedRatio   = 5  // full rebuild when changed files exceed 1/5 (20%) of the base
-	rebuildUnassignedPct  = 10 // full rebuild when more than 10% of files are unassigned
-	fallbackRetryInterval = 24 * time.Hour
-	otherStageID          = "other"
+	minStages            = 2
+	maxStages            = 15
+	skeletonInputBudget  = 120 << 10
+	skeletonBaseTokens   = 1000
+	skeletonTokensPerDir = 20
+	skeletonMaxTokensCap = 8192 // many OpenAI-compatible providers reject larger max_tokens
+	skeletonMaxDirs      = (skeletonMaxTokensCap - skeletonBaseTokens) / skeletonTokensPerDir
+	maxDirPurposes       = 3
+	rebuildChangedRatio  = 5  // full rebuild when changed files exceed 1/5 (20%) of the base
+	rebuildUnassignedPct = 10 // full rebuild when more than 10% of files are unassigned
+	otherStageID         = "other"
 )
+
+// FallbackRetryInterval is how long a skeleton that fell back on an unusable reply is kept
+// before the next run retries the model.
+const FallbackRetryInterval = 24 * time.Hour
 
 // Fallback reasons recorded in Skeleton.FallbackReason.
 const (
@@ -513,7 +516,7 @@ func rebuildReason(sk *Skeleton, f *Facts, now time.Time, maxAgeDays int) string
 		return "prompt"
 	case maxAgeDays > 0 && now.Sub(sk.BuiltAt) > time.Duration(maxAgeDays)*24*time.Hour:
 		return "age"
-	case sk.FallbackAreas && sk.FallbackReason == FallbackBadReply && now.Sub(sk.BuiltAt) > fallbackRetryInterval:
+	case sk.FallbackAreas && sk.FallbackReason == FallbackBadReply && now.Sub(sk.BuiltAt) > FallbackRetryInterval:
 		return "fallback_retry"
 	case sk.BaseFiles > 0 && max(sk.ChangedSinceRebuild, len(sk.ChangedPaths))*rebuildChangedRatio > sk.BaseFiles:
 		return "changes"

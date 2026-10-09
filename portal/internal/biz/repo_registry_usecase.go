@@ -603,6 +603,9 @@ func (uc *RepoRegistryUsecase) PatchRepo(ctx context.Context, id string, p RepoM
 		if len(s) > maxHandbookModelLen || strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 			return nil, fmt.Errorf("%w: handbook_model must be at most %d characters without whitespace", ErrInvalidRepo, maxHandbookModelLen)
 		}
+		if strings.EqualFold(s, HandbookModelOff) {
+			s = HandbookModelOff
+		}
 		p.HandbookModel = &s
 	}
 	var prevStatus string
