@@ -4,11 +4,27 @@
 
 **Goal:** 在 portal 中建立仓库注册表与 agent→仓库/仓库组绑定，运行时按绑定生成带唯一逻辑名的 RCA 根，并修复 RCA 工具 basename 重名读错仓库的问题。
 
-**Architecture:** framework 的 rca_* 工具改为接收 `[]RCARoot{Name, Path}`，旧的 `[]string` 入口保留并自动消歧。portal 新增 `repositories / repo_groups / repo_group_members / agent_repo_bindings / agent_effective_repos` 五张表；`biz.RepoRegistryUsecase` 负责扫描、目录组维护、绑定校验与有效仓库集展开；service 层在构建工具注册表时查询有效仓库集，通过 `RegistryBuildOptions.RCARoots` 传给 `chat`，为空时完全沿用旧的 `workspace/code` 逻辑。
+**Architecture:** framework 的 rca_* 工具改为接收 `[]RCARoot{Name, Path}`，旧的 `[]string` 入口保留并自动消歧。portal 新增 `repositories / repo_groups / repo_group_members / agent_repo_bindings / agent_effective_repos` 五张表；`biz.RepoRegistryUsecase` 负责扫描、目录组维护、绑定校验与有效仓库集展开；service 层在构建工具注册表时查询有效仓库集，通过 `RegistryBuildOptions.RCARoots` 传给 `chat`，为 nil（agent 无绑定）时完全沿用旧的 `workspace/code` 逻辑。
 
 **Tech Stack:** Go 1.26、kratos、GORM（MySQL；测试用 sqlite 内存库，需要 CGO）、wire（`wire_gen.go` 手工维护）。
 
 **Spec:** `docs/superpowers/specs/2026-10-09-repo-registry-and-rca-handbook-design.md`（§4、§5、§6.1、§6.1.1、§6.3、§11、§14、§15 P1 行）
+
+---
+
+## 实施偏差
+
+实施与评审中对下文任务做了以下调整。下文代码块保留原稿，**以代码和本节为准**：
+
+- **绑定权威**：`RCARootsForAgent` 仅在 agent 没有任何绑定时返回 `nil`；有绑定但有效集为空时返回非 nil 空切片，调用方视为权威（不注册 RCA 代码工具，不回退 `workspace/code`）。查询出错仍 fail-open。
+- **使用时校验**：`RCARootsForAgent` 丢弃 code root 已不在配置中、路径已不存在、或解析软链接后逃出 code root（每次重新解析 code root）的条目；读取绑定与有效集时持有 agent 级锁。
+- **workspace-link 不再自动绑定**：Task 11 的 `BindFromLegacyLink` 已删除。`POST /agents/{id}/workspace-link` 只建软链接；agent 已有绑定时响应带 `repo_bindings_override: true` 与 `warning`。
+- **迁移**：`MigrateLegacyLinks(ctx, apply, allow)` 增加 `allow` 过滤（HTTP 层只处理调用者可编辑的 agent）；分页用 100（`agentRepo.List` 超过 100 会被截成 10）；软链接解析出的真实路径映射回配置的 code root；`bind_group` 仅在目标下仓库全是该组直接成员时自动写入，否则降级为 `manual_multi` 并给出 `reason`；报告项新增 `reason`、`after_roots`。
+- **扫描**：code root 统一为绝对路径（Windows 下比较不区分大小写）；读取 git 信息失败时保留旧的 branch/commit/remote；用 `MarkRepositoryMissingIfActive` 标记 missing，不覆盖 `archived`；`refreshScannedRepository` 用 SQL `CASE` 保留 `archived`；已从配置移除的 code root 下的仓库在扫描末尾标记 missing（未配置任何 code root 时跳过）。
+- **一致性**：绑定写入与有效集重算按 agent 加进程内锁；有效集未变化时不重写；`PatchRepo` 状态未变时不重算。
+- **校验与错误**：`ReplaceBindings` / `CopyBindings` 校验 agent 存在（源和目标），不存在返回 `ErrAgentNotFound`；新增 `ErrInvalidRepo`（`PatchRepo` 非法状态，400）与 `ErrRepoGroupInUse`（删除仍被绑定的组，409 `REPO_GROUP_IN_USE`）；`DeleteGroup` 不再连带删除绑定。
+- **agent 删除级联**：`agentRepo.Delete` 在同一事务里删除该 agent 的 `agent_repo_bindings` 与 `agent_effective_repos`。
+- **其他**：`agentRepo.List` / `ListByIDs` 排序加 `id DESC` 作为第二键；API 列表接口不分页（设计 §11 已同步）。
 
 ---
 
@@ -26,10 +42,12 @@
 
 ## 运行时行为约定
 
-- agent 的有效仓库集**非空** → RCA 根 = 有效仓库（`Name = rel_path`，带 `sub_paths` 时 `Name = rel_path/sub`）；忽略 `workspace/code` 和工具配置里的 `roots`。
-- 有效仓库集**为空**（未迁移的老 agent）→ 行为与现在完全一致。
-- 查询有效仓库集出错 → 记 warn，按"为空"处理（fail-open 到旧逻辑）。
-- 迁移接口 `apply=true` 只自动写入"精确命中一个仓库"或"精确命中一个目录组"的 agent；其余只出报告，保持旧逻辑直到人工处理（设计 §14 第 4 条）。
+> 以下为实施后的最终约定（原稿以"有效仓库集是否为空"为分界，已按下方"实施偏差"修正）。
+
+- agent **有绑定** → RCA 根 = 有效仓库（`Name = rel_path`，带 `sub_paths` 时 `Name = rel_path/sub`）；忽略 `workspace/code` 和工具配置里的 `roots`。有效仓库集为空时也以此为准：不注册 `rca_code` / `rca_symbol`，不回退旧逻辑。
+- agent **没有任何绑定**（未迁移的老 agent）→ `RCARootsForAgent` 返回 `nil`，行为与现在完全一致。
+- 查询出错 → 记 warn，按"没有绑定"处理（fail-open 到旧逻辑）。
+- 迁移接口 `apply=true` 只自动写入"精确命中一个仓库"或"精确命中一个目录组且目标下仓库全是直接成员"的 agent；其余只出报告，保持旧逻辑直到人工处理（设计 §14）。
 
 ## 文件结构
 

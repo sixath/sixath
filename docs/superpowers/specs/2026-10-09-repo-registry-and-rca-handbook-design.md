@@ -209,7 +209,7 @@ effective(agent) =
 
 在 `cron.Scheduler` 增加 `repoScanLoop`：
 
-- 间隔默认 10 分钟（配置 `repo_registry.scan_interval`）。
+- 间隔 10 分钟。P1 为常量 `cron.DefaultRepoScanInterval`，启动时先扫一次；配置项 `repo_registry.scan_interval` 后续再加。
 - 每轮：扫描 → 对 `head_commit` 变化的仓库投递 handbook 增量刷新任务（§7.2）→ 更新组成员 → 触发有效仓库集重算。
 - 提供 `POST /api/v1/repos/scan` 手动触发；宿主机可在 `post-merge` hook 里调用（可选）。
 
@@ -223,13 +223,15 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
 
 ### 6.1 RCA roots
 
-`rca_builder.go` 中 `MergeRCARoots(workspace, configured)` 调整为三级优先：
+**绑定是权威来源**，以"有没有绑定"而不是"有效仓库集是否为空"作为分界：
 
-1. **有效仓库集非空** → `[code_root/rel_path ...]`（含 `sub_paths` 时用子路径）；
-2. 否则 `workspace/code` 软链接存在 → 沿用旧逻辑（兼容期）；
-3. 否则 `configured`。
+1. agent **没有任何绑定** → `RepoRegistryUsecase.RCARootsForAgent` 返回 `nil`，沿用旧逻辑：`workspace/code` 软链接存在则用它，否则用工具配置里的 `roots`（`MergeRCARoots` 不变）；
+2. agent **有绑定** → 返回非 nil 切片，**即使为空也是权威结果**：每项 `Name = rel_path`（含 `sub_paths` 时为 `rel_path/sub`），`Path` 为绝对路径；为空时不注册 `rca_code` / `rca_symbol` 工具，也**不回退**到 `workspace/code`；
+3. 查询出错 → 记 warn，按"没有绑定"处理（fail-open 到旧逻辑）。
 
-签名改为接收 `effectiveRoots []string` 参数，由 service 层查询 `agent_effective_repos` 后传入；`chat` 包不直接访问 DB。
+传递机制：service 层通过 `RCARootResolver`（`service/rca_roots.go`）查询，结果放入 `chat.RegistryBuildOptions.RCARoots []tool.RCARoot`；`rca_builder.go` 在 `RCARoots != nil` 时走 `RegisterRCACodeToolsNamed` / `RegisterRCASymbolToolNamed`。`chat` 包不直接访问 DB。
+
+返回前在使用时再校验：仓库所在 code root 已不在配置中、路径已不存在、或解析软链接后逃出 code root 的条目会被丢弃并记 warn。
 
 ### 6.1.1 仓库逻辑名（P1 必改）
 
@@ -260,7 +262,9 @@ portal 负责 clone/pull 到可写卷，需改 compose 挂载、管理 git 凭�
 
 ### 6.3 兼容旧软链接
 
-- 旧接口 `POST /agents/{id}/workspace-link` 保留，但内部改为：解析目标 → 映射为仓库/组绑定 → 写 `agent_repo_bindings`；软链接仍创建（兼容期）。
+- 旧接口 `POST /agents/{id}/workspace-link` 保留，**只创建软链接，不再自动写绑定**（P1 实施时改定：隐式绑定会让 agent 悄悄切到"绑定权威"模式，且目录组只含直接子仓库，可能比旧链接少看到仓库）。
+- 若 agent 已有绑定，响应额外带 `"repo_bindings_override": true` 和 `"warning": "agent has repo bindings; RCA tools use bound repositories, not this link"`，提示该链接对 RCA 工具不生效；查询绑定出错时忽略，不影响链接结果。
+- 旧链接到绑定的转换统一走迁移接口（§14）。
 - 兼容期结束后，`workspace/code` 由有效仓库集反向生成（单仓库时链接仓库；多仓库时不再创建），旧接口返回 deprecation 提示。
 
 ---
@@ -495,25 +499,32 @@ portal 与 web 当前**没有任何用户反馈机制**（无点赞、无"已解
 - Agent 只能看到 `agent_effective_repos` 中仓库的 handbook 与其所在组的组级 handbook；组级 handbook 渲染时**按 agent 可见仓库裁剪**（跨服务关系只列可见仓库，对不可见端显示"外部服务"）。因此组级 handbook 的 `skill/` 需按 agent 渲染一份视图（存于 `agents/<agent_id>/`，与 code-map 同时重渲染）。
 - `auto_apply_new=false` 的组，新成员进入 `pending_confirm`，组负责人确认后才生效。
 - 仓库/组的增删改、绑定变更走现有 `user_resource_acl` 权限体系（`portal/migrations/007_user_resource_acl.sql`），资源类型新增 `repo`、`repo_group`。
+- **P1 暂缓 ACL 资源类型**：全局的仓库/组接口只要求登录；agent 绑定接口要求对目标 agent 有编辑权限（`copy-from` 另需对源 agent 有查看权限）；迁移接口只报告和处理调用者有编辑权限的 agent。`repo` / `repo_group` 资源类型在后续阶段补上。
 
 ---
 
 ## 11. API
 
+P1 已实现的接口（列表接口不分页，返回全量）：
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/repos` | 列仓库（tag / group / status / handbook_status 过滤，分页） |
-| GET | `/api/v1/repos/{id}` | 详情 + handbook 统计 + 使用该仓库的 agent |
-| PATCH | `/api/v1/repos/{id}` | 改名称、描述、标签、负责人 |
-| POST | `/api/v1/repos/scan` | 手动触发扫描 |
-| POST | `/api/v1/repos/{id}/handbook/rebuild` | 手动触发增量（`?full=true` 骨架重建） |
-| GET | `/api/v1/repos/{id}/handbook` | 渲染后的 handbook 浏览（只读） |
-| POST | `/api/v1/repos/batch` | 批量打标签 / 加入手工组 |
-| GET/POST/PATCH/DELETE | `/api/v1/repo-groups[/{id}]` | 组 CRUD（dir 组只读规则） |
-| POST | `/api/v1/repo-groups/{id}/members/confirm` | 确认 pending 成员 |
-| GET | `/api/v1/agents/{id}/repo-bindings` | 绑定列表 + 有效仓库集（含 via） |
-| PUT | `/api/v1/agents/{id}/repo-bindings` | 整体替换绑定（含排除），返回新的有效仓库集 |
-| POST | `/api/v1/agents/{id}/repo-bindings/copy-from/{other}` | 复制其他 agent 的绑定 |
+| GET | `/api/v1/repos` | 列仓库，过滤参数 `status` / `q` / `group_id` / `code_root`；返回 `{items, total}` |
+| GET | `/api/v1/repos/{id}` | 详情 + 有效仓库集中包含该仓库的 agent |
+| PATCH | `/api/v1/repos/{id}` | 改名称、描述、标签、负责人；`status` 只允许 `active` / `archived` |
+| POST | `/api/v1/repos/scan` | 手动触发扫描；扫描进行中返回 409 `REPO_SCAN_RUNNING` |
+| POST | `/api/v1/repos/migrate-legacy-links` | 旧 `workspace/code` 迁移；默认只出报告，`?apply=true` 才写入（§14） |
+| GET | `/api/v1/repo-groups` | 列组，`?kind=` 过滤；返回 `{items}`，每项含 `repo_ids` |
+| POST | `/api/v1/repo-groups` | 新建 manual 组 `{"name","repo_ids"}` |
+| PUT | `/api/v1/repo-groups/{id}/members` | 整体替换 manual 组成员 `{"repo_ids"}` |
+| DELETE | `/api/v1/repo-groups/{id}` | 删除 manual 组；仍被 agent 绑定时返回 409 `REPO_GROUP_IN_USE` |
+| GET | `/api/v1/agents/{agent_id}/repo-bindings` | 绑定列表 + 有效仓库集（含 via） |
+| PUT | `/api/v1/agents/{agent_id}/repo-bindings` | 整体替换绑定（含排除），`{"bindings":[]}` 表示清空；返回新的有效仓库集 |
+| POST | `/api/v1/agents/{agent_id}/repo-bindings/copy-from/{other_id}` | 复制其他 agent 的绑定 |
+
+错误码：参数非法 400 `INVALID_ARGUMENT`；仓库/组不存在 404 `NOT_FOUND`；agent 不存在沿用 `AGENT_NOT_FOUND`；409 见上表。
+
+后续阶段的接口：`POST /api/v1/repos/{id}/handbook/rebuild`、`GET /api/v1/repos/{id}/handbook`、`POST /api/v1/repos/batch`、`POST /api/v1/repo-groups/{id}/members/confirm`，以及 tag 组的创建与修改。
 
 ---
 
@@ -549,16 +560,20 @@ portal 与 web 当前**没有任何用户反馈机制**（无点赞、无"已解
 
 ## 14. 迁移
 
-一次性迁移任务（`portal/cmd/migrate-repo-bindings` 或启动时幂等执行）：
+P1 以接口 `POST /api/v1/repos/migrate-legacy-links` 实现（默认 dry-run，`?apply=true` 写入），可重复执行：
 
 1. 执行首次扫描，建立 `repositories` 与 dir 组。
-2. 遍历所有 agent workspace，解析 `workspace/code` 目标：
-   - 目标是 git 根 → 绑定该仓库；
-   - 目标恰为某 dir 组目录 → 绑定该组；
-   - 目标是包含多个 git 根的其他目录 → 绑定其下所有仓库（逐个 `repo` 绑定），标记待人工整理；
-   - 目标是仓库内子目录 → 绑定所属仓库 + `sub_paths`，标记待人工确认。
-3. 重算所有 agent 有效仓库集。
-4. 输出迁移报告（每个 agent 的前后可见 root 对比）；对比不一致的 agent 不切换运行时，保留旧软链接逻辑直到人工确认。
+2. 遍历调用者有编辑权限的 agent，解析 `workspace/code` 目标（软链接解析到 code root 的真实路径时，映射回配置的 code root 再比较；Windows 下路径比较不区分大小写）：
+   - 目标是 git 根 → `bind_repo`，可自动写入；
+   - 目标恰为某 dir 组目录，且目标下所有仓库都是该组的**直接**成员 → `bind_group`，可自动写入；
+   - 目标恰为某 dir 组目录但其下还有更深层的仓库 → 降级为 `manual_multi`，`reason` 列出嵌套仓库（dir 组只含直接子仓库，自动绑定会让 agent 少看到这些仓库）；
+   - 目标是包含多个 git 根的其他目录 → `manual_multi`，候选为其下所有仓库的逐个 `repo` 绑定；
+   - 目标是仓库内子目录 → `manual_subdir`，候选为所属仓库 + `sub_paths`；
+   - 其余 → `unresolved`；已有绑定的 agent → `skip_has_bindings`。
+3. `apply=true` 只写入 `bind_repo` / `bind_group`，写入后重算该 agent 的有效仓库集；`manual_*` 只出报告，这些 agent 保持旧软链接逻辑直到人工处理。
+4. 报告每项包含 `action`、候选 `bindings`、`reason`，以及 `after_roots`：按候选绑定展开后 RCA 工具将看到的逻辑名列表，用于和旧链接对比。
+
+workspace-link 接口不再自动绑定（§6.3）。
 
 ---
 
