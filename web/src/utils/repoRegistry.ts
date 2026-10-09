@@ -216,3 +216,29 @@ export function summarizeMigration(items: LegacyLinkMigrationItem[]): Record<Leg
 export function pendingAutoApplyCount(items: LegacyLinkMigrationItem[]): number {
   return items.filter((it) => isAutoApplyAction(it.action) && !it.applied).length
 }
+
+export type HandbookState = 'none' | 'building' | 'ready' | 'outdated' | 'failed'
+
+export const HANDBOOK_STATE_LABELS: Record<HandbookState, string> = {
+  none: '未生成',
+  building: '生成中',
+  ready: '最新',
+  outdated: '待更新',
+  failed: '失败',
+}
+
+/** Derives the display state; a ready handbook built from an older commit is outdated. */
+export function handbookState(
+  r: Pick<Repository, 'handbook_status' | 'head_commit'> & { handbook_commit?: string },
+): HandbookState {
+  if (r.handbook_status === 'building') return 'building'
+  if (r.handbook_status === 'failed') return 'failed'
+  if (!r.handbook_commit) return 'none'
+  return r.handbook_commit === r.head_commit ? 'ready' : 'outdated'
+}
+
+/** Orders pages as SKILL.md, then references/*.md, then area pages. */
+export function sortHandbookPages(pages: string[]): string[] {
+  const rank = (p: string) => (p === 'SKILL.md' ? 0 : p.startsWith('references/areas/') ? 2 : 1)
+  return [...pages].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+}

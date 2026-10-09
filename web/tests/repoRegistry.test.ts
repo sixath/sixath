@@ -9,6 +9,7 @@ import type {
 import {
   bindingsEqual,
   groupNamesByRepo,
+  handbookState,
   includeRepo,
   isGroupIncluded,
   isRepoExcluded,
@@ -20,6 +21,7 @@ import {
   removeRepoBinding,
   repoFilterQuery,
   shortCommit,
+  sortHandbookPages,
   summarizeMigration,
   toRequestBindings,
   toggleGroup,
@@ -224,5 +226,31 @@ describe('labels and summaries', () => {
     assert.equal(s.manual_multi, 1)
     assert.equal(s.unresolved, 0)
     assert.equal(pendingAutoApplyCount(items), 1)
+  })
+})
+
+describe('handbookState', () => {
+  const base = { head_commit: 'aaa', handbook_status: 'ready', handbook_commit: 'aaa' }
+  it('maps backend status and commit drift', () => {
+    assert.equal(handbookState(base), 'ready')
+    assert.equal(handbookState({ ...base, handbook_commit: 'old' }), 'outdated')
+    assert.equal(handbookState({ ...base, handbook_status: 'building' }), 'building')
+    assert.equal(handbookState({ ...base, handbook_status: 'failed' }), 'failed')
+    assert.equal(handbookState({ head_commit: 'aaa', handbook_status: 'none' }), 'none')
+  })
+})
+
+describe('sortHandbookPages', () => {
+  it('puts SKILL.md first and area pages last', () => {
+    assert.deepEqual(
+      sortHandbookPages([
+        'references/areas/b.md',
+        'references/registers.md',
+        'SKILL.md',
+        'references/areas/a.md',
+        'references/index.md',
+      ]),
+      ['SKILL.md', 'references/index.md', 'references/registers.md', 'references/areas/a.md', 'references/areas/b.md'],
+    )
   })
 })

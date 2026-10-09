@@ -42,6 +42,7 @@ async function mockRepoRegistry(
     onMigrate?: (apply: boolean) => void
     onCreateGroup?: (body: GroupBody) => void
     bindings?: unknown[]
+    repos?: unknown[]
   } = {},
 ) {
   const groups: Record<string, unknown>[] = [group]
@@ -74,7 +75,9 @@ async function mockRepoRegistry(
       return
     }
     if (url.pathname === '/api/v1/repos' && method === 'GET') {
-      await route.fulfill({ json: { items: [repoA, repoB], total: 2 } })
+      await route.fulfill({
+        json: { items: opts.repos ?? [repoA, repoB], total: (opts.repos ?? [repoA, repoB]).length },
+      })
       return
     }
     await route.continue()
@@ -190,5 +193,58 @@ test.describe('Repo registry UI', () => {
 
     await page.goto(`/agents/${sampleAgent.id}/edit`)
     await expect(page.getByTestId('workspace-link-override-hint')).toContainText('1 条代码仓库绑定')
+  })
+
+  test('仓库页展示 handbook 状态，可浏览与重建', async ({ page }) => {
+    const rebuilt: string[] = []
+    const withHandbook = {
+      ...repoA,
+      handbook_status: 'ready',
+      handbook_commit: repoA.head_commit,
+      handbook_version: 2,
+      handbook_stats: { files: 12 },
+    }
+    await mockRepoRegistry(page, { repos: [withHandbook, repoB] })
+    await page.route(/\/api\/v1\/repos\/[^/]+\/handbook(\/[^?]*)?(\?.*)?$/, async (route: Route) => {
+      const url = new URL(route.request().url())
+      const id = url.pathname.split('/')[4]
+      if (url.pathname.endsWith('/handbook/rebuild')) {
+        rebuilt.push(id)
+        await route.fulfill({ json: { accepted: true } })
+        return
+      }
+      if (url.pathname.endsWith('/handbook/page')) {
+        const p = url.searchParams.get('path')
+        await route.fulfill({ json: { path: p, content: p === 'SKILL.md' ? 'Handbook body' : `page ${p}` } })
+        return
+      }
+      await route.fulfill({
+        json: {
+          repo_id: id,
+          status: 'ready',
+          commit: repoA.head_commit,
+          head_commit: repoA.head_commit,
+          version: 2,
+          pages: ['references/index.md', 'SKILL.md'],
+        },
+      })
+    })
+
+    await page.goto('/repos')
+    await expect(page.getByTestId('handbook-state-r-a')).toHaveText('最新')
+    await expect(page.getByTestId('handbook-state-r-b')).toHaveText('未生成')
+
+    await page.getByRole('button', { name: '查看 cloudgame/svc-a 的 handbook' }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByTestId('handbook-content')).toHaveText('Handbook body')
+    await dialog.getByRole('button', { name: 'references/index.md' }).click()
+    await expect(dialog.getByTestId('handbook-content')).toHaveText('page references/index.md')
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await expect(dialog).toHaveCount(0)
+
+    await expect(page.getByRole('button', { name: '查看 cloudgame/svc-b 的 handbook' })).toBeDisabled()
+    await page.getByRole('button', { name: '重建 cloudgame/svc-b 的 handbook' }).click()
+    await expect(page.getByTestId('handbook-state-r-b')).toHaveText('生成中')
+    expect(rebuilt).toEqual(['r-b'])
   })
 })

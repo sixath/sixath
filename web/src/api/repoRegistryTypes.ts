@@ -23,6 +23,9 @@ export interface Repository {
   sync_mode: string
   status: RepoStatus
   handbook_status: string
+  handbook_commit?: string
+  handbook_version?: number
+  handbook_stats?: HandbookStats | null
   owner_id: string
   last_scanned_at?: string
   created_at: string
@@ -115,4 +118,29 @@ export interface RepoFilter {
   q?: string
   group_id?: string
   code_root?: string
+}
+
+export interface HandbookStats {
+  generator_version?: string
+  built_at?: string
+  duration_ms?: number
+  files?: number
+  go_files?: number
+  packages?: number
+  areas?: number
+  symbols?: number
+  registers?: number
+  truncated?: boolean
+  last_error?: string
+  failed_commit?: string
+}
+
+export interface HandbookView {
+  repo_id: string
+  status: string
+  commit: string
+  head_commit: string
+  version: number
+  stats?: HandbookStats | null
+  pages: string[]
 }

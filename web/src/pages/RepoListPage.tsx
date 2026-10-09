@@ -4,8 +4,16 @@ import { repoApi, repoGroupApi } from '../api/repoRegistry'
 import type { RepoFilter, RepoGroupView, RepoScanReport, Repository } from '../api/repoRegistryTypes'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { FormDialog } from '../components/FormDialog'
+import { HandbookDialog } from '../components/HandbookDialog'
 import { RepoRegistryTabs } from '../components/RepoRegistryTabs'
-import { REPO_STATUS_LABELS, groupNamesByRepo, parseTags, shortCommit } from '../utils/repoRegistry'
+import {
+  HANDBOOK_STATE_LABELS,
+  REPO_STATUS_LABELS,
+  groupNamesByRepo,
+  handbookState,
+  parseTags,
+  shortCommit,
+} from '../utils/repoRegistry'
 import './RepoRegistry.css'
 
 interface EditState {
@@ -38,6 +46,8 @@ export default function RepoListPage() {
   const [editError, setEditError] = useState('')
   const [pendingStatus, setPendingStatus] = useState<Repository | null>(null)
   const [statusSaving, setStatusSaving] = useState(false)
+  const [viewing, setViewing] = useState<Repository | null>(null)
+  const [rebuildingId, setRebuildingId] = useState<string | null>(null)
 
   const filterRef = useRef(filter)
   const loadSeq = useRef(0)
@@ -145,6 +155,18 @@ export default function RepoListPage() {
     }
   }
 
+  const requestRebuild = async (repo: Repository) => {
+    setRebuildingId(repo.id)
+    try {
+      await repoApi.rebuildHandbook(repo.id)
+      setRepos((prev) => prev.map((r) => (r.id === repo.id ? { ...r, handbook_status: 'building' } : r)))
+    } catch (e) {
+      alert((e as Error).message)
+    } finally {
+      setRebuildingId(null)
+    }
+  }
+
   const restoring = pendingStatus?.status === 'archived'
 
   return (
@@ -155,7 +177,7 @@ export default function RepoListPage() {
             <h1>代码仓库</h1>
             <span className="page-count">{repos.length}</span>
           </div>
-          <p className="page-sub">code root 下自动发现的 git 仓库。启动时和每 10 分钟扫描一次，也可以手动扫描。</p>
+          <p className="page-sub">code root 下自动发现的 git 仓库。启动时和每 10 分钟扫描一次，HEAD 变化后自动重建 handbook。</p>
         </div>
         <button type="button" className="btn" onClick={() => void runScan()} disabled={scanning}>
           {scanning ? '扫描中…' : '立即扫描'}
@@ -236,6 +258,7 @@ export default function RepoListPage() {
                 <th>标签</th>
                 <th>分支 / 提交</th>
                 <th>状态</th>
+                <th>Handbook</th>
                 <th>最近扫描</th>
                 <th className="col-actions">操作</th>
               </tr>
@@ -274,9 +297,36 @@ export default function RepoListPage() {
                   <td>
                     <span className={`badge badge-repo-${r.status}`}>{REPO_STATUS_LABELS[r.status]}</span>
                   </td>
+                  <td>
+                    <span
+                      className={`badge badge-handbook-${handbookState(r)}`}
+                      title={r.handbook_stats?.last_error ?? ''}
+                      data-testid={`handbook-state-${r.id}`}
+                    >
+                      {HANDBOOK_STATE_LABELS[handbookState(r)]}
+                    </span>
+                  </td>
                   <td>{formatTime(r.last_scanned_at)}</td>
                   <td className="col-actions">
                     <div className="row-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`查看 ${r.rel_path} 的 handbook`}
+                        disabled={!r.handbook_version}
+                        onClick={() => setViewing(r)}
+                      >
+                        Handbook
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`重建 ${r.rel_path} 的 handbook`}
+                        disabled={r.status !== 'active' || rebuildingId === r.id || handbookState(r) === 'building'}
+                        onClick={() => void requestRebuild(r)}
+                      >
+                        重建
+                      </button>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}>
                         编辑
                       </button>
@@ -359,6 +409,7 @@ export default function RepoListPage() {
         onCancel={() => setPendingStatus(null)}
         onConfirm={() => void confirmStatus()}
       />
+      <HandbookDialog repo={viewing} onClose={() => setViewing(null)} />
     </div>
   )
 }

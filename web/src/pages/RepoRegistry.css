@@ -158,3 +158,66 @@
 .detail-kv__hint.repo-bindings__warn {
   color: #b45309;
 }
+
+.badge-handbook-ready {
+  background: color-mix(in srgb, #16a34a 15%, transparent);
+  color: #15803d;
+}
+
+.badge-handbook-outdated,
+.badge-handbook-building {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: #b45309;
+}
+
+.badge-handbook-failed {
+  background: color-mix(in srgb, #dc2626 15%, transparent);
+  color: #b91c1c;
+}
+
+.badge-handbook-none {
+  background: color-mix(in srgb, #6b7280 15%, transparent);
+  color: #4b5563;
+}
+
+.handbook-dialog {
+  width: min(1100px, 94vw);
+  max-width: none;
+}
+
+.handbook-dialog__body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 1rem;
+  height: 60vh;
+}
+
+.handbook-dialog__pages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.handbook-dialog__pages .btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.handbook-dialog__pages .btn.active {
+  background: var(--accent-subtle);
+}
+
+.handbook-dialog__content {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
