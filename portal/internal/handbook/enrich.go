@@ -455,6 +455,7 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 		}
 	}
 	onDisk := resume
+	resumed := len(resume.stages) > 0 || resume.overview || resume.notes
 	reason := "manual"
 	if !o.Full {
 		// Decide what does not depend on the incremental update first, so a skeleton that is
@@ -520,7 +521,9 @@ func synthesizeAll(ctx context.Context, in EnrichInput, o EnrichOptions, cards m
 			return err
 		}
 		report()
-		res.Changed = res.Changed || unsaved
+		// Content checkpointed by an interrupted run may never have been rendered (its rev
+		// was not recorded), so a resuming run always counts as a change.
+		res.Changed = res.Changed || unsaved || resumed
 		unsaved, storedCommit, onDisk = false, in.Commit, pendingOf(sk)
 		return nil
 	}

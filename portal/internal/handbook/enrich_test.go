@@ -740,6 +740,31 @@ func TestEnrich_CancelDuringSynthesisKeepsCheckpoint(t *testing.T) {
 	}
 }
 
+func TestEnrich_ResumedCheckpointCountsAsChange(t *testing.T) {
+	r := newEnrichRepo(t)
+	r.facts.Registers = nil
+	cache := LLMCache{Dir: t.TempDir()}
+	if _, err := Enrich(context.Background(), r.input(happyModel(), cache, EnrichOptions{})); err != nil {
+		t.Fatal(err)
+	}
+	sk, _ := cache.Skeleton()
+	sk.PendingNotes = true
+	if err := cache.PutSkeleton(sk); err != nil {
+		t.Fatal(err)
+	}
+	m := happyModel()
+	res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{}))
+	if err != nil || res.State != LLMStateComplete || !res.Changed || m.callCount() != 0 {
+		t.Fatalf("a resumed checkpoint must re-render even when the rest changes nothing: %#v %v calls=%d", res, err, m.callCount())
+	}
+	if sk, _ := cache.Skeleton(); sk.PendingNotes {
+		t.Fatalf("pending notes must clear: %#v", sk)
+	}
+	if res, err := Enrich(context.Background(), r.input(m, cache, EnrichOptions{})); err != nil || res.Changed {
+		t.Fatalf("nothing left to do: %#v %v", res, err)
+	}
+}
+
 func TestEnrich_InterruptedStagesResume(t *testing.T) {
 	r := newEnrichRepo(t)
 	cache := LLMCache{Dir: t.TempDir()}

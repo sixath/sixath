@@ -400,24 +400,21 @@ func fallbackSkeleton(f *Facts, commit string, now time.Time, reason string) *Sk
 			keep[a.ID] = true
 		}
 	}
-	otherID := otherStageID
-	for k := 2; ; k++ {
-		taken := false
-		for _, a := range areas {
-			taken = taken || a.ID == otherID
-		}
-		if !taken {
-			break
-		}
-		otherID = fmt.Sprintf("%s-%d", otherStageID, k)
+	taken := map[string]bool{}
+	stageOf := make(map[string]string, len(areas))
+	for _, a := range areas {
+		id := uniqueStageID(a.ID, taken)
+		taken[id] = true
+		stageOf[a.ID] = id
 	}
+	otherID := uniqueStageID(otherStageID, taken)
 	hasOther := false
 	for _, a := range areas {
-		id := a.ID
-		if len(keep) > 0 && !keep[id] {
+		id := stageOf[a.ID]
+		if len(keep) > 0 && !keep[a.ID] {
 			id, hasOther = otherID, true
 		} else {
-			sk.Stages = append(sk.Stages, Stage{ID: a.ID, Title: a.Name})
+			sk.Stages = append(sk.Stages, Stage{ID: id, Title: a.Name})
 		}
 		for _, file := range a.Files {
 			sk.Files[file.Path] = FileAssign{Stage: id, CardHash: file.Hash, Hash: file.Hash}
@@ -427,6 +424,29 @@ func fallbackSkeleton(f *Facts, commit string, now time.Time, reason string) *Sk
 		sk.Stages = append(sk.Stages, Stage{ID: otherID, Title: "其他"})
 	}
 	return sk
+}
+
+// maxStageIDLen is the longest id stageIDRe accepts.
+const maxStageIDLen = 40
+
+// uniqueStageID turns base (an area id: lowercase alphanumerics and hyphens) into a valid
+// stage id not in taken, truncating it and adding a numeric suffix as needed.
+func uniqueStageID(base string, taken map[string]bool) string {
+	cut := func(n int) string {
+		if len(base) <= n {
+			return base
+		}
+		return strings.TrimRight(base[:n], "-")
+	}
+	if base == "" {
+		base = "stage"
+	}
+	id := cut(maxStageIDLen)
+	for k := 2; taken[id] || !validStageID(id); k++ {
+		suffix := fmt.Sprintf("-%d", k)
+		id = cut(maxStageIDLen-len(suffix)) + suffix
+	}
+	return id
 }
 
 func firstNonEmpty(a, b string) string {

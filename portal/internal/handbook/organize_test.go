@@ -124,6 +124,26 @@ func TestInferSkeleton_DropsDeviceNameStages(t *testing.T) {
 	}
 }
 
+func TestFallbackSkeleton_ClampsLongAreaIDs(t *testing.T) {
+	prefix := strings.Repeat("a", 45)
+	f := &Facts{Files: []File{
+		{Path: prefix + "x/x.go", Lang: "go", Size: 1, Hash: hashOf("1")},
+		{Path: prefix + "y/y.go", Lang: "go", Size: 1, Hash: hashOf("2")},
+	}}
+	sk := fallbackSkeleton(f, "c1", time.Now(), FallbackBadReply)
+	if len(sk.Stages) != 2 || len(validStages(sk)) != 2 || sk.Stages[0].ID == sk.Stages[1].ID {
+		t.Fatalf("stages %#v", sk.Stages)
+	}
+	for _, s := range sk.Stages {
+		if !validStageID(s.ID) {
+			t.Fatalf("invalid stage id %q", s.ID)
+		}
+	}
+	if a, b := sk.Files[prefix+"x/x.go"].Stage, sk.Files[prefix+"y/y.go"].Stage; a != sk.Stages[0].ID || b != sk.Stages[1].ID {
+		t.Fatalf("files %#v stages %#v", sk.Files, sk.Stages)
+	}
+}
+
 func TestInferSkeleton_FallsBackToAreas(t *testing.T) {
 	f, cards := orgFacts()
 	m := (&fakeModel{}).on("执行阶段", func(string) string { return `{"stages":[{"id":"only","title":"一个"}],"assign":{}}` })
