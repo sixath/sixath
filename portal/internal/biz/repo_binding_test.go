@@ -37,6 +37,7 @@ func TestNormalizeRepoBindings(t *testing.T) {
 		{{TargetKind: RepoTargetGroup, TargetID: "g", Mode: RepoBindingExclude}},
 		{{TargetKind: RepoTargetGroup, TargetID: "g", SubPaths: []string{"a"}}},
 		{{TargetKind: RepoTargetRepo, TargetID: "r", SubPaths: []string{"../etc"}}},
+		{{TargetKind: RepoTargetRepo, TargetID: "r", SubPaths: []string{"svc/.GIT/config"}}},
 		{{TargetKind: RepoTargetRepo, TargetID: "r", Mode: "weird"}},
 		{{TargetKind: RepoTargetRepo, TargetID: "r"}, {TargetKind: RepoTargetRepo, TargetID: "r", Mode: RepoBindingExclude}},
 	}
@@ -104,6 +105,48 @@ func TestBuildRCARoots(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %#v\nwant %#v", got, want)
+	}
+}
+
+func assertUniqueRootNames(t *testing.T, roots []tool.RCARoot) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, r := range roots {
+		if seen[r.Name] {
+			t.Fatalf("duplicate root name %q in %#v", r.Name, roots)
+		}
+		seen[r.Name] = true
+	}
+}
+
+func TestBuildRCARoots_SameCodeRootBasename(t *testing.T) {
+	repos := map[string]*Repository{
+		"r1": repoFixture("r1", "/x/codes", "cg/gw", RepoStatusActive),
+		"r2": repoFixture("r2", "/y/codes", "cg/gw", RepoStatusActive),
+	}
+	got := buildRCARoots([]*AgentEffectiveRepo{{RepoID: "r1"}, {RepoID: "r2"}}, repos)
+	want := []tool.RCARoot{
+		{Name: filepath.ToSlash(filepath.Join("/x/codes", "cg", "gw")), Path: filepath.Join("/x/codes", "cg", "gw")},
+		{Name: filepath.ToSlash(filepath.Join("/y/codes", "cg", "gw")), Path: filepath.Join("/y/codes", "cg", "gw")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestBuildRCARoots_PrefixedNameCollidesWithRelPath(t *testing.T) {
+	repos := map[string]*Repository{
+		"r1": repoFixture("r1", "/codes", "cg/gw", RepoStatusActive),
+		"r2": repoFixture("r2", "/other", "cg/gw", RepoStatusActive),
+		"r3": repoFixture("r3", "/z", "codes/cg/gw", RepoStatusActive),
+	}
+	got := buildRCARoots([]*AgentEffectiveRepo{{RepoID: "r1"}, {RepoID: "r2"}, {RepoID: "r3"}}, repos)
+	if len(got) != 3 {
+		t.Fatalf("got %#v", got)
+	}
+	assertUniqueRootNames(t, got)
+	if got[1].Name != "other/cg/gw" {
+		t.Fatalf("non-colliding prefixed name must stay, got %q", got[1].Name)
 	}
 }
 

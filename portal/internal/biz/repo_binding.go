@@ -68,6 +68,11 @@ func normalizeSubPaths(in []string) ([]string, error) {
 		if c == "." || c == ".." || strings.HasPrefix(c, "../") || strings.Contains(c, ":") {
 			return nil, fmt.Errorf("sub_path %q must be a relative path inside the repo", p)
 		}
+		for _, seg := range strings.Split(c, "/") {
+			if strings.EqualFold(seg, ".git") {
+				return nil, fmt.Errorf("sub_path %q must not reach into .git", p)
+			}
+		}
 		set[c] = struct{}{}
 	}
 	if len(set) == 0 {
@@ -140,7 +145,8 @@ func ExpandRepoBindings(agentID string, bindings []*AgentRepoBinding, groupMembe
 }
 
 // buildRCARoots maps effective repos to RCA roots named by rel_path (rel_path/sub for
-// sub_paths). Names repeated across code roots are prefixed with the code root basename.
+// sub_paths). Names repeated across code roots are prefixed with the code root basename;
+// names still repeated after that fall back to the slash form of the absolute path.
 func buildRCARoots(eff []*AgentEffectiveRepo, repos map[string]*Repository) []tool.RCARoot {
 	type item struct {
 		root     tool.RCARoot
@@ -174,6 +180,15 @@ func buildRCARoots(eff []*AgentEffectiveRepo, repos map[string]*Repository) []to
 			it.root.Name = filepath.Base(it.codeRoot) + "/" + it.root.Name
 		}
 		out = append(out, it.root)
+	}
+	clear(count)
+	for _, r := range out {
+		count[r.Name]++
+	}
+	for i := range out {
+		if count[out[i].Name] > 1 {
+			out[i].Name = filepath.ToSlash(out[i].Path)
+		}
 	}
 	return out
 }
