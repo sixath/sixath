@@ -84,6 +84,46 @@ func TestInferSkeleton_AssignsDirectories(t *testing.T) {
 	}
 }
 
+func TestValidStageID_RejectsWindowsDeviceNames(t *testing.T) {
+	for _, id := range []string{"con", "prn", "aux", "nul", "com0", "com9", "lpt1", "lpt0"} {
+		if validStageID(id) {
+			t.Fatalf("%q must be rejected", id)
+		}
+	}
+	for _, id := range []string{"console", "com10", "comx", "lpt", "aux-io", "nul1x", "order"} {
+		if !validStageID(id) {
+			t.Fatalf("%q must be accepted", id)
+		}
+	}
+	if !windowsDeviceName("CON") || !windowsDeviceName("Lpt3") {
+		t.Fatal("device names are case-insensitive")
+	}
+}
+
+func TestInferSkeleton_DropsDeviceNameStages(t *testing.T) {
+	f, cards := orgFacts()
+	m := (&fakeModel{}).on("执行阶段", func(string) string {
+		return `{"stages":[{"id":"boot","title":"启动"},{"id":"aux","title":"辅助"},{"id":"pay","title":"支付"}],` +
+			`"assign":{"cmd/server":"boot","internal/order":"aux","internal/pay":"pay"}}`
+	})
+	var u usage
+	sk, err := inferSkeleton(context.Background(), m, "svc", f, cards, "c1", time.Now(), &u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sk.Stages {
+		if s.ID == "aux" {
+			t.Fatalf("a device-name stage must be dropped: %#v", sk.Stages)
+		}
+	}
+	if st := sk.Files["internal/order/store.go"].Stage; st == "aux" {
+		t.Fatalf("files of a dropped stage must be reassigned: %q", st)
+	}
+	if got := validStages(&Skeleton{Stages: []Stage{{ID: "nul"}, {ID: "com1"}, {ID: "ok"}}}); len(got) != 1 || got[0].ID != "ok" {
+		t.Fatalf("render must skip device-name stages: %#v", got)
+	}
+}
+
 func TestInferSkeleton_FallsBackToAreas(t *testing.T) {
 	f, cards := orgFacts()
 	m := (&fakeModel{}).on("执行阶段", func(string) string { return `{"stages":[{"id":"only","title":"一个"}],"assign":{}}` })

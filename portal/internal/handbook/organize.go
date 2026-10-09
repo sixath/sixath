@@ -42,6 +42,20 @@ const (
 
 var stageIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// validStageID reports whether id can name a stage page file on every platform.
+func validStageID(id string) bool { return stageIDRe.MatchString(id) && !windowsDeviceName(id) }
+
+// windowsDeviceName reports whether name, which has no extension, is a Windows reserved
+// device name; such files cannot be created there.
+func windowsDeviceName(name string) bool {
+	switch n := strings.ToLower(name); n {
+	case "con", "prn", "aux", "nul":
+		return true
+	default:
+		return len(n) == 4 && (strings.HasPrefix(n, "com") || strings.HasPrefix(n, "lpt")) && n[3] >= '0' && n[3] <= '9'
+	}
+}
+
 type dirSummary struct {
 	Dir      string
 	Files    []File
@@ -285,7 +299,7 @@ func inferSkeleton(ctx context.Context, m model.Model, relPath string, f *Facts,
 	var stages []Stage
 	for _, s := range r.Stages {
 		id := strings.TrimSpace(s.ID)
-		if !stageIDRe.MatchString(id) || valid[id] {
+		if !validStageID(id) || valid[id] {
 			continue
 		}
 		valid[id] = true

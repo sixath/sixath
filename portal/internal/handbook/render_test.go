@@ -102,6 +102,11 @@ func TestSlugAndSkillName(t *testing.T) {
 	if exact := strings.Repeat("b", 60); SkillName(exact) != "handbook-"+exact {
 		t.Fatalf("60-char slug = %q", SkillName(exact))
 	}
+	for in, want := range map[string]string{"aux": "aux-dir", "CON": "con-dir", "lpt1": "lpt1-dir", "auxiliary": "auxiliary"} {
+		if got := slug(in); got != want {
+			t.Fatalf("slug(%q) = %q, want %q", in, got, want)
+		}
+	}
 	if got := areaOfDir("internal/order/sub"); got != "internal/order" {
 		t.Fatalf("areaOfDir = %q", got)
 	}

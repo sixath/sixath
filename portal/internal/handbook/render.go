@@ -43,6 +43,9 @@ func slug(s string) string {
 	if s == "" {
 		s = "root"
 	}
+	if windowsDeviceName(s) {
+		s += "-dir"
+	}
 	return s
 }
 
@@ -613,8 +616,8 @@ func newLLMView(f *Facts, l *LLMLayer) *llmView {
 	return v
 }
 
-// validStages returns the skeleton stages usable as page names: ids matching stageIDRe, first
-// occurrence of each id kept.
+// validStages returns the skeleton stages usable as page names: ids passing validStageID,
+// first occurrence of each id kept.
 func validStages(sk *Skeleton) []Stage {
 	if sk == nil {
 		return nil
@@ -622,7 +625,7 @@ func validStages(sk *Skeleton) []Stage {
 	seen := map[string]bool{}
 	var out []Stage
 	for _, s := range sk.Stages {
-		if !stageIDRe.MatchString(s.ID) || seen[s.ID] {
+		if !validStageID(s.ID) || seen[s.ID] {
 			continue
 		}
 		seen[s.ID] = true
