@@ -26,7 +26,7 @@ const (
 )
 
 // ProviderSet is data providers.
-var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, ProvideDB, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewProxyRepo, NewAgentRepo, NewIdentityRepo, NewAuthEphemeralRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChatAttachmentRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewEvolutionProposalRepo)
+var ProviderSet = wire.NewSet(NewData, ProvideDataRoot, ProvideCodeRoots, ProvideDB, NewSessionUnitsBackendFromData, NewTurnTraceStoreFromData, NewToolRepo, NewMcpServerRepo, NewProxyRepo, NewAgentRepo, NewIdentityRepo, NewAuthEphemeralRepo, NewInviteRepo, NewResourceRepo, NewChatSessionRepo, NewChatMessageRepo, NewChatAttachmentRepo, NewChannelRepo, NewChannelRuntimeRepo, NewChannelPeerSessionRepo, NewCronTaskRepo, NewCronRunRepo, NewEvolutionProposalRepo, NewRepoRegistryRepo)
 
 // Data .
 type Data struct {
