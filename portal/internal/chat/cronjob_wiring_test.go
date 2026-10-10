@@ -76,7 +76,9 @@ func (s *stubCronRepo) ListDue(context.Context, time.Time) ([]*biz.CronTaskMeta,
 	return nil, nil
 }
 
-func (s *stubCronRepo) UpdateNextRun(context.Context, string, time.Time) error { return nil }
+func (s *stubCronRepo) ClaimDue(context.Context, string, time.Time, *time.Time) (bool, error) {
+	return false, nil
+}
 
 func (s *stubCronRepo) ListSkillExecuteByAgentIDs(context.Context, []string) ([]*biz.CronTaskMeta, error) {
 	return nil, nil

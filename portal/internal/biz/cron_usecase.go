@@ -69,9 +69,9 @@ func (uc *CronUsecase) ListDue(ctx context.Context, before time.Time) ([]*CronTa
 	return uc.taskRepo.ListDue(ctx, before)
 }
 
-// UpdateNextRun 更新下次执行时间
-func (uc *CronUsecase) UpdateNextRun(ctx context.Context, id string, nextRunAt time.Time) error {
-	return uc.taskRepo.UpdateNextRun(ctx, id, nextRunAt)
+// ClaimDue 领取到期的一次执行：把 next_run_at 推进到 next（nil 表示不再执行），只有领取成功的调用方可以执行。
+func (uc *CronUsecase) ClaimDue(ctx context.Context, id string, now time.Time, next *time.Time) (bool, error) {
+	return uc.taskRepo.ClaimDue(ctx, id, now, next)
 }
 
 // CreateRun 创建执行记录

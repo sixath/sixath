@@ -599,7 +599,8 @@ type CronTaskStore interface {
     Update(ctx context.Context, id string, updates map[string]any) (*CronTaskMeta, error)
     Delete(ctx context.Context, id string) error
     ListDue(ctx context.Context, before time.Time) ([]CronTaskMeta, error)
-    UpdateNextRun(ctx context.Context, id string, nextRunAt time.Time) error
+    // 条件更新：仅当任务启用且 next_run_at <= now 时改为 next（nil 清空），返回是否领取成功
+    ClaimDue(ctx context.Context, id string, now time.Time, next *time.Time) (bool, error)
 }
 
 type CronRunStore interface {
@@ -1153,18 +1154,20 @@ POST /api/v1/webhooks/dingtalk
 1. **next_run_at 计算**：
    - `cron`：使用 `github.com/robfig/cron/v3` 或 `github.com/gorhill/cronexpr` 解析表达式，计算下次触发时间。
    - `every`：`last_run + schedule_expr` 秒。
-   - `at`：单次任务，`schedule_expr` 为 ISO 时间戳；执行后 `enabled=false` 或删除。
+   - `at`：单次任务，`schedule_expr` 为 ISO 时间戳；领取后 next_run_at 置空，不再执行。
 2. **错峰**：`actual_run_at = next_run_at + rand.Intn(stagger_sec)`，避免整点雪崩。
 3. **执行流程**：
-   - `CronRunStore.Create` 插入 run 记录，status=running。
+   - 调度器每 30 秒 `ListDue`，对每个到期任务先按**当前**计划计算下一次时间（从 now 起算，错过的时间点不补跑；`at` 与无法解析的计划为 nil），再 `CronTaskStore.ClaimDue` 条件更新 next_run_at；只有领取成功才启动执行，因此运行耗时超过扫描间隔、或多个实例同时扫描，都不会重复执行同一时间点。
+   - `CronRunStore.Create` 插入 run 记录，status=running，triggered_at 为领取的时间点。
    - 执行 agent_turn 或 skill_execute。
-   - 更新 run：finished_at、status、output_summary、error。
+   - 更新 run：finished_at、status、output_summary（按 UTF-8 字符边界截断到 2000 字节）、error。
    - 若配置了 delivery，执行投递，更新 delivery_ok。
-   - `CronTaskStore.UpdateNextRun` 更新任务的 next_run_at。
+   - 执行结束**不再**改写 next_run_at，避免用执行开始时的旧任务快照覆盖期间修改过的计划。
 4. **投递实现**：
-   - **webhook**：`POST delivery_webhook_url`，body 为 `{"task_id","task_name","status","output_summary","error","triggered_at","finished_at"}`；若 `delivery_secret` 非空，添加 `X-Signature: HMAC-SHA256(body, secret)`。
+   - **webhook**：`POST delivery_webhook_url`（10 秒超时），body 为 `{"task_id","task_name","status","output_summary","error","triggered_at","finished_at"}`；若 `delivery_secret` 非空，添加 `X-Signature: HMAC-SHA256(body, secret)`。
+   - **企业微信群机器人**（URL 路径以 `/cgi-bin/webhook/send` 结尾）：改用 `channel.PushToWeCom` 发 markdown 消息，内容为完整输出（超过 4096 字节按 UTF-8 截断），失败时为"定时任务「名称」执行失败：错误"；响应 `errcode` 非 0 视为投递失败。
    - **session**：校验 `delivery_session_id` 所属 session 的 agent_id 与任务 agent_id 一致；`ChatMessageStore.Create` 插入 role=assistant 的消息，content 为 Markdown 格式的摘要。
-5. **立即执行**：`POST /api/v1/cron/tasks/:id/run` 直接调用 Executor，不更新 next_run_at。
+5. **立即执行**：`POST /api/v1/cron/tasks/:id/run` 直接调用 Executor（triggered_at 为当前时间），不更新 next_run_at。
 
 #### 6.7.3 目录结构扩展
 

@@ -2,7 +2,6 @@ package data
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"backend/internal/biz"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/uuid"
-	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
 
@@ -164,8 +162,11 @@ func (r *cronTaskRepo) ListDue(ctx context.Context, before time.Time) ([]*biz.Cr
 	return out, nil
 }
 
-func (r *cronTaskRepo) UpdateNextRun(ctx context.Context, id string, nextRunAt time.Time) error {
-	return r.db.WithContext(ctx).Model(&model.CronTask{}).Where("id = ?", id).Update("next_run_at", nextRunAt).Error
+func (r *cronTaskRepo) ClaimDue(ctx context.Context, id string, now time.Time, next *time.Time) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.CronTask{}).
+		Where("id = ? AND enabled = ? AND next_run_at IS NOT NULL AND next_run_at <= ?", id, true, now).
+		Update("next_run_at", next)
+	return res.RowsAffected > 0, res.Error
 }
 
 func (r *cronTaskRepo) ListSkillExecuteByAgentIDs(ctx context.Context, agentIDs []string) ([]*biz.CronTaskMeta, error) {
@@ -272,39 +273,5 @@ func cronRunModelToBiz(m *model.CronRun) *biz.CronRunMeta {
 
 // computeNextRun 计算下次执行时间
 func computeNextRun(m *model.CronTask) (*time.Time, error) {
-	loc := time.UTC
-	if m.Timezone != "" {
-		if l, err := time.LoadLocation(m.Timezone); err == nil {
-			loc = l
-		}
-	}
-	now := time.Now().In(loc)
-
-	switch m.ScheduleKind {
-	case "cron":
-		if m.ScheduleExpr == "" {
-			return nil, nil
-		}
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		sched, err := parser.Parse(m.ScheduleExpr)
-		if err != nil {
-			return nil, err
-		}
-		next := sched.Next(now)
-		return &next, nil
-	case "every":
-		sec := 3600
-		if n, err := strconv.Atoi(m.ScheduleExpr); err == nil && n > 0 {
-			sec = n
-		}
-		next := now.Add(time.Duration(sec) * time.Second)
-		return &next, nil
-	case "at":
-		t, err := time.ParseInLocation(time.RFC3339, m.ScheduleExpr, loc)
-		if err != nil {
-			return nil, err
-		}
-		return &t, nil
-	}
-	return nil, nil
+	return biz.CronNextRun(m.ScheduleKind, m.ScheduleExpr, m.Timezone, time.Now())
 }

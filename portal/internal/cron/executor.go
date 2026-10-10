@@ -9,9 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
+	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	agentv1 "backend/api/agent/v1"
 	"backend/internal/biz"
@@ -22,7 +23,6 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/uuid"
-	"github.com/robfig/cron/v3"
 	"github.com/sixath/framework/tool"
 )
 
@@ -50,14 +50,15 @@ func NewExecutor(agentSvc *service.AgentService, chatUC *biz.ChatUsecase, cronUC
 	return e
 }
 
-// Execute 执行任务（可异步调用）
+// Execute 立即执行任务（手动触发，可异步调用），不改变任务的 next_run_at。
 func (e *Executor) Execute(ctx context.Context, task *biz.CronTaskMeta) {
+	e.executeAt(ctx, task, time.Now())
+}
+
+// executeAt 执行一次计划在 triggeredAt 的运行；调度器在领取该时间点后调用。
+func (e *Executor) executeAt(ctx context.Context, task *biz.CronTaskMeta, triggeredAt time.Time) {
 	ctx = e.internalContext(ctx)
 	runID := uuid.New().String()
-	triggeredAt := time.Now()
-	if task.NextRunAt != nil {
-		triggeredAt = *task.NextRunAt
-	}
 
 	run := &biz.CronRunMeta{
 		ID:          runID,
@@ -94,11 +95,7 @@ func (e *Executor) Execute(ctx context.Context, task *biz.CronTaskMeta) {
 		output = execErr.Error()
 	}
 
-	// 截断 output 作为 summary
-	summary := output
-	if len(summary) > 2000 {
-		summary = summary[:2000] + "..."
-	}
+	summary := outputSummary(output)
 
 	updates := map[string]any{
 		"finished_at":    finishedAt,
@@ -112,7 +109,7 @@ func (e *Executor) Execute(ctx context.Context, task *biz.CronTaskMeta) {
 
 	// 投递
 	if task.DeliveryMode != "none" && task.DeliveryMode != "" {
-		deliveryOK := e.deliver(ctx, task, runID, status, summary, execErr, triggeredAt, finishedAt)
+		deliveryOK := e.deliver(ctx, task, runID, status, summary, output, execErr, triggeredAt, finishedAt)
 		updates["delivery_ok"] = deliveryOK
 		if !deliveryOK && !task.DeliveryBestEffort {
 			updates["status"] = "failed"
@@ -122,14 +119,21 @@ func (e *Executor) Execute(ctx context.Context, task *biz.CronTaskMeta) {
 	if err := e.cronUC.UpdateRun(ctx, runID, updates); err != nil {
 		e.log.Errorf("update cron run failed: %v", err)
 	}
+}
 
-	// 更新 next_run_at（at 类型一次性任务不再更新）
-	if task.ScheduleKind != "at" {
-		next := e.computeNextRun(task, finishedAt)
-		if next != nil {
-			_ = e.cronUC.UpdateNextRun(ctx, task.ID, *next)
-		}
+// maxOutputSummaryBytes bounds the stored and webhook-delivered output summary.
+const maxOutputSummaryBytes = 2000
+
+// outputSummary truncates output on a UTF-8 boundary; MySQL rejects a cut multi-byte character.
+func outputSummary(output string) string {
+	if len(output) <= maxOutputSummaryBytes {
+		return output
 	}
+	b := output[:maxOutputSummaryBytes]
+	for len(b) > 0 && !utf8.ValidString(b) {
+		b = b[:len(b)-1]
+	}
+	return b + "..."
 }
 
 func (e *Executor) internalContext(ctx context.Context) context.Context {
@@ -190,28 +194,49 @@ func (e *Executor) runSkillExecute(ctx context.Context, task *biz.CronTaskMeta) 
 	return reply.GetOutput(), nil
 }
 
-func (e *Executor) deliver(ctx context.Context, task *biz.CronTaskMeta, runID, status, outputSummary string, execErr error, triggeredAt, finishedAt time.Time) bool {
+func (e *Executor) deliver(ctx context.Context, task *biz.CronTaskMeta, runID, status, summary, output string, execErr error, triggeredAt, finishedAt time.Time) bool {
 	switch task.DeliveryMode {
 	case "webhook":
-		return e.deliverWebhook(ctx, task, runID, status, outputSummary, execErr, triggeredAt, finishedAt)
+		return e.deliverWebhook(ctx, task, runID, status, output, execErr, triggeredAt, finishedAt)
 	case "session":
-		return e.deliverSession(ctx, task, outputSummary, execErr)
+		return e.deliverSession(ctx, task, summary, execErr)
 	case "channel":
-		return e.deliverChannel(ctx, task, outputSummary, execErr)
+		return e.deliverChannel(ctx, task, summary, execErr)
 	}
 	return true
 }
 
-func (e *Executor) deliverWebhook(ctx context.Context, task *biz.CronTaskMeta, runID, status, outputSummary string, execErr error, triggeredAt, finishedAt time.Time) bool {
+// webhookTimeout bounds one generic webhook delivery.
+const webhookTimeout = 10 * time.Second
+
+// isWeComRobotWebhook reports whether url is a WeCom group robot, which only accepts its own
+// message format and reports errors in the body of a 200 response.
+func isWeComRobotWebhook(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && strings.HasSuffix(u.Path, "/cgi-bin/webhook/send")
+}
+
+func (e *Executor) deliverWebhook(ctx context.Context, task *biz.CronTaskMeta, runID, status, output string, execErr error, triggeredAt, finishedAt time.Time) bool {
 	if task.DeliveryWebhookURL == "" {
 		return false
+	}
+	if isWeComRobotWebhook(task.DeliveryWebhookURL) {
+		content := output
+		if execErr != nil {
+			content = "定时任务「" + task.Name + "」执行失败：" + execErr.Error()
+		}
+		if err := channel.PushToWeCom(ctx, task.DeliveryWebhookURL, content, "markdown"); err != nil {
+			e.log.Errorf("wecom webhook delivery failed: %v", err)
+			return false
+		}
+		return true
 	}
 	body := map[string]any{
 		"task_id":        task.ID,
 		"task_name":      task.Name,
 		"run_id":         runID,
 		"status":         status,
-		"output_summary": outputSummary,
+		"output_summary": outputSummary(output),
 		"triggered_at":   triggeredAt.Format(time.RFC3339),
 		"finished_at":    finishedAt.Format(time.RFC3339),
 	}
@@ -236,7 +261,7 @@ func (e *Executor) deliverWebhook(ctx context.Context, task *biz.CronTaskMeta, r
 		req.Header.Set("X-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: webhookTimeout}).Do(req)
 	if err != nil {
 		e.log.Errorf("webhook POST failed: %v", err)
 		return false
@@ -313,36 +338,4 @@ func (e *Executor) deliverSession(ctx context.Context, task *biz.CronTaskMeta, o
 		return false
 	}
 	return true
-}
-
-func (e *Executor) computeNextRun(task *biz.CronTaskMeta, after time.Time) *time.Time {
-	loc := time.UTC
-	if task.Timezone != "" {
-		if l, err := time.LoadLocation(task.Timezone); err == nil {
-			loc = l
-		}
-	}
-	now := after.In(loc)
-
-	switch task.ScheduleKind {
-	case "cron":
-		if task.ScheduleExpr == "" {
-			return nil
-		}
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		sched, err := parser.Parse(task.ScheduleExpr)
-		if err != nil {
-			return nil
-		}
-		next := sched.Next(now)
-		return &next
-	case "every":
-		sec := 3600
-		if n, err := strconv.Atoi(task.ScheduleExpr); err == nil && n > 0 {
-			sec = n
-		}
-		next := now.Add(time.Duration(sec) * time.Second)
-		return &next
-	}
-	return nil
 }

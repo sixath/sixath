@@ -14,6 +14,7 @@ import (
 type Scheduler struct {
 	cronUC      *biz.CronUsecase
 	exec        *Executor
+	runTask     func(ctx context.Context, task *biz.CronTaskMeta, triggeredAt time.Time)
 	interval    time.Duration
 	evolutionUC *biz.EvolutionUsecase
 	log         *log.Helper
@@ -43,12 +44,16 @@ func NewScheduler(cronUC *biz.CronUsecase, exec *Executor, interval time.Duratio
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
-	return &Scheduler{
+	s := &Scheduler{
 		cronUC:   cronUC,
 		exec:     exec,
 		interval: interval,
 		log:      log.NewHelper(logger),
 	}
+	if exec != nil {
+		s.runTask = exec.executeAt
+	}
+	return s
 }
 
 // Start 启动调度循环，阻塞直到 ctx 取消
@@ -112,15 +117,32 @@ func (s *Scheduler) run(ctx context.Context) {
 	}
 }
 
+// tick starts every due task once: a run starts only after its slot is claimed by moving
+// next_run_at past now, so runs still in progress are not started again by later ticks.
+// One-shot tasks and tasks whose schedule no longer parses get no next run.
 func (s *Scheduler) tick(ctx context.Context) {
-	tasks, err := s.cronUC.ListDue(ctx, time.Now())
+	now := time.Now()
+	tasks, err := s.cronUC.ListDue(ctx, now)
 	if err != nil {
 		s.log.Errorf("list due tasks: %v", err)
 		return
 	}
 	for _, t := range tasks {
-		task := t
-		go s.exec.Execute(ctx, task)
+		var next *time.Time
+		if t.ScheduleKind != "at" {
+			if next, err = biz.CronNextRun(t.ScheduleKind, t.ScheduleExpr, t.Timezone, now); err != nil {
+				s.log.Errorf("cron task %s: invalid schedule %q, stopping it: %v", t.ID, t.ScheduleExpr, err)
+			}
+		}
+		claimed, err := s.cronUC.ClaimDue(ctx, t.ID, now, next)
+		if err != nil {
+			s.log.Errorf("claim cron task %s: %v", t.ID, err)
+			continue
+		}
+		if !claimed || s.runTask == nil {
+			continue
+		}
+		go s.runTask(ctx, t, *t.NextRunAt)
 	}
 }
 
