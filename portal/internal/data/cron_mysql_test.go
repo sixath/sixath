@@ -83,3 +83,44 @@ func TestCronTaskRepo_ClaimDue(t *testing.T) {
 		t.Fatalf("unknown task: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestCronRunRepo_TriggerDeliveryErrorAndListRunning(t *testing.T) {
+	ctx := context.Background()
+	_, db := newCronTaskRepoForTest(t)
+	if err := db.AutoMigrate(&model.CronRun{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := NewCronRunRepo(&Data{db: db}, log.DefaultLogger)
+	now := time.Now().Truncate(time.Second)
+	for _, r := range []*biz.CronRunMeta{
+		{ID: "old", TaskID: "t1", Trigger: biz.CronTriggerSchedule, TriggeredAt: now.Add(-time.Hour), StartedAt: now.Add(-time.Hour), Status: biz.CronRunRunning},
+		{ID: "new", TaskID: "t1", Trigger: biz.CronTriggerManual, TriggeredAt: now, StartedAt: now, Status: biz.CronRunRunning},
+		{ID: "done", TaskID: "t1", Trigger: biz.CronTriggerSchedule, TriggeredAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour), Status: biz.CronRunSuccess},
+	} {
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.Update(ctx, "old", map[string]any{"delivery_ok": false, "delivery_error": "webhook 返回 HTTP 500"}); err != nil {
+		t.Fatal(err)
+	}
+
+	running, err := repo.ListRunning(ctx, now.Add(-time.Minute))
+	if err != nil || len(running) != 1 || running[0].ID != "old" {
+		t.Fatalf("ListRunning = %v err=%v, want only the old running run", running, err)
+	}
+	runs, _, err := repo.ListByTask(ctx, "t1", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]*biz.CronRunMeta{}
+	for _, r := range runs {
+		byID[r.ID] = r
+	}
+	if byID["new"].Trigger != biz.CronTriggerManual || byID["old"].Trigger != biz.CronTriggerSchedule {
+		t.Fatalf("triggers = %q/%q", byID["new"].Trigger, byID["old"].Trigger)
+	}
+	if byID["old"].DeliveryError != "webhook 返回 HTTP 500" {
+		t.Fatalf("delivery error = %q", byID["old"].DeliveryError)
+	}
+}

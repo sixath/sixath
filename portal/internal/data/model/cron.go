@@ -38,13 +38,15 @@ func (CronTask) TableName() string {
 type CronRun struct {
 	ID            string     `gorm:"column:id;primaryKey;size:36"`
 	TaskID        string     `gorm:"column:task_id;size:36;not null;index"`
+	Trigger       string     `gorm:"column:trigger_kind;size:16;not null;default:''"` // schedule, manual
 	TriggeredAt   time.Time  `gorm:"column:triggered_at;not null"`
-	StartedAt     time.Time  `gorm:"column:started_at;not null"`
+	StartedAt     time.Time  `gorm:"column:started_at;not null;index:idx_cron_run_status_started,priority:2"`
 	FinishedAt    *time.Time `gorm:"column:finished_at"`
-	Status        string     `gorm:"column:status;size:16;not null"` // success, failed, timeout, cancelled
+	Status        string     `gorm:"column:status;size:16;not null;index:idx_cron_run_status_started,priority:1"` // running, success, failed, missed, interrupted
 	OutputSummary string     `gorm:"column:output_summary;type:text"`
 	Error         string     `gorm:"column:error;type:text"`
 	DeliveryOK    *bool      `gorm:"column:delivery_ok"`
+	DeliveryError string     `gorm:"column:delivery_error;type:text"`
 }
 
 func (CronRun) TableName() string {

@@ -5,6 +5,34 @@ import { getResourceByPayload, type ResourceInfo } from '../api/resource'
 import ResourceGrantPanel from '../components/ResourceGrantPanel'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 
+const STATUS_LABELS: Record<string, string> = {
+  success: '成功',
+  failed: '失败',
+  running: '运行中',
+  missed: '错过',
+  interrupted: '中断',
+}
+
+const TRIGGER_LABELS: Record<string, string> = {
+  schedule: '定时',
+  manual: '手动',
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { hour12: false })
+}
+
+/** How long after its planned time a scheduled run started, when over a minute. */
+function lateBy(run: CronRun): string {
+  if (run.trigger !== 'schedule' || run.status === 'missed') return ''
+  const ms = new Date(run.started_at).getTime() - new Date(run.triggered_at).getTime()
+  if (!(ms > 60_000)) return ''
+  const min = Math.round(ms / 60_000)
+  return min < 60 ? `${min} 分钟` : `${Math.floor(min / 60)} 小时 ${min % 60} 分钟`
+}
+
 export default function CronTaskDetail() {
   const { id } = useParams()
   const [task, setTask] = useState<CronTask | null>(null)
@@ -24,7 +52,7 @@ export default function CronTaskDetail() {
       .then(async (taskRes) => {
         setTask(taskRes)
         const [runRes, agentRes] = await Promise.all([
-          cronApi.listRuns(id, { page: 1, page_size: 20 }).catch(() => ({ items: [], total: 0 })),
+          cronApi.listRuns(id, { page: 1, page_size: 50 }).catch(() => ({ items: [], total: 0 })),
           agentApi.get(taskRes.agent_id).catch(() => null),
         ])
         setRuns(runRes.items)
@@ -96,7 +124,11 @@ export default function CronTaskDetail() {
             <p><strong>时区：</strong>{task.timezone || '-'}</p>
             <p><strong>载荷：</strong>{task.payload_kind}</p>
             <p><strong>投递：</strong>{task.delivery_mode}</p>
-            <p><strong>下次运行：</strong>{task.next_run_at || '-'}</p>
+            <p><strong>下次运行：</strong>
+              {task.next_run_at
+                ? formatTime(task.next_run_at)
+                : task.enabled ? '无（不会再自动运行，原因见下方最近运行记录）' : '-'}
+            </p>
           </div>
         </div>
       </section>
@@ -119,23 +151,43 @@ export default function CronTaskDetail() {
             <table>
               <thead>
                 <tr>
-                  <th>触发时间</th>
+                  <th>计划时间</th>
+                  <th>触发</th>
                   <th>状态</th>
+                  <th>开始 / 结束</th>
                   <th>投递</th>
-                  <th>结束时间</th>
-                  <th>摘要</th>
+                  <th>结果 / 错误</th>
                 </tr>
               </thead>
               <tbody>
-                {runs.map((run) => (
-                  <tr key={run.id}>
-                    <td>{run.triggered_at}</td>
-                    <td>{run.status}</td>
-                    <td>{run.delivery_ok === undefined ? '-' : run.delivery_ok ? '成功' : '失败'}</td>
-                    <td>{run.finished_at || '-'}</td>
-                    <td>{run.output_summary || run.error || '-'}</td>
-                  </tr>
-                ))}
+                {runs.map((run) => {
+                  const delay = lateBy(run)
+                  return (
+                    <tr key={run.id}>
+                      <td>
+                        {formatTime(run.triggered_at)}
+                        {delay ? <div className="cron-run-note">晚了 {delay} 才开始</div> : null}
+                      </td>
+                      <td>{TRIGGER_LABELS[run.trigger] ?? '-'}</td>
+                      <td>
+                        <span className={`badge badge-run-${run.status}`}>{STATUS_LABELS[run.status] ?? run.status}</span>
+                      </td>
+                      <td>
+                        {run.status === 'missed' ? '-' : formatTime(run.started_at)}
+                        <div className="cron-run-note">{run.finished_at ? formatTime(run.finished_at) : run.status === 'running' ? '进行中' : '-'}</div>
+                      </td>
+                      <td>
+                        {run.delivery_ok === undefined ? '-' : run.delivery_ok ? '成功' : '失败'}
+                        {run.delivery_error ? <div className="cron-run-error cron-run-detail">{run.delivery_error}</div> : null}
+                      </td>
+                      <td className="cron-run-detail">
+                        {run.error ? <div className="cron-run-error">{run.error}</div> : null}
+                        {run.output_summary && run.output_summary !== run.error ? <div>{run.output_summary}</div> : null}
+                        {!run.error && !run.output_summary ? '-' : null}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

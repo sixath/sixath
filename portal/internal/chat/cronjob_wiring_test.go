@@ -93,6 +93,9 @@ func (stubCronRunRepo) Update(context.Context, string, map[string]any) error {
 func (stubCronRunRepo) ListByTask(context.Context, string, int32, int32) ([]*biz.CronRunMeta, int, error) {
 	return nil, 0, nil
 }
+func (stubCronRunRepo) ListRunning(context.Context, time.Time) ([]*biz.CronRunMeta, error) {
+	return nil, nil
+}
 
 func TestPortalCronClientCreateAndList(t *testing.T) {
 	repo := &stubCronRepo{}

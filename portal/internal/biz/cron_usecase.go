@@ -84,6 +84,45 @@ func (uc *CronUsecase) UpdateRun(ctx context.Context, id string, updates map[str
 	return uc.runRepo.Update(ctx, id, updates)
 }
 
+// staleRunGrace is how long past its timeout a running run may still report its result
+// (delivery and result writes happen after the timeout).
+const staleRunGrace = 5 * time.Minute
+
+// SweepStaleRuns marks runs still "running" well past their task's timeout as interrupted and
+// returns how many it marked; their goroutine is gone (e.g. the backend restarted) or failed
+// to record a result.
+func (uc *CronUsecase) SweepStaleRuns(ctx context.Context, now time.Time) (int, error) {
+	runs, err := uc.runRepo.ListRunning(ctx, now.Add(-staleRunGrace))
+	if err != nil {
+		return 0, err
+	}
+	timeouts := map[string]time.Duration{}
+	n := 0
+	for _, r := range runs {
+		timeout, ok := timeouts[r.TaskID]
+		if !ok {
+			timeout = 0
+			if t, err := uc.taskRepo.GetByID(ctx, r.TaskID); err == nil && t != nil {
+				timeout = time.Duration(t.TimeoutSec) * time.Second
+			}
+			timeouts[r.TaskID] = timeout
+		}
+		if now.Before(r.StartedAt.Add(timeout + staleRunGrace)) {
+			continue
+		}
+		err := uc.runRepo.Update(ctx, r.ID, map[string]any{
+			"status":      CronRunInterrupted,
+			"finished_at": now,
+			"error":       "执行中断：超过超时时间仍未写入结果（后端可能在执行期间重启，或保存结果失败）",
+		})
+		if err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // ListRuns 获取任务执行历史
 func (uc *CronUsecase) ListRuns(ctx context.Context, taskID string, page, pageSize int32) ([]*CronRunMeta, int, error) {
 	return uc.runRepo.ListByTask(ctx, taskID, page, pageSize)

@@ -191,6 +191,7 @@ func (r *cronRunRepo) Create(ctx context.Context, run *biz.CronRunMeta) error {
 	m := &model.CronRun{
 		ID:            run.ID,
 		TaskID:        run.TaskID,
+		Trigger:       run.Trigger,
 		TriggeredAt:   run.TriggeredAt,
 		StartedAt:     run.StartedAt,
 		FinishedAt:    run.FinishedAt,
@@ -198,8 +199,22 @@ func (r *cronRunRepo) Create(ctx context.Context, run *biz.CronRunMeta) error {
 		OutputSummary: run.OutputSummary,
 		Error:         run.Error,
 		DeliveryOK:    run.DeliveryOK,
+		DeliveryError: run.DeliveryError,
 	}
 	return r.db.WithContext(ctx).Create(m).Error
+}
+
+func (r *cronRunRepo) ListRunning(ctx context.Context, startedBefore time.Time) ([]*biz.CronRunMeta, error) {
+	var list []model.CronRun
+	if err := r.db.WithContext(ctx).Where("status = ? AND started_at < ?", biz.CronRunRunning, startedBefore).
+		Order("started_at ASC").Limit(500).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*biz.CronRunMeta, len(list))
+	for i := range list {
+		out[i] = cronRunModelToBiz(&list[i])
+	}
+	return out, nil
 }
 
 func (r *cronRunRepo) Update(ctx context.Context, id string, updates map[string]any) error {
@@ -220,7 +235,7 @@ func (r *cronRunRepo) ListByTask(ctx context.Context, taskID string, page, pageS
 	}
 	offset := (page - 1) * pageSize
 	var list []model.CronRun
-	if err := q.Order("triggered_at DESC").Offset(int(offset)).Limit(int(pageSize)).Find(&list).Error; err != nil {
+	if err := q.Order("started_at DESC, triggered_at DESC").Offset(int(offset)).Limit(int(pageSize)).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	out := make([]*biz.CronRunMeta, len(list))
@@ -261,6 +276,7 @@ func cronRunModelToBiz(m *model.CronRun) *biz.CronRunMeta {
 	return &biz.CronRunMeta{
 		ID:            m.ID,
 		TaskID:        m.TaskID,
+		Trigger:       m.Trigger,
 		TriggeredAt:   m.TriggeredAt,
 		StartedAt:     m.StartedAt,
 		FinishedAt:    m.FinishedAt,
@@ -268,6 +284,7 @@ func cronRunModelToBiz(m *model.CronRun) *biz.CronRunMeta {
 		OutputSummary: m.OutputSummary,
 		Error:         m.Error,
 		DeliveryOK:    m.DeliveryOK,
+		DeliveryError: m.DeliveryError,
 	}
 }
 

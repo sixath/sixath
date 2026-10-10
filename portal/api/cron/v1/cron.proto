@@ -161,4 +161,8 @@ message CronRunReply {
   string output_summary = 7;
   string error = 8;
   optional bool delivery_ok = 9;
+  // schedule: 计划触发；manual: 立即运行
+  string trigger = 10;
+  // 投递失败原因（delivery_ok=false 时）
+  string delivery_error = 11;
 }

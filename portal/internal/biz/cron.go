@@ -95,17 +95,37 @@ type CronTaskMeta struct {
 	UpdatedAt          time.Time
 }
 
+// Cron run statuses.
+const (
+	CronRunRunning = "running"
+	CronRunSuccess = "success"
+	CronRunFailed  = "failed"
+	// CronRunMissed records a scheduled time that passed while the backend was not running.
+	CronRunMissed = "missed"
+	// CronRunInterrupted records a run that never reported a result, e.g. the backend
+	// restarted mid-run.
+	CronRunInterrupted = "interrupted"
+)
+
+// Cron run triggers.
+const (
+	CronTriggerSchedule = "schedule"
+	CronTriggerManual   = "manual"
+)
+
 // CronRunMeta 执行历史元数据
 type CronRunMeta struct {
 	ID            string
 	TaskID        string
+	Trigger       string // schedule, manual; "" for runs recorded before the field existed
 	TriggeredAt   time.Time
 	StartedAt     time.Time
 	FinishedAt    *time.Time
-	Status        string // success, failed, timeout, cancelled
+	Status        string // running, success, failed, missed, interrupted
 	OutputSummary string
 	Error         string
 	DeliveryOK    *bool
+	DeliveryError string
 }
 
 // CronTaskRepo 定时任务存储接口
@@ -128,4 +148,6 @@ type CronRunRepo interface {
 	Create(ctx context.Context, run *CronRunMeta) error
 	Update(ctx context.Context, id string, updates map[string]any) error
 	ListByTask(ctx context.Context, taskID string, page, pageSize int32) ([]*CronRunMeta, int, error)
+	// ListRunning returns runs still marked running that started before startedBefore.
+	ListRunning(ctx context.Context, startedBefore time.Time) ([]*CronRunMeta, error)
 }

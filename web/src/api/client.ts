@@ -1848,13 +1848,17 @@ export interface CronTask {
 export interface CronRun {
   id: string
   task_id: string
+  /** schedule | manual; empty for runs recorded before the field existed */
+  trigger: string
   triggered_at: string
   started_at: string
   finished_at?: string
+  /** running | success | failed | missed | interrupted */
   status: string
   output_summary?: string
   error?: string
   delivery_ok?: boolean
+  delivery_error?: string
 }
 
 export interface CronTaskListResponse {
@@ -1923,6 +1927,7 @@ function normalizeCronRun(raw: CronRun & Record<string, unknown>): CronRun {
   return {
     id: (raw.id as string | undefined) ?? '',
     task_id: (raw.task_id as string | undefined) ?? (raw.taskId as string | undefined) ?? '',
+    trigger: (raw.trigger as string | undefined) ?? '',
     triggered_at: (raw.triggered_at as string | undefined) ?? (raw.triggeredAt as string | undefined) ?? '',
     started_at: (raw.started_at as string | undefined) ?? (raw.startedAt as string | undefined) ?? '',
     finished_at: (raw.finished_at as string | undefined) ?? (raw.finishedAt as string | undefined),
@@ -1930,6 +1935,7 @@ function normalizeCronRun(raw: CronRun & Record<string, unknown>): CronRun {
     output_summary: (raw.output_summary as string | undefined) ?? (raw.outputSummary as string | undefined),
     error: raw.error as string | undefined,
     delivery_ok: (raw.delivery_ok as boolean | undefined) ?? (raw.deliveryOk as boolean | undefined),
+    delivery_error: (raw.delivery_error as string | undefined) ?? (raw.deliveryError as string | undefined),
   }
 }
 

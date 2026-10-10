@@ -222,13 +222,15 @@ type DeliveryConfig struct {
 type CronRunMeta struct {
     ID           string    `json:"id"`
     TaskID       string    `json:"task_id"`
+    Trigger      string    `json:"trigger"` // schedule / manual
     TriggeredAt  time.Time `json:"triggered_at"`
     StartedAt    time.Time `json:"started_at"`
     FinishedAt   *time.Time `json:"finished_at,omitempty"`
-    Status       string    `json:"status"` // success / failed / timeout / cancelled
+    Status       string    `json:"status"` // running / success / failed / missed / interrupted
     OutputSummary string   `json:"output_summary,omitempty"`
     Error        string    `json:"error,omitempty"`
     DeliveryOK   *bool     `json:"delivery_ok,omitempty"` // 投递是否成功
+    DeliveryError string   `json:"delivery_error,omitempty"` // 投递失败原因（webhook key 已脱敏）
 }
 
 // 流式响应：SSE 事件
@@ -463,18 +465,21 @@ CREATE TABLE cron_tasks (
 |------|------|------|------|
 | id | VARCHAR(36) | PRIMARY KEY | UUID |
 | task_id | VARCHAR(36) | NOT NULL, FK→cron_tasks(id) | 任务 ID |
+| trigger_kind | VARCHAR(16) | NOT NULL DEFAULT '' | schedule（定时）/ manual（手动）；旧记录为空 |
 | triggered_at | DATETIME(3) | NOT NULL | 计划触发时间 |
-| started_at | DATETIME(3) | NOT NULL | 实际开始时间 |
+| started_at | DATETIME(3) | NOT NULL | 实际开始时间（missed / 计划失效记录为记录写入时间） |
 | finished_at | DATETIME(3) | | 结束时间 |
-| status | VARCHAR(16) | NOT NULL | success / failed / timeout / cancelled |
+| status | VARCHAR(16) | NOT NULL | running / success / failed / missed（后端停机错过）/ interrupted（未写回结果） |
 | output_summary | TEXT | | 输出摘要（可截断） |
 | error | TEXT | | 错误信息 |
 | delivery_ok | TINYINT(1) | | 投递是否成功 |
+| delivery_error | TEXT | | 投递失败原因 |
 
 ```sql
 CREATE TABLE cron_run_history (
     id             VARCHAR(36)   NOT NULL PRIMARY KEY,
     task_id        VARCHAR(36)   NOT NULL,
+    trigger_kind   VARCHAR(16)   NOT NULL DEFAULT '',
     triggered_at   DATETIME(3)   NOT NULL,
     started_at     DATETIME(3)   NOT NULL,
     finished_at    DATETIME(3),
@@ -482,9 +487,11 @@ CREATE TABLE cron_run_history (
     output_summary TEXT,
     error          TEXT,
     delivery_ok    TINYINT(1),
+    delivery_error TEXT,
     FOREIGN KEY (task_id) REFERENCES cron_tasks(id) ON DELETE CASCADE,
     INDEX idx_cron_run_history_task_id (task_id),
-    INDEX idx_cron_run_history_triggered_at (triggered_at)
+    INDEX idx_cron_run_history_triggered_at (triggered_at),
+    INDEX idx_cron_run_status_started (status, started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -1157,11 +1164,15 @@ POST /api/v1/webhooks/dingtalk
    - `at`：单次任务，`schedule_expr` 为 ISO 时间戳；领取后 next_run_at 置空，不再执行。
 2. **错峰**：`actual_run_at = next_run_at + rand.Intn(stagger_sec)`，避免整点雪崩。
 3. **执行流程**：
-   - 调度器每 30 秒 `ListDue`，对每个到期任务先按**当前**计划计算下一次时间（从 now 起算，错过的时间点不补跑；`at` 与无法解析的计划为 nil），再 `CronTaskStore.ClaimDue` 条件更新 next_run_at；只有领取成功才启动执行，因此运行耗时超过扫描间隔、或多个实例同时扫描，都不会重复执行同一时间点。
-   - `CronRunStore.Create` 插入 run 记录，status=running，triggered_at 为领取的时间点。
-   - 执行 agent_turn 或 skill_execute。
-   - 更新 run：finished_at、status、output_summary（按 UTF-8 字符边界截断到 2000 字节）、error。
-   - 若配置了 delivery，执行投递，更新 delivery_ok。
+   - 调度器每 30 秒 `ListDue`，对每个到期任务先按**当前**计划计算下一次时间（从 now 起算；`at` 与无法解析的计划为 nil），再 `CronTaskStore.ClaimDue` 条件更新 next_run_at；只有领取成功才启动执行，因此运行耗时超过扫描间隔、或多个实例同时扫描，都不会重复执行同一时间点。
+   - 领取时间点晚于计划（后端停机期间）：只补跑最早的那个时间点；其后早于 now 减一个扫描间隔的时间点各写一条 status=missed 的记录（最多 20 条，最后一条注明还有更多），不执行。
+   - 计划已无法得出下一次时间（表达式无法解析、cron 表达式为空、未知类型）：写一条 status=failed 的记录说明原因，不执行，next_run_at 置空。
+   - `CronRunStore.Create` 插入 run 记录，status=running，trigger=schedule（立即执行为 manual），triggered_at 为领取的时间点。
+   - 执行 agent_turn 或 skill_execute；panic 被捕获并记为 failed。
+   - 若配置了 delivery，执行投递，更新 delivery_ok；失败原因写入 delivery_error（webhook URL 中的 key 已去除）。
+   - 更新 run：finished_at、status、output_summary（按 UTF-8 字符边界截断到 2000 字节）、error；写入失败重试 3 次，仍失败则只写 status、finished_at 与"保存执行结果失败"的 error。
+   - 调度器启动后首次扫描及此后每 5 分钟，把超过任务超时 + 5 分钟仍为 running 的记录标为 interrupted（后端在执行中重启等）。
+   - 执行记录按 started_at 倒序展示，补跑记录排在同批 missed 记录之前。
    - 执行结束**不再**改写 next_run_at，避免用执行开始时的旧任务快照覆盖期间修改过的计划。
 4. **投递实现**：
    - **webhook**：`POST delivery_webhook_url`（10 秒超时），body 为 `{"task_id","task_name","status","output_summary","error","triggered_at","finished_at"}`；若 `delivery_secret` 非空，添加 `X-Signature: HMAC-SHA256(body, secret)`。

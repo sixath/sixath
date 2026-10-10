@@ -65,6 +65,8 @@ func cronRunMetaToReply(r *biz.CronRunMeta) *cronv1.CronRunReply {
 		OutputSummary: r.OutputSummary,
 		Error:         r.Error,
 		DeliveryOk:    r.DeliveryOK,
+		Trigger:       r.Trigger,
+		DeliveryError: r.DeliveryError,
 	}
 	if r.FinishedAt != nil {
 		rep.FinishedAt = r.FinishedAt.Format("2006-01-02T15:04:05Z07:00")
