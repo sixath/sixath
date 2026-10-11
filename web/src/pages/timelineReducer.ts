@@ -26,6 +26,9 @@ export type ModelNode = {
   inputTokens?: number
   outputTokens?: number
   messageCount?: number
+  reasoning?: string
+  answer?: string
+  finishReason?: string
 }
 
 export type TimelineNode = ToolNode | ModelNode
@@ -78,6 +81,9 @@ export function normalizeTimeline(raw: unknown): TimelineNode[] | undefined {
         inputTokens: typeof row.inputTokens === 'number' ? row.inputTokens : typeof row.input_tokens === 'number' ? row.input_tokens : undefined,
         outputTokens: typeof row.outputTokens === 'number' ? row.outputTokens : typeof row.output_tokens === 'number' ? row.output_tokens : undefined,
         messageCount: typeof row.messageCount === 'number' ? row.messageCount : typeof row.message_count === 'number' ? row.message_count : undefined,
+        reasoning: typeof row.reasoning === 'string' ? row.reasoning : undefined,
+        answer: typeof row.answer === 'string' ? row.answer : undefined,
+        finishReason: typeof row.finishReason === 'string' ? row.finishReason : typeof row.finish_reason === 'string' ? row.finish_reason : undefined,
       })
     }
   }
@@ -132,6 +138,9 @@ export function applyModelCall(nodes: TimelineNode[], p: ModelCallPayload): Time
       inputTokens: p.input_tokens ?? prev.inputTokens,
       outputTokens: p.output_tokens ?? prev.outputTokens,
       messageCount: p.message_count ?? prev.messageCount,
+      reasoning: p.reasoning ?? prev.reasoning,
+      answer: p.answer ?? prev.answer,
+      finishReason: p.finish_reason ?? prev.finishReason,
     }
     const copy = [...nodes]
     copy[idx] = merged
@@ -141,6 +150,7 @@ export function applyModelCall(nodes: TimelineNode[], p: ModelCallPayload): Time
     kind: 'model', step: p.step, seq: nextSeq(), phase: p.phase,
     mode: p.mode, model: p.model, inputTokens: p.input_tokens,
     outputTokens: p.output_tokens, messageCount: p.message_count,
+    reasoning: p.reasoning, answer: p.answer, finishReason: p.finish_reason,
   }
   return sortNodes([...nodes, node])
 }

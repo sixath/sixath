@@ -625,6 +625,9 @@ export interface ModelCallPayload {
   input_tokens?: number
   output_tokens?: number
   message_count?: number
+  reasoning?: string
+  answer?: string
+  finish_reason?: string
 }
 
 export function parseToolCallPayload(d: Record<string, unknown>): ToolCallPayload | null {
