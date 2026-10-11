@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sixath/framework/model"
 )
@@ -139,9 +140,68 @@ func TestRunTrace_RecordModelCall_TruncatesLongContent(t *testing.T) {
 		t.Fatalf("expected at least 1 model call")
 	}
 	got := tr.ModelCalls[0].Messages[0].Content
-	// Should be truncated; allow a small tolerance for multi-byte safety
-	if len(got) > 2048+8 {
-		t.Fatalf("expected truncated content <= %d, got %d", 2048+8, len(got))
+	// 纯 ASCII 应精确截断到上限字节数。
+	if len(got) != modelCallRecordContentLimit {
+		t.Fatalf("expected truncated content length == %d, got %d", modelCallRecordContentLimit, len(got))
+	}
+}
+
+func TestRunTrace_RecordModelCall_TruncatesMultibyteUTF8(t *testing.T) {
+	tr := &RunTrace{}
+	// 4 字节 emoji,每个 rune 占 4 字节;重复到远超上限。
+	longContent := strings.Repeat("😀", 5000)
+	messages := []model.Message{
+		{Role: "user", Content: longContent},
+	}
+	gen := &model.Generation{Text: "short"}
+	tr.recordModelCall(messages, gen, "chat", 1)
+
+	if len(tr.ModelCalls) == 0 {
+		t.Fatalf("expected at least 1 model call")
+	}
+	got := tr.ModelCalls[0].Messages[0].Content
+
+	if len(got) > modelCallRecordContentLimit {
+		t.Fatalf("expected truncated length <= %d, got %d", modelCallRecordContentLimit, len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("expected valid UTF-8 after truncation, got invalid")
+	}
+	// 不应截断到半个 rune:😀 每个恰好 4 字节,截断后长度必须是 4 的整数倍。
+	if len(got)%4 != 0 {
+		t.Fatalf("expected truncated length to be a multiple of 4 bytes (full emoji), got %d", len(got))
+	}
+}
+
+func TestRunTrace_RecordModelCall_TracesToolCalls(t *testing.T) {
+	tr := &RunTrace{}
+	messages := []model.Message{
+		{
+			Role:    "assistant",
+			Metadata: map[string]any{"tool_calls": []model.ToolCall{
+				{ID: "call_1", Name: "http_request", Arguments: map[string]any{"url": "https://x", "password": "supersecret"}},
+			}},
+		},
+	}
+	gen := &model.Generation{Text: "ok"}
+	tr.recordModelCall(messages, gen, "tools", 0)
+
+	if len(tr.ModelCalls) == 0 {
+		t.Fatalf("expected at least 1 model call")
+	}
+	traced := tr.ModelCalls[0].Messages[0]
+	if len(traced.ToolCalls) != 1 {
+		t.Fatalf("expected 1 traced tool call, got %d", len(traced.ToolCalls))
+	}
+	tc := traced.ToolCalls[0]
+	if tc.ID != "call_1" || tc.Name != "http_request" {
+		t.Fatalf("expected tool call id/name, got %+v", tc)
+	}
+	if tc.Arguments["password"] != "***" {
+		t.Fatalf("expected password redacted to ***, got %v", tc.Arguments["password"])
+	}
+	if tc.Arguments["url"] != "https://x" {
+		t.Fatalf("expected url preserved, got %v", tc.Arguments["url"])
 	}
 }
 

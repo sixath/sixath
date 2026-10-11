@@ -340,9 +340,31 @@ func traceMessages(messages []model.Message) []TracedMessage {
 		if tc, ok := m.Metadata["tool_call_id"].(string); ok {
 			tm.ToolCallID = tc
 		}
+		if calls, ok := m.Metadata["tool_calls"].([]model.ToolCall); ok {
+			for _, tc := range calls {
+				tm.ToolCalls = append(tm.ToolCalls, TracedToolCall{
+					ID:        tc.ID,
+					Name:      tc.Name,
+					Arguments: traceArguments(tc.Arguments),
+				})
+			}
+		}
 		out = append(out, tm)
 	}
 	return out
+}
+
+// traceArguments 脱敏并断言回 map[string]any;nil/空输入安全返回 nil,不 panic。
+func traceArguments(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	v := redact.Value(args)
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m
 }
 
 // safeTruncate 按 UTF-8 边界截断到 maxBytes;不追加省略号。
