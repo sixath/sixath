@@ -24,7 +24,8 @@ type TurnTrace struct {
 	Calls     []TurnToolCall `json:"calls"`
 
 	// ModelCalls 为本 turn 的模型调用记录（含 messages/推理/终答，已裁剪+脱敏）。
-	// 数量受 maxModelCallRecords 截断，超限时保留靠后调用。
+	// 数量已在 RunTrace 层 recordModelCall 按 maxModelCallRecords 截断（超限保留靠后调用），此处仅透传。
+	// 注意：字段类型由 number(计数)改为 array(记录)，与历史 payload_json 中 model_calls 为 number 的旧数据不兼容；这是既定的破坏性变更。
 	ModelCalls []ModelCallRecord `json:"model_calls,omitempty"`
 	// ModelCallCount 为本 turn 的模型调用总次数（不受截断影响，可能大于 len(ModelCalls)）。
 	ModelCallCount int `json:"model_call_count,omitempty"`

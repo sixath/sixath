@@ -79,6 +79,36 @@ func TestBuildTurnTrace_ModelCallsNilSafe(t *testing.T) {
 	}
 }
 
+func TestBuildTurnTrace_ModelCallsShallowCopyIsolation(t *testing.T) {
+	tr := &RunTrace{
+		RequestID:  "r1",
+		ModelCalls: []ModelCallRecord{{Step: 0, Mode: "tools"}},
+	}
+	out := BuildTurnTrace(TurnTraceMeta{SessionID: "s", AgentID: "a", RequestID: "r1"}, tr)
+	out.ModelCalls = append(out.ModelCalls, ModelCallRecord{Step: 1, Mode: "plain"})
+	if len(tr.ModelCalls) != 1 {
+		t.Fatalf("expected original run trace unaffected, got %d", len(tr.ModelCalls))
+	}
+	if len(out.ModelCalls) != 2 {
+		t.Fatalf("expected output to have appended record, got %d", len(out.ModelCalls))
+	}
+}
+
+func TestBuildTurnTrace_ModelCallCountExceedsRecords(t *testing.T) {
+	records := make([]ModelCallRecord, 0, 20)
+	for i := 0; i < 20; i++ {
+		records = append(records, ModelCallRecord{Step: i, Mode: "tools"})
+	}
+	tr := &RunTrace{RequestID: "r1", ModelCalls: records, ModelCallCount: 25}
+	out := BuildTurnTrace(TurnTraceMeta{SessionID: "s", AgentID: "a", RequestID: "r1"}, tr)
+	if len(out.ModelCalls) != 20 {
+		t.Fatalf("expected 20 records, got %d", len(out.ModelCalls))
+	}
+	if out.ModelCallCount != 25 {
+		t.Fatalf("expected model_call_count=25 preserved, got %d", out.ModelCallCount)
+	}
+}
+
 func TestBuildTurnTrace_RedactsCredentialsInValues(t *testing.T) {
 	tr := &RunTrace{ToolCalls: []ToolCallRecord{{
 		ToolName:  "ssh_exec",
