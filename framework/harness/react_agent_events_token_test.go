@@ -61,3 +61,26 @@ func TestRunEvents_ModelRespondedIncludesTokenUsage(t *testing.T) {
 		t.Fatalf("token usage not propagated: input=%d output=%d", gotInput, gotOutput)
 	}
 }
+
+func TestModelRespondedPayload_IncludesReasoningAndAnswer(t *testing.T) {
+	tr := &RunTrace{RequestID: "r1"}
+	gen := model.Generation{
+		Raw:          model.ToolStep{Used: true, ReasoningContent: "because x"},
+		Text:         "do the thing",
+		FinishReason: "tool_calls",
+		TokenUsage:   &model.TokenUsage{InputTokens: 1, OutputTokens: 1},
+	}
+	p := tr.modelRespondedPayload(gen, 0, "tools", []model.Message{{Role: "user", Content: "go"}})
+	if p["reasoning"] != "because x" {
+		t.Fatalf("expected reasoning, got %#v", p)
+	}
+	if p["answer"] != "do the thing" {
+		t.Fatalf("expected answer, got %#v", p)
+	}
+	if p["finish_reason"] != "tool_calls" {
+		t.Fatalf("expected finish_reason, got %#v", p)
+	}
+	if len(tr.ModelCalls) == 0 {
+		t.Fatal("expected model call recorded")
+	}
+}

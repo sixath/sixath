@@ -14,6 +14,7 @@ import (
 	"github.com/sixath/framework/events"
 	"github.com/sixath/framework/memory"
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/redact"
 	"github.com/sixath/framework/skills"
 	"github.com/sixath/framework/tool"
 )
@@ -385,11 +386,21 @@ func (a *ReActAgent) modelOpts() []model.Option {
 	return nil
 }
 
-// modelRespondedPayload 记录本次模型调用用量并构造 ModelResponded 事件 payload。
+// modelRespondedPayload 记录本次模型调用用量与完整 prompt+推理+终答，并构造 ModelResponded 事件 payload。
 // 挂在 RunTrace 上，使「聚合用量」与「事件 payload」必然同源，不会漏记。
-func (t *RunTrace) modelRespondedPayload(gen model.Generation, step int) map[string]any {
+func (t *RunTrace) modelRespondedPayload(gen model.Generation, step int, mode string, messages []model.Message) map[string]any {
 	t.recordModelUsage(&gen)
+	t.recordModelCall(messages, &gen, mode, step)
 	p := map[string]any{"text_length": len(gen.Text), "step": step}
+	if st, ok := gen.Raw.(model.ToolStep); ok && st.ReasoningContent != "" {
+		p["reasoning"] = safeTruncate(redact.String(st.ReasoningContent), modelCallRecordContentLimit)
+	}
+	if gen.FinishReason != "" {
+		p["finish_reason"] = gen.FinishReason
+	}
+	if gen.Text != "" {
+		p["answer"] = safeTruncate(redact.String(gen.Text), modelCallRecordContentLimit)
+	}
 	if gen.TokenUsage != nil {
 		p["input_tokens"] = gen.TokenUsage.InputTokens
 		p["output_tokens"] = gen.TokenUsage.OutputTokens
@@ -453,7 +464,7 @@ func (a *ReActAgent) Run(ctx context.Context, req *Request) (*Response, error) {
 			emit(events.RunError, map[string]any{"error": err.Error(), "step": step})
 			return nil, runError(err, trace)
 		}
-		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step, "tools", messages))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
@@ -753,7 +764,7 @@ func (a *ReActAgent) runPlainEvents(
 		}
 		trace.recordEmptyFinal(gen, -1)
 		_ = a.storeAssistant(ctx, gen.Text)
-		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1, "plain", messages))
 		if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
 			return
 		}
@@ -783,7 +794,13 @@ func (a *ReActAgent) runPlainEvents(
 	}
 	text := full.String()
 	_ = a.storeAssistant(ctx, text)
-	emit(events.ModelResponded, map[string]any{"text_length": len(text), "step": -1})
+	trace.recordModelCall(messages, &model.Generation{Text: text, FinishReason: "eof"}, "plain_stream", -1)
+	emit(events.ModelResponded, map[string]any{
+		"text_length":   len(text),
+		"step":          -1,
+		"answer":        safeTruncate(redact.String(text), modelCallRecordContentLimit),
+		"finish_reason": "eof",
+	})
 	emit(events.RunCompleted, map[string]any{"text_length": len(text), "stream": true})
 	_ = send(streamDoneEvent(trace, messages, nil, text))
 }
@@ -815,7 +832,7 @@ func (a *ReActAgent) runToolEventsSync(
 			}
 			return
 		}
-		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step, "tools", messages))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
@@ -938,7 +955,7 @@ func (a *ReActAgent) runToolEvents(
 			}
 			return
 		}
-		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step, "tools", messages))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
@@ -1319,7 +1336,7 @@ func (a *ReActAgent) runPlain(ctx context.Context, messages []model.Message, emi
 	}
 	trace.recordEmptyFinal(gen, -1)
 	_ = a.storeAssistant(ctx, gen.Text)
-	emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1))
+	emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1, "plain", messages))
 	emit(events.RunCompleted, map[string]any{"text_length": len(gen.Text)})
 	return responseWithTrace(gen.Text, gen.TokenUsage, trace, messages), nil
 }
