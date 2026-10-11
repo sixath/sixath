@@ -3,8 +3,10 @@ package harness
 import (
 	"context"
 	"errors"
+	"unicode/utf8"
 
 	"github.com/sixath/framework/model"
+	"github.com/sixath/framework/redact"
 	"github.com/sixath/framework/tool"
 )
 
@@ -50,8 +52,10 @@ type RunTrace struct {
 	ToolCalls []ToolCallRecord
 	Errors    []string
 
-	// ModelCalls 为本 Run 内模型调用次数（含各工具轮）。
-	ModelCalls int `json:"model_calls,omitempty"`
+	// ModelCalls 为本 Run 内模型调用记录（含 messages、推理与终答）。
+	ModelCalls []ModelCallRecord `json:"model_calls,omitempty"`
+	// ModelCallCount 为本 Run 内模型调用次数（含各工具轮）。
+	ModelCallCount int `json:"-"`
 	// InputTokens/OutputTokens 为聚合 token 用量。provider 未返回 usage 时为 0
 	// （例如只拿到增量文本的 ChatStream 路径），因此非零即代表"有真实计量"。
 	InputTokens  int `json:"input_tokens,omitempty"`
@@ -123,21 +127,12 @@ type RunTrace struct {
 	invocationSeq int `json:"-"`
 }
 
-// recordModelCall 记录一次模型调用；provider 未回传 usage 时也应调用，
-// 使 ModelCalls 反映真实轮次。
-func (t *RunTrace) recordModelCall() {
-	if t == nil {
-		return
-	}
-	t.ModelCalls++
-}
-
 // recordModelUsage 记录一次模型调用及其 token 用量（gen 可为 nil）。
 func (t *RunTrace) recordModelUsage(gen *model.Generation) {
 	if t == nil {
 		return
 	}
-	t.ModelCalls++
+	t.ModelCallCount++
 	if gen == nil || gen.TokenUsage == nil {
 		return
 	}
@@ -277,4 +272,86 @@ func (p denyToolsPolicy) AllowTool(_ context.Context, t tool.Tool, _ map[string]
 		return PermissionDecision{Allowed: false, Reason: "tool denied by policy"}
 	}
 	return PermissionDecision{Allowed: true, Reason: "allowed"}
+}
+
+const (
+	// modelCallRecordContentLimit 单条提示词消息内容 / 推理 / 终答的字节上限(UTF-8 安全截断)。
+	modelCallRecordContentLimit = 2048
+	// maxModelCallRecords 单次 Run 内保留的模型调用记录上限;超限时优先保留靠后调用。
+	maxModelCallRecords = 20
+)
+
+// ModelCallRecord 记录一次模型调用:发送的提示词(裁剪+脱敏)+ 推理与终答。
+type ModelCallRecord struct {
+	Step         int              `json:"step"`
+	Mode         string           `json:"mode,omitempty"`
+	Messages     []TracedMessage  `json:"messages,omitempty"`
+	Reasoning    string           `json:"reasoning,omitempty"`
+	Answer       string           `json:"answer,omitempty"`
+	FinishReason string           `json:"finish_reason,omitempty"`
+	InputTokens  int              `json:"input_tokens,omitempty"`
+	OutputTokens int              `json:"output_tokens,omitempty"`
+}
+
+// TracedMessage 序列化的一条提示词消息(裁剪+脱敏后)。
+type TracedMessage struct {
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	ToolCalls  []TracedToolCall `json:"tool_calls,omitempty"`
+}
+
+// TracedToolCall 序列化的一个模型 tool_calls 提议(裁剪+脱敏后)。
+type TracedToolCall struct {
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Arguments map[string]any `json:"arguments,omitempty"`
+}
+
+// recordModelCall 记录一次模型调用。messages 为发送的完整 prompt(裁剪+脱敏后保存);
+// gen 提供推理(ToolStep.ReasoningContent)、终答、finish_reason 与 token。gen 可为 nil。
+func (t *RunTrace) recordModelCall(messages []model.Message, gen *model.Generation, mode string, step int) {
+	if t == nil {
+		return
+	}
+	rec := ModelCallRecord{Step: step, Mode: mode, Messages: traceMessages(messages)}
+	if gen != nil {
+		rec.FinishReason = gen.FinishReason
+		rec.Answer = safeTruncate(redact.String(gen.Text), modelCallRecordContentLimit)
+		if st, ok := gen.Raw.(model.ToolStep); ok && st.ReasoningContent != "" {
+			rec.Reasoning = safeTruncate(redact.String(st.ReasoningContent), modelCallRecordContentLimit)
+		}
+		if gen.TokenUsage != nil {
+			rec.InputTokens = gen.TokenUsage.InputTokens
+			rec.OutputTokens = gen.TokenUsage.OutputTokens
+		}
+	}
+	t.ModelCalls = append(t.ModelCalls, rec)
+	if len(t.ModelCalls) > maxModelCallRecords {
+		// 超限时保留靠后调用,丢最早。
+		t.ModelCalls = t.ModelCalls[len(t.ModelCalls)-maxModelCallRecords:]
+	}
+}
+
+func traceMessages(messages []model.Message) []TracedMessage {
+	out := make([]TracedMessage, 0, len(messages))
+	for _, m := range messages {
+		tm := TracedMessage{Role: m.Role, Content: safeTruncate(redact.String(m.Content), modelCallRecordContentLimit)}
+		if tc, ok := m.Metadata["tool_call_id"].(string); ok {
+			tm.ToolCallID = tc
+		}
+		out = append(out, tm)
+	}
+	return out
+}
+
+// safeTruncate 按 UTF-8 边界截断到 maxBytes;不追加省略号。
+func safeTruncate(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
 }

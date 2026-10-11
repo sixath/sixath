@@ -63,7 +63,7 @@ func BuildTurnTrace(meta TurnTraceMeta, tr *RunTrace) *TurnTrace {
 		AgentID:          meta.AgentID,
 		RequestID:        meta.RequestID,
 		CreatedAt:        time.Now().UTC(),
-		ModelCalls:       tr.ModelCalls,
+		ModelCalls:       tr.ModelCallCount,
 		InputTokens:      tr.InputTokens,
 		OutputTokens:     tr.OutputTokens,
 		EstimatedCostUSD: tr.EstimatedCostUSD,
