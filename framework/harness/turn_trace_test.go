@@ -42,6 +42,43 @@ func TestBuildTurnTrace_NilTrace(t *testing.T) {
 	}
 }
 
+func TestBuildTurnTrace_MapsModelCalls(t *testing.T) {
+	tr := &RunTrace{
+		RequestID: "r1",
+		ModelCalls: []ModelCallRecord{{
+			Step: 0, Mode: "tools",
+			Messages:  []TracedMessage{{Role: "user", Content: "ask"}},
+			Reasoning: "chain", Answer: "answer", FinishReason: "stop",
+			InputTokens: 4, OutputTokens: 3,
+		}},
+		ModelCallCount: 1,
+	}
+	out := BuildTurnTrace(TurnTraceMeta{SessionID: "s", AgentID: "a", RequestID: "r1"}, tr)
+	if out == nil {
+		t.Fatal("expected non-nil turn trace")
+	}
+	if len(out.ModelCalls) != 1 {
+		t.Fatalf("expected 1 model call in turn trace, got %d", len(out.ModelCalls))
+	}
+	m := out.ModelCalls[0]
+	if m.Reasoning != "chain" || m.Answer != "answer" || m.FinishReason != "stop" {
+		t.Fatalf("unexpected model call: %+v", m)
+	}
+	if len(m.Messages) != 1 || m.Messages[0].Content != "ask" {
+		t.Fatalf("unexpected messages: %+v", m.Messages)
+	}
+	if out.ModelCallCount != 1 {
+		t.Fatalf("expected model_call_count=1, got %d", out.ModelCallCount)
+	}
+}
+
+func TestBuildTurnTrace_ModelCallsNilSafe(t *testing.T) {
+	tr := &RunTrace{RequestID: "r1", ModelCalls: nil}
+	if out := BuildTurnTrace(TurnTraceMeta{}, tr); out.ModelCalls != nil {
+		t.Fatalf("expected nil model calls, got %#v", out.ModelCalls)
+	}
+}
+
 func TestBuildTurnTrace_RedactsCredentialsInValues(t *testing.T) {
 	tr := &RunTrace{ToolCalls: []ToolCallRecord{{
 		ToolName:  "ssh_exec",

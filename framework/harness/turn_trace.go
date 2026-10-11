@@ -23,10 +23,13 @@ type TurnTrace struct {
 	CreatedAt time.Time      `json:"created_at"`
 	Calls     []TurnToolCall `json:"calls"`
 
-	// ModelCalls/InputTokens/OutputTokens 为本 turn 的模型调用次数与聚合用量
-	// （来自 RunTrace；provider 未返回 usage 时 token 为 0）。
+	// ModelCalls 为本 turn 的模型调用记录（含 messages/推理/终答，已裁剪+脱敏）。
+	// 数量受 maxModelCallRecords 截断，超限时保留靠后调用。
+	ModelCalls []ModelCallRecord `json:"model_calls,omitempty"`
+	// ModelCallCount 为本 turn 的模型调用总次数（不受截断影响，可能大于 len(ModelCalls)）。
+	ModelCallCount int `json:"model_call_count,omitempty"`
+	// InputTokens/OutputTokens 为聚合 token 用量（provider 未返回 usage 时为 0）。
 	// 随 payload_json 一起持久化，无需额外列即可在 turn_trace 中查询。
-	ModelCalls   int `json:"model_calls,omitempty"`
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
 	// EstimatedCostUSD 为本 turn 估算成本（美元），由 Portal 计算并随 payload_json 持久化。
@@ -63,7 +66,8 @@ func BuildTurnTrace(meta TurnTraceMeta, tr *RunTrace) *TurnTrace {
 		AgentID:          meta.AgentID,
 		RequestID:        meta.RequestID,
 		CreatedAt:        time.Now().UTC(),
-		ModelCalls:       tr.ModelCallCount,
+		ModelCallCount:   tr.ModelCallCount,
+		ModelCalls:       append([]ModelCallRecord(nil), tr.ModelCalls...),
 		InputTokens:      tr.InputTokens,
 		OutputTokens:     tr.OutputTokens,
 		EstimatedCostUSD: tr.EstimatedCostUSD,
