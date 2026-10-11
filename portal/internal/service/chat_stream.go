@@ -97,6 +97,11 @@ type ModelCallPayload struct {
 	MessageCount int    `json:"message_count,omitempty"`
 	// EstimatedCostUSD 为本次模型调用估算成本（美元），按 chat.EstimateCost 计价表计算。
 	EstimatedCostUSD float64 `json:"estimated_cost_usd,omitempty"`
+	// Reasoning 为 thinking 模型的推理链；Answer 为终答；FinishReason 为停止原因。
+	// 实时 SSE 不携带完整 prompt（走 turn_trace 回查），仅带推理与终答摘要。
+	Reasoning    string `json:"reasoning,omitempty"`
+	Answer       string `json:"answer,omitempty"`
+	FinishReason string `json:"finish_reason,omitempty"`
 }
 
 // truncateField 将任意值转为 JSON，超过上限时截断并返回 truncated=true。
@@ -204,6 +209,15 @@ func modelCallEventFromBus(e events.Event, modelName string) *ModelCallPayload {
 	p.MessageCount = intFromAny(e.Payload["message_count"])
 	p.InputTokens = intFromAny(e.Payload["input_tokens"])
 	p.OutputTokens = intFromAny(e.Payload["output_tokens"])
+	if v, ok := e.Payload["reasoning"].(string); ok {
+		p.Reasoning = v
+	}
+	if v, ok := e.Payload["answer"].(string); ok {
+		p.Answer = v
+	}
+	if v, ok := e.Payload["finish_reason"].(string); ok {
+		p.FinishReason = v
+	}
 	p.EstimatedCostUSD = chat.EstimateCost(modelName, p.InputTokens, p.OutputTokens)
 	return p
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/sixath/framework/events"
 	agent "github.com/sixath/framework/harness"
 	toolskill "github.com/sixath/framework/tool/skillops"
 )
@@ -422,6 +423,29 @@ func TestStreamEventsFromResponseIncludesTextBeforeConfirmation(t *testing.T) {
 	}
 	if events[1].Type != ChatStreamEventConfirmRequired || events[1].Confirmation == nil {
 		t.Fatalf("unexpected confirmation event: %#v", events[1])
+	}
+}
+
+func TestModelCallEventFromBus_RespondedCarriesReasoning(t *testing.T) {
+	p := modelCallEventFromBus(events.Event{
+		Kind: events.ModelResponded,
+		Payload: map[string]any{
+			"step": 2, "mode": "tools",
+			"reasoning":     "because y",
+			"answer":        "final answer",
+			"finish_reason": "tool_calls",
+			"input_tokens":  7,
+			"output_tokens": 5,
+		},
+	}, "gpt-4o")
+	if p == nil {
+		t.Fatal("expected payload")
+	}
+	if p.Reasoning != "because y" || p.Answer != "final answer" || p.FinishReason != "tool_calls" {
+		t.Fatalf("unexpected: %+v", p)
+	}
+	if p.Phase != "responded" {
+		t.Fatalf("expected phase=responded, got %q", p.Phase)
 	}
 }
 
