@@ -840,7 +840,21 @@ function TimelineView({ nodes }: { nodes: TimelineNode[] }) {
                     )}
                   </>
                 ) : (
-                  <pre className="tl-pre">{JSON.stringify({ mode: n.mode, model: n.model, input_tokens: n.inputTokens, output_tokens: n.outputTokens, message_count: n.messageCount }, null, 2)}</pre>
+                  <>
+                    {n.reasoning && (
+                      <details className="tl-detail">
+                        <summary>推理</summary>
+                        <pre className="tl-pre">{n.reasoning}</pre>
+                      </details>
+                    )}
+                    {n.answer && (
+                      <details className="tl-detail">
+                        <summary>{n.finishReason ? `终答 · ${n.finishReason}` : '终答'}</summary>
+                        <pre className="tl-pre">{n.answer}</pre>
+                      </details>
+                    )}
+                    <pre className="tl-pre">{JSON.stringify({ mode: n.mode, model: n.model, input_tokens: n.inputTokens, output_tokens: n.outputTokens, message_count: n.messageCount }, null, 2)}</pre>
+                  </>
                 )}
               </div>
             )}
