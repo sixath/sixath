@@ -159,14 +159,14 @@ func runLiveTask(task Task, reg *tool.Registry, m model.Model, lo liveOptions) T
 		res.Steps = len(tr.ToolCalls) + 1 // 工具轮数 + 最终回复
 		res.StopNudges = len(tr.StopHookContinues)
 		res.CriticRounds = criticRounds(tr.StopHookContinues)
-		res.HitMaxSteps = tr.ModelCalls > maxSteps
+		res.HitMaxSteps = tr.ModelCallCount > maxSteps
 	}
 	// 模型最终不可用时 harness 返回由工具结果拼出的降级答复（无 error），按模型调用失败同样归类。
 	if tr != nil && tr.ModelUnavailable {
 		res.FailureReason, res.Attribution = "model_error", "model"
 		res.Error = strings.Join(tr.Errors, "; ")
 		// ModelCalls 只计成功调用：步数用尽后在强制总结处才失败时 == maxSteps，仍按跑满步数算失败。
-		res.HitMaxSteps = tr.ModelCalls >= maxSteps
+		res.HitMaxSteps = tr.ModelCallCount >= maxSteps
 		if task.Category == "answer_shape" && !res.HitMaxSteps {
 			res.FailureReason, res.Attribution = "infra_error", ""
 		}
