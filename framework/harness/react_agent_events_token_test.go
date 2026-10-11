@@ -83,4 +83,7 @@ func TestModelRespondedPayload_IncludesReasoningAndAnswer(t *testing.T) {
 	if len(tr.ModelCalls) == 0 {
 		t.Fatal("expected model call recorded")
 	}
+	if tr.ModelCalls[0].Mode != "tools" {
+		t.Fatalf("expected mode=tools, got %q", tr.ModelCalls[0].Mode)
+	}
 }

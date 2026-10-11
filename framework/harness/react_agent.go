@@ -764,7 +764,7 @@ func (a *ReActAgent) runPlainEvents(
 		}
 		trace.recordEmptyFinal(gen, -1)
 		_ = a.storeAssistant(ctx, gen.Text)
-		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1, "plain", messages))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, -1, "plain_stream", messages))
 		if gen.Text != "" && !send(StreamEvent{Type: StreamEventDelta, Text: gen.Text, Trace: trace}) {
 			return
 		}
@@ -794,7 +794,9 @@ func (a *ReActAgent) runPlainEvents(
 	}
 	text := full.String()
 	_ = a.storeAssistant(ctx, text)
-	trace.recordModelCall(messages, &model.Generation{Text: text, FinishReason: "eof"}, "plain_stream", -1)
+	genForTrace := &model.Generation{Text: text, FinishReason: "eof"}
+	trace.recordModelUsage(genForTrace)
+	trace.recordModelCall(messages, genForTrace, "plain_stream", -1)
 	emit(events.ModelResponded, map[string]any{
 		"text_length":   len(text),
 		"step":          -1,
@@ -955,7 +957,7 @@ func (a *ReActAgent) runToolEvents(
 			}
 			return
 		}
-		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step, "tools", messages))
+		emit(events.ModelResponded, trace.modelRespondedPayload(*gen, step, "tools_stream", messages))
 
 		stepInfo, _ := gen.Raw.(model.ToolStep)
 		if !stepInfo.Used {
