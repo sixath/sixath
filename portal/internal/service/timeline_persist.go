@@ -26,6 +26,9 @@ type TimelineNode struct {
 	InputTokens  *int   `json:"inputTokens,omitempty"`
 	OutputTokens *int   `json:"outputTokens,omitempty"`
 	MessageCount *int   `json:"messageCount,omitempty"`
+	Reasoning    *string `json:"reasoning,omitempty"`
+	Answer       *string `json:"answer,omitempty"`
+	FinishReason *string `json:"finishReason,omitempty"`
 }
 
 // TimelineAccumulator merges streaming tool_call / model_call events into a
@@ -138,6 +141,18 @@ func (a *TimelineAccumulator) ApplyModelCall(p *ModelCallPayload) {
 				v := p.MessageCount
 				n.MessageCount = &v
 			}
+			if p.Reasoning != "" {
+				v := p.Reasoning
+				n.Reasoning = &v
+			}
+			if p.Answer != "" {
+				v := p.Answer
+				n.Answer = &v
+			}
+			if p.FinishReason != "" {
+				v := p.FinishReason
+				n.FinishReason = &v
+			}
 			a.sort()
 			return
 		}
@@ -161,6 +176,18 @@ func (a *TimelineAccumulator) ApplyModelCall(p *ModelCallPayload) {
 	if p.MessageCount != 0 {
 		v := p.MessageCount
 		node.MessageCount = &v
+	}
+	if p.Reasoning != "" {
+		v := p.Reasoning
+		node.Reasoning = &v
+	}
+	if p.Answer != "" {
+		v := p.Answer
+		node.Answer = &v
+	}
+	if p.FinishReason != "" {
+		v := p.FinishReason
+		node.FinishReason = &v
 	}
 	a.nodes = append(a.nodes, node)
 	a.sort()
@@ -245,6 +272,15 @@ func timelineNodeToMap(n TimelineNode) map[string]any {
 	}
 	if n.MessageCount != nil {
 		m["messageCount"] = *n.MessageCount
+	}
+	if n.Reasoning != nil {
+		m["reasoning"] = *n.Reasoning
+	}
+	if n.Answer != nil {
+		m["answer"] = *n.Answer
+	}
+	if n.FinishReason != nil {
+		m["finishReason"] = *n.FinishReason
 	}
 	return m
 }

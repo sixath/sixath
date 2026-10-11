@@ -46,6 +46,55 @@ func TestTimelineAccumulator_ToolAndModelFinalize(t *testing.T) {
 	}
 }
 
+func TestApplyModelCall_StoresReasoningAndAnswer(t *testing.T) {
+	a := &TimelineAccumulator{}
+	a.ApplyModelCall(&ModelCallPayload{
+		Step: 1, Phase: "invoked", Mode: "tools",
+	})
+	a.ApplyModelCall(&ModelCallPayload{
+		Step: 1, Phase: "responded",
+		Reasoning: "chain", Answer: "answer", FinishReason: "stop",
+		InputTokens: 3, OutputTokens: 2,
+	})
+	nodes := a.Finalize()
+	if len(nodes) != 1 || nodes[0].Kind != "model" {
+		t.Fatalf("unexpected nodes: %#v", nodes)
+	}
+	n := nodes[0]
+	if n.Reasoning == nil || *n.Reasoning != "chain" {
+		t.Fatalf("expected reasoning on node: %#v", n)
+	}
+	if n.Answer == nil || *n.Answer != "answer" {
+		t.Fatalf("expected answer on node: %#v", n)
+	}
+	if n.FinishReason == nil || *n.FinishReason != "stop" {
+		t.Fatalf("expected finish_reason on node: %#v", n)
+	}
+}
+
+func TestApplyModelCall_NewNodeStoresReasoningAndAnswer(t *testing.T) {
+	a := &TimelineAccumulator{}
+	a.ApplyModelCall(&ModelCallPayload{
+		Step: 1, Phase: "responded",
+		Reasoning: "chain", Answer: "answer", FinishReason: "stop",
+		InputTokens: 3, OutputTokens: 2,
+	})
+	nodes := a.Finalize()
+	if len(nodes) != 1 || nodes[0].Kind != "model" {
+		t.Fatalf("unexpected nodes: %#v", nodes)
+	}
+	n := nodes[0]
+	if n.Reasoning == nil || *n.Reasoning != "chain" {
+		t.Fatalf("expected reasoning on node: %#v", n)
+	}
+	if n.Answer == nil || *n.Answer != "answer" {
+		t.Fatalf("expected answer on node: %#v", n)
+	}
+	if n.FinishReason == nil || *n.FinishReason != "stop" {
+		t.Fatalf("expected finish_reason on node: %#v", n)
+	}
+}
+
 func TestMetadataWithTimeline_Empty(t *testing.T) {
 	if MetadataWithTimeline(nil) != nil {
 		t.Fatal("nil timeline should yield nil metadata")
