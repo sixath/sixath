@@ -399,7 +399,7 @@ type portalRunOptions struct {
 func runPortal(ctx context.Context, tasks []Task, c *PortalClient, o portalRunOptions) []TaskResult {
 	var shape []Task
 	for _, t := range tasks {
-		if t.Category == "answer_shape" {
+		if t.Category == "answer_shape" || t.Category == "rca_handbook" {
 			shape = append(shape, t)
 		}
 	}
@@ -456,6 +456,9 @@ func runPortalTask(ctx context.Context, c *PortalClient, o portalRunOptions, tas
 	if !judge {
 		return res
 	}
+	if task.Category == "rca_handbook" {
+		return evaluateRCALocalization(task, turn)
+	}
 	jt := o.JudgeTimeout
 	if jt <= 0 {
 		jt = portalDefaultJudgeTimeout
@@ -489,6 +492,12 @@ func classifyPortalTurn(task Task, turn portalTurn, err error) (TaskResult, bool
 		// 模型持续不可用时 harness 以工具结果拼出降级答复（未经模型总结），按基础设施故障记丢失运行。
 		first, _, _ := strings.Cut(strings.TrimSpace(turn.Answer), "\n")
 		return TaskResult{TaskID: task.ID, Category: task.Category, FailureReason: "infra_error", Output: turn.Answer, Error: first}, false
+	}
+	// rca_handbook 任务的核心交付物是根因结论（已写在 Answer 里）；agent 收尾时可能额外调
+	// case_library 沉淀案例，该动作触发 confirm_required 使 turn.HITL=true。只要终答已产出，
+	// 就应交给 evaluateRCALocalization 按关键词判定，而非当成 HITL 失败。
+	if task.Category == "rca_handbook" && turn.HITL && !turn.TimedOut && !turn.Failed && strings.TrimSpace(turn.Answer) != "" {
+		return TaskResult{}, true
 	}
 	if !turn.TimedOut && !turn.Failed && !turn.HITL {
 		return TaskResult{}, true
@@ -531,4 +540,20 @@ func classifyRunError(msg string) (reason, attribution string, hitMaxSteps bool)
 		}
 	}
 	return "run_error", "harness", false
+}
+
+// evaluateRCALocalization 用 root_cause 关键词命中判 rca_handbook 任务（portal 模式读真实仓库，无 fixtures/contrast）。
+func evaluateRCALocalization(task Task, turn portalTurn) TaskResult {
+	passed, reason := evaluateInvestigation(task, investigationEvidence{Output: turn.Answer})
+	res := TaskResult{
+		TaskID:   task.ID,
+		Category: task.Category,
+		Output:   turn.Answer,
+		Passed:   passed,
+	}
+	if !passed {
+		res.FailureReason = reason
+		res.Attribution = investigationAttribution(reason)
+	}
+	return res
 }

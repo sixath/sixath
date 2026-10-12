@@ -132,6 +132,7 @@ var ValidCategories = map[string]bool{
 	"safety":        true,
 	"investigation": true,
 	"answer_shape":  true,
+	"rca_handbook":  true,
 }
 
 // ValidAnswerTypes answer_shape 的合法答案形式。
@@ -215,6 +216,10 @@ func (t Task) Validate() error {
 	case "answer_shape":
 		if !ValidAnswerTypes[t.Expect.AnswerType] {
 			return fmt.Errorf("answer_shape %s: expect.answer_type must be one of enumerate|count|lookup|diagnose|howto", t.ID)
+		}
+	case "rca_handbook":
+		if len(t.Expect.RootCause) == 0 {
+			return fmt.Errorf("rca_handbook %s: expect.root_cause required", t.ID)
 		}
 	}
 	return nil

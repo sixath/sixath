@@ -1,0 +1,6 @@
+# rca_handbook：真实仓库 + handbook 的代码排障定位 A/B（portal 模式）。判据为 expect.root_cause 关键词命中；无需 fixtures。
+# 判据语义（见 runner investigation.go evaluateInvestigation）：root_cause 每个元素内 | 分隔同义词（命中任一即可），元素之间为 AND（须全部命中），忽略大小写。
+# 标的 agent：e8107fb3-e40a-4207-9d9a-6768847aaf79（「自建 agent」，绑定 25 个真实仓库 handbook + 4 个 zijian 自建 skill）。
+#   SATH_HANDBOOK_ENABLED=false 只关掉仓库 handbook + code-map，保留 zijian 自建 skill —— off/on 对比即对比「仓库 handbook 知识」的增益。
+# 样本来源：portal 真实线上排障会话。
+{"id":"rca-handbook-005","category":"rca_handbook","input":"分析这个流水4100_az9zsdwuc8af 为什么分配不了实例，老调度","max_steps":40,"tags":["rca","handbook"],"source_session":"ebd73c14-f9ce-4d87-b986-b11f74bdc360","expect":{"root_cause":["siv not matched|siv 不匹配|镜像版本不匹配","imageversion|镜像版本|11358","no available vm|no element|没有可用|无可用|assgin_code|assigncode|排队|line up|分配失败"]}}

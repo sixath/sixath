@@ -354,6 +354,35 @@ func TestClassifyPortalTurn(t *testing.T) {
 	}
 }
 
+func TestClassifyPortalTurn_RCAHandbookHITLWithAnswer(t *testing.T) {
+	rcaTask := Task{ID: "rca-handbook-005", Category: "rca_handbook", Input: "分析流水", MaxSteps: 40,
+		Expect: Expectation{RootCause: []string{"siv not matched", "imageversion|11358", "no available vm|no element"}}}
+
+	cases := []struct {
+		name      string
+		turn      portalTurn
+		wantJudge bool
+	}{
+		{"hitl with full root-cause answer goes to rca judge", portalTurn{HITL: true, Answer: "根因：siv not matched，演示机 imageversion 9999 与 11358 不匹配，No element, no available vm"}, true},
+		{"hitl with empty answer stays hitl", portalTurn{HITL: true, Answer: ""}, false},
+		{"hitl with whitespace answer stays hitl", portalTurn{HITL: true, Answer: "   "}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, judge := classifyPortalTurn(rcaTask, tc.turn, nil)
+			if judge != tc.wantJudge {
+				t.Fatalf("judge=%v want %v", judge, tc.wantJudge)
+			}
+		})
+	}
+
+	// answer_shape 任务的 HITL 行为不受影响。
+	_, judge := classifyPortalTurn(shapeTask, portalTurn{HITL: true, Answer: "请确认"}, nil)
+	if judge {
+		t.Fatal("answer_shape HITL must not go to judge")
+	}
+}
+
 func TestRunPortal_ScoresAndMerges(t *testing.T) {
 	f := &fakePortal{streamBody: sseDone, answer: "198002"}
 	ts := httptest.NewServer(f.handler(t))

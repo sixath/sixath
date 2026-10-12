@@ -254,24 +254,28 @@ func runPortalMode(cfg portalModeConfig) error {
 	if strings.TrimSpace(cfg.AgentID) == "" {
 		return fmt.Errorf("-agent is required for portal mode")
 	}
-	if cfg.Judge == nil {
-		return fmt.Errorf("-judge-model is required for portal mode")
-	}
 	all, err := LoadTasksFromPath(cfg.TasksPath)
 	if err != nil {
 		return err
 	}
 	var tasks []Task
+	hasShape := false
 	for _, t := range all {
 		if t.Category == "answer_shape" {
+			hasShape = true
+			tasks = append(tasks, t)
+		} else if t.Category == "rca_handbook" {
 			tasks = append(tasks, t)
 		}
 	}
 	if len(tasks) == 0 {
-		return fmt.Errorf("portal mode runs answer_shape tasks only; none found in %s", cfg.TasksPath)
+		return fmt.Errorf("portal mode runs answer_shape/rca_handbook tasks only; none found in %s", cfg.TasksPath)
+	}
+	if hasShape && cfg.Judge == nil {
+		return fmt.Errorf("-judge-model is required when answer_shape tasks are present")
 	}
 	if skipped := len(all) - len(tasks); skipped > 0 {
-		fmt.Fprintf(os.Stderr, "eval runner: portal mode skips %d non-answer_shape task(s)\n", skipped)
+		fmt.Fprintf(os.Stderr, "eval runner: portal mode skips %d non-answer_shape/rca_handbook task(s)\n", skipped)
 	}
 	timeout := cfg.TurnTimeout
 	if timeout <= 0 {
