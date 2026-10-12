@@ -125,6 +125,11 @@ func main() {
 		chat.SetAllowScriptExecution(v == "1" || v == "true" || v == "yes")
 	}
 
+	// handbook skill 目录注入开关：环境变量 SATH_HANDBOOK_ENABLED > 默认 true
+	if v := os.Getenv("SATH_HANDBOOK_ENABLED"); v != "" {
+		chat.SetHandbookEnabled(v == "1" || v == "true" || v == "yes")
+	}
+
 	if bc.Data != nil {
 		chat.SetMemoryVectorDataRoot(bc.Data.GetDataRoot())
 	}

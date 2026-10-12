@@ -418,6 +418,15 @@ func SetAllowScriptExecution(allow bool) {
 	AllowScriptExecution = allow
 }
 
+// HandbookEnabled 控制是否为 agent 注入 handbook skill 目录（code-map + 各仓库 handbook）。
+// 默认 true；A/B 评测的 off 组通过 SATH_HANDBOOK_ENABLED=false 关闭。
+var HandbookEnabled = true
+
+// SetHandbookEnabled 设置 handbook skill 目录注入开关。
+func SetHandbookEnabled(enabled bool) {
+	HandbookEnabled = enabled
+}
+
 // ExecuteSkillScript 直接执行技能脚本，供 Agent.ExecuteSkill API 使用
 func ExecuteSkillScript(ctx context.Context, workspace string, extraSkillDirs []string, skillName, relPath, input string) (string, error) {
 	if workspace == "" || skillName == "" || relPath == "" {

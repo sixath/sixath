@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/go-kratos/kratos/v2/log"
+
+	"backend/internal/chat"
 )
 
 // HandbookSkillDirResolver returns the code-map and handbook skill dirs of an agent;
@@ -14,6 +16,9 @@ type HandbookSkillDirResolver interface {
 
 // appendHandbookDirs fails open: on error it still appends whatever dirs were resolved.
 func appendHandbookDirs(ctx context.Context, r HandbookSkillDirResolver, agentID string, dirs []string, logger *log.Helper) []string {
+	if !chat.HandbookEnabled {
+		return dirs
+	}
 	if r == nil || agentID == "" {
 		return dirs
 	}
