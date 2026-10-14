@@ -13,6 +13,7 @@ import (
 	"backend/internal/biz"
 	"backend/internal/channel"
 	"backend/internal/chat"
+	"backend/internal/conf"
 	"backend/internal/data"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -501,6 +502,15 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 
+	// 装配 vault：启用且 embedder/index 就绪时注册 vault_recall 工具（fail-open）。
+	// watcher 为进程级单例，cleanup 幂等（进程退出才真正 Close），此处 defer 无害。
+	vaultCfg := conf.LoadVaultConfig()
+	if cleanup, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
+		s.log.Warnf("SendMessage wire vault failed: session_id=%s err=%v", sessionID, werr)
+	} else if cleanup != nil {
+		defer cleanup()
+	}
+
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
 		Reg:          reg,
 		BoundServers: mcpServerMetas,
@@ -512,6 +522,9 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	maxHistory := 20
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	if hint := chat.VaultDepositHint(vaultCfg.Enabled); hint != "" {
+		agentText += "\n\n" + hint
+	}
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptionsFor(m, agentMeta.Workspace, extraSkillDirs)...)
 	a := chat.BuildAgent(m, reg, agentText, maxHistory, agentMeta.Mode, opts...)
 
@@ -805,6 +818,14 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 
+	// 装配 vault：启用且 embedder/index 就绪时注册 vault_recall 工具（fail-open）。
+	vaultCfg := conf.LoadVaultConfig()
+	if cleanup, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
+		s.log.Warnf("SendMessageStream wire vault failed: session_id=%s err=%v", sessionID, werr)
+	} else if cleanup != nil {
+		defer cleanup()
+	}
+
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
 		Reg:          reg,
 		BoundServers: mcpServerMetas,
@@ -815,6 +836,9 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	maxHistory := 20
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	if hint := chat.VaultDepositHint(vaultCfg.Enabled); hint != "" {
+		agentText += "\n\n" + hint
+	}
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptionsFor(m, agentMeta.Workspace, extraSkillDirs)...)
 	opts = append(opts, agent.WithReActEventBus(turnBus))
 	// 注入本轮私有 bus：WithReActEventBus 作为最后一个 extra option 传入，

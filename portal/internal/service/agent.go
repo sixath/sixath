@@ -12,6 +12,7 @@ import (
 	"backend/api/common"
 	"backend/internal/biz"
 	"backend/internal/chat"
+	"backend/internal/conf"
 	"backend/internal/validator"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -377,6 +378,14 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 
+	// 装配 vault：启用且 embedder/index 就绪时注册 vault_recall 工具（fail-open）。
+	vaultCfg := conf.LoadVaultConfig()
+	if cleanup, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
+		s.log.Warnf("Chat wire vault failed: agent_id=%s err=%v", agentID, werr)
+	} else if cleanup != nil {
+		defer cleanup()
+	}
+
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
 		Reg:          reg,
 		BoundServers: mcpServerMetas,
@@ -387,6 +396,9 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 
 	agentText := chat.AppendAskUserToolPrompt(agentMeta.SystemPrompt)
 	agentText = appendWecomBoundSystemPrompt(ctx, s.channelUC, agentText, agentMeta)
+	if hint := chat.VaultDepositHint(vaultCfg.Enabled); hint != "" {
+		agentText += "\n\n" + hint
+	}
 	opts := append(chat.ReActOptionsFromAgent(*agentMeta), chat.HarnessReActOptionsFor(m, agentMeta.Workspace, extraSkillDirs)...)
 	if router := chat.SkillEmbedRouterFor(ctx, skillsIdx, agentMeta); router != nil {
 		opts = append(opts, agent.WithReActSkillRouter(router))
