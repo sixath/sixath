@@ -16,11 +16,16 @@ import (
 // 单例快照（byID）由 watcher 内部 atomic.Pointer 持有，Recall 每次读最新快照。
 var vaultWireOnce sync.Once
 
+// vaultBuildWatcher 是 watcher 构造入口，默认 vault.NewWatcher；测试可替换为带计数的 fake。
+var vaultBuildWatcher = vault.NewWatcher
+
+// vaultStoreOpts 提供 embedder/index，默认 DefaultMemoryStoreOptions；测试可替换。
+var vaultStoreOpts = DefaultMemoryStoreOptions
+
 // vaultWireState 保存进程级单例 watcher 的创建结果，供 WireVault 幂等返回。
 type vaultWireState struct {
-	w       *vault.Watcher
-	cleanup func()
-	err     error
+	w   *vault.Watcher
+	err error
 }
 
 var vaultWireResult vaultWireState
@@ -30,14 +35,14 @@ var vaultWireResult vaultWireState
 // 降级语义（fail-open）：enabled 为 false、Root 为空、或 embedder/index 未就绪时
 // 直接跳过，返回 nil cleanup 且不报错，agent 照常构建，只是没有 vault_recall 能力。
 //
-// watcher 生命周期是进程级：首次调用成功时创建并返回 cleanup（w.Close），
-// 后续调用幂等返回同一 watcher 的 cleanup。上层应把 cleanup 挂到进程退出处；
-// 在 service 层无法触达进程级生命周期时，至少 defer 调用（Close 幂等，多余调用无害）。
+// watcher 生命周期是进程级单例：首次调用成功时创建，随进程存活，由 OS 在进程退出时回收。
+// 调用方无需也【不应】关闭它（任一请求 defer 关闭都会终止 fsnotify 监听、使热重载永久失效），
+// 因此 cleanup 恒为 nil。
 func WireVault(ctx context.Context, reg *tool.Registry, cfg conf.VaultConfig) (cleanup func(), err error) {
 	if !cfg.Enabled || cfg.Root == "" {
 		return nil, nil
 	}
-	opts := DefaultMemoryStoreOptions()
+	opts := vaultStoreOpts()
 	if opts.UnitEmbedder == nil || opts.UnitVectors == nil {
 		slog.Warn("vault: embedder/index not ready, skipping vault_recall wiring",
 			"embedder_nil", opts.UnitEmbedder == nil, "index_nil", opts.UnitVectors == nil)
@@ -45,13 +50,12 @@ func WireVault(ctx context.Context, reg *tool.Registry, cfg conf.VaultConfig) (c
 	}
 
 	vaultWireOnce.Do(func() {
-		w, werr := vault.NewWatcher(cfg.Root, opts.UnitEmbedder, opts.UnitVectors)
+		w, werr := vaultBuildWatcher(cfg.Root, opts.UnitEmbedder, opts.UnitVectors)
 		if werr != nil {
 			vaultWireResult.err = werr
 			return
 		}
 		vaultWireResult.w = w
-		vaultWireResult.cleanup = w.Close
 	})
 	if vaultWireResult.err != nil {
 		// 首建失败：记录并跳过，不中断请求，也不把工具注册成永远报错。
@@ -67,7 +71,8 @@ func WireVault(ctx context.Context, reg *tool.Registry, cfg conf.VaultConfig) (c
 			slog.Warn("vault: register vault_recall tool failed", "err", rerr)
 		}
 	}
-	return vaultWireResult.cleanup, nil
+	// watcher 是进程级单例，随进程存活，不返回 cleanup（调用方不应关闭）。
+	return nil, nil
 }
 
 // VaultDepositHint 返回沉淀经验指引；enabled 为 false 返回空串。
@@ -94,3 +99,11 @@ const vaultDepositHintText = `## 经验沉淀（Experience Vault）
 - 禁止写 ` + "`ops/`" + `、` + "`mine/`" + `、` + "`shared/`" + ` 等正式目录，只写 ` + "`_agent_notes/`" + `；
 - 禁止把 ` + "`status`" + ` 设成 ` + "`promoted`" + `，晋升必须由人 review 完成；
 - 不确定是否可复用就不要写。`
+
+// resetVaultWireForTest 清空 Once 与单例结果、恢复默认 seam，供测试重装。
+func resetVaultWireForTest() {
+	vaultWireOnce = sync.Once{}
+	vaultWireResult = vaultWireState{}
+	vaultBuildWatcher = vault.NewWatcher
+	vaultStoreOpts = DefaultMemoryStoreOptions
+}

@@ -503,12 +503,10 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 	}
 
 	// 装配 vault：启用且 embedder/index 就绪时注册 vault_recall 工具（fail-open）。
-	// watcher 为进程级单例，cleanup 幂等（进程退出才真正 Close），此处 defer 无害。
+	// watcher 为进程级单例，随进程存活，WireVault 恒返回 nil cleanup（不应随请求关闭）。
 	vaultCfg := conf.LoadVaultConfig()
-	if cleanup, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
+	if _, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
 		s.log.Warnf("SendMessage wire vault failed: session_id=%s err=%v", sessionID, werr)
-	} else if cleanup != nil {
-		defer cleanup()
 	}
 
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
@@ -819,11 +817,10 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 	}
 
 	// 装配 vault：启用且 embedder/index 就绪时注册 vault_recall 工具（fail-open）。
+	// watcher 为进程级单例，随进程存活，WireVault 恒返回 nil cleanup（不应随请求关闭）。
 	vaultCfg := conf.LoadVaultConfig()
-	if cleanup, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
+	if _, werr := chat.WireVault(ctx, reg, vaultCfg); werr != nil {
 		s.log.Warnf("SendMessageStream wire vault failed: session_id=%s err=%v", sessionID, werr)
-	} else if cleanup != nil {
-		defer cleanup()
 	}
 
 	mcpExpand := chat.NewMcpExpandOnMiss(chat.McpExpandOnMissOptions{
