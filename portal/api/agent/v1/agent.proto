@@ -106,6 +106,7 @@ message ModelConfig {
   // max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（32768）。
   int32 max_output_tokens = 5;
   reserved 6 to 9;
+  bool has_api_key = 10;  // 是否已配置密钥（仅响应下发，请求侧忽略）
 }
 
 // Hermes P0 运行时工具开关（与全局 env OR 合并）

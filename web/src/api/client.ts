@@ -729,6 +729,8 @@ export interface ModelConfig {
   model: string
   api_key?: string
   base_url?: string
+  /** 服务端是否已配置密钥（响应下发；请求侧忽略） */
+  has_api_key?: boolean
   /** 单次回复 max_tokens；0 或未设则用服务端默认 32768 */
   max_output_tokens?: number
 }
@@ -870,6 +872,7 @@ function normalizeModelConfig(raw?: ModelConfig & Record<string, unknown>): Mode
     model: (cfg.model as string | undefined) ?? '',
     api_key: (cfg.api_key as string | undefined) ?? (cfg.apiKey as string | undefined),
     base_url: (cfg.base_url as string | undefined) ?? (cfg.baseUrl as string | undefined),
+    has_api_key: (cfg.has_api_key as boolean | undefined) ?? (cfg.hasApiKey as boolean | undefined),
     max_output_tokens: maxOut && maxOut > 0 ? maxOut : undefined,
   }
 }
@@ -1019,6 +1022,11 @@ export const agentApi = {
     const data = await request<ListSkillsResponse>(`/agents/${id}/skills`)
     checkRet(data)
     return data
+  },
+  getCase: async (id: string, caseId: string) =>
+    request<{ id: string; status: string }>(`/agents/${id}/cases/${encodeURIComponent(caseId)}`),
+  discardCase: async (id: string, caseId: string) => {
+    await request(`/agents/${id}/cases/${encodeURIComponent(caseId)}`, { method: 'DELETE' })
   },
   deleteSkill: async (id: string, skillName: string) => {
     const res = await request<{ ret?: BaseResponse }>(`/agents/${id}/skills/${encodeURIComponent(skillName)}`, {
@@ -1467,10 +1475,15 @@ export const chatApi = {
       input_response?: ChatInputSubmitBody['input_response']
       confirm_response?: { kind: string; token: string }
       attachment_ids?: string[]
+      /** 排障模式：开启时本轮装配 investigation 台账、案例库与结案审查 */
+      troubleshoot?: boolean
     }
   ): AbortController => {
     const ac = new AbortController()
     const body: Record<string, unknown> = { content }
+    if (options?.troubleshoot) {
+      body.troubleshoot = true
+    }
     if (options?.input_response) {
       body.input_response = options.input_response
     }

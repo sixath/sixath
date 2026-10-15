@@ -128,7 +128,7 @@ func agentMetaToReply(m *biz.AgentMeta) *agentv1.AgentReply {
 		ModelConfig: &agentv1.ModelConfig{
 			Provider:        m.ModelConfig.Provider,
 			Model:           m.ModelConfig.Model,
-			ApiKey:          m.ModelConfig.APIKey,
+			HasApiKey:       m.ModelConfig.APIKey != "",
 			BaseUrl:         m.ModelConfig.BaseURL,
 			MaxOutputTokens: int32(m.ModelConfig.MaxOutputTokens),
 		},
@@ -202,7 +202,13 @@ func (s *AgentService) UpdateAgent(ctx context.Context, req *agentv1.UpdateAgent
 		updates["system_prompt"] = *req.SystemPrompt
 	}
 	if req.ModelConfig != nil {
-		updates["model_config"] = protoToBizModelConfig(req.ModelConfig)
+		mc := protoToBizModelConfig(req.ModelConfig)
+		if mc.APIKey == "" {
+			if existing, err := s.uc.GetForEdit(ctx, req.GetId()); err == nil {
+				mc.APIKey = existing.ModelConfig.APIKey
+			}
+		}
+		updates["model_config"] = mc
 	}
 	if req.Workspace != nil {
 		workspace := strings.TrimSpace(*req.Workspace)
@@ -338,7 +344,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		s.log.Errorf("Chat build tool registry failed: agent_id=%s err=%v", agentID, err)
 		return nil, err
 	}
-	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace); err != nil {
+	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace, chat.TroubleshootModeFromContext(ctx)); err != nil {
 		s.log.Errorf("register deep_investigate failed: agent_id=%s err=%v", agentID, err)
 	}
 	mcpServers := regResult.McpServers

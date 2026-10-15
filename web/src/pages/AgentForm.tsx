@@ -395,7 +395,7 @@ export default function AgentForm() {
             </div>
             <div className="form-group">
               <label>API Key</label>
-              <input type="password" value={modelConfig.api_key || ''} onChange={(e) => setModelConfig((c) => ({ ...c, api_key: e.target.value }))} placeholder="可选，加密存储" />
+              <input type="password" value={modelConfig.api_key || ''} onChange={(e) => setModelConfig((c) => ({ ...c, api_key: e.target.value }))} placeholder={modelConfig.has_api_key ? '已配置密钥，留空表示保持原值' : '可选，加密存储'} />
             </div>
             <div className="form-group">
               <label>Base URL</label>
