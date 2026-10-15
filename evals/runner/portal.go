@@ -545,11 +545,22 @@ func classifyRunError(msg string) (reason, attribution string, hitMaxSteps bool)
 // evaluateRCALocalization 用 root_cause 关键词命中判 rca_handbook 任务（portal 模式读真实仓库，无 fixtures/contrast）。
 func evaluateRCALocalization(task Task, turn portalTurn) TaskResult {
 	passed, reason := evaluateInvestigation(task, investigationEvidence{Output: turn.Answer})
+	// 采集工具轨迹，让 A/B 能从 ToolsUsed 看出 agent 是否调用了 vault_recall（成功路径也要留证据）。
+	ts := summarizeTimeline(turn.Timeline)
 	res := TaskResult{
 		TaskID:   task.ID,
 		Category: task.Category,
 		Output:   turn.Answer,
 		Passed:   passed,
+		Steps:    len(ts.Calls) + 1,
+		Trace:    &ts,
+	}
+	seen := map[string]bool{}
+	for _, call := range ts.Calls {
+		if call.Tool != "" && !seen[call.Tool] {
+			seen[call.Tool] = true
+			res.ToolsUsed = append(res.ToolsUsed, call.Tool)
+		}
 	}
 	if !passed {
 		res.FailureReason = reason

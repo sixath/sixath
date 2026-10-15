@@ -1,5 +1,6 @@
 # vault_experience：经验库「二次排查命中」A/B（portal 模式）。判据复用 rca_handbook 的 expect.root_cause 关键词命中。
 # A/B 差异由环境变量 SATH_VAULT_ENABLED / SATH_VAULT_ROOT 控制，不在样本层面区分。
-# on 侧预期：agent 先调 vault_recall 命中已晋升经验，ToolsUsed 含 vault_recall，且不再反复 list_tools/load_skill 才动手。
-# 样本对应 ops/ 里已晋升的经验笔记（示例见 docs/superpowers/plans/2026-10-14-obsidian-experience-vault.md Task 8 Step 1）。
-{"id":"vault-experience-001","category":"rca_handbook","input":"又遇到存档卸载失败的流水了，event 是 8110008，帮我看下该怎么查这个流水","max_steps":40,"tags":["vault","rca","experience"],"source_session":"manual","expect":{"root_cause":["cgarchive|存档|卸载|8110008|es_log_query|流水"]}}
+# on 侧预期：agent 先调 vault_recall 命中已晋升经验（archive-unmount-fail.md），ToolsUsed 含 vault_recall，
+# 直接说出正确查询路径（t_game_virtual_machine_extend_info 的 game_disk_state / deploy_type / mount_path）。
+# off 侧预期：无 vault_recall，agent 靠模型内置知识回答，可能遗漏具体字段或泛泛而谈。
+{"id":"vault-experience-001","category":"rca_handbook","input":"存档卸载失败的流水 event=8110008，帮我看下该查哪些库表字段来定位问题","max_steps":40,"tags":["vault","rca","experience"],"source_session":"manual","expect":{"root_cause":["game_disk_state|deploy_type|mount_path|t_game_virtual_machine_extend_info|t_game_virtual_machine_info"]}}

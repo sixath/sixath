@@ -71,6 +71,8 @@ func WireVault(ctx context.Context, reg *tool.Registry, cfg conf.VaultConfig) (c
 			slog.Warn("vault: register vault_recall tool failed", "err", rerr)
 		}
 	}
+	// 机器证据：记录 vault_recall 已装配、当前索引中的 promoted 笔记数，便于 A/B 验证确认工具生效。
+	slog.Info("vault: wired vault_recall", "root", cfg.Root, "indexed_notes", len(w.ByID()))
 	// watcher 是进程级单例，随进程存活，不返回 cleanup（调用方不应关闭）。
 	return nil, nil
 }

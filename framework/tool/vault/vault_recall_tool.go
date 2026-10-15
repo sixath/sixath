@@ -3,6 +3,7 @@ package toolvault
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/sixath/framework/tool"
@@ -48,8 +49,10 @@ func RegisterVaultRecallTool(reg *tool.Registry, recall VaultRecallFunc) error {
 			}
 			hits, err := recall(ctx, query, limit)
 			if err != nil {
+				slog.Warn("vault_recall: recall failed", "query", query, "err", err)
 				return map[string]any{"ok": false, "error": err.Error()}, nil
 			}
+			slog.Info("vault_recall: hit", "query", query, "limit", limit, "hits", len(hits))
 			out := make([]map[string]any, 0, len(hits))
 			for _, h := range hits {
 				excerpt := h.Note.Body
