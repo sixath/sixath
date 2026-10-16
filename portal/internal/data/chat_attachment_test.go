@@ -106,6 +106,22 @@ func TestChatAttachmentRepo_CreateGetCountListDelete(t *testing.T) {
 		t.Fatalf("Count = %d, want 2", n)
 	}
 
+	toolImg := &biz.ChatAttachment{
+		ID: "att-3", SessionID: "sess-1", Kind: "image", Mime: "image/png",
+		Name: "screenshot.png", Size: 8, RelativePath: "sessions/sess-1/" + biz.ToolImageDir + "/att-3_screenshot.png",
+		CreatedAt: now.Add(2 * time.Second),
+	}
+	if err := repo.Create(ctx, toolImg); err != nil {
+		t.Fatalf("Create tool image: %v", err)
+	}
+	n, err = repo.CountBySession(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("Count with tool image: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("Count with tool image = %d, want 2 (tool images excluded from quota)", n)
+	}
+
 	if err := repo.Delete(ctx, "sess-1", "att-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}

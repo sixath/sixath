@@ -571,10 +571,11 @@ func WorkspaceCaseResolver(workspace string) tool.CaseStoreResolver {
 	return func(context.Context) cases.Store { return store }
 }
 
-// RegisterInvestigationTools 注册调查类工具：工作区开启 investigation_ledger 时注册台账，
-// 门控可见的 compare（有探测类工具才进 schema）、timeline（有日志类工具才进 schema），以及 deep_investigate（代码+日志工具都配置才进 schema）。
-func RegisterInvestigationTools(reg *tool.Registry, m model.Model, workspace string) error {
-	if agent.WorkspaceInvestigationLedgerEnabled(workspace) {
+// RegisterInvestigationTools 注册调查类工具：门控可见的 compare（有探测类工具才进 schema）、timeline（有日志类工具才进 schema）；
+// troubleshoot（会话开启排障模式）时再注册 deep_investigate（代码+日志工具都配置才进 schema），
+// 工作区开启 investigation_ledger 时还注册台账与案例库。台账不在时排障方法论提示、台账类 stop 规则与结案审查都不启动。
+func RegisterInvestigationTools(reg *tool.Registry, m model.Model, workspace string, troubleshoot bool) error {
+	if troubleshoot && agent.WorkspaceInvestigationLedgerEnabled(workspace) {
 		resolve := WorkspaceCaseResolver(workspace)
 		if err := tool.RegisterInvestigationToolWithOptions(reg, tool.DefaultInvestigationStore, tool.InvestigationToolOptions{Cases: resolve}); err != nil {
 			return err
@@ -606,6 +607,9 @@ func RegisterInvestigationTools(reg *tool.Registry, m model.Model, workspace str
 		if err := tool.RegisterFsCompareTool(reg); err != nil {
 			return err
 		}
+	}
+	if !troubleshoot {
+		return nil
 	}
 	return investigate.Register(reg, InvestigateConfig(m, workspace))
 }

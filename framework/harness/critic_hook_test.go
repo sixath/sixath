@@ -91,6 +91,20 @@ func TestCritic_LedgerStoppedAtMechanism(t *testing.T) {
 	}
 }
 
+func TestCritic_SkipsWhenLedgerUnavailable(t *testing.T) {
+	c := NewCriticHook(CriticConfig{Enabled: true}, nil, nil)
+	calls := probeCalls(6)
+	text := "安装失败，错误码 1603 表示安装包损坏。"
+	noLedger := func(string) bool { return false }
+	if d := c.OnStop(context.Background(), StopHookInput{Text: text, ToolCalls: calls, HasTool: noLedger}); d.Continue {
+		t.Fatalf("a run without the investigation ledger is not an investigation: %+v", d)
+	}
+	withLedger := func(name string) bool { return name == tool.InvestigationToolName }
+	if d := c.OnStop(context.Background(), StopHookInput{Text: text, ToolCalls: calls, HasTool: withLedger}); !d.Continue {
+		t.Fatalf("critic must still review when the ledger is available: %+v", d)
+	}
+}
+
 func TestCritic_ModelTier(t *testing.T) {
 	fm := &criticFakeModel{reply: "审查结果：\n```json\n{\"verdict\":\"revise\",\"issues\":[{\"type\":\"weak_contrast\",\"detail\":\"只对比了报错\",\"next_probe\":\"对比两台机的 config.ini\"},{\"type\":\"made_up\",\"detail\":\"x\"},{\"type\":\"misread_output\",\"detail\":\"把空结果当正常\"}]}\n```"}
 	c := NewCriticHook(CriticConfig{Enabled: true}, nil, fm)
@@ -129,7 +143,11 @@ func (h alwaysContinueHook) OnStop(context.Context, StopHookInput) StopDecision 
 func TestEvaluateStopHooks_CriticHasOwnBudget(t *testing.T) {
 	fm := &criticFakeModel{reply: `{"verdict":"revise","issues":[{"type":"unsupported_claim","detail":"x"}]}`}
 	critic := NewCriticHook(CriticConfig{Enabled: true, MaxRounds: 1}, nil, fm)
-	a := NewReActAgent(fm, nil, tool.NewRegistry(),
+	reg := tool.NewRegistry()
+	if err := tool.RegisterInvestigationTool(reg, tool.NewInMemoryInvestigationStore()); err != nil {
+		t.Fatal(err)
+	}
+	a := NewReActAgent(fm, nil, reg,
 		WithReActStopHooks(alwaysContinueHook{id: "rule"}, critic), WithReActMaxStopNudges(1))
 	var emitted []events.Kind
 	emit := func(k events.Kind, _ map[string]any) { emitted = append(emitted, k) }

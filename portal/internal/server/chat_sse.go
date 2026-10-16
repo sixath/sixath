@@ -30,6 +30,7 @@ func SendMessageSSE(chat *service.ChatService, logger log.Logger) func(ctx krato
 			AttachmentIDs   []string                    `json:"attachment_ids"`
 			InputResponse   *portalchat.InputResponse   `json:"input_response"`
 			ConfirmResponse *portalchat.ConfirmResponse `json:"confirm_response"`
+			Troubleshoot    bool                        `json:"troubleshoot"`
 		}
 		if err := ctx.Bind(&body); err != nil {
 			l.Errorf("SendMessageSSE bind request body failed: session_id=%s err=%v", sessionID, err)
@@ -55,7 +56,7 @@ func SendMessageSSE(chat *service.ChatService, logger log.Logger) func(ctx krato
 		}
 
 		// Preserve prior chat SSE behavior: disconnect must not cancel in-flight model/tool work.
-		reqCtx := context.WithoutCancel(authCtx)
+		reqCtx := portalchat.WithTroubleshootMode(context.WithoutCancel(authCtx), body.Troubleshoot)
 		if body.InputResponse != nil {
 			reqCtx = portalchat.WithInputResponse(reqCtx, body.InputResponse)
 		}

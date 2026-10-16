@@ -217,6 +217,29 @@ export function restoreConfirmationsFromMessages(
   return collected
 }
 
+/**
+ * Case drafts live in the agent's case library, so it is the source of truth after reload:
+ * a missing draft was cancelled (discarded), a confirmed one was settled elsewhere.
+ * getStatus returns null when the case does not exist; lookup errors leave the card as is.
+ */
+export async function settleCaseConfirmations(
+  items: { kind: string; token: string; status: string }[],
+  getStatus: (token: string) => Promise<string | null>,
+): Promise<Map<string, 'confirmed' | 'cancelled'>> {
+  const out = new Map<string, 'confirmed' | 'cancelled'>()
+  const tokens = [...new Set(items.filter((c) => c.kind === 'case_save' && c.status === 'pending').map((c) => c.token))]
+  await Promise.all(tokens.map(async (token) => {
+    try {
+      const status = await getStatus(token)
+      if (status === null) out.set(token, 'cancelled')
+      else if (status === 'confirmed') out.set(token, 'confirmed')
+    } catch {
+      // permission/network errors: keep the card actionable
+    }
+  }))
+  return out
+}
+
 /** Apply later [confirmed: …] outcomes so reload does not revive already-settled cards. */
 function applyConfirmOutcomesFromHistory(
   messages: MessageLike[],
@@ -253,7 +276,7 @@ function applyConfirmOutcomesFromHistory(
     const target = pendingFirst || candidates[candidates.length - 1]
     if (!target) continue
 
-    if (text.includes('技能操作已确认并执行') || text.includes('操作已确认并执行')) {
+    if (text.includes('技能操作已确认并执行') || text.includes('操作已确认并执行') || text.includes('案例已确认')) {
       target.status = 'confirmed'
       target.error = undefined
       if (target.resource_key) {
@@ -339,6 +362,22 @@ function confirmationRequestFromTimelineTool(
       ...(expires_in !== undefined ? { expires_in } : {}),
       ...(expires_at ? { expires_at } : {}),
       severity: 'danger',
+    }
+  }
+
+  if (toolName === 'case_library') {
+    const name = stringValue(result.name)
+    const preview = stringValue(result.preview)
+    if (!preview) return null
+    return {
+      id: `${toolCallId}:${token}`,
+      kind: stringValue(result.kind) || 'case_save',
+      title: '确认沉淀排障案例',
+      description: `确认后，案例「${name}」会在以后遇到相似症状时被优先验证。有误可先在案例库中修改或删除。`,
+      token,
+      dsl: preview,
+      resource_key: `case:${token}`,
+      severity: 'default',
     }
   }
 

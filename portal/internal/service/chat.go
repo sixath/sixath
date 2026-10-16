@@ -455,7 +455,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		s.log.Errorf("SendMessage build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, err
 	}
-	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace); err != nil {
+	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace, chat.TroubleshootModeFromContext(ctx)); err != nil {
 		s.log.Errorf("register deep_investigate failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 	}
 	mcpServers = regResult.McpServers
@@ -770,7 +770,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		s.log.Errorf("SendMessageStream build tool registry failed: session_id=%s agent_id=%s err=%v", sessionID, session.AgentID, err)
 		return nil, "", err
 	}
-	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace); err != nil {
+	if err := chat.RegisterInvestigationTools(reg, m, agentMeta.Workspace, chat.TroubleshootModeFromContext(ctx)); err != nil {
 		s.log.Errorf("register deep_investigate failed: err=%v", err)
 	}
 	mcpServers = regResult.McpServers

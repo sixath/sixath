@@ -1464,6 +1464,8 @@ export const chatApi = {
       onInputRequired?: (input: ChatInputRequest) => void
       onSourcesBrowsed?: (payload: SourcesBrowsedPayload) => void
       onToolCall?: (payload: ToolCallPayload) => void
+      /** 工具产出的图片（如浏览器截图）已登记为会话附件 */
+      onAttachment?: (attachment: ChatAttachment) => void
       onModelCall?: (payload: ModelCallPayload) => void
       onPlan?: (payload: PlanPayload) => void
       onPlanStep?: (payload: PlanStepPayload) => void
@@ -1590,6 +1592,13 @@ export const chatApi = {
               else if (curEvent === 'tool_call') {
                 const tc = parseToolCallPayload(d)
                 if (tc) callbacks.onToolCall?.(tc)
+              }
+              else if (curEvent === 'attachment') {
+                const raw = d.attachment
+                if (raw && typeof raw === 'object') {
+                  const att = normalizeChatAttachment(raw as Record<string, unknown>)
+                  if (att.id) callbacks.onAttachment?.(att)
+                }
               }
               else if (curEvent === 'model_call') {
                 const mc = parseModelCallPayload(d)

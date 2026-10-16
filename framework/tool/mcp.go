@@ -499,6 +499,15 @@ func (a *metoroClientAdapter) CallTool(ctx context.Context, name string, args ma
 			b.WriteString(c.TextContent.Text)
 			continue
 		}
+		if c.ImageContent != nil {
+			if data, err := json.Marshal(offloadMCPImage(ctx, c.ImageContent.MimeType, c.ImageContent.Data)); err == nil {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(string(data))
+			}
+			continue
+		}
 		if data, err := json.Marshal(c); err == nil {
 			if b.Len() > 0 {
 				b.WriteString("\n")
@@ -626,7 +635,7 @@ func (a *mark3labsClientAdapter) CallTool(ctx context.Context, name string, args
 	if err != nil {
 		return "工具执行完成", nil
 	}
-	return string(data), nil
+	return string(offloadMCPImages(ctx, data)), nil
 }
 
 func (a *mark3labsClientAdapter) Close(ctx context.Context) error {

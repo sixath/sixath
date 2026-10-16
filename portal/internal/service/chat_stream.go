@@ -37,6 +37,8 @@ const (
 	// ChatStreamEventFinal 携带本轮最终答复（Done.Text / 末条 assistant），不再下发为 chunk；
 	// 落库时优先用它，避免把中间步骤的过程性文字和被 stop hook 打回的草稿拼进历史。
 	ChatStreamEventFinal ChatStreamEventType = "final"
+	// ChatStreamEventAttachment 携带工具产出（如浏览器截图）登记成的会话附件，随助手回复展示。
+	ChatStreamEventAttachment ChatStreamEventType = "attachment"
 )
 
 const toolPayloadFieldLimit = 8 * 1024 // 单字段截断上限（字节）
@@ -51,6 +53,7 @@ type ChatStreamEvent struct {
 	ToolCall      *ToolCallPayload
 	ModelCall     *ModelCallPayload
 	MEA           *MEAStreamPayload
+	Attachment    *AttachmentUploadReply
 	Plan          *agent.Plan     `json:"plan,omitempty"`
 	PlanStep      *agent.PlanStep `json:"plan_step,omitempty"`
 }

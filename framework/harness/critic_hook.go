@@ -110,7 +110,11 @@ func (c *CriticHook) OnStop(ctx context.Context, in StopHookInput) StopDecision 
 	if c == nil || strings.TrimSpace(in.Text) == "" {
 		return StopDecision{}
 	}
-	// 只审查"调查"：用过台账，或工具调用达到 min_tool_calls；闲聊和简单查询不打扰。
+	// 只审查"调查"：本轮装配了台账（HasTool 为 nil 时不限制），且用过台账或工具调用达到 min_tool_calls；
+	// 闲聊、简单查询和未开启排障的多步查找不打扰。
+	if in.HasTool != nil && !in.HasTool(tool.InvestigationToolName) {
+		return StopDecision{}
+	}
 	if len(in.ToolCalls) < c.cfg.MinToolCalls && !usedToolSuccessfully(in.ToolCalls, tool.InvestigationToolName) {
 		return StopDecision{}
 	}

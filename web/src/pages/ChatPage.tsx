@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
-import { agentApi, chatApi, DEFAULT_SESSION_TITLE, modelCatalogApi, type Agent, type ChatAttachment, type ChatMessage, type ModelChoiceItem, type ModelChoiceSelected } from '../api/client'
+import { agentApi, chatApi, DEFAULT_SESSION_TITLE, isApiError, modelCatalogApi, type Agent, type ChatAttachment, type ChatMessage, type ModelChoiceItem, type ModelChoiceSelected } from '../api/client'
 import { findLatestSessionId, prepareSessionForSend } from '../api/resolveSession'
 import {
   buildConfirmSubmitBody,
@@ -9,6 +9,7 @@ import {
   inputProvidedLabel,
   restoreConfirmationsFromMessages,
   restoreInputsFromMessages,
+  settleCaseConfirmations,
   type ChatConfirmationRequest,
   type ChatInputRequest,
   type ConfirmResultPayload,
@@ -913,6 +914,25 @@ function choiceValue(selected: ModelChoiceSelected | null | undefined): string {
   return `${selected.provider_id}::${selected.model}`
 }
 
+const TROUBLESHOOT_KEY_PREFIX = 'sixath-troubleshoot:'
+
+function readTroubleshootMode(sessionId: string): boolean {
+  try {
+    return localStorage.getItem(TROUBLESHOOT_KEY_PREFIX + sessionId) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeTroubleshootMode(sessionId: string, on: boolean): void {
+  try {
+    if (on) localStorage.setItem(TROUBLESHOOT_KEY_PREFIX + sessionId, '1')
+    else localStorage.removeItem(TROUBLESHOOT_KEY_PREFIX + sessionId)
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 export default function ChatPage(props?: ChatPageProps) {
   const params = useParams()
   const navigate = useNavigate()
@@ -937,6 +957,9 @@ export default function ChatPage(props?: ChatPageProps) {
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   /** 本轮被用户停止/取消（服务端已保存部分回复） */
   const [cancelledNotice, setCancelledNotice] = useState(false)
+  const [troubleshoot, setTroubleshoot] = useState(false)
+  const troubleshootRef = useRef(false)
+  troubleshootRef.current = troubleshoot
   /** 仅用于展示；实际缓冲在 ref 中合并刷新，避免每条 SSE 触发整页重绘 */
   const [debugText, setDebugText] = useState('')
   const [debugEventCount, setDebugEventCount] = useState(0)
@@ -1369,6 +1392,52 @@ export default function ChatPage(props?: ChatPageProps) {
     return () => clearInterval(timer)
   }, [hasPendingConfirm])
 
+  const troubleshootSessionRef = useRef<string | undefined>(sessionId)
+  useEffect(() => {
+    const prev = troubleshootSessionRef.current
+    troubleshootSessionRef.current = sessionId
+    if (!sessionId) {
+      setTroubleshoot(false)
+      return
+    }
+    // 新会话在首次发送/上传时才创建：沿用创建前选好的开关
+    if (!prev && troubleshootRef.current) {
+      writeTroubleshootMode(sessionId, true)
+      return
+    }
+    setTroubleshoot(readTroubleshootMode(sessionId))
+  }, [sessionId])
+
+  const toggleTroubleshoot = () => {
+    const next = !troubleshoot
+    setTroubleshoot(next)
+    if (sessionId) writeTroubleshootMode(sessionId, next)
+  }
+
+  const settledCaseTokensRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (!agentId) return
+    const unchecked = confirmations.filter(
+      (c) => c.kind === 'case_save' && c.status === 'pending' && !settledCaseTokensRef.current.has(c.token),
+    )
+    if (unchecked.length === 0) return
+    for (const c of unchecked) settledCaseTokensRef.current.add(c.token)
+    void settleCaseConfirmations(unchecked, async (token) => {
+      try {
+        return (await agentApi.getCase(agentId, token)).status
+      } catch (e) {
+        if (isApiError(e) && e.status === 404) return null
+        throw e
+      }
+    }).then((settled) => {
+      if (settled.size === 0) return
+      setConfirmations((prev) => prev.map((c) => {
+        const status = c.kind === 'case_save' && c.status === 'pending' ? settled.get(c.token) : undefined
+        return status ? { ...c, status, error: undefined } : c
+      }))
+    })
+  }, [agentId, confirmations])
+
   const runTerminalTurn = async (opts: {
     vmid: number
     userLabel: string
@@ -1774,6 +1843,20 @@ export default function ChatPage(props?: ChatPageProps) {
             [assistantKey]: applyToolCall(prev[assistantKey] ?? [], p),
           }))
         },
+        onAttachment: (att) => {
+          setMessages((prev) => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role !== 'assistant') return prev
+            const existing = last.metadata?.attachments ?? []
+            if (existing.some((a) => a.id === att.id)) return prev
+            next[next.length - 1] = {
+              ...last,
+              metadata: { ...last.metadata, attachments: [...existing, att] },
+            }
+            return next
+          })
+        },
         onModelCall: (p) => {
           setMessageTimelines((prev) => ({
             ...prev,
@@ -1802,7 +1885,7 @@ export default function ChatPage(props?: ChatPageProps) {
           if (showDebugRef.current) scheduleDebugFlush()
         },
       },
-      opts?.streamOptions,
+      { ...opts?.streamOptions, troubleshoot: troubleshootRef.current },
     )
   }
 
@@ -1913,9 +1996,19 @@ export default function ChatPage(props?: ChatPageProps) {
     void submitConfirmation(item)
   }
 
-  const handleCancelAction = (item: ChatConfirmationItem) => {
+  const handleCancelAction = async (item: ChatConfirmationItem) => {
     if (item.status !== 'pending') return
-    updateConfirmation(item, { status: 'cancelled' })
+    if (item.kind === 'case_save' && agentId) {
+      try {
+        await agentApi.discardCase(agentId, item.token)
+      } catch (e) {
+        if (!(isApiError(e) && e.status === 404)) {
+          updateConfirmation(item, { error: `取消失败：${(e as Error).message}` })
+          return
+        }
+      }
+    }
+    updateConfirmation(item, { status: 'cancelled', error: undefined })
   }
 
   const updateInput = (
@@ -2220,6 +2313,12 @@ export default function ChatPage(props?: ChatPageProps) {
                               }
                               emptyReply={!!m.metadata?.empty_reply}
                             />
+                            {sessionId && (m.metadata?.attachments?.length ?? 0) > 0 ? (
+                              <MessageAttachmentList
+                                sessionId={sessionId}
+                                attachments={m.metadata?.attachments ?? []}
+                              />
+                            ) : null}
                             {m.metadata?.interrupted && !!(m.content ?? '').trim() && (
                               <div className="chat-interrupted-marker">Interrupted — showing the partial reply</div>
                             )}
@@ -2319,7 +2418,7 @@ export default function ChatPage(props?: ChatPageProps) {
                                     type="button"
                                     className="btn btn-secondary btn-sm"
                                     disabled={c.status !== 'pending' || streaming}
-                                    onClick={() => handleCancelAction(c)}
+                                    onClick={() => void handleCancelAction(c)}
                                   >
                                     {c.status === 'cancelled' ? 'Cancelled' : 'Cancel'}
                                   </button>
@@ -2404,48 +2503,62 @@ export default function ChatPage(props?: ChatPageProps) {
           >
             {hasAgent ? (
               <div className="chat-composer__toolbar">
-                <SearchableChipSelect
-                  className="chat-chip--compact"
-                  value={modelChoice}
-                  disabled={streaming || !sessionId}
-                  placement="up"
-                  searchPlaceholder="搜索模型…"
-                  placeholder="选择模型"
-                  leading={<span className="chat-chip__ai" aria-hidden>AI</span>}
-                  options={modelChoices.map((item) => {
-                    if (item.id === 'agent_default') {
-                      const model = item.model || agent?.model_config?.model
+                <div className="chat-composer__controls">
+                  <SearchableChipSelect
+                    className="chat-chip--compact"
+                    value={modelChoice}
+                    disabled={streaming || !sessionId}
+                    placement="up"
+                    searchPlaceholder="搜索模型…"
+                    placeholder="选择模型"
+                    leading={<span className="chat-chip__ai" aria-hidden>AI</span>}
+                    options={modelChoices.map((item) => {
+                      if (item.id === 'agent_default') {
+                        const model = item.model || agent?.model_config?.model
+                        return {
+                          value: 'agent_default',
+                          label: model ? `默认 · ${model}` : (item.label?.replace(/^Agent\s*/, '') || '默认模型'),
+                        }
+                      }
                       return {
-                        value: 'agent_default',
-                        label: model ? `默认 · ${model}` : (item.label?.replace(/^Agent\s*/, '') || '默认模型'),
+                        value: `${item.provider_id}::${item.model}`,
+                        label: item.display_name || item.model || item.label,
+                        group: item.provider_name || '其他',
                       }
-                    }
-                    return {
-                      value: `${item.provider_id}::${item.model}`,
-                      label: item.display_name || item.model || item.label,
-                      group: item.provider_name || '其他',
-                    }
-                  })}
-                  onChange={async (next) => {
-                    const prev = modelChoice
-                    if (!sessionId || next === prev) return
-                    try {
-                      if (next === 'agent_default') {
-                        await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
-                      } else {
-                        const sep = next.indexOf('::')
-                        await modelCatalogApi.patchSessionModel(sessionId, {
-                          model_provider_id: next.slice(0, sep),
-                          model: next.slice(sep + 2),
-                        })
+                    })}
+                    onChange={async (next) => {
+                      const prev = modelChoice
+                      if (!sessionId || next === prev) return
+                      try {
+                        if (next === 'agent_default') {
+                          await modelCatalogApi.patchSessionModel(sessionId, { choice: 'agent_default' })
+                        } else {
+                          const sep = next.indexOf('::')
+                          await modelCatalogApi.patchSessionModel(sessionId, {
+                            model_provider_id: next.slice(0, sep),
+                            model: next.slice(sep + 2),
+                          })
+                        }
+                        setModelChoice(next)
+                      } catch (err) {
+                        setError((err as Error).message)
+                        setModelChoice(prev)
                       }
-                      setModelChoice(next)
-                    } catch (err) {
-                      setError((err as Error).message)
-                      setModelChoice(prev)
-                    }
-                  }}
-                />
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="chat-chip chat-chip--toggle"
+                    aria-pressed={troubleshoot}
+                    disabled={streaming}
+                    title={troubleshoot
+                      ? '排障模式已开启：按症状、开始时间、假设与证据做根因调查，结论经过结案审查'
+                      : '开启后按排障流程做根因调查（证据台账、案例召回、结案审查）；查找、查询类任务无需开启'}
+                    onClick={toggleTroubleshoot}
+                  >
+                    排障模式{troubleshoot ? ' · 开' : ''}
+                  </button>
+                </div>
                 <span className="chat-composer__hint">
                   {terminalMode ? 'Tab 补全文件 · Esc 退出终端' : 'Shift + Enter 换行'}
                 </span>

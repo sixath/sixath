@@ -54,6 +54,10 @@ type ChatMessage struct {
 }
 
 // ChatAttachment 会话附件元数据（落盘路径 + 表行）
+// ToolImageDir is the per-session directory for tool-produced images (screenshots);
+// attachments stored there do not count against the user upload quota.
+const ToolImageDir = "tool_images"
+
 type ChatAttachment struct {
 	ID           string
 	SessionID    string

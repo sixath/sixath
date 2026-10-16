@@ -123,7 +123,7 @@ func TestInvestigationLedgerWiring(t *testing.T) {
 	}
 
 	reg := tool.NewRegistry()
-	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root); err != nil {
+	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := reg.Get(tool.InvestigationToolName); ok {
@@ -142,7 +142,20 @@ func TestInvestigationLedgerWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg = tool.NewRegistry()
-	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root); err != nil {
+	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{tool.InvestigationToolName, tool.CaseLibraryToolName, "deep_investigate"} {
+		if _, ok := reg.Get(name); ok {
+			t.Fatalf("%s must stay off when the session is not in troubleshooting mode", name)
+		}
+	}
+	if _, ok := reg.Get(tool.CompareToolName); !ok {
+		t.Fatal("general comparison tools stay available outside troubleshooting mode")
+	}
+
+	reg = tool.NewRegistry()
+	if err := RegisterInvestigationTools(reg, &builderGateFake{finalReply: "ok"}, root, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := reg.Get(tool.InvestigationToolName); !ok {

@@ -542,6 +542,16 @@
   background: #eef2ff;
 }
 
+.chat-msg-content .chat-msg-attachments {
+  margin-top: 0.6rem;
+}
+
+.chat-msg-content .chat-att-thumb {
+  max-width: min(100%, 520px);
+  max-height: 360px;
+  object-fit: contain;
+}
+
 .chat-att-thumb-btn {
   appearance: none;
   margin: 0;
@@ -993,6 +1003,33 @@
   border-bottom: 1px solid #eef2ff;
   background: #f8fafc;
   border-radius: 1.25rem 1.25rem 0 0;
+}
+
+.chat-composer__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.chat-chip--toggle {
+  flex-shrink: 0;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.chat-chip--toggle[aria-pressed="true"] {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #c2410c;
+  font-weight: 600;
+}
+
+.chat-chip--toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .chat-composer__hint {

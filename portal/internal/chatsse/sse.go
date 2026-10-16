@@ -101,6 +101,7 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 	var full strings.Builder
 	var timeline service.TimelineAccumulator
 	var finalText string
+	var attachments []any
 	res := StreamResult{}
 
 	for event := range ch {
@@ -117,6 +118,19 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 				res.HasContent = true
 			}
 			WriteEvent(w, "chunk", map[string]any{"content": out})
+		case service.ChatStreamEventAttachment:
+			if a := event.Attachment; a != nil {
+				item := map[string]any{
+					"id":            a.ID,
+					"kind":          a.Kind,
+					"mime":          a.Mime,
+					"name":          a.Name,
+					"size":          a.Size,
+					"relative_path": a.RelativePath,
+				}
+				attachments = append(attachments, item)
+				WriteEvent(w, "attachment", map[string]any{"attachment": item})
+			}
 		case service.ChatStreamEventInputRequired:
 			res.HITL = true
 			if event.Input != nil {
@@ -206,6 +220,12 @@ func WriteStream(persistCtx context.Context, w http.ResponseWriter, ch <-chan se
 		}
 	}
 	meta := service.MetadataWithTimeline(timeline.Finalize())
+	if len(attachments) > 0 {
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["attachments"] = attachments
+	}
 	if res.Canceled {
 		// 标记中断：UI 恢复历史时可显示"已中断"，并让后续轮次知道该回答不完整。
 		if meta == nil {
@@ -293,7 +313,7 @@ func AggregateFinal(ch <-chan service.ChatStreamEvent) StreamResult {
 			res.Failed = true
 			res.Error = event.Error
 		case service.ChatStreamEventDebug, service.ChatStreamEventToolCall, service.ChatStreamEventModelCall,
-			service.ChatStreamEventConfirmResult, service.ChatStreamEventMEA:
+			service.ChatStreamEventConfirmResult, service.ChatStreamEventMEA, service.ChatStreamEventAttachment:
 			// Observability / HITL side-channels — never part of the assistant answer body.
 		default:
 			// Unknown types: ignore non-chunk content to avoid leaking protocol payloads into IM replies.

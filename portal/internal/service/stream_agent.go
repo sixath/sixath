@@ -65,6 +65,7 @@ func (s *ChatService) streamAgentEvents(
 		}
 		return streamEpisode{}, runErr
 	}
+	images := s.newToolImageCapturer(sessionID, workspace)
 	for ev := range evCh {
 		switch ev.Type {
 		case agent.StreamEventDelta:
@@ -87,6 +88,9 @@ func (s *ChatService) streamAgentEvents(
 		case agent.StreamEventToolCompleted:
 			if ev.ToolCall != nil {
 				ch <- ChatStreamEvent{Type: ChatStreamEventToolCall, ToolCall: toolCallPayloadFromRecord(*ev.ToolCall, "completed")}
+				for _, att := range images.Capture(runCtx, *ev.ToolCall) {
+					ch <- ChatStreamEvent{Type: ChatStreamEventAttachment, Attachment: att}
+				}
 				if item := inputRequestFromToolRecord(*ev.ToolCall); item != nil {
 					input := *item
 					ch <- ChatStreamEvent{Type: ChatStreamEventInputRequired, Input: &input}

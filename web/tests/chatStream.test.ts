@@ -10,6 +10,7 @@ import {
   parsePlanStepPayload,
   restoreConfirmationsFromMessages,
   restoreInputsFromMessages,
+  settleCaseConfirmations,
   shouldTreatStreamErrorAsWarning,
 } from '../src/api/chatStream.ts'
 
@@ -646,4 +647,82 @@ test('parsePlanStepPayload accepts a valid plan_step event', () => {
 test('parsePlanStepPayload rejects malformed events', () => {
   assert.equal(parsePlanStepPayload({}), null)
   assert.equal(parsePlanStepPayload({ plan_step: {} }), null)
+})
+
+const caseDraftMessage = {
+  id: 'msg-case',
+  role: 'assistant',
+  created_at: '2026-10-13T15:54:41+08:00',
+  metadata: {
+    timeline: [
+      {
+        kind: 'tool',
+        id: 'call-case',
+        toolName: 'case_library',
+        result: {
+          ok: true,
+          status: 'pending',
+          kind: 'case_save',
+          action: 'save',
+          token: 'case-20261013-155441-cbc9b9',
+          name: 'zone 目录被整体删除',
+          preview: '# zone 目录被整体删除',
+        },
+      },
+      {
+        kind: 'tool',
+        id: 'call-search',
+        toolName: 'case_library',
+        result: { ok: true, cases: [] },
+      },
+    ],
+  },
+}
+
+test('restoreConfirmationsFromMessages rebuilds pending case_library draft', () => {
+  const items = restoreConfirmationsFromMessages([caseDraftMessage], Date.parse('2026-10-13T16:00:00+08:00'))
+  assert.equal(items.length, 1)
+  assert.equal(items[0]?.kind, 'case_save')
+  assert.equal(items[0]?.token, 'case-20261013-155441-cbc9b9')
+  assert.equal(items[0]?.dsl, '# zone 目录被整体删除')
+  assert.equal(items[0]?.status, 'pending')
+})
+
+test('settleCaseConfirmations maps case library state onto pending cards', async () => {
+  const items = [
+    { kind: 'case_save', token: 'gone', status: 'pending' },
+    { kind: 'case_save', token: 'done', status: 'pending' },
+    { kind: 'case_save', token: 'draft', status: 'pending' },
+    { kind: 'case_save', token: 'boom', status: 'pending' },
+    { kind: 'case_save', token: 'settled', status: 'confirmed' },
+    { kind: 'skill_manage', token: 'skill', status: 'pending' },
+  ]
+  const asked: string[] = []
+  const out = await settleCaseConfirmations(items, async (token) => {
+    asked.push(token)
+    if (token === 'gone') return null
+    if (token === 'done') return 'confirmed'
+    if (token === 'boom') throw new Error('forbidden')
+    return 'draft'
+  })
+  assert.deepEqual(asked.sort(), ['boom', 'done', 'draft', 'gone'])
+  assert.deepEqual(Object.fromEntries(out), { gone: 'cancelled', done: 'confirmed' })
+})
+
+test('restoreConfirmationsFromMessages marks case draft confirmed after success history', () => {
+  const items = restoreConfirmationsFromMessages(
+    [
+      caseDraftMessage,
+      { id: 'u-ok', role: 'user', created_at: '2026-10-13T16:00:00+08:00', content: '[confirmed: case_save]' },
+      {
+        id: 'a-ok',
+        role: 'assistant',
+        created_at: '2026-10-13T16:00:01+08:00',
+        content: '案例已确认（case-20261013-155441-cbc9b9），以后遇到相似症状会优先验证它。',
+      },
+    ],
+    Date.parse('2026-10-13T16:01:00+08:00'),
+  )
+  assert.equal(items.length, 1)
+  assert.equal(items[0]?.status, 'confirmed')
 })

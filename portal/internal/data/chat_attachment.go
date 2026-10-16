@@ -71,7 +71,9 @@ func (r *chatAttachmentRepo) Delete(ctx context.Context, sessionID, id string) e
 
 func (r *chatAttachmentRepo) CountBySession(ctx context.Context, sessionID string) (int64, error) {
 	var n int64
-	err := r.db.WithContext(ctx).Model(&model.ChatAttachment{}).Where("session_id = ?", sessionID).Count(&n).Error
+	err := r.db.WithContext(ctx).Model(&model.ChatAttachment{}).
+		Where("session_id = ? AND relative_path NOT LIKE ?", sessionID, "%/"+biz.ToolImageDir+"/%").
+		Count(&n).Error
 	return n, err
 }
 
