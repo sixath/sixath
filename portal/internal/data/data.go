@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -100,6 +101,10 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 		return nil, nil, err
 	}
 
+	if err := ensureUTF8MB4(context.Background(), db); err != nil {
+		return nil, nil, err
+	}
+
 	if err := BootstrapACL(context.Background(), db, auth, c.GetDataRoot()); err != nil {
 		return nil, nil, err
 	}
@@ -149,4 +154,28 @@ func configureSQLPool(sqlDB *sql.DB) {
 	sqlDB.SetMaxIdleConns(defaultMaxIdleConns)
 	sqlDB.SetConnMaxLifetime(defaultConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(defaultConnMaxIdleTime)
+}
+
+// ensureUTF8MB4 把历史遗留的 utf8(3字节) 表转成 utf8mb4。这些表是在 DSN 加上 charset=utf8mb4
+// 之前建的，AutoMigrate 不会改已有表/列的字符集；含 emoji(4字节) 的文本写进去会报
+// MySQL 1366 (Incorrect string value)。
+// 排序规则必须用 utf8mb4_unicode_ci，与库默认以及 tools/agents 等表一致。
+// 用 utf8mb4_general_ci 时，ListByAgent 的 `tools.id = agent_tools.tool_id` 会报
+// MySQL 1267 (Illegal mix of collations)。CONVERT TO 幂等，转过的表再次执行无副作用。
+func ensureUTF8MB4(ctx context.Context, db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	tables := []string{
+		"cron_run_history", "cron_tasks",
+		"channels", "channel_runtime_status", "agent_tools",
+		"chat_growth_states", "growth_curator_states", "growth_workspace_leases",
+	}
+	for _, t := range tables {
+		stmt := "ALTER TABLE `" + t + "` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+		if err := db.WithContext(ctx).Exec(stmt).Error; err != nil {
+			return fmt.Errorf("convert %s to utf8mb4: %w", t, err)
+		}
+	}
+	return nil
 }
