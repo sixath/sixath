@@ -1,0 +1,192 @@
+{
+  "timestamp": "2026-10-01T10:46:54Z",
+  "mode": "portal",
+  "summary": {
+    "total": 0,
+    "passed": 0,
+    "completion_rate": 0,
+    "tool_selection_f1": 0,
+    "avg_steps": 0,
+    "avg_cost_usd": 0,
+    "by_category": {},
+    "attribution": {},
+    "answer_shape": {
+      "tasks": 24,
+      "runs": 3,
+      "passes": 0,
+      "e2e_pass_rate": 0,
+      "lost_runs": 21,
+      "lost_rate": 0.875,
+      "by_answer_type": {
+        "count": {
+          "total": 0,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "diagnose": {
+          "total": 0,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "enumerate": {
+          "total": 3,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "howto": {
+          "total": 0,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "lookup": {
+          "total": 0,
+          "passed": 0,
+          "completion_rate": 0
+        }
+      },
+      "tool_error_rate": 0.08391608391608392,
+      "empty_rate": 0.13286713286713286,
+      "rule4_failures": 0,
+      "avg_steps": 6.958333333333333,
+      "attribution": {
+        "harness": 2,
+        "model": 1
+      }
+    }
+  },
+  "failures": [
+    {
+      "id": "shape-vm-prelaunch-fail-list",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-vm-prelaunch-with-success",
+      "reason": "hitl_required",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-restart-instances-today",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-prelaunch-repeat-fail-30m",
+      "reason": "shape_mismatch",
+      "attribution": "model"
+    },
+    {
+      "id": "shape-discard-archive-reboot-vms",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-pool-config-image-version",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-vm-assign-state-300-count",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-agent-es-config-count",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-discard-archive-7d-count",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-vm-prelaunch-state-db",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-key-timestamps",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-archive-version",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-gid-recycle-duration",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-agent-memory-list",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-fail-qi1x",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-prelaunch-flow-cancel",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-vm-prelaunch-why-fail",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-vm-online-illegal-op",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-stuck-recycling",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-archive-upload-fail",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-alloc-fail",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-howto-old-prelaunch-flow",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-howto-find-restart-logs",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-howto-prelaunch-troubleshoot",
+      "reason": "infra_error",
+      "attribution": ""
+    }
+  ],
+  "baseline_diff": {
+    "completion_rate_delta": 0,
+    "tool_selection_f1_delta": 0,
+    "gate_passed": false,
+    "threshold": 0.02,
+    "answer_shape": {
+      "e2e_pass_rate_delta": 0,
+      "threshold": 0.08,
+      "lost_rate": 0.875,
+      "invalid": true,
+      "gate_passed": false
+    }
+  }
+}

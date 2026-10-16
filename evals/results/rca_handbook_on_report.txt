@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-10-12T02:48:31Z",
+  "mode": "portal",
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "completion_rate": 1,
+    "tool_selection_f1": 0,
+    "avg_steps": 0,
+    "avg_cost_usd": 0,
+    "by_category": {
+      "rca_handbook": {
+        "total": 1,
+        "passed": 1,
+        "completion_rate": 1
+      }
+    },
+    "attribution": {}
+  },
+  "failures": []
+}

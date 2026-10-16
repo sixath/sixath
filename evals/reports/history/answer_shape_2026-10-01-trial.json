@@ -1,0 +1,173 @@
+{
+  "timestamp": "2026-10-01T09:47:28Z",
+  "mode": "portal",
+  "summary": {
+    "total": 0,
+    "passed": 0,
+    "completion_rate": 0,
+    "tool_selection_f1": 0,
+    "avg_steps": 0,
+    "avg_cost_usd": 0,
+    "by_category": {},
+    "attribution": {},
+    "answer_shape": {
+      "tasks": 24,
+      "runs": 13,
+      "passes": 4,
+      "e2e_pass_rate": 0.3076923076923077,
+      "lost_runs": 11,
+      "lost_rate": 0.4583333333333333,
+      "by_answer_type": {
+        "count": {
+          "total": 3,
+          "passed": 2,
+          "completion_rate": 0.6666666666666666
+        },
+        "diagnose": {
+          "total": 0,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "enumerate": {
+          "total": 6,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "howto": {
+          "total": 0,
+          "passed": 0,
+          "completion_rate": 0
+        },
+        "lookup": {
+          "total": 4,
+          "passed": 2,
+          "completion_rate": 0.5
+        }
+      },
+      "tool_error_rate": 0.07539682539682539,
+      "empty_rate": 0.10714285714285714,
+      "rule4_failures": 0,
+      "avg_steps": 11.5,
+      "attribution": {
+        "harness": 7,
+        "model": 1,
+        "understanding": 1
+      }
+    }
+  },
+  "failures": [
+    {
+      "id": "shape-vm-prelaunch-fail-list",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-vm-prelaunch-with-success",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-restart-instances-today",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-prelaunch-repeat-fail-30m",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-discard-archive-reboot-vms",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-pool-config-image-version",
+      "reason": "shape_mismatch",
+      "attribution": "understanding"
+    },
+    {
+      "id": "shape-vm-assign-state-300-count",
+      "reason": "shape_mismatch",
+      "attribution": "model"
+    },
+    {
+      "id": "shape-flow-archive-version",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-gid-recycle-duration",
+      "reason": "timeout",
+      "attribution": "harness"
+    },
+    {
+      "id": "shape-agent-memory-list",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-fail-qi1x",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-prelaunch-flow-cancel",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-vm-prelaunch-why-fail",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-vm-online-illegal-op",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-stuck-recycling",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-archive-upload-fail",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-flow-alloc-fail",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-howto-old-prelaunch-flow",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-howto-find-restart-logs",
+      "reason": "infra_error",
+      "attribution": ""
+    },
+    {
+      "id": "shape-howto-prelaunch-troubleshoot",
+      "reason": "infra_error",
+      "attribution": ""
+    }
+  ],
+  "baseline_diff": {
+    "completion_rate_delta": 0,
+    "tool_selection_f1_delta": 0,
+    "gate_passed": false,
+    "threshold": 0.02,
+    "answer_shape": {
+      "e2e_pass_rate_delta": 0,
+      "threshold": 0.08,
+      "lost_rate": 0.4583333333333333,
+      "invalid": true,
+      "gate_passed": false
+    }
+  }
+}
