@@ -991,6 +991,8 @@ components:
                         type: string
                 proxyId:
                     type: string
+                mode:
+                    type: string
         agent.v1.BindToolsReply:
             type: object
             properties:
@@ -1044,6 +1046,8 @@ components:
                 runtimeTools:
                     $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
                 wecomChannelId:
+                    type: string
+                mode:
                     type: string
                 proxyId:
                     type: string
@@ -1109,6 +1113,8 @@ components:
                     type: integer
                     description: max_output_tokens 单次模型回复上限；<=0 时 Portal 使用内置默认（32768）。
                     format: int32
+                hasApiKey:
+                    type: boolean
             description: 模型配置
         agent.v1.RuntimeToolsConfig:
             type: object
@@ -1168,6 +1174,8 @@ components:
                 runtimeTools:
                     $ref: '#/components/schemas/agent.v1.RuntimeToolsConfig'
                 wecomChannelId:
+                    type: string
+                mode:
                     type: string
                 proxyId:
                     type: string
@@ -1519,6 +1527,10 @@ components:
                     type: string
                 content:
                     type: string
+                attachmentIds:
+                    type: array
+                    items:
+                        type: string
             description: 消息
         chat.v1.SessionReply:
             type: object
@@ -1614,8 +1626,10 @@ components:
                     type: boolean
                 trigger:
                     type: string
+                    description: 'schedule: 计划触发；manual: 立即运行'
                 deliveryError:
                     type: string
+                    description: 投递失败原因（delivery_ok=false 时）
         cron.v1.CronTaskReply:
             type: object
             properties:
@@ -1800,7 +1814,7 @@ components:
                     type: string
                 bodyField:
                     type: string
-            description: RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query。
+            description: RCAConfig 根因分析工具配置。func_path 指定子工具:rca_code | jaeger_trace | es_log_query | vm_run_cmd。
         tool.v1.ToolConfig:
             type: object
             properties:
