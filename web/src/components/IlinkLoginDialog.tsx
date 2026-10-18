@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ilinkApi, type IlinkLoginStatusReply } from '../api/client'
+import { ilinkApi, isApiError, type IlinkLoginStatusReply } from '../api/client'
 import { ilinkLoginHint } from '../utils/ilink'
 import './ConfirmDialog.css'
 
@@ -58,6 +58,8 @@ export function IlinkLoginDialog({ channelId, onClose, onConfirmed }: IlinkLogin
             res = await ilinkApi.loginStatus(channelId, start.qrcode, signal)
           } catch (e) {
             if (signal.aborted) return
+            // 4xx (expired qrcode, unauthorized) will not recover by retrying.
+            if (isApiError(e) && e.status < 500) throw e
             failures += 1
             if (failures > STATUS_MAX_RETRIES) throw e
             await delay(STATUS_RETRY_DELAY_MS, signal)
