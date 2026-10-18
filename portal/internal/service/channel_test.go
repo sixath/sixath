@@ -218,6 +218,9 @@ func (r *channelCreateRepo) List(context.Context, int32, int32, string, *bool) (
 func (r *channelCreateRepo) ListGatewayChannels(context.Context) ([]*biz.ChannelMeta, error) {
 	return nil, nil
 }
+func (r *channelCreateRepo) ListIlinkByAgent(context.Context, string) ([]*biz.ChannelMeta, error) {
+	return nil, nil
+}
 func (r *channelCreateRepo) Update(context.Context, string, map[string]any) (*biz.ChannelMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }

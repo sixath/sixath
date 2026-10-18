@@ -2,6 +2,8 @@ package data
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"backend/internal/biz"
 	"backend/internal/data/model"
@@ -175,6 +177,28 @@ func (r *channelRepo) ListGatewayChannels(ctx context.Context) ([]*biz.ChannelMe
 	out := make([]*biz.ChannelMeta, len(list))
 	for i := range list {
 		out[i] = channelModelToBiz(&list[i])
+	}
+	return out, nil
+}
+
+// ListIlinkByAgent filters in Go: allowed_agents is a JSON column and the candidate set is small.
+func (r *channelRepo) ListIlinkByAgent(ctx context.Context, agentID string) ([]*biz.ChannelMeta, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, nil
+	}
+	var list []model.Channel
+	if err := r.db.WithContext(ctx).
+		Where("type = ? AND enabled = ?", biz.ChannelTypeWeixinIlink, true).
+		Order("channel_id").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	var out []*biz.ChannelMeta
+	for i := range list {
+		if list[i].DefaultAgent == agentID || slices.Contains([]string(list[i].AllowedAgents), agentID) {
+			out = append(out, channelModelToBiz(&list[i]))
+		}
 	}
 	return out, nil
 }

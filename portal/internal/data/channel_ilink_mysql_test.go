@@ -222,3 +222,21 @@ func TestIlinkRepo_UpdateAndDeletePeer(t *testing.T) {
 		t.Fatalf("rows left = %d", count)
 	}
 }
+
+func TestIlinkRepo_GetPeer(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newIlinkRepoForTest(db)
+	ctx := context.Background()
+	ch := seedIlinkChannel(t, db)
+
+	if _, err := repo.GetPeer(ctx, ch.ID, "p1"); err != ErrNotFound {
+		t.Fatalf("missing peer err = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.UpsertPeerReport(ctx, ch.ID, 0, biz.IlinkPeerReport{PeerID: "p1", ContextToken: "tok", At: time.Now()}); err != nil {
+		t.Fatalf("report: %v", err)
+	}
+	p, err := repo.GetPeer(ctx, ch.ID, "p1")
+	if err != nil || p.PeerID != "p1" || p.ContextToken != "tok" || p.Allowed {
+		t.Fatalf("GetPeer = %+v, %v", p, err)
+	}
+}

@@ -44,6 +44,9 @@ func (f *fakeRouteChannelRepo) List(context.Context, int32, int32, string, *bool
 func (f *fakeRouteChannelRepo) ListGatewayChannels(context.Context) ([]*ChannelMeta, error) {
 	return nil, nil
 }
+func (f *fakeRouteChannelRepo) ListIlinkByAgent(context.Context, string) ([]*ChannelMeta, error) {
+	return nil, nil
+}
 func (f *fakeRouteChannelRepo) Update(context.Context, string, map[string]any) (*ChannelMeta, error) {
 	return nil, pkgErrors.ErrNotFound
 }
@@ -63,6 +66,9 @@ func (f *fakeRoutePeerRepo) Get(_ context.Context, channelID, peerID string) (*C
 	cp := *row
 	return &cp, nil
 }
+func (f *fakeRoutePeerRepo) GetBySessionID(context.Context, string) (*ChannelPeerSession, error) {
+	return nil, pkgErrors.ErrNotFound
+}
 func (f *fakeRoutePeerRepo) Create(context.Context, *ChannelPeerSession) error { return nil }
 func (f *fakeRoutePeerRepo) Upsert(context.Context, *ChannelPeerSession) error { return nil }
 func (f *fakeRoutePeerRepo) Delete(context.Context, string, string) error      { return nil }
@@ -81,8 +87,8 @@ func (f *fakeRouteAgentReader) GetForSession(_ context.Context, id string) (*Age
 }
 
 type fakeCompleter struct {
-	fn      func(ctx context.Context, prompt string) (string, error)
-	calls   int
+	fn         func(ctx context.Context, prompt string) (string, error)
+	calls      int
 	lastPrompt string
 }
 

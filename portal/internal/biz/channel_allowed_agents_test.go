@@ -42,8 +42,8 @@ func (f *fakeChannelRepo) Create(_ context.Context, ch *ChannelCreate) (*Channel
 		DefaultAgent:        ch.DefaultAgent,
 		AllowedAgents:       append([]string(nil), allowed...),
 		Enabled:             ch.Enabled,
-		WebhookPath:        ch.WebhookPath,
-		WebhookSecret:      ch.WebhookSecret,
+		WebhookPath:         ch.WebhookPath,
+		WebhookSecret:       ch.WebhookSecret,
 		IPWhitelist:         append([]string(nil), ch.IPWhitelist...),
 		AppToken:            ch.AppToken,
 		DefaultUids:         append([]string(nil), ch.DefaultUids...),
@@ -54,7 +54,7 @@ func (f *fakeChannelRepo) Create(_ context.Context, ch *ChannelCreate) (*Channel
 		WSURL:               ch.WSURL,
 		CorpID:              ch.CorpID,
 		CorpSecret:          ch.CorpSecret,
-		DefaultReplyMode:   ch.DefaultReplyMode,
+		DefaultReplyMode:    ch.DefaultReplyMode,
 		AutoRouteEnabled:    ch.AutoRouteEnabled,
 		AutoRouteMention:    ch.AutoRouteMention,
 		AutoRouteClassifier: ch.AutoRouteClassifier,
@@ -106,6 +106,10 @@ func (f *fakeChannelRepo) ListGatewayChannels(context.Context) ([]*ChannelMeta, 
 		out = append(out, &cp)
 	}
 	return out, nil
+}
+
+func (f *fakeChannelRepo) ListIlinkByAgent(context.Context, string) ([]*ChannelMeta, error) {
+	return nil, nil
 }
 
 func (f *fakeChannelRepo) Update(_ context.Context, id string, updates map[string]any) (*ChannelMeta, error) {

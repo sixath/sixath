@@ -32,6 +32,8 @@ type ChannelPeerSession struct {
 // ChannelPeerSessionRepo persists channel+peer → session mappings.
 type ChannelPeerSessionRepo interface {
 	Get(ctx context.Context, channelID, peerID string) (*ChannelPeerSession, error)
+	// GetBySessionID returns the most recently updated mapping of sessionID, or ErrNotFound.
+	GetBySessionID(ctx context.Context, sessionID string) (*ChannelPeerSession, error)
 	Create(ctx context.Context, row *ChannelPeerSession) error
 	Upsert(ctx context.Context, row *ChannelPeerSession) error
 	Delete(ctx context.Context, channelID, peerID string) error

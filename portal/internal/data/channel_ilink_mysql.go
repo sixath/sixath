@@ -166,6 +166,18 @@ func (r *weixinIlinkRepo) ListPeers(ctx context.Context, channelUUID string) ([]
 	return out, nil
 }
 
+func (r *weixinIlinkRepo) GetPeer(ctx context.Context, channelUUID, peerID string) (*biz.IlinkPeer, error) {
+	var row model.ChannelIlinkPeer
+	err := r.db.WithContext(ctx).Where("channel_uuid = ? AND peer_id = ?", channelUUID, peerID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ilinkPeerModelToBiz(&row), nil
+}
+
 func (r *weixinIlinkRepo) UpdatePeer(ctx context.Context, channelUUID, peerID string, patch biz.IlinkPeerPatch) (*biz.IlinkPeer, error) {
 	var out model.ChannelIlinkPeer
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

@@ -78,6 +78,8 @@ type ChannelRepo interface {
 	GetOutboundByDefaultAgent(ctx context.Context, agentID string) (*ChannelMeta, error)
 	List(ctx context.Context, page, pageSize int32, typ string, enabled *bool) ([]*ChannelMeta, int, error)
 	ListGatewayChannels(ctx context.Context) ([]*ChannelMeta, error)
+	// ListIlinkByAgent lists enabled weixin_ilink channels whose default or allowed agents include agentID.
+	ListIlinkByAgent(ctx context.Context, agentID string) ([]*ChannelMeta, error)
 	Update(ctx context.Context, id string, updates map[string]any) (*ChannelMeta, error)
 	Delete(ctx context.Context, id string) error
 }

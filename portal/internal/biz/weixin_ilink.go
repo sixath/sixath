@@ -66,6 +66,8 @@ type WeixinIlinkRepo interface {
 	// UpsertPeerReport returns ErrIlinkGenerationMismatch when generation is stale; new peers start not allowed.
 	UpsertPeerReport(ctx context.Context, channelUUID string, generation int, in IlinkPeerReport) (*IlinkPeer, error)
 	ListPeers(ctx context.Context, channelUUID string) ([]*IlinkPeer, error)
+	// GetPeer returns ErrNotFound when the peer is not in the roster.
+	GetPeer(ctx context.Context, channelUUID, peerID string) (*IlinkPeer, error)
 	UpdatePeer(ctx context.Context, channelUUID, peerID string, patch IlinkPeerPatch) (*IlinkPeer, error)
 	DeletePeer(ctx context.Context, channelUUID, peerID string) error
 	ListAllowedPeerIDs(ctx context.Context, channelUUID string) ([]string, error)

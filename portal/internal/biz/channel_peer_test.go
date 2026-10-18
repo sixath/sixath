@@ -30,6 +30,20 @@ func (f *fakeChannelPeerSessionRepo) Get(_ context.Context, channelID, peerID st
 	return &cp, nil
 }
 
+func (f *fakeChannelPeerSessionRepo) GetBySessionID(_ context.Context, sessionID string) (*ChannelPeerSession, error) {
+	var best *ChannelPeerSession
+	for _, row := range f.rows {
+		if row.SessionID == sessionID && (best == nil || row.UpdatedAt.After(best.UpdatedAt)) {
+			best = row
+		}
+	}
+	if best == nil {
+		return nil, pkgErrors.ErrNotFound
+	}
+	cp := *best
+	return &cp, nil
+}
+
 func (f *fakeChannelPeerSessionRepo) Create(_ context.Context, row *ChannelPeerSession) error {
 	if f.rows == nil {
 		f.rows = map[string]*ChannelPeerSession{}
@@ -450,6 +464,10 @@ func (f *conflictCreatePeerRepo) Get(_ context.Context, channelID, peerID string
 	}
 	cp := *row
 	return &cp, nil
+}
+
+func (f *conflictCreatePeerRepo) GetBySessionID(context.Context, string) (*ChannelPeerSession, error) {
+	return nil, pkgErrors.ErrNotFound
 }
 
 func (f *conflictCreatePeerRepo) Create(_ context.Context, _ *ChannelPeerSession) error {

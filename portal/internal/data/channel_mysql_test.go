@@ -264,3 +264,32 @@ func TestChannelRepo_DeleteCascadesIlinkRows(t *testing.T) {
 		t.Fatalf("second Delete err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestChannelRepo_ListIlinkByAgent(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newChannelRepoForTest(db)
+	ctx := context.Background()
+
+	for _, in := range []*biz.ChannelCreate{
+		{ChannelID: "wx-b", Type: "weixin_ilink", DefaultAgent: "a1", Enabled: true},
+		{ChannelID: "wx-a", Type: "weixin_ilink", DefaultAgent: "a2", AllowedAgents: []string{"a2", "a1"}, Enabled: true},
+		{ChannelID: "wx-off", Type: "weixin_ilink", DefaultAgent: "a1", Enabled: false},
+		{ChannelID: "wx-other", Type: "weixin_ilink", DefaultAgent: "a3", Enabled: true},
+		{ChannelID: "wecom-1", Type: "wecom", DefaultAgent: "a1", Enabled: true},
+	} {
+		if _, err := repo.Create(ctx, in); err != nil {
+			t.Fatalf("Create %s: %v", in.ChannelID, err)
+		}
+	}
+
+	got, err := repo.ListIlinkByAgent(ctx, "a1")
+	if err != nil {
+		t.Fatalf("ListIlinkByAgent: %v", err)
+	}
+	if len(got) != 2 || got[0].ChannelID != "wx-a" || got[1].ChannelID != "wx-b" {
+		t.Fatalf("channels = %+v", got)
+	}
+	if none, err := repo.ListIlinkByAgent(ctx, "  "); err != nil || len(none) != 0 {
+		t.Fatalf("blank agent = %+v, %v", none, err)
+	}
+}

@@ -40,6 +40,20 @@ func (r *channelPeerSessionRepo) Get(ctx context.Context, channelID, peerID stri
 	return channelPeerModelToBiz(&m), nil
 }
 
+func (r *channelPeerSessionRepo) GetBySessionID(ctx context.Context, sessionID string) (*biz.ChannelPeerSession, error) {
+	var m model.ChannelPeerSession
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("updated_at DESC").
+		Take(&m).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return channelPeerModelToBiz(&m), nil
+}
+
 func (r *channelPeerSessionRepo) Create(ctx context.Context, row *biz.ChannelPeerSession) error {
 	if row == nil {
 		return gorm.ErrInvalidData
