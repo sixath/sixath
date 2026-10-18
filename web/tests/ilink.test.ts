@@ -1,9 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  cronIlinkPeerError,
   ilinkLoginHint,
   ilinkPeerActivation,
   ilinkPeerLabel,
+  ilinkPeerOptions,
   ilinkPeerTail,
   mergeRemarkDrafts,
 } from '../src/utils/ilink.ts'
@@ -44,6 +46,34 @@ describe('ilinkPeerActivation', () => {
   it('maps context token presence', () => {
     assert.equal(ilinkPeerActivation({ has_context_token: true }), '已激活')
     assert.equal(ilinkPeerActivation({ has_context_token: false }), '待激活')
+  })
+})
+
+describe('cronIlinkPeerError', () => {
+  it('requires a recipient only for weixin_ilink channel delivery', () => {
+    assert.match(cronIlinkPeerError({ deliveryMode: 'channel', channelType: 'weixin_ilink', peerId: ' ' }), /接收人/)
+    assert.equal(cronIlinkPeerError({ deliveryMode: 'channel', channelType: 'weixin_ilink', peerId: 'p1' }), '')
+    assert.equal(cronIlinkPeerError({ deliveryMode: 'channel', channelType: 'wecom', peerId: '' }), '')
+    assert.equal(cronIlinkPeerError({ deliveryMode: 'none', channelType: 'weixin_ilink', peerId: '' }), '')
+  })
+})
+
+describe('ilinkPeerOptions', () => {
+  const peers = [
+    { peer_id: 'aaaa1111@im.wechat', allowed: true, remark: '张三' },
+    { peer_id: 'bbbb2222@im.wechat', allowed: false, remark: '' },
+    { peer_id: 'cccc3333@im.wechat', allowed: true, remark: '' },
+  ]
+  it('lists allowed peers only', () => {
+    assert.deepEqual(ilinkPeerOptions(peers, ''), [
+      { value: 'aaaa1111@im.wechat', label: '张三（尾号 1111）' },
+      { value: 'cccc3333@im.wechat', label: '尾号 3333' },
+    ])
+  })
+  it('keeps a saved recipient that is no longer allowed, marked', () => {
+    const opts = ilinkPeerOptions(peers, 'bbbb2222@im.wechat')
+    assert.deepEqual(opts[0], { value: 'bbbb2222@im.wechat', label: '尾号 2222（未放行）' })
+    assert.equal(ilinkPeerOptions([], 'gone9999@im.wechat')[0].label, '尾号 9999（未放行）')
   })
 })
 

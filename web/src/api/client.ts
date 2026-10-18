@@ -1914,6 +1914,8 @@ export interface CronTask {
   delivery_webhook_url?: string
   delivery_session_id?: string
   delivery_channel_id?: string
+  /** weixin_ilink recipient (raw WeChat user id) */
+  delivery_peer_id?: string
   enabled: boolean
   next_run_at?: string
   created_at: string
@@ -1966,6 +1968,7 @@ export interface CreateCronTaskRequest {
   delivery_best_effort?: boolean
   delivery_session_id?: string
   delivery_channel_id?: string
+  delivery_peer_id?: string
   enabled?: boolean
 }
 
@@ -1991,6 +1994,7 @@ function normalizeCronTask(raw: CronTask & Record<string, unknown>): CronTask {
       (raw.delivery_session_id as string | undefined) ?? (raw.deliverySessionId as string | undefined),
     delivery_channel_id:
       (raw.delivery_channel_id as string | undefined) ?? (raw.deliveryChannelId as string | undefined),
+    delivery_peer_id: (raw.delivery_peer_id as string | undefined) ?? (raw.deliveryPeerId as string | undefined),
     enabled: (raw.enabled as boolean | undefined) ?? false,
     next_run_at: (raw.next_run_at as string | undefined) ?? (raw.nextRunAt as string | undefined),
     created_at: (raw.created_at as string | undefined) ?? (raw.createdAt as string | undefined) ?? '',

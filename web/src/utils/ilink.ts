@@ -29,6 +29,24 @@ export function ilinkPeerActivation(peer: { has_context_token?: boolean }): '已
   return peer.has_context_token ? '已激活' : '待激活'
 }
 
+/** Cron delivery to a weixin_ilink channel needs a recipient; '' means valid. */
+export function cronIlinkPeerError(input: { deliveryMode?: string; channelType?: string; peerId: string }): string {
+  if (input.deliveryMode !== 'channel' || input.channelType !== 'weixin_ilink') return ''
+  return input.peerId.trim() ? '' : '投递到微信渠道必须选择接收人。'
+}
+
+type PeerOptionRow = { peer_id: string; allowed: boolean; remark?: string }
+
+/** Allowed peers for the cron recipient select; a saved recipient that is no longer allowed stays visible and marked. */
+export function ilinkPeerOptions(peers: PeerOptionRow[], current: string): Array<{ value: string; label: string }> {
+  const options = peers.filter((p) => p.allowed).map((p) => ({ value: p.peer_id, label: ilinkPeerLabel(p) }))
+  if (current && !options.some((o) => o.value === current)) {
+    const known = peers.find((p) => p.peer_id === current)
+    options.unshift({ value: current, label: `${ilinkPeerLabel(known ?? { peer_id: current })}（未放行）` })
+  }
+  return options
+}
+
 type RemarkRow = { peer_id: string; remark: string }
 
 /** A draft is dirty when it differs from the server remark it was based on; dirty drafts survive a reload. */
