@@ -31,7 +31,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager, agentRepo biz.AgentRepo, toolUC *biz.ToolUsecase, evolutionUC *biz.EvolutionUsecase, repoUC *biz.RepoRegistryUsecase, handbookUC *biz.HandbookUsecase) *httptransport.Server {
+func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.AgentService, chat *service.ChatService, channelSvc *service.ChannelService, cronSvc *cron.CronService, channelUC *biz.ChannelUsecase, identityRepo biz.IdentityRepo, aclAPI *biz.ACLAPIUsecase, authUC *biz.AuthUsecase, mcpServer *service.McpServerService, proxy *service.ProxyService, runtimeSvc *runtime.Service, pinger DBPinger, agentUC *biz.AgentUsecase, codeRoots []string, logger log.Logger, terminalMgr *terminal.Manager, agentRepo biz.AgentRepo, toolUC *biz.ToolUsecase, evolutionUC *biz.EvolutionUsecase, repoUC *biz.RepoRegistryUsecase, handbookUC *biz.HandbookUsecase, ilinkUC *biz.WeixinIlinkUsecase) *httptransport.Server {
 	addr := ":0"
 	if c != nil && c.Http != nil && c.Http.Addr != "" {
 		addr = c.Http.Addr
@@ -180,6 +180,13 @@ func NewHTTPServer(c *conf.Server, tool *service.ToolService, agent *service.Age
 	r.GET("/api/v1/agents/{agent_id}/repo-bindings", repoH.GetBindings())
 	r.PUT("/api/v1/agents/{agent_id}/repo-bindings", repoH.PutBindings())
 	r.POST("/api/v1/agents/{agent_id}/repo-bindings/copy-from/{other_id}", repoH.CopyBindings())
+	// weixin_ilink QR login and roster: login only, same as Channel admin APIs.
+	ilinkH := NewWeixinIlinkHandlers(ilinkUC)
+	r.POST("/api/v1/channels/{id}/ilink/login", ilinkH.StartLogin())
+	r.GET("/api/v1/channels/{id}/ilink/login/status", ilinkH.LoginStatus())
+	r.GET("/api/v1/channels/{id}/ilink/peers", ilinkH.ListPeers())
+	r.PATCH("/api/v1/channels/{id}/ilink/peers/{peer_id}", ilinkH.PatchPeer())
+	r.DELETE("/api/v1/channels/{id}/ilink/peers/{peer_id}", ilinkH.DeletePeer())
 	srv.Handle("/healthz", healthzHandler())
 	srv.Handle("/readyz", readyzHandler(pinger))
 	setupPrometheusEndpoint(srv)
