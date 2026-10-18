@@ -46,13 +46,22 @@ type ChannelRuntimeRepo interface {
 	Upsert(ctx context.Context, channelID string, patch RuntimeStatusPatch) error
 }
 
-// DeriveRuntimeStatus applies spec §3.5 read-path derivation.
+// DeriveRuntimeStatus applies the read-path derivation (wecom_bot / weixin_ilink).
 func DeriveRuntimeStatus(ch *ChannelMeta, row *RuntimeStatusRow, now time.Time) *RuntimeStatusView {
-	if ch == nil || ch.Type != "wecom_bot" {
+	if ch == nil || (ch.Type != "wecom_bot" && ch.Type != ChannelTypeWeixinIlink) {
 		return nil
 	}
 	if !ch.Enabled {
 		return &RuntimeStatusView{State: "disabled"}
+	}
+	if ch.Type == ChannelTypeWeixinIlink {
+		// Login state is persisted on the channel, so it must not decay into "unknown" with the heartbeat.
+		if ch.IlinkBotToken == "" {
+			return &RuntimeStatusView{State: "login_required", LastError: "未登录，请扫码登录"}
+		}
+		if ch.IlinkSessionExpiredAt != nil {
+			return &RuntimeStatusView{State: "login_required", LastError: "会话已过期，请重新扫码"}
+		}
 	}
 	if row == nil || now.Sub(row.LastHeartbeatAt) > RuntimeStatusStaleAfter {
 		v := &RuntimeStatusView{State: "unknown"}
