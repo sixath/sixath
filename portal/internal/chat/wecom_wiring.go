@@ -125,15 +125,20 @@ func channelSuccessLabel(typ string) string {
 }
 
 func checkSendToWeComRateLimit(sessionID string, interval time.Duration) error {
+	return checkSessionRateLimit(&sendToWeComLastSend, sessionID, interval)
+}
+
+// checkSessionRateLimit enforces a per-session minimum interval using lastSend (session_id → time.Time).
+func checkSessionRateLimit(lastSend *sync.Map, sessionID string, interval time.Duration) error {
 	if interval <= 0 {
 		interval = sendToWeComDefaultInterval
 	}
 	now := time.Now()
-	if v, ok := sendToWeComLastSend.Load(sessionID); ok {
+	if v, ok := lastSend.Load(sessionID); ok {
 		if last, ok := v.(time.Time); ok && now.Sub(last) < interval {
 			return fmt.Errorf("发送过于频繁，请至少间隔 %s 后再试", interval)
 		}
 	}
-	sendToWeComLastSend.Store(sessionID, now)
+	lastSend.Store(sessionID, now)
 	return nil
 }

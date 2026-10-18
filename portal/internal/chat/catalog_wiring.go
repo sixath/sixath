@@ -7,12 +7,19 @@ import (
 	"github.com/sixath/framework/tool"
 )
 
+// ChannelBinding 把出站渠道工具绑定到目录；ChannelID 可为逗号分隔的多个渠道 slug。
+type ChannelBinding struct {
+	ChannelID   string
+	ChannelType string
+}
+
 // CatalogWiringInput 构建 Agent 工具目录所需的运行时上下文。
 type CatalogWiringInput struct {
 	Reg            *tool.Registry
 	DsBindings     []DatasourceBinding
 	WecomChannelID string
-	ChannelType    string // "wecom" when bound
+	ChannelType    string           // "wecom" when bound
+	Channels       []ChannelBinding // 其它出站渠道（如 weixin_ilink），与 WecomChannelID 并存
 	SkillsIdx      *skills.Index
 }
 
@@ -24,6 +31,9 @@ func BuildCatalogForAgent(ctx context.Context, in CatalogWiringInput) tool.ToolC
 	}
 	if in.WecomChannelID != "" {
 		providers = append(providers, &ChannelCatalogProvider{ChannelID: in.WecomChannelID, ChannelType: in.ChannelType})
+	}
+	for _, b := range in.Channels {
+		providers = append(providers, &ChannelCatalogProvider{ChannelID: b.ChannelID, ChannelType: b.ChannelType})
 	}
 	if in.SkillsIdx != nil {
 		providers = append(providers, &SkillsCatalogProvider{Index: in.SkillsIdx})

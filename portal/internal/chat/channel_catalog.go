@@ -7,11 +7,13 @@ import (
 )
 
 var channelTypeTools = map[string][]string{
-	"wecom": {"send_to_wecom"},
+	"wecom":        {"send_to_wecom"},
+	"weixin_ilink": {"send_to_weixin"},
 }
 
 var channelTypeHints = map[string][]string{
-	"wecom": {"企微", "企业微信", "推送", "webhook"},
+	"wecom":        {"企微", "企业微信", "推送", "webhook"},
+	"weixin_ilink": {"微信", "weixin", "推送"},
 }
 
 // ChannelCatalogProvider 为出站 Channel 工具注入 channel_id / channel_type 绑定与检索词。
