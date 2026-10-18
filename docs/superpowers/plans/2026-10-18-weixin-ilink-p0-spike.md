@@ -45,7 +45,7 @@
 New-Item -ItemType Directory -Force scripts/ilink-spike | Out-Null
 Set-Location scripts/ilink-spike
 go mod init github.com/sixath/ilink-spike
-go mod edit -go=1.26.0
+go mod edit '-go=1.26.0'
 go get github.com/skip2/go-qrcode@latest
 ```
 
