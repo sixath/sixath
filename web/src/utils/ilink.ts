@@ -28,3 +28,21 @@ export function ilinkLoginHint(status: IlinkLoginStatus | ''): string {
 export function ilinkPeerActivation(peer: { has_context_token?: boolean }): '已激活' | '待激活' {
   return peer.has_context_token ? '已激活' : '待激活'
 }
+
+type RemarkRow = { peer_id: string; remark: string }
+
+/** A draft is dirty when it differs from the server remark it was based on; dirty drafts survive a reload. */
+export function mergeRemarkDrafts(
+  prevDrafts: Record<string, string>,
+  prevPeers: RemarkRow[],
+  nextPeers: RemarkRow[],
+): Record<string, string> {
+  const prevRemarks = new Map(prevPeers.map((p) => [p.peer_id, p.remark]))
+  const out: Record<string, string> = {}
+  for (const p of nextPeers) {
+    const draft = prevDrafts[p.peer_id]
+    const base = prevRemarks.get(p.peer_id)
+    out[p.peer_id] = draft !== undefined && base !== undefined && draft !== base ? draft : p.remark
+  }
+  return out
+}

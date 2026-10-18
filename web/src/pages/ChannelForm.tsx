@@ -140,6 +140,7 @@ export default function ChannelForm() {
   const [hasBotToken, setHasBotToken] = useState(false)
   const [ilinkBotId, setIlinkBotId] = useState('')
   const [ilinkOwner, setIlinkOwner] = useState('')
+  const [persistedType, setPersistedType] = useState('')
   const [ilinkLoginOpen, setIlinkLoginOpen] = useState(false)
   const [rosterKey, setRosterKey] = useState(0)
   const [error, setError] = useState('')
@@ -157,6 +158,7 @@ export default function ChannelForm() {
       .then((channel) => {
         setChannelId(channel.channel_id)
         setType((channel.type || 'web') as CreateChannelRequest['type'])
+        setPersistedType(channel.type || 'web')
         setDefaultAgent(channel.default_agent || '')
         setAllowedAgents(channel.allowed_agents ?? [])
         setEnabled(channel.enabled)
@@ -187,6 +189,7 @@ export default function ChannelForm() {
     if (!id) return
     channelApi.get(id)
       .then((channel) => {
+        setPersistedType(channel.type || 'web')
         setHasBotToken(!!channel.has_bot_token)
         setIlinkBotId(channel.ilink_bot_id || '')
         setIlinkOwner(channel.ilink_owner_user_id || '')
@@ -210,7 +213,9 @@ export default function ChannelForm() {
     })
   }
 
-  const resolveAllowedAgentsForSubmit = (): string[] | undefined => {
+  const ilinkPersisted = isEdit && persistedType === 'weixin_ilink'
+
+  const resolveAllowedAgentsForSubmit = () : string[] | undefined => {
     const normalized = withDefaultInAllowed(allowedAgents, defaultAgent)
     return normalized.length ? normalized : undefined
   }
@@ -590,7 +595,7 @@ export default function ChannelForm() {
                 个人微信机器人（iLink）。保存后在本页扫码登录。每次扫码都会换一个新 bot，需要接收推送的人要重新给 bot
                 发一条消息。
               </div>
-              {isEdit ? (
+              {ilinkPersisted ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <span className="page-sub">
                     {hasBotToken
@@ -613,15 +618,16 @@ export default function ChannelForm() {
           </div>
         </form>
       </div>
-      {isEdit && id && type === 'weixin_ilink' ? (
+      {ilinkPersisted && id ? (
         <>
           <IlinkRosterPanel channelId={id} refreshKey={rosterKey} />
-          <IlinkLoginDialog
-            channelId={id}
-            open={ilinkLoginOpen}
-            onClose={() => setIlinkLoginOpen(false)}
-            onConfirmed={refreshIlinkLogin}
-          />
+          {ilinkLoginOpen ? (
+            <IlinkLoginDialog
+              channelId={id}
+              onClose={() => setIlinkLoginOpen(false)}
+              onConfirmed={refreshIlinkLogin}
+            />
+          ) : null}
         </>
       ) : null}
       {isEdit && id ? <ResourceGrantPanel resourceType="channel" payloadRef={id} /> : null}

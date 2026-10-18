@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { ilinkLoginHint, ilinkPeerActivation, ilinkPeerLabel, ilinkPeerTail } from '../src/utils/ilink.ts'
+import {
+  ilinkLoginHint,
+  ilinkPeerActivation,
+  ilinkPeerLabel,
+  ilinkPeerTail,
+  mergeRemarkDrafts,
+} from '../src/utils/ilink.ts'
 
 describe('ilinkPeerTail', () => {
   it('returns the last 4 chars of the local part', () => {
@@ -38,5 +44,30 @@ describe('ilinkPeerActivation', () => {
   it('maps context token presence', () => {
     assert.equal(ilinkPeerActivation({ has_context_token: true }), '已激活')
     assert.equal(ilinkPeerActivation({ has_context_token: false }), '待激活')
+  })
+})
+
+describe('mergeRemarkDrafts', () => {
+  it('takes server remarks on first load', () => {
+    assert.deepEqual(mergeRemarkDrafts({}, [], [{ peer_id: 'a', remark: '甲' }]), { a: '甲' })
+  })
+  it('keeps dirty drafts and refreshes clean ones', () => {
+    const prevPeers = [
+      { peer_id: 'a', remark: '甲' },
+      { peer_id: 'b', remark: '乙' },
+    ]
+    const nextPeers = [
+      { peer_id: 'a', remark: '甲2' },
+      { peer_id: 'b', remark: '乙2' },
+    ]
+    assert.deepEqual(mergeRemarkDrafts({ a: '甲', b: '正在编辑' }, prevPeers, nextPeers), { a: '甲2', b: '正在编辑' })
+  })
+  it('drops removed peers and adds new ones from the server', () => {
+    const prevPeers = [{ peer_id: 'a', remark: '甲' }]
+    const nextPeers = [{ peer_id: 'c', remark: '丙' }]
+    assert.deepEqual(mergeRemarkDrafts({ a: '改了' }, prevPeers, nextPeers), { c: '丙' })
+  })
+  it('ignores stray drafts for peers the client never saw', () => {
+    assert.deepEqual(mergeRemarkDrafts({ c: 'x' }, [], [{ peer_id: 'c', remark: '丙' }]), { c: '丙' })
   })
 })

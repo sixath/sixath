@@ -3,14 +3,31 @@ import { ilinkApi, type IlinkLoginStatusReply } from '../api/client'
 import { ilinkLoginHint } from '../utils/ilink'
 import './ConfirmDialog.css'
 
+const STATUS_MAX_RETRIES = 3
+const STATUS_RETRY_DELAY_MS = 1500
+
 interface IlinkLoginDialogProps {
   channelId: string
-  open: boolean
   onClose: () => void
   onConfirmed: () => void
 }
 
-export function IlinkLoginDialog({ channelId, open, onClose, onConfirmed }: IlinkLoginDialogProps) {
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
+
+/** Mount only while open so each opening starts from a blank QR/status. */
+export function IlinkLoginDialog({ channelId, onClose, onConfirmed }: IlinkLoginDialogProps) {
   const [image, setImage] = useState('')
   const [status, setStatus] = useState<IlinkLoginStatusReply['status'] | ''>('')
   const [error, setError] = useState('')
@@ -22,7 +39,6 @@ export function IlinkLoginDialog({ channelId, open, onClose, onConfirmed }: Ilin
   }, [onConfirmed])
 
   useEffect(() => {
-    if (!open) return
     const controller = new AbortController()
     const { signal } = controller
     setImage('')
@@ -34,9 +50,20 @@ export function IlinkLoginDialog({ channelId, open, onClose, onConfirmed }: Ilin
         if (signal.aborted) return
         setImage(start.qrcode_image)
         setStatus('wait')
+        let failures = 0
         // Each status call is held open by the server for up to ~30s; abort releases it on close.
         while (!signal.aborted) {
-          const res = await ilinkApi.loginStatus(channelId, start.qrcode, signal)
+          let res: IlinkLoginStatusReply
+          try {
+            res = await ilinkApi.loginStatus(channelId, start.qrcode, signal)
+          } catch (e) {
+            if (signal.aborted) return
+            failures += 1
+            if (failures > STATUS_MAX_RETRIES) throw e
+            await delay(STATUS_RETRY_DELAY_MS, signal)
+            continue
+          }
+          failures = 0
           if (signal.aborted) return
           setStatus(res.status)
           if (res.status === 'confirmed') {
@@ -44,7 +71,7 @@ export function IlinkLoginDialog({ channelId, open, onClose, onConfirmed }: Ilin
             return
           }
           if (res.status === 'expired') return
-          await new Promise((resolve) => setTimeout(resolve, 1000))
+          await delay(1000, signal)
         }
       } catch (e) {
         if (!signal.aborted) setError(e instanceof Error ? e.message : String(e))
@@ -52,9 +79,8 @@ export function IlinkLoginDialog({ channelId, open, onClose, onConfirmed }: Ilin
     }
     void run()
     return () => controller.abort()
-  }, [open, channelId, round])
+  }, [channelId, round])
 
-  if (!open) return null
   const canRetry = status === 'expired' || !!error
   return (
     <div className="confirm-dialog-backdrop" role="presentation">

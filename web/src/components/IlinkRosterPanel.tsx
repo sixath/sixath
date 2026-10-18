@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ilinkApi, type IlinkPeer } from '../api/client'
-import { ilinkPeerActivation, ilinkPeerTail } from '../utils/ilink'
+import { ilinkPeerActivation, ilinkPeerTail, mergeRemarkDrafts } from '../utils/ilink'
+import { ConfirmDialog } from './ConfirmDialog'
 
 interface IlinkRosterPanelProps {
   channelId: string
@@ -13,20 +14,31 @@ function formatTime(iso?: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProps) {
   const [peers, setPeers] = useState<IlinkPeer[]>([])
   const [remarks, setRemarks] = useState<Record<string, string>>({})
-  const [busyPeer, setBusyPeer] = useState('')
+  const [busyPeers, setBusyPeers] = useState<Set<string>>(() => new Set())
+  const [pendingRemove, setPendingRemove] = useState<IlinkPeer | null>(null)
   const [error, setError] = useState('')
+  const peersRef = useRef<IlinkPeer[]>([])
+
+  useEffect(() => {
+    peersRef.current = peers
+  }, [peers])
 
   const load = useCallback(async () => {
     try {
       const items = await ilinkApi.listPeers(channelId)
+      const prevPeers = peersRef.current
       setPeers(items)
-      setRemarks(Object.fromEntries(items.map((p) => [p.peer_id, p.remark])))
+      setRemarks((prev) => mergeRemarkDrafts(prev, prevPeers, items))
       setError('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     }
   }, [channelId])
 
@@ -34,22 +46,64 @@ export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProp
     void load()
   }, [load, refreshKey])
 
-  const run = async (peerId: string, action: () => Promise<unknown>) => {
-    setBusyPeer(peerId)
+  const applyPeer = (updated: IlinkPeer) => {
+    setPeers((prev) => prev.map((p) => (p.peer_id === updated.peer_id ? updated : p)))
+  }
+
+  const run = async (peerId: string, action: () => Promise<void>) => {
+    setBusyPeers((prev) => new Set(prev).add(peerId))
     try {
       await action()
-      await load()
+      setError('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorMessage(e))
     } finally {
-      setBusyPeer('')
+      setBusyPeers((prev) => {
+        const next = new Set(prev)
+        next.delete(peerId)
+        return next
+      })
     }
   }
 
-  const saveRemark = (peer: IlinkPeer) => {
-    const next = (remarks[peer.peer_id] ?? '').trim()
-    if (next === peer.remark) return
-    void run(peer.peer_id, () => ilinkApi.patchPeer(channelId, peer.peer_id, { remark: next }))
+  // Not routed through run(): a blur-triggered save must not disable the button the user is clicking.
+  const saveRemark = async (peer: IlinkPeer) => {
+    const peerId = peer.peer_id
+    const next = (remarks[peerId] ?? '').trim()
+    if (next === peer.remark) {
+      setRemarks((prev) => ({ ...prev, [peerId]: peer.remark }))
+      return
+    }
+    try {
+      const updated = await ilinkApi.patchPeer(channelId, peerId, { remark: next })
+      applyPeer(updated)
+      setRemarks((prev) =>
+        (prev[peerId] ?? '').trim() === updated.remark ? { ...prev, [peerId]: updated.remark } : prev,
+      )
+      setError('')
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  const toggleAllowed = (peer: IlinkPeer) =>
+    run(peer.peer_id, async () => {
+      applyPeer(await ilinkApi.patchPeer(channelId, peer.peer_id, { allowed: !peer.allowed }))
+    })
+
+  const confirmRemove = async () => {
+    if (!pendingRemove) return
+    const peerId = pendingRemove.peer_id
+    await run(peerId, async () => {
+      await ilinkApi.deletePeer(channelId, peerId)
+      setPeers((prev) => prev.filter((p) => p.peer_id !== peerId))
+      setRemarks((prev) => {
+        const next = { ...prev }
+        delete next[peerId]
+        return next
+      })
+    })
+    setPendingRemove(null)
   }
 
   return (
@@ -81,7 +135,7 @@ export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProp
           </thead>
           <tbody>
             {peers.map((peer) => {
-              const busy = busyPeer === peer.peer_id
+              const busy = busyPeers.has(peer.peer_id)
               return (
                 <tr key={peer.peer_id}>
                   <td title={peer.peer_id}>尾号 {ilinkPeerTail(peer.peer_id)}</td>
@@ -89,10 +143,9 @@ export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProp
                     <input
                       value={remarks[peer.peer_id] ?? ''}
                       onChange={(e) => setRemarks((prev) => ({ ...prev, [peer.peer_id]: e.target.value }))}
-                      onBlur={() => saveRemark(peer)}
+                      onBlur={() => void saveRemark(peer)}
                       maxLength={64}
                       placeholder="备注"
-                      disabled={busy}
                     />
                   </td>
                   <td>{peer.allowed ? '已放行' : '无权限'}</td>
@@ -104,11 +157,7 @@ export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProp
                         type="button"
                         className="btn btn-ghost btn-sm"
                         disabled={busy}
-                        onClick={() =>
-                          void run(peer.peer_id, () =>
-                            ilinkApi.patchPeer(channelId, peer.peer_id, { allowed: !peer.allowed }),
-                          )
-                        }
+                        onClick={() => void toggleAllowed(peer)}
                       >
                         {peer.allowed ? '取消放行' : '放行'}
                       </button>
@@ -116,7 +165,7 @@ export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProp
                         type="button"
                         className="btn btn-ghost btn-sm"
                         disabled={busy}
-                        onClick={() => void run(peer.peer_id, () => ilinkApi.deletePeer(channelId, peer.peer_id))}
+                        onClick={() => setPendingRemove(peer)}
                       >
                         移出
                       </button>
@@ -128,6 +177,17 @@ export function IlinkRosterPanel({ channelId, refreshKey }: IlinkRosterPanelProp
           </tbody>
         </table>
       )}
+      <ConfirmDialog
+        open={!!pendingRemove}
+        title="移出名册"
+        description="移出后对方下次发消息会重新入册，且默认无权限。"
+        confirmLabel="移出"
+        cancelLabel="取消"
+        variant="danger"
+        loading={!!pendingRemove && busyPeers.has(pendingRemove.peer_id)}
+        onCancel={() => setPendingRemove(null)}
+        onConfirm={() => void confirmRemove()}
+      />
     </div>
   )
 }
