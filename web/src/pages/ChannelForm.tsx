@@ -9,6 +9,9 @@ import {
 } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
 import ResourceGrantPanel from '../components/ResourceGrantPanel'
+import { IlinkLoginDialog } from '../components/IlinkLoginDialog'
+import { IlinkRosterPanel } from '../components/IlinkRosterPanel'
+import { ilinkPeerTail } from '../utils/ilink'
 
 function parseList(value: string): string[] | undefined {
   const items = value
@@ -50,13 +53,14 @@ function formatRelativeTime(iso?: string): string {
   return rtf.format(-diffYear, 'year')
 }
 
-/** Five Admin-facing states: connected|disconnected|reconnecting|disabled|unknown */
+/** Admin-facing states: connected|disconnected|reconnecting|disabled|unknown|login_required */
 const RUNTIME_DOT_COLORS: Record<string, string> = {
   connected: '#16a34a',
   disconnected: '#dc2626',
   reconnecting: '#d97706',
   disabled: '#64748b',
   unknown: '#94a3b8',
+  login_required: '#7c3aed',
 }
 
 function RuntimePanel({ status }: { status?: ChannelRuntimeStatus }) {
@@ -133,6 +137,11 @@ export default function ChannelForm() {
   const [corpId, setCorpId] = useState('')
   const [corpSecret, setCorpSecret] = useState('')
   const [runtimeStatus, setRuntimeStatus] = useState<ChannelRuntimeStatus | undefined>()
+  const [hasBotToken, setHasBotToken] = useState(false)
+  const [ilinkBotId, setIlinkBotId] = useState('')
+  const [ilinkOwner, setIlinkOwner] = useState('')
+  const [ilinkLoginOpen, setIlinkLoginOpen] = useState(false)
+  const [rosterKey, setRosterKey] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -167,9 +176,25 @@ export default function ChannelForm() {
         setWsUrl(channel.ws_url || '')
         setCorpId(channel.corp_id || '')
         setRuntimeStatus(channel.runtime_status)
+        setHasBotToken(!!channel.has_bot_token)
+        setIlinkBotId(channel.ilink_bot_id || '')
+        setIlinkOwner(channel.ilink_owner_user_id || '')
       })
       .catch((e) => setError(e.message))
   }, [id, isEdit])
+
+  const refreshIlinkLogin = () => {
+    if (!id) return
+    channelApi.get(id)
+      .then((channel) => {
+        setHasBotToken(!!channel.has_bot_token)
+        setIlinkBotId(channel.ilink_bot_id || '')
+        setIlinkOwner(channel.ilink_owner_user_id || '')
+        setRuntimeStatus(channel.runtime_status)
+      })
+      .catch((e) => setError(e.message))
+    setRosterKey((n) => n + 1)
+  }
 
   useEffect(() => {
     if (!defaultAgent.trim() || !allowedAgents.length) return
@@ -303,7 +328,7 @@ export default function ChannelForm() {
       </div>
 
       <div className="section-card" style={{ maxWidth: 640 }}>
-        {isEdit && type === 'wecom_bot' && <RuntimePanel status={runtimeStatus} />}
+        {isEdit && (type === 'wecom_bot' || type === 'weixin_ilink') && <RuntimePanel status={runtimeStatus} />}
 
         <form onSubmit={handleSubmit}>
           {getStoredOrgId() ? (
@@ -326,6 +351,7 @@ export default function ChannelForm() {
                 <option value="wxpusher">WxPusher</option>
                 <option value="wecom">WeCom</option>
                 <option value="wecom_bot">WeCom Bot</option>
+                <option value="weixin_ilink">微信 iLink</option>
               </select>
             </div>
             <div className="form-group">
@@ -558,6 +584,28 @@ export default function ChannelForm() {
             </>
           )}
 
+          {type === 'weixin_ilink' && (
+            <div className="form-panel">
+              <div className="form-panel__desc">
+                个人微信机器人（iLink）。保存后在本页扫码登录。每次扫码都会换一个新 bot，需要接收推送的人要重新给 bot
+                发一条消息。
+              </div>
+              {isEdit ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <span className="page-sub">
+                    {hasBotToken
+                      ? `已登录：bot 尾号 ${ilinkPeerTail(ilinkBotId)}，扫码人尾号 ${ilinkPeerTail(ilinkOwner)}`
+                      : '尚未登录'}
+                  </span>
+                  <button type="button" className="btn btn-secondary" onClick={() => setIlinkLoginOpen(true)}>
+                    {hasBotToken ? '重新扫码登录' : '扫码登录'}
+                  </button>
+                </div>
+              ) : (
+                <div className="page-sub">先保存渠道，再在编辑页扫码登录。</div>
+              )}
+            </div>
+          )}
           {error && <div className="error">{error}</div>}
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
             <button type="submit" className="btn" disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
@@ -565,6 +613,17 @@ export default function ChannelForm() {
           </div>
         </form>
       </div>
+      {isEdit && id && type === 'weixin_ilink' ? (
+        <>
+          <IlinkRosterPanel channelId={id} refreshKey={rosterKey} />
+          <IlinkLoginDialog
+            channelId={id}
+            open={ilinkLoginOpen}
+            onClose={() => setIlinkLoginOpen(false)}
+            onConfirmed={refreshIlinkLogin}
+          />
+        </>
+      ) : null}
       {isEdit && id ? <ResourceGrantPanel resourceType="channel" payloadRef={id} /> : null}
     </div>
   )

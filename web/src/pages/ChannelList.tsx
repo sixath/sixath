@@ -3,17 +3,18 @@ import { Link } from 'react-router-dom'
 import { channelApi, type Channel, type ChannelRuntimeStatus } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 
-/** Five Admin-facing states: connected|disconnected|reconnecting|disabled|unknown */
+/** Admin-facing states: connected|disconnected|reconnecting|disabled|unknown|login_required */
 const RUNTIME_DOT_COLORS: Record<string, string> = {
   connected: '#16a34a',
   disconnected: '#dc2626',
   reconnecting: '#d97706',
   disabled: '#64748b',
   unknown: '#94a3b8',
+  login_required: '#7c3aed',
 }
 
 function RuntimeStatusCell({ channel }: { channel: Channel }) {
-  if (channel.type !== 'wecom_bot') return <>—</>
+  if (channel.type !== 'wecom_bot' && channel.type !== 'weixin_ilink') return <>—</>
   const status: ChannelRuntimeStatus | undefined = channel.runtime_status
   const state = status?.state || 'unknown'
   const color = RUNTIME_DOT_COLORS[state] ?? RUNTIME_DOT_COLORS.unknown
@@ -119,6 +120,7 @@ export default function ChannelList() {
                 <option value="wxpusher">WxPusher</option>
                 <option value="wecom">企业微信</option>
                 <option value="wecom_bot">企业微信 Bot</option>
+                <option value="weixin_ilink">微信 iLink</option>
               </select>
               <select value={enabled} onChange={(e) => setEnabled(e.target.value)}>
                 <option value="">全部状态</option>
