@@ -1680,9 +1680,9 @@ export const chatApi = {
 }
 
 // Channel API
-/** Admin-facing derived gateway status (wecom_bot only). */
+/** Admin-facing derived gateway status (wecom_bot / weixin_ilink). */
 export interface ChannelRuntimeStatus {
-  state?: string // connected|disconnected|reconnecting|disabled|unknown
+  state?: string // connected|disconnected|reconnecting|disabled|unknown|login_required
   last_heartbeat_at?: string
   last_error?: string
   reconnect_attempt?: number
@@ -1709,6 +1709,9 @@ export interface Channel {
   ws_url?: string
   corp_id?: string
   default_reply_mode?: string
+  has_bot_token?: boolean
+  ilink_bot_id?: string
+  ilink_owner_user_id?: string
   runtime_status?: ChannelRuntimeStatus
   created_at: string
   updated_at: string
@@ -1722,7 +1725,7 @@ export interface ChannelListResponse {
 
 export interface CreateChannelRequest {
   channel_id: string
-  type: 'web' | 'api' | 'webhook' | 'wxpusher' | 'wecom' | 'wecom_bot'
+  type: 'web' | 'api' | 'webhook' | 'wxpusher' | 'wecom' | 'wecom_bot' | 'weixin_ilink'
   default_agent?: string
   allowed_agents?: string[]
   enabled?: boolean
@@ -1791,6 +1794,10 @@ function normalizeChannel(raw: Channel & Record<string, unknown>): Channel {
     corp_id: (raw.corp_id as string | undefined) ?? (raw.corpId as string | undefined),
     default_reply_mode:
       (raw.default_reply_mode as string | undefined) ?? (raw.defaultReplyMode as string | undefined),
+    has_bot_token: (raw.has_bot_token as boolean | undefined) ?? (raw.hasBotToken as boolean | undefined),
+    ilink_bot_id: (raw.ilink_bot_id as string | undefined) ?? (raw.ilinkBotId as string | undefined),
+    ilink_owner_user_id:
+      (raw.ilink_owner_user_id as string | undefined) ?? (raw.ilinkOwnerUserId as string | undefined),
     runtime_status: normalizeRuntimeStatus(raw.runtime_status ?? raw.runtimeStatus),
     created_at: (raw.created_at as string) ?? (raw.createdAt as string) ?? '',
     updated_at: (raw.updated_at as string) ?? (raw.updatedAt as string) ?? '',
@@ -1840,6 +1847,52 @@ export const channelApi = {
       body: JSON.stringify(data),
     })
     checkRet(res)
+  },
+}
+
+export interface IlinkLoginStart {
+  qrcode: string
+  qrcode_image: string
+  expires_at: string
+}
+
+export interface IlinkLoginStatusReply {
+  status: 'wait' | 'scaned' | 'confirmed' | 'expired'
+  bot_id?: string
+}
+
+export interface IlinkPeer {
+  peer_id: string
+  allowed: boolean
+  remark: string
+  has_context_token: boolean
+  context_token_at?: string
+  last_inbound_at?: string
+  last_preview: string
+}
+
+/** weixin_ilink QR login and roster; channelId is the channel's id (uuid). */
+export const ilinkApi = {
+  startLogin: (channelId: string, signal?: AbortSignal) =>
+    request<IlinkLoginStart>(`/channels/${channelId}/ilink/login`, { method: 'POST', body: '{}', signal }),
+  loginStatus: (channelId: string, qrcode: string, signal?: AbortSignal) =>
+    request<IlinkLoginStatusReply>(
+      `/channels/${channelId}/ilink/login/status?qrcode=${encodeURIComponent(qrcode)}`,
+      { signal },
+    ),
+  listPeers: async (channelId: string) => {
+    const res = await request<{ items?: IlinkPeer[] }>(`/channels/${channelId}/ilink/peers`)
+    return res.items ?? []
+  },
+  patchPeer: (channelId: string, peerId: string, patch: { allowed?: boolean; remark?: string }) =>
+    request<IlinkPeer>(`/channels/${channelId}/ilink/peers/${encodeURIComponent(peerId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deletePeer: async (channelId: string, peerId: string) => {
+    await request<{ ok: boolean }>(`/channels/${channelId}/ilink/peers/${encodeURIComponent(peerId)}`, {
+      method: 'DELETE',
+    })
   },
 }
 
