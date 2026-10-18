@@ -125,6 +125,43 @@ func TestCronjobToolCreateAndList(t *testing.T) {
 	}
 }
 
+func TestCronjobToolCreateDeliveryDefaults(t *testing.T) {
+	reg := NewRegistry()
+	client := &mockCronClient{}
+	if err := RegisterCronjobTool(reg, client, &CronjobToolConfig{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	toolDef, _ := reg.Get("cronjob")
+	ctx := context.WithValue(context.Background(), ContextKeyAgentID, "agent-1")
+	base := map[string]any{
+		"action": "create", "name": "n", "schedule_kind": "cron", "schedule_expr": "0 9 * * *",
+		"payload_kind": "agent_turn", "payload_content": "p",
+	}
+	if _, err := toolDef.Execute(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	withPeer := map[string]any{"delivery_mode": "channel", "delivery_channel_id": "ch-1", "delivery_peer_id": " u1@im.wechat "}
+	for k, v := range base {
+		withPeer[k] = v
+	}
+	if _, err := toolDef.Execute(ctx, withPeer); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.created) != 2 {
+		t.Fatalf("created = %d", len(client.created))
+	}
+	if got := client.created[0].DeliveryMode; got != "" {
+		t.Fatalf("omitted delivery_mode = %q, want empty for the host to decide", got)
+	}
+	if got := client.created[1]; got.DeliveryMode != "channel" || got.DeliveryChannelID != "ch-1" || got.DeliveryPeerID != "u1@im.wechat" {
+		t.Fatalf("explicit delivery = %+v", got)
+	}
+	toolProps := toolDef.Parameters.(map[string]any)["properties"].(map[string]any)
+	if _, ok := toolProps["delivery_peer_id"]; !ok {
+		t.Fatal("schema missing delivery_peer_id")
+	}
+}
+
 func TestCronjobToolCheckFnDisabled(t *testing.T) {
 	reg := NewRegistry()
 	if err := RegisterCronjobTool(reg, &mockCronClient{}, &CronjobToolConfig{Enabled: false}); err != nil {

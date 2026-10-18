@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// CronJobCreateInput is the payload for creating a scheduled task.
+// CronJobCreateInput is the payload for creating a scheduled task. An empty DeliveryMode means the
+// caller did not choose one; the CronClient implementation picks the default.
 type CronJobCreateInput struct {
 	Name               string
 	ScheduleKind       string
@@ -21,6 +22,7 @@ type CronJobCreateInput struct {
 	DeliveryWebhookURL string
 	DeliverySessionID  string
 	DeliveryChannelID  string
+	DeliveryPeerID     string
 	Enabled            bool
 }
 
@@ -156,7 +158,7 @@ func RegisterCronjobTool(reg *Registry, client CronClient, cfg *CronjobToolConfi
 				"delivery_mode": map[string]any{
 					"type":        "string",
 					"enum":        []string{"none", "webhook", "session", "channel"},
-					"description": "Where to deliver results (create/update).",
+					"description": "Where to deliver results (create/update). Omit on create to let the host choose (e.g. reply to the chat the request came from).",
 				},
 				"delivery_session_id": map[string]any{
 					"type":        "string",
@@ -165,6 +167,10 @@ func RegisterCronjobTool(reg *Registry, client CronClient, cfg *CronjobToolConfi
 				"delivery_channel_id": map[string]any{
 					"type":        "string",
 					"description": "Channel id when delivery_mode=channel.",
+				},
+				"delivery_peer_id": map[string]any{
+					"type":        "string",
+					"description": "Recipient within the channel when delivery_mode=channel and the channel needs one (e.g. a WeChat user id).",
 				},
 				"enabled": map[string]any{
 					"type":        "boolean",
@@ -240,9 +246,6 @@ func cronjobCreate(ctx context.Context, client CronClient, agentID string, param
 		tz = "UTC"
 	}
 	deliveryMode := strings.TrimSpace(stringParam(params, "delivery_mode"))
-	if deliveryMode == "" {
-		deliveryMode = "none"
-	}
 	enabled := true
 	if v, ok := params["enabled"].(bool); ok {
 		enabled = v
@@ -258,6 +261,7 @@ func cronjobCreate(ctx context.Context, client CronClient, agentID string, param
 		DeliveryWebhookURL: stringParam(params, "delivery_webhook_url"),
 		DeliverySessionID:  stringParam(params, "delivery_session_id"),
 		DeliveryChannelID:  stringParam(params, "delivery_channel_id"),
+		DeliveryPeerID:     strings.TrimSpace(stringParam(params, "delivery_peer_id")),
 		Enabled:            enabled,
 	})
 	if err != nil {
