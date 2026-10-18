@@ -35,18 +35,18 @@ func (s *StringSlice) Scan(value interface{}) error {
 
 // Channel 渠道表
 type Channel struct {
-	ID            string      `gorm:"column:id;primaryKey;size:36"`
-	ChannelID     string      `gorm:"column:channel_id;uniqueIndex;size:64;not null"`
-	Type          string      `gorm:"column:type;size:16;not null"` // web, api, webhook, wxpusher, wecom, wecom_bot
-	DefaultAgent  string      `gorm:"column:default_agent;size:36"`
-	AllowedAgents StringSlice `gorm:"column:allowed_agents;type:json"`
-	AutoRouteEnabled    bool `gorm:"column:auto_route_enabled;not null;default:1"`
-	AutoRouteMention    bool `gorm:"column:auto_route_mention;not null;default:1"`
-	AutoRouteClassifier bool `gorm:"column:auto_route_classifier;not null;default:1"`
-	Enabled       bool        `gorm:"column:enabled;not null;default:true"`
-	WebhookPath   string      `gorm:"column:webhook_path;size:256"`
-	WebhookSecret string      `gorm:"column:webhook_secret;size:256"`
-	IPWhitelist   StringSlice `gorm:"column:ip_whitelist;type:json"`
+	ID                  string      `gorm:"column:id;primaryKey;size:36"`
+	ChannelID           string      `gorm:"column:channel_id;uniqueIndex;size:64;not null"`
+	Type                string      `gorm:"column:type;size:16;not null"` // web, api, webhook, wxpusher, wecom, wecom_bot, weixin_ilink
+	DefaultAgent        string      `gorm:"column:default_agent;size:36"`
+	AllowedAgents       StringSlice `gorm:"column:allowed_agents;type:json"`
+	AutoRouteEnabled    bool        `gorm:"column:auto_route_enabled;not null;default:1"`
+	AutoRouteMention    bool        `gorm:"column:auto_route_mention;not null;default:1"`
+	AutoRouteClassifier bool        `gorm:"column:auto_route_classifier;not null;default:1"`
+	Enabled             bool        `gorm:"column:enabled;not null;default:true"`
+	WebhookPath         string      `gorm:"column:webhook_path;size:256"`
+	WebhookSecret       string      `gorm:"column:webhook_secret;size:256"`
+	IPWhitelist         StringSlice `gorm:"column:ip_whitelist;type:json"`
 	// WxPusher 渠道配置（type=wxpusher 时使用）
 	AppToken    string      `gorm:"column:app_token;size:256"`
 	DefaultUids StringSlice `gorm:"column:default_uids;type:json"`
@@ -60,8 +60,15 @@ type Channel struct {
 	CorpID           string      `gorm:"column:corp_id;size:64"`
 	CorpSecret       string      `gorm:"column:corp_secret;size:256"`
 	DefaultReplyMode string      `gorm:"column:default_reply_mode;size:16"`
-	CreatedAt        time.Time   `gorm:"column:created_at;not null"`
-	UpdatedAt        time.Time   `gorm:"column:updated_at;not null"`
+	// 微信 iLink（type=weixin_ilink）；只由扫码登录 / 会话失效流程写入，不在 Update 白名单中
+	IlinkBotToken         string     `gorm:"column:ilink_bot_token;size:512"`
+	IlinkBotID            string     `gorm:"column:ilink_bot_id;size:128"`
+	IlinkOwnerUserID      string     `gorm:"column:ilink_owner_user_id;size:128"`
+	IlinkBaseURL          string     `gorm:"column:ilink_base_url;size:512"`
+	IlinkGeneration       int        `gorm:"column:ilink_generation;not null;default:0"`
+	IlinkSessionExpiredAt *time.Time `gorm:"column:ilink_session_expired_at"`
+	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`
 }
 
 func (Channel) TableName() string {

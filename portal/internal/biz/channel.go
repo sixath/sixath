@@ -58,8 +58,15 @@ type ChannelMeta struct {
 	CorpID           string
 	CorpSecret       string
 	DefaultReplyMode string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// 微信 iLink（type=weixin_ilink）
+	IlinkBotToken         string
+	IlinkBotID            string
+	IlinkOwnerUserID      string
+	IlinkBaseURL          string
+	IlinkGeneration       int
+	IlinkSessionExpiredAt *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // ChannelRepo 渠道存储接口

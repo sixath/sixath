@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"testing"
+	"time"
 
 	"backend/internal/biz"
 	"backend/internal/data/model"
@@ -19,7 +20,7 @@ func openChannelTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.Channel{}); err != nil {
+	if err := db.AutoMigrate(&model.Channel{}, &model.ChannelIlinkPeer{}, &model.ChannelIlinkState{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -177,5 +178,89 @@ func TestChannelRepo_ListGatewayChannelsIncludesDisabled(t *testing.T) {
 	}
 	if byID["web-only"] != nil || byID["wecom-group"] != nil {
 		t.Fatalf("unexpected types in list: %+v", byID)
+	}
+}
+
+func TestChannelRepo_ListGatewayChannelsIncludesWeixinIlink(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newChannelRepoForTest(db)
+	ctx := context.Background()
+
+	ch, err := repo.Create(ctx, &biz.ChannelCreate{ChannelID: "wx-1", Type: "weixin_ilink", Enabled: true})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	expired := time.Date(2026, 10, 18, 2, 0, 0, 0, time.UTC)
+	if err := db.Model(&model.Channel{}).Where("id = ?", ch.ID).Updates(map[string]any{
+		"ilink_bot_token": "bt", "ilink_bot_id": "b@im.bot", "ilink_owner_user_id": "u@im.wechat",
+		"ilink_generation": 2, "ilink_session_expired_at": expired,
+	}).Error; err != nil {
+		t.Fatalf("seed ilink columns: %v", err)
+	}
+
+	list, err := repo.ListGatewayChannels(ctx)
+	if err != nil {
+		t.Fatalf("ListGatewayChannels: %v", err)
+	}
+	if len(list) != 1 || list[0].Type != "weixin_ilink" {
+		t.Fatalf("list = %+v", list)
+	}
+	got := list[0]
+	if got.IlinkBotToken != "bt" || got.IlinkBotID != "b@im.bot" || got.IlinkOwnerUserID != "u@im.wechat" || got.IlinkGeneration != 2 {
+		t.Fatalf("ilink fields = %+v", got)
+	}
+	if got.IlinkSessionExpiredAt == nil || !got.IlinkSessionExpiredAt.Equal(expired) {
+		t.Fatalf("IlinkSessionExpiredAt = %v", got.IlinkSessionExpiredAt)
+	}
+}
+
+func TestChannelRepo_UpdateIgnoresIlinkCredentialKeys(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newChannelRepoForTest(db)
+	ctx := context.Background()
+
+	ch, err := repo.Create(ctx, &biz.ChannelCreate{ChannelID: "wx-1", Type: "weixin_ilink", Enabled: true})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	updated, err := repo.Update(ctx, ch.ID, map[string]any{
+		"ilink_bot_token": "injected", "ilink_generation": 99, "enabled": false,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.IlinkBotToken != "" || updated.IlinkGeneration != 0 || updated.Enabled {
+		t.Fatalf("updated = %+v", updated)
+	}
+}
+
+func TestChannelRepo_DeleteCascadesIlinkRows(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newChannelRepoForTest(db)
+	ctx := context.Background()
+
+	ch, err := repo.Create(ctx, &biz.ChannelCreate{ChannelID: "wx-1", Type: "weixin_ilink", Enabled: true})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	now := time.Now()
+	if err := db.Create(&model.ChannelIlinkPeer{ChannelUUID: ch.ID, PeerID: "p1", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed peer: %v", err)
+	}
+	if err := db.Create(&model.ChannelIlinkState{ChannelUUID: ch.ID, GetUpdatesBuf: "buf", UpdatedAt: now}).Error; err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	if err := repo.Delete(ctx, ch.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	var peers, states int64
+	db.Model(&model.ChannelIlinkPeer{}).Where("channel_uuid = ?", ch.ID).Count(&peers)
+	db.Model(&model.ChannelIlinkState{}).Where("channel_uuid = ?", ch.ID).Count(&states)
+	if peers != 0 || states != 0 {
+		t.Fatalf("leftover peers=%d states=%d", peers, states)
+	}
+	if err := repo.Delete(ctx, ch.ID); err != ErrNotFound {
+		t.Fatalf("second Delete err = %v, want ErrNotFound", err)
 	}
 }

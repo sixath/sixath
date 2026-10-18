@@ -163,11 +163,11 @@ func (r *channelRepo) List(ctx context.Context, page, pageSize int32, typ string
 	return out, int(total), nil
 }
 
-// ListGatewayChannels returns webhook/wecom_bot channels including disabled, with plaintext secrets.
+// ListGatewayChannels returns webhook/wecom_bot/weixin_ilink channels including disabled, with plaintext secrets.
 func (r *channelRepo) ListGatewayChannels(ctx context.Context) ([]*biz.ChannelMeta, error) {
 	var list []model.Channel
 	if err := r.db.WithContext(ctx).
-		Where("type IN ?", []string{"webhook", "wecom_bot"}).
+		Where("type IN ?", []string{"webhook", "wecom_bot", "weixin_ilink"}).
 		Order("created_at DESC").
 		Find(&list).Error; err != nil {
 		return nil, err
@@ -223,14 +223,19 @@ func (r *channelRepo) Update(ctx context.Context, id string, updates map[string]
 }
 
 func (r *channelRepo) Delete(ctx context.Context, id string) error {
-	res := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Channel{})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("id = ?", id).Delete(&model.Channel{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if err := tx.Where("channel_uuid = ?", id).Delete(&model.ChannelIlinkPeer{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("channel_uuid = ?", id).Delete(&model.ChannelIlinkState{}).Error
+	})
 }
 
 func coerceUpdateStringSlice(v any) (model.StringSlice, bool) {
@@ -272,29 +277,35 @@ func channelModelToBiz(m *model.Channel) *biz.ChannelMeta {
 		botNames = []string{}
 	}
 	return &biz.ChannelMeta{
-		ID:                  m.ID,
-		ChannelID:           m.ChannelID,
-		Type:                m.Type,
-		DefaultAgent:        m.DefaultAgent,
-		AllowedAgents:       allowedAgents,
-		AutoRouteEnabled:    m.AutoRouteEnabled,
-		AutoRouteMention:    m.AutoRouteMention,
-		AutoRouteClassifier: m.AutoRouteClassifier,
-		Enabled:             m.Enabled,
-		WebhookPath:         m.WebhookPath,
-		WebhookSecret:       m.WebhookSecret,
-		IPWhitelist:         ipList,
-		AppToken:            m.AppToken,
-		DefaultUids:         uids,
-		WebhookURL:          m.WebhookURL,
-		BotID:               m.BotID,
-		BotSecret:           m.BotSecret,
-		BotNames:            botNames,
-		WSURL:               m.WSURL,
-		CorpID:              m.CorpID,
-		CorpSecret:          m.CorpSecret,
-		DefaultReplyMode:    m.DefaultReplyMode,
-		CreatedAt:           m.CreatedAt,
-		UpdatedAt:           m.UpdatedAt,
+		ID:                    m.ID,
+		ChannelID:             m.ChannelID,
+		Type:                  m.Type,
+		DefaultAgent:          m.DefaultAgent,
+		AllowedAgents:         allowedAgents,
+		AutoRouteEnabled:      m.AutoRouteEnabled,
+		AutoRouteMention:      m.AutoRouteMention,
+		AutoRouteClassifier:   m.AutoRouteClassifier,
+		Enabled:               m.Enabled,
+		WebhookPath:           m.WebhookPath,
+		WebhookSecret:         m.WebhookSecret,
+		IPWhitelist:           ipList,
+		AppToken:              m.AppToken,
+		DefaultUids:           uids,
+		WebhookURL:            m.WebhookURL,
+		BotID:                 m.BotID,
+		BotSecret:             m.BotSecret,
+		BotNames:              botNames,
+		WSURL:                 m.WSURL,
+		CorpID:                m.CorpID,
+		CorpSecret:            m.CorpSecret,
+		DefaultReplyMode:      m.DefaultReplyMode,
+		IlinkBotToken:         m.IlinkBotToken,
+		IlinkBotID:            m.IlinkBotID,
+		IlinkOwnerUserID:      m.IlinkOwnerUserID,
+		IlinkBaseURL:          m.IlinkBaseURL,
+		IlinkGeneration:       m.IlinkGeneration,
+		IlinkSessionExpiredAt: m.IlinkSessionExpiredAt,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
 	}
 }

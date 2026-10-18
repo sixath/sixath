@@ -82,7 +82,7 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 	// AutoMigrate 创建/更新表结构（按架构设计 docs/architecture_design.md）
 	if err := db.AutoMigrate(
 		&model.Tool{}, &model.Agent{}, &model.AgentTool{}, &model.ChatSession{}, &model.ChatMessage{}, &model.ChatAttachment{},
-		&model.Channel{}, &model.ChannelRuntimeStatus{}, &model.ChannelPeerSession{}, &model.CronTask{}, &model.CronRun{},
+		&model.Channel{}, &model.ChannelRuntimeStatus{}, &model.ChannelPeerSession{}, &model.ChannelIlinkPeer{}, &model.ChannelIlinkState{}, &model.CronTask{}, &model.CronRun{},
 		&model.User{}, &model.Org{}, &model.OrgMember{}, &model.UserToken{},
 		&model.OrgInvite{}, &model.EmailVerifyToken{},
 		&model.UserIdentity{}, &model.AuthEphemeral{},
