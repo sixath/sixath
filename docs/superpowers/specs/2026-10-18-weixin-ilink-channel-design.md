@@ -1,7 +1,7 @@
 # 微信 iLink 机器人渠道（`weixin_ilink`）
 
 **日期**: 2026-10-18  
-**状态**: 设计已确认，待写实现计划  
+**状态**: 设计已确认（rev2：吸收 spec 审阅意见），待写实现计划  
 **方案**: Gateway 负责 iLink 长轮询入站与对话回复；Portal 负责扫码登录、渠道/名册真相源与出站推送（Cron / `send_to_weixin`）  
 **关联**:
 - [`2026-08-09-inbound-gateway-design.md`](./2026-08-09-inbound-gateway-design.md)（入站 Gateway 契约）
@@ -18,20 +18,24 @@
 | 项 | 选择 |
 |----|------|
 | 能力范围 | **入站对话** + **出站推送**（Cron 投递、Agent 工具） |
-| 账号模型 | **一个 Portal 渠道 = 一个 iLink bot 账号**；管理员在 Portal 扫码登录 |
-| 访问控制 | **对端白名单**；首次发言自动入名册（默认拒绝），管理员在 Portal 放行；扫码人自动放行 |
+| 账号模型 | **一个 Portal 渠道 = 一个 iLink bot 账号**；在 Portal 渠道页扫码登录 |
+| 访问控制 | **对端白名单**（名册表）；首次发言自动入名册、默认拒绝，在 Portal 放行；扫码人自动放行 |
 | 推送目标 | **两种都支持**：推回发起人（会话反查自动回填）+ Portal 从名册手选 |
 | 架构 | **方案 A**：Gateway 收 + 回复；Portal 登录 + 出站直发 `sendmessage` |
-| 协议代码 | Gateway / Portal 两个 Go 模块**各放一份精简客户端**，共用 JSON fixture 测试 |
-| 非目标（一期） | 图片/文件收发、群聊、微信内 HITL、`sendtyping`、多副本分布式租约、按 sixath 用户身份跑 Agent |
+| Turn 调用 | Gateway 用 **`TurnsStream`**（同 `wecom_bot`），不受 Portal HTTP 120s 超时限制 |
+| 投递语义 | **至多一次**：游标在处理前提交；进程崩溃时在途 Turn 丢失（与 `wecom_bot` 一致） |
+| 新表外键 | 一律用 **`channels.id`（UUID，不可变）**；Runtime API 收 slug，服务端换算 |
+| 权限 | 扫码/名册接口与现有 Channel 管理接口**一致（登录即可）**；本期不引入管理员角色 |
+| 协议代码 | Gateway / Portal 两个 Go 模块**各放一份精简 HTTP 客户端**，共用同一组 JSON fixture（人工同步） |
+| 非目标（一期） | 图片/文件收发、群聊、微信内 HITL、`sendtyping`、多副本 leader 租约、按 sixath 用户身份跑 Agent、管理员 RBAC |
 
 ---
 
 ## 1. 问题
 
 - sixath 已有企微入站（`wecom_bot` 长连接）和推送（`wecom` 群 Webhook、`wxpusher`），但**没有个人微信的双向对话入口**。
-- 腾讯通过 iLink 机器人网关（微信 ClawBot 背后的 HTTP/JSON 协议）开放了"扫码授权 → 长轮询收消息 → 回消息"的能力，可以用来做 sixath 与微信的互通。
-- iLink 的协议形态与企微长连接不同（HTTP 长轮询、每条回复必须带 `context_token`、会话会过期需重扫），不能直接复用 `wecom_bot` adapter，需要新的渠道类型。
+- 腾讯通过 iLink 机器人网关（微信 ClawBot 背后的 HTTP/JSON 协议）开放了"扫码授权 → 长轮询收消息 → 回消息"的能力，可用于 sixath 与微信互通。
+- iLink 形态与企微长连接不同（HTTP 长轮询、回复必须带 `context_token`、会话会过期需重扫），不能直接复用 `wecom_bot` adapter，需要新的渠道类型。
 
 ---
 
@@ -39,21 +43,22 @@
 
 ### 2.1 目标
 
-1. 管理员在 Portal Channels 页创建 `type=weixin_ilink` 渠道，页面内扫码完成登录。
+1. 在 Portal Channels 页创建 `type=weixin_ilink` 渠道，页面内扫码完成登录。
 2. 白名单内的微信用户私聊 bot → 按渠道 default / 绑定 Agent 跑 Turn → 纯文本回复。
-3. 现有入站能力全部可用：`/switch`、`/who`、`/agent`、`/new`、`/unbind`、`@Agent` 自动路由、消息幂等。
+3. 复用现有入站能力：`/switch`、`/who`、`/agent`、`/new`、`/unbind`、`@Agent` 自动路由、进程内消息幂等。
 4. Cron 结果可推送到指定微信对端；在微信里创建的 Cron 默认推回发起人。
 5. Agent 可通过 `send_to_weixin` 工具主动给名册内已放行的对端发消息。
-6. 会话过期（`-14`）在 Portal 可见（`login_required`），重新扫码后自动恢复。
+6. 会话过期（`-14`）在 Portal 持续可见为 `login_required`，重新扫码后自动恢复。
 
 ### 2.2 非目标
 
-- 图片、文件、语音的收发（`getuploadurl` + CDN AES 上传）。非文本入站统一回复"暂只支持文字消息"。
-- 群聊（协议有 `group_id` 字段，但公开实现主要是单聊）。
-- 在微信内完成 HITL 确认：fail-closed，提示去 Web。
-- 输入中提示（`sendtyping` / `getconfig` 的 `typing_ticket`）。
-- 多 Gateway 副本的分布式 leader 租约：沿用 `leadership.AlwaysLeader`，单副本约束同 `wecom_bot`。
-- 把微信用户绑定到 sixath 用户、按其身份/权限跑 Agent。
+- 图片、文件、语音收发（`getuploadurl` + CDN AES 上传）。非文本入站统一回复"暂只支持文字消息"。
+- 群聊（协议有 `group_id`，公开实现主要是单聊）。
+- 微信内 HITL 确认：fail-closed，提示去 Web。
+- 输入中提示（`sendtyping` / `getconfig`）。
+- 多 Gateway 副本 leader 租约：与 `wecom_bot` 相同，**单副本约束**写入文档，不接 `leadership`。
+- 微信用户绑定 sixath 用户。
+- 管理员角色 / Channel ACL（现有 Channel 接口也没有，单独立项）。
 
 ---
 
@@ -61,17 +66,17 @@
 
 | 项 | 内容 |
 |----|------|
-| 基址 | `https://ilinkai.weixin.qq.com`（可配置） |
+| 基址 | 默认 `https://ilinkai.weixin.qq.com`；渠道级可覆盖（`ilink_base_url`，登录返回 `baseurl` 时写入）。扫码前一律用默认基址 |
 | 通用请求头 | `Content-Type: application/json`、`AuthorizationType: ilink_bot_token`、`Authorization: Bearer {bot_token}`、`X-WECHAT-UIN: base64(随机 uint32 十进制串)` |
-| 通用 body | `base_info: { channel_version }` |
-| 扫码登录 | `GET /ilink/bot/get_bot_qrcode?bot_type=3` → 二维码；`GET /ilink/bot/get_qrcode_status?qrcode=…` → `wait` / `scaned` / `confirmed` / `expired`；`confirmed` 时返回 `bot_token`、`ilink_bot_id`、`ilink_user_id`（扫码人）、可选 `baseurl` |
-| 收消息 | `POST /ilink/bot/getupdates`，body `{ get_updates_buf }`（首次 `""`）；服务端挂起至有消息或约 35s；响应 `msgs[]` + 新 `get_updates_buf` + `longpolling_timeout_ms` |
-| 消息字段 | `message_id`、`from_user_id`（`…@im.wechat`）、`to_user_id`（`…@im.bot`）、`message_type`（1=用户，2=bot）、`context_token`、`item_list[]`（`type=1` → `text_item.text`） |
-| 发消息 | `POST /ilink/bot/sendmessage`，body `msg: { from_user_id:"", to_user_id, client_id, message_type:2, message_state:2, context_token, item_list:[{type:1,text_item:{text}}] }`；成功通常为空对象 |
-| `context_token` | **回复必需**；缺失时服务端返回 200 但消息不投递。只能由对端先发消息获得；按 `(channel, peer)` 缓存最近一次 |
-| 会话过期 | `ret` 或 `errcode` = `-14`（`session timeout`）→ 停止收发、清游标、重新扫码 |
+| 通用 body | `base_info: { channel_version }`；`channel_version` 为代码常量（两模块各一份） |
+| 扫码登录 | `GET /ilink/bot/get_bot_qrcode?bot_type=3` → 二维码；`GET /ilink/bot/get_qrcode_status?qrcode=…` → `wait` / `scaned` / `confirmed` / `expired`；`confirmed` 返回 `bot_token`、`ilink_bot_id`、`ilink_user_id`（扫码人）、可选 `baseurl`。**疑似服务端挂起的长轮询**，见 §10 |
+| 收消息 | `POST /ilink/bot/getupdates`，body `{ get_updates_buf }`（首次 `""`）；服务端挂起至有消息或约 35s；响应 `msgs[]` + 新 `get_updates_buf` |
+| 消息字段 | `message_id`、`from_user_id`（`…@im.wechat`）、`message_type`（1=用户，2=bot）、`context_token`、`item_list[]`（`type=1` → `text_item.text`） |
+| 发消息 | `POST /ilink/bot/sendmessage`，`msg: { from_user_id:"", to_user_id, client_id, message_type:2, message_state:2, context_token, item_list:[{type:1,text_item:{text}}] }` |
+| `context_token` | **回复必需**；缺失时服务端返回 200 但不投递。只能由对端先发消息获得；按 `(channel, peer)` 缓存最近一次 |
+| 会话过期 | `ret` 或 `errcode` = `-14` → 停止收发、清游标、重新扫码 |
 
-客户端侧超时（长轮询无响应）视为空批次，直接进入下一轮，不算错误。
+客户端侧超时（长轮询无响应）视为空批次。
 
 ---
 
@@ -86,10 +91,10 @@
 └─────┬──────┘                                     │  → slash / 自动路由 → Turn  │
       │                                            └──────────┬──────────────────┘
       │ get_bot_qrcode / get_qrcode_status                    │ /runtime/v1
-      │ sendmessage（出站推送）                                ▼ 上报 context_token / 游标 / 状态
+      │ sendmessage（出站推送）                                ▼ 名册 / 游标 / 会话失效 / 心跳
       │                                            ┌─────────────────────────────┐
       └───────────────────────────────────────────▶│ Portal                      │
-                                                   │  扫码登录 · 渠道 / 名册 CRUD │
+                                                   │  扫码登录 · 渠道 / 名册      │
                                                    │  Cron 投递 · send_to_weixin │
                                                    └─────────────────────────────┘
 ```
@@ -98,160 +103,219 @@
 
 | 组件 | 做什么 | 不做什么 |
 |------|--------|----------|
-| **Gateway** | iLink 长轮询、入站归一化、名册上报、白名单拦截、复用现有 slash/自动路由/Resolve/Turn 流水线、`sendmessage` 回复、Runtime Status 上报 | 不持有 token/白名单真相；不做扫码登录；不做出站推送 |
-| **Portal** | 渠道 CRUD 与扫码登录、名册（白名单 + `context_token`）与游标持久化、Cron `weixin_ilink` 投递、`send_to_weixin` 工具 | 不跑长轮询 |
+| **Gateway** | iLink 长轮询、入站归一化、名册上报、白名单拦截、复用 slash/自动路由/Resolve/`TurnsStream` 流水线、`sendmessage` 回复、心跳与会话失效上报 | **不是** token / 白名单的真相源（只用同步下发的副本）；不做扫码；不做出站推送 |
+| **Portal** | 渠道 CRUD 与扫码登录、名册与游标持久化、会话失效状态、Cron `weixin_ilink` 投递、`send_to_weixin` 工具 | 不跑长轮询 |
 
-数据流方向保持不变：**只有 Gateway → Portal**，Portal 不调用 Gateway。Gateway 停机不影响 Cron 推送（只要 `context_token` 仍有效）。
+数据流方向不变：**只有 Gateway → Portal**。Gateway 停机不影响 Cron 推送（只要 `context_token` 仍有效）。
 
-### 4.2 组件清单
+### 4.2 改动清单
 
-**Gateway**
+**Gateway（`gateway/`）**
 
-- `internal/ilink/`：精简协议客户端（请求头、`GetUpdates`、`SendText`、`-14` 识别）+ 入站归一化（取文本、判非文本）+ 文本整形（Markdown 简化、按约 1800 字切分）。
-- `internal/adapter/weixin_ilink_manager.go`：对齐 `WecomBotManager`，`Reconcile(prev, next)` 按 Portal 同步结果启停/重启 runner；`ConnectionConfigChanged` 覆盖 `bot_token` / `base_url` 变化；仅 leader 运行。
-- `internal/adapter/weixin_ilink.go`：runner 循环与单条消息处理（见 §6.2）。
-- `internal/runtimeclient`：新增名册上报、游标读写接口的客户端方法。
-- `internal/channel.Channel`：新增 `BotToken`、`BaseURL`、`AllowedPeers` 字段。
+| 位置 | 改动 |
+|------|------|
+| `internal/ilink/`（新） | 精简协议客户端：请求头、`GetUpdates`、`SendText`、`-14` 识别；入站归一化（取文本 / 判非文本）；文本整形（Markdown 简化、约 1800 字切分）。只做 HTTP，不依赖 runtimeclient |
+| `internal/channel/registry.go` | `Channel` 新增 `BotToken`、`BaseURL`、`Generation`、`SessionExpired`、`AllowedPeers` |
+| `internal/runtimeclient/client.go` | `gatewayChannelItem` 映射新字段；新增 `ReportIlinkPeer`、`GetIlinkCursor`、`PutIlinkCursor`、`ReportIlinkSessionExpired` |
+| `internal/adapter/weixin_ilink_manager.go`（新） | 对齐 `WecomBotManager` 的 `Reconcile` / start / stop / drain。**可运行条件** = `enabled && BotToken != "" && !SessionExpired`。新增独立的 `IlinkConnectionChanged(a, b)`：比较 `BotToken`、`BaseURL`、`Generation`；**不含 `AllowedPeers`**（改白名单不重启 runner）。不改动现有 `ConnectionConfigChanged` |
+| `internal/adapter/weixin_ilink.go`（新） | runner 循环、心跳、peer 队列、单条消息处理（§6.2） |
+| `internal/channelsync/sync.go` | `Config.Manager` 改为可组合多个 `Reconciler`（或新增 `MultiReconciler`），同时驱动 `WecomBotManager` 与 `WeixinIlinkManager` |
+| `cmd/gateway/main.go` | 装配新 manager |
+| `README.md` | 渠道一览、单副本约束、验收清单 |
 
-**Portal**
+**Portal（`portal/`）**
 
-- `internal/ilink/`：精简协议客户端（扫码登录两接口 + `SendText`）。
-- `internal/channel/`：`PushToWeixinIlink(ctx, ch, peerID, text)`。
-- 渠道 service：扫码登录接口、名册接口（列表 / 放行 / 拒绝 / 备注）。
-- `/runtime/v1`：名册上报、游标读写接口；`gateway/channels` 下发 iLink 字段。
-- Cron executor：`deliverChannel` 新增 `weixin_ilink` 分支；`cronjob` 工具的"推回发起人"回填。
-- `chat`：`send_to_weixin` 工具注册，通过 `ChannelCatalogProvider` 绑定（`channelTypeTools["weixin_ilink"] = {"send_to_weixin"}`）。
-- Web：Channels 表单（扫码弹窗、名册 Tab）、Cron 表单（对端下拉）。
+| 位置 | 改动 |
+|------|------|
+| `internal/ilink/`（新） | 精简协议客户端：`GetBotQRCode`、`GetQRCodeStatus`、`SendText`、`-14` 识别。只做 HTTP |
+| `internal/data/model/` | `Channel` 新列（§5.1）；新模型 `ChannelIlinkPeer`、`ChannelIlinkState`；`CronTask.DeliveryPeerID` |
+| `internal/data/data.go` | 新模型加入 `AutoMigrate` 列表与 `ensureUTF8MB4` |
+| `migrations/023_weixin_ilink_channel.sql` | 手工补充迁移（编号以实现时最新为准） |
+| `internal/data/channel_mysql.go` | `ListGatewayChannels` 类型过滤加入 `weixin_ilink`；`Update` 可改字段白名单**不得**包含 `ilink_bot_token` / `ilink_generation` / `ilink_session_expired_at`（只由扫码与失效流程写）；新增 `ListIlinkByAgent(agentID)`（default 或 allowed 包含该 Agent、且 enabled） |
+| `internal/data/channel_peer_mysql.go` | 新增 `GetBySessionID(sessionID)`（`session_id` 非唯一索引；多行时取 `updated_at` 最新） |
+| `internal/data/channel_ilink_mysql.go`（新） | 名册与状态表 repo |
+| `internal/biz/channel.go` + `data/channel_mysql.go` `channelModelToBiz` | `ChannelMeta` 新增 `HasIlinkBotToken`、`IlinkBotID`、`IlinkOwnerUserID`、`IlinkBaseURL`、`IlinkGeneration`、`IlinkSessionExpiredAt`（token 明文只在 usecase 内部取用） |
+| `internal/biz/channel_runtime.go` | `DeriveRuntimeStatus` 支持 `weixin_ilink`（§5.5 优先级） |
+| `internal/biz/identity.go` + `data/auth_ephemeral_mysql.go` | `AuthEphemeralRepo` 新增非消费读 `Get(ctx, id, kind, now)` |
+| `internal/biz/weixin_ilink.go`（新） | `WeixinIlinkUsecase`：扫码登录编排、名册上报 / 放行 / 备注、游标 CAS、会话失效、`Push(ctx, channelUUID, peerID, text)` |
+| `internal/biz/channel_usecase.go` | 删除渠道时级联清理名册与状态表 |
+| `internal/biz/cron.go` + `api/cron/v1/cron.proto` + `cron_service` | create / update / reply 加 `delivery_peer_id`；create/update 时校验（§6.3）；`CronUsecase` 注入名册 repo，同步改 wire 装配 |
+| `api/channel/v1/channel.proto` + `service/channel.go` | 回复加 `has_bot_token`、`ilink_bot_id`、`ilink_owner_user_id`（登录态由既有 `runtime_status` 表达，不另加字段）；新增扫码与名册接口（§6.1、§6.4） |
+| `internal/runtime/` + `server/http.go` | Runtime API（§5.6） |
+| `internal/cron/executor.go` | `deliverChannel` 新增 `weixin_ilink` 分支，调 `WeixinIlinkUsecase.Push` |
+| 推回发起人回填 | 在 Portal 的 `portalCronClient.Create`（framework `CronJobClient` 的 Portal 实现）里做，见 §6.3 |
+| `internal/chat/` + `service/wecom_bind.go` 同类位置 | 注册 `send_to_weixin`；`CatalogWiringInput` 支持多个渠道 provider（不再只有单个 `WecomChannelID` 槽位）；`channelTypeTools["weixin_ilink"] = {"send_to_weixin"}` |
+
+**Framework（`framework/`）**
+
+| 位置 | 改动 |
+|------|------|
+| `tool/cronjob_tool.go` | `CronJobCreateInput` / 工具 schema 新增可选 `delivery_peer_id`；**未指定 `delivery_mode` 时保持空串**，不再在工具层默认 `"none"`（由 Portal 实现兜底）。framework 不含任何微信逻辑 |
+
+**Web（`web/`）**
+
+| 位置 | 改动 |
+|------|------|
+| `pages/ChannelForm.tsx` | `weixin_ilink` 类型表单；"扫码登录"弹窗；名册 Tab（放行 / 拒绝 / 备注、最近预览、ID 尾号） |
+| `pages/ChannelList.tsx` | `RUNTIME_DOT_COLORS` 增加 `login_required`；类型列 |
+| `pages/CronTaskForm.tsx` | 选中 `weixin_ilink` 渠道时显示对端下拉 |
+| `api/client.ts` | 新接口与字段 |
 
 ---
 
 ## 5. 数据模型
 
-迁移：`portal/migrations/023_weixin_ilink_channel.sql`（编号以实现时最新为准）。
-
 ### 5.1 `channels` 新增列（仅 `type=weixin_ilink` 使用）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
-| `ilink_bot_token` | varchar(512) | 扫码所得凭证。**API 不回显明文**，对外只给 `has_bot_token`（同 Agent `has_api_key`） |
-| `ilink_bot_id` | varchar(128) | bot 账号 ID（`…@im.bot`），展示/校验用 |
-| `ilink_owner_user_id` | varchar(128) | 扫码人微信 ID（`…@im.wechat`） |
-| `ilink_base_url` | varchar(512) | 可选；空 = `https://ilinkai.weixin.qq.com`；登录返回 `baseurl` 时写入 |
+| `ilink_bot_token` | varchar(512) | 扫码所得凭证。API 不回显，只给 `has_bot_token` |
+| `ilink_bot_id` | varchar(128) | bot 账号 ID（`…@im.bot`） |
+| `ilink_owner_user_id` | varchar(128) | 扫码人微信 ID |
+| `ilink_base_url` | varchar(512) | 空 = 默认基址 |
+| `ilink_generation` | int, default 0 | 每次扫码成功 +1；用于 runner 重启判定与游标 CAS |
+| `ilink_session_expired_at` | datetime null | 非空 = 会话已失效（`-14`），需重扫。扫码成功时清空 |
 
-`default_agent`、`allowed_agents`、`auto_route_*`、`enabled` 直接复用。`Type` 注释补上 `weixin_ilink`。
+`default_agent`、`allowed_agents`、`auto_route_*`、`enabled` 复用。`Type` 注释补 `weixin_ilink`（12 字符，`size:16` 足够）。
 
-### 5.2 新表 `channel_ilink_peers`（对端名册，白名单唯一真相）
+### 5.2 新表 `channel_ilink_peers`（名册；白名单唯一真相）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
-| `channel_id` | varchar(64) PK | |
-| `peer_id` | varchar(128) PK | 微信用户 ID |
+| `channel_uuid` | varchar(36) PK | `channels.id` |
+| `peer_id` | varchar(128) PK | **原始**微信用户 ID（无 `user:` 前缀） |
 | `allowed` | bool, default false | 白名单标志 |
-| `remark` | varchar(128) | 管理员备注名（iLink 不提供昵称） |
-| `context_token` | varchar(512) | 最近一次入站消息的 token；**API 不回显**，只给 `has_context_token` |
-| `context_token_at` | datetime null | token 获取时间 |
-| `last_inbound_at` | datetime null | 最近发言时间 |
-| `last_preview` | varchar(160) | 最近发言前 40 字，帮管理员识别 |
+| `remark` | varchar(128) | 备注名（iLink 不提供昵称） |
+| `context_token` | varchar(512) | 最近一次入站 token；API 不回显，只给 `has_context_token` |
+| `context_token_at` | datetime null | |
+| `last_inbound_at` | datetime null | |
+| `last_preview` | varchar(160) | 最近发言前 40 字 |
 | `created_at` / `updated_at` | datetime | |
 
-为什么白名单放名册而不是 `channels` 列：微信 ID 是不透明串，管理员事先不知道；必须先"看到"对端再放行，名册天然承载这一流程。
+白名单放名册而不是 `channels` 列：微信 ID 是不透明串，管理员必须先"看到"对端再放行。
 
 ### 5.3 新表 `channel_ilink_state`（长轮询运行时状态）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
-| `channel_id` | varchar(64) PK | |
-| `get_updates_buf` | text | 游标；重扫登录 / `-14` 时清空 |
+| `channel_uuid` | varchar(36) PK | `channels.id` |
+| `generation` | int | 写入该游标时的 `ilink_generation` |
+| `get_updates_buf` | text | 游标 |
 | `updated_at` | datetime | |
 
-不放进 `channels`，避免游标高频变化干扰 Gateway 配置 diff 与 `updated_at` 语义。
+不放进 `channels`：避免高频变化干扰 Gateway 配置 diff 与 `updated_at` 语义。
 
 ### 5.4 `cron_tasks` 新增列
 
 | 列 | 说明 |
 |----|------|
-| `delivery_peer_id` varchar(128) | `delivery_mode=channel` 且渠道为 `weixin_ilink` 时**必填** |
+| `delivery_peer_id` varchar(128) | 原始微信用户 ID；`delivery_mode=channel` 且渠道为 `weixin_ilink` 时必填 |
 
-### 5.5 Runtime Status
+### 5.5 Runtime Status 派生
 
-复用 `channel_runtime_status`；`weixin_ilink` 的状态集：`connected` / `reconnecting` / `login_required` / `disabled`，读路径派生 `unknown`（无心跳或超过 90s）。`login_required` 时 `last_error` 写原因（未登录 / 会话过期）。
+`weixin_ilink` 读路径优先级（高 → 低）：
 
-无 `bot_token` 的渠道：Gateway 不启动 runner，Portal 读路径直接派生 `login_required`。
+1. `enabled=false` → `disabled`
+2. `ilink_bot_token` 为空 → `login_required`（原因：未登录）
+3. `ilink_session_expired_at` 非空 → `login_required`（原因：会话过期，请重新扫码）——**不受心跳新鲜度影响**
+4. 心跳缺失或超过 90s → `unknown`
+5. 否则取行内 `state`（`connected` / `reconnecting`）
 
-### 5.6 Gateway 同步下发
+Gateway runner 运行期间**独立于长轮询**每 ≤30s 上报一次心跳（长轮询单轮约 35s，不能兼作心跳）。
 
-`GET /runtime/v1/gateway/channels` 对 `weixin_ilink` 额外返回：
+### 5.6 Runtime API（Gateway → Portal，service token 鉴权）
 
-```json
-{
-  "bot_token": "…",
-  "base_url": "https://ilinkai.weixin.qq.com",
-  "allowed_peers": ["o9cq…@im.wechat"]
-}
-```
+路径中的 `{channel_id}` 为 slug（Gateway 侧已知），Portal 内部换算为 `channels.id`。
 
-`allowed_peers` 由名册 `allowed=true` 派生。该接口本就以 service token 下发 `wecom_bot` secret，安全级别一致。白名单改动最长约 15s（一个同步周期）生效。
+| 方法 & 路径 | 请求体 | 说明 |
+|-------------|--------|------|
+| `GET /runtime/v1/gateway/channels` | — | 既有接口；对 `weixin_ilink` 额外返回 `bot_token`、`base_url`、`generation`、`session_expired`、`allowed_peers` |
+| `POST /runtime/v1/gateway/channels/{channel_id}/ilink/peers` | `{ generation, peer_id, context_token, preview, at }` | upsert 名册；新对端 `allowed=false`。**`generation` 不匹配 → `409 ILINK_GENERATION_MISMATCH`**，不写入（防止换号后旧 runner 写回旧 bot 的 `context_token`），runner 收到后退出。返回 `{ allowed }`（仅供日志，白名单判定仍以同步副本为准） |
+| `GET /runtime/v1/gateway/channels/{channel_id}/ilink/cursor` | — | `{ generation, get_updates_buf }`；`generation` 与当前不符时返回空游标 |
+| `PUT /runtime/v1/gateway/channels/{channel_id}/ilink/cursor` | `{ generation, get_updates_buf }` | **CAS**：`generation != channels.ilink_generation` → `409 ILINK_GENERATION_MISMATCH`，runner 丢弃并退出 |
+| `POST /runtime/v1/gateway/channels/{channel_id}/ilink/session-expired` | `{ generation, reason }` | `generation` 匹配时写 `ilink_session_expired_at` 并清游标；不匹配忽略（旧 runner 迟到） |
+| `POST /runtime/v1/gateway/channels/{channel_id}/status` | 既有 `StatusBody` | 心跳 / `connected` / `reconnecting` |
+
+`allowed_peers` 由名册派生；该接口本就以 service token 下发 `wecom_bot` secret，安全级别一致。白名单改动最长约 15s 生效。
 
 ---
 
 ## 6. 流程
 
-### 6.1 扫码登录（Portal，仅管理员）
+### 6.1 扫码登录（Portal）
 
-1. 管理员创建 `weixin_ilink` 渠道 → 无 token，状态 `login_required`。
-2. 点"扫码登录" → `POST /api/v1/channels/{id}/ilink/login` → Portal 调 `get_bot_qrcode` → 返回 `{ qrcode, qrcode_img_content }`，前端渲染二维码。
-3. 前端每 2s 轮询 `GET /api/v1/channels/{id}/ilink/login/{qrcode}` → Portal 调 `get_qrcode_status`：
-   - `wait` / `scaned`：原样返回，前端提示"等待扫码 / 已扫码，请在手机确认"。
-   - `expired`：前端提示并允许"刷新二维码"（重新走第 2 步）。
-   - `confirmed`：**单事务**写入 `ilink_bot_token` / `ilink_bot_id` / `ilink_owner_user_id` / `ilink_base_url`，清空 `channel_ilink_state.get_updates_buf`，upsert owner 到名册并 `allowed=true`。返回 `{ status:"confirmed", bot_id }`。
-4. 渠道配置变化 → Gateway 下一次同步时 `ConnectionConfigChanged=true` → 重启 runner → `connected`。
+权限：与现有 Channel 管理接口一致（登录用户）。
 
-二维码状态不落库：每次轮询直接透传 iLink 结果，无需 Portal 端会话。
+1. 创建 `weixin_ilink` 渠道 → 无 token，派生 `login_required`。
+2. `POST /api/v1/channels/{id}/ilink/login` → Portal 用默认基址调 `get_bot_qrcode` → `AuthEphemeralRepo.Put`（`id = hex(sha256(qrcode))`（64 字符，适配 `auth_ephemeral.id size:64`），`kind = ilink_qrcode`，payload = channel uuid，TTL 5 分钟）→ 返回 `{ qrcode, qrcode_img_content }`。
+3. 前端调用 `GET /api/v1/channels/{id}/ilink/login/status?qrcode=…`：
+   - Portal 先用 `AuthEphemeralRepo.Get`（**新增的非消费读**：`Get(ctx, id, kind, now)`）校验 `qrcode` 属于该渠道，否则 `404`（防止把别人的确认结果写进任意渠道）。只在 `confirmed` 时调用 `Consume`。
+   - Portal 调 `get_qrcode_status`，单次最长等待 25s（兼容服务端挂起式长轮询），返回后前端**立即**发起下一次；若服务端立即返回，Portal 不做额外等待，前端最小间隔 1s。
+   - `wait` / `scaned`：提示"等待扫码 / 已扫码，请在手机确认"。
+   - `expired`：提示并允许"刷新二维码"（回到第 2 步）。
+   - `confirmed`：**单事务**：
+     - 写 `ilink_bot_token` / `ilink_bot_id` / `ilink_owner_user_id` / `ilink_base_url`；`ilink_generation += 1`；`ilink_session_expired_at = NULL`；
+     - 清空 `channel_ilink_state`；
+     - 若 `ilink_bot_id` 与旧值不同（换号）：清空该渠道所有名册的 `context_token`，保留 `allowed` / `remark`；
+     - upsert owner 到名册并 `allowed=true`；
+     - `AuthEphemeralRepo.Consume` 作废该二维码记录。
+4. Gateway 下次同步时 `IlinkConnectionChanged=true`（`Generation` 变化）→ 重启 runner → 旧 runner 迟到的游标写入被 CAS 拒绝。
 
 ### 6.2 入站对话（Gateway runner）
 
 ```text
-启动 → GET 游标
+启动 → GET 游标（generation 不符 → 空游标）
+心跳 goroutine：每 ≤30s 上报 connected / reconnecting
 loop:
-  getupdates(buf) ──超时──▶ 空批次，继续
-       │ -14 ──▶ §7 会话过期
+  getupdates(buf) ──客户端超时──▶ 空批次，继续
+       │ -14 ──▶ §7 会话过期（上报后 runner 挂起，不再请求 iLink）
        │ 网络/5xx ──▶ 退避重试（reconnecting）
        ▼
   for msg in msgs where message_type == 1:
-     ① 上报名册：context_token / last_inbound_at / last_preview   （在白名单之前）
-     ② 幂等：ilink:{channel_id}:{message_id} 已处理 → 跳过
-     ③ 白名单：peer ∉ allowed_peers → 回"无权限，请联系管理员开通（ID 尾号 xxxx）"，结束
-     ④ 非文本 → 回"暂只支持文字消息"，结束
-     ⑤ 投递到该 peer 的串行队列
-  提交新游标
+     ① 上报名册（generation / context_token / preview / at）——在白名单之前；409 → 退出
+  ② PUT 游标（CAS；失败重试 3 次，仍失败记日志后继续——见 §7）
+  for msg in msgs where message_type == 1:
+     ③ 进程内幂等：ilink:{channel_id}:{message_id} 已见 → 跳过
+     ④ 白名单：每条消息从 Registry.Get(channelID) 读取最新 AllowedPeers；
+        不在名单 → 回"无权限，请联系管理员开通（ID 尾号 xxxx）"（同一 peer 10 分钟内最多回一次），结束
+     ⑤ 非文本 → 回"暂只支持文字消息"，结束
+     ⑥ 投递到该 peer 的串行队列（队列上限 5；满则回"消息太多，请稍后再试"）
 ```
+
+**先提交游标、再处理**：语义为至多一次。崩溃时在途 / 排队中的 Turn 丢失，与 `wecom_bot` 一致；不承诺跨进程去重。
 
 单条消息在 peer 队列中的处理（复用现有流水线，peer 键 `user:{from_user_id}`）：
 
-1. pending `/switch` 序号 → slash 指令 → `prepareAutoRoute`（`@Agent` / 分类器）→ Resolve → `TurnsFinal(reply_mode=final)`，超时沿用 600s。
-2. 15s 内 Turn 未结束 → 先 `sendmessage` 一条"处理中…"（每条入站最多一次）。
-3. 回复：Markdown 简化为纯文本（去标题/加粗标记、代码块保留内容）→ 按约 1800 字切分 → 依次 `sendmessage`，均携带本条消息的 `context_token`。
-4. 只回助手正文，不含工具时间线（同 `wecom_bot`）。
+1. pending `/switch` 序号 → slash 指令 → `prepareAutoRoute`（`@Agent` / 分类器）→ Resolve → **`TurnsStream`**，Gateway 侧 context 超时 600s（同 `wecom_bot` 的 `turn_timeout`）。
+2. 消费流事件：15s 内未收到 final → 先 `sendmessage` 一条"处理中…"（每条入站最多一次）；HITL 识别复用 `wecom_progress` 现有逻辑，命中则回"该操作需要在 Web 端确认"。
+3. 回复：只取助手正文（不含工具时间线）→ Markdown 简化为纯文本（去标题 / 加粗标记，代码块保留内容）→ 约 1800 字切分 → 依次 `sendmessage`，均带本条消息的 `context_token`。
 
-并发模型：**同一 peer 串行，不同 peer 并发**；长 Turn 不阻塞长轮询与其他对端。游标在批次分派后提交；进程崩溃时在途 Turn 丢失，与 `wecom_bot` 语义一致，重复投递由幂等兜底。
+并发：同 peer 串行、跨 peer 并发；peer 队列空闲 5 分钟回收。
 
 ### 6.3 出站推送（Portal）
 
-统一入口：
+统一入口在 biz 层：
 
 ```go
-func PushToWeixinIlink(ctx context.Context, ch *biz.Channel, peerID, text string) error
+func (uc *WeixinIlinkUsecase) Push(ctx context.Context, channelUUID, peerID, text string) error
 ```
 
-1. 查名册：不存在或 `allowed=false` → `目标 {peer} 未在白名单`；`context_token` 为空 → `对方尚未与 bot 对话，无法主动推送`。均**不调用** iLink。
-2. 文本整形与切分同 §6.2，逐条 `sendmessage`。
-3. `-14` → 返回错误，并把该渠道 Runtime Status 写为 `login_required`。
+1. 查名册：不存在或 `allowed=false` → `目标 {peer} 未在白名单`；`context_token` 为空 → `对方尚未与 bot 对话，无法主动推送`；渠道 `login_required` → `微信 bot 需重新扫码登录`。均**不调用** iLink。
+2. 整形与切分同 §6.2，逐条调用 `internal/ilink.SendText`。**不重试**：`sendmessage` 失败无法判断是否已送达，重试会导致重复消息；Recorder 记录时 `MaxAttempts=1`。
+3. 返回 `-14` → 写 `ilink_session_expired_at`（等价于 Runtime `session-expired`，`generation` 取当前值），并返回错误。
 
 **Cron 投递**
 
-- `deliverChannel` 新增 `case "weixin_ilink"`：要求 `delivery_peer_id`，调用 `PushToWeixinIlink`；错误信息更新"仅支持 …"列表。
-- **Portal 手选**：Cron 表单选中 `weixin_ilink` 渠道后显示对端下拉（名册中 `allowed=true`，显示 `remark` 或 ID 尾号）。
-- **推回发起人**：`cronjob` 工具在 create 时若未指定投递方式，且当前会话可经 `channel_peer_sessions` 反查到 `weixin_ilink` 渠道 + peer，则自动回填 `delivery_mode=channel`、`delivery_channel_id`、`delivery_peer_id`。显式指定的投递参数优先。`cronjob` 工具新增可选参数 `delivery_peer_id`。
+- 校验（create / update 时）：`delivery_mode=channel` 且渠道为 `weixin_ilink` → `delivery_peer_id` 必填，且须在该渠道名册中 `allowed=true`。
+- `deliverChannel` 新增 `case "weixin_ilink"` → `WeixinIlinkUsecase.Push`；"仅支持 …"错误文案同步更新。
+- **Portal 手选**：Cron 表单选中 `weixin_ilink` 渠道后显示对端下拉（`allowed=true`，显示 `remark` 或 ID 尾号）。
+- **推回发起人**：在 Portal 的 `portalCronClient.Create` 中，当 `DeliveryMode == ""`：
+  1. 从 ctx 取 `tool.ContextKeySessionID`；
+  2. `channelPeerSessionRepo.GetBySessionID` 反查 `(channel slug, peer)`；
+  3. `channelRepo.GetByChannelID(slug)` 得到渠道；若 `type=weixin_ilink`，回填 `delivery_mode=channel`、`delivery_channel_id=channels.id`、`delivery_peer_id=strip("user:", peer)`；
+  4. 否则按现有逻辑默认 `none`。
+  
+  显式传入的投递参数始终优先。
 
 **`send_to_weixin` 工具**
 
@@ -259,10 +323,26 @@ func PushToWeixinIlink(ctx context.Context, ch *biz.Channel, peerID, text string
 |------|------|------|
 | `text` | 是 | 发送内容 |
 | `peer_id` | 否 | 省略时：当前会话来自 `weixin_ilink` → 发给当前对端；否则报错要求指定 |
+| `channel_id` | 否 | 渠道 slug；仅在下述解析无法唯一确定渠道时需要 |
 
-- 渠道绑定：`ChannelCatalogProvider` 注入 `channel_id` / `channel_type`，检索词 `微信`、`weixin`、`推送`。
-- 复用 `DeliveryRecorder` 记录投递，复用按会话频率限制（同 `send_to_wecom`）。
-- `peer_id` 必须在名册且已放行，校验在 `PushToWeixinIlink` 内统一完成。
+渠道解析顺序：
+
+1. 当前会话经 `GetBySessionID` 反查到 `weixin_ilink` 渠道 → 用它；
+2. 否则 `ListIlinkByAgent(agentID)` 恰好 1 个 → 用它；
+3. 否则若传了 `channel_id` 且在 2 的结果中 → 用它；
+4. 否则报错（列出可选渠道 slug）。
+
+注册条件：Agent 至少关联一个启用的 `weixin_ilink` 渠道（`ListIlinkByAgent` 非空）。检索词 `微信`、`weixin`、`推送`；复用 `DeliveryRecorder`（`MaxAttempts=1`）与按会话频率限制（同 `send_to_wecom`）。
+
+### 6.4 名册管理（Portal）
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/v1/channels/{id}/ilink/peers` | 列表：`peer_id`、`allowed`、`remark`、`has_context_token`、`last_inbound_at`、`last_preview` |
+| `PATCH /api/v1/channels/{id}/ilink/peers/{peer_id}` | 改 `allowed` / `remark` |
+| `DELETE /api/v1/channels/{id}/ilink/peers/{peer_id}` | 移出名册（下次发言会重新入册且默认拒绝） |
+
+权限同 §6.1。
 
 ---
 
@@ -270,15 +350,17 @@ func PushToWeixinIlink(ctx context.Context, ch *biz.Channel, peerID, text string
 
 | 场景 | 处理 |
 |------|------|
-| `getupdates` 网络错误 / 5xx | 指数退避 1s → 60s 封顶；上报 `reconnecting`（附 attempt / 下次间隔）；恢复后 `connected` |
-| `-14` 会话过期（入站） | 立即停止该渠道收发；清空游标；上报 `login_required`（`last_error=会话过期，请重新扫码`）；**不自动重试**，直到 `bot_token` 变化触发重启 |
-| 名册上报失败 | 记日志，不阻塞回复 |
-| 游标提交失败 | 保留在内存，下批一并提交；重复消息由幂等兜底 |
+| `getupdates` 网络错误 / 5xx | 指数退避 1s → 60s 封顶；心跳上报 `reconnecting`；恢复后 `connected` |
+| `-14`（入站） | 立即停止请求 iLink；调 `session-expired`；runner **挂起但保留在 manager 的 active 表**，避免 `Reconcile` 每 15s 重启；下次同步看到 `session_expired=true` 后 stop（`reportDisabled=false`，不写误导性的 `disabled`）；重扫后 `Generation` 变化再启动 |
+| 名册上报 `409` | 当前 runner 已过期（重扫 / 换号），丢弃本批并退出 |
+| 名册上报失败 | 记日志，不阻塞（`context_token` 可能缺失 → 该 peer 暂无法被主动推送，下次发言自愈） |
+| 游标 PUT 失败 | 重试 3 次仍失败：记日志并继续处理本批；若随后进程重启会重复拉取这批消息，可能重复回复（已知限制，仅在 Portal 不可用 + 进程重启叠加时发生） |
+| 游标 PUT `409` | 当前 runner 已过期（重扫过），丢弃本批并退出 |
 | Turn 超时 / 出错 | 回"处理失败：{简述}"，不静默丢弃 |
 | 回复需要 HITL | fail-closed："该操作需要在 Web 端确认" |
-| 出站 `-14` | 返回错误（Cron 记入 `delivery_error`）；渠道状态写 `login_required` |
-| 出站无 token / 不在白名单 | 明确报错，不调 iLink |
-| 日志脱敏 | `bot_token`、`context_token` 一律不打日志；Portal API 只给 `has_*` |
+| 出站 `-14` | 写 `ilink_session_expired_at`；返回错误（Cron 记入 `delivery_error`） |
+| 出站无 token / 不在白名单 / 需重扫 | 明确报错，不调 iLink |
+| 日志脱敏 | `bot_token`、`context_token` 一律不打日志；API 只给 `has_*` |
 
 ---
 
@@ -286,42 +368,57 @@ func PushToWeixinIlink(ctx context.Context, ch *biz.Channel, peerID, text string
 
 **协议层（Gateway、Portal 各一份）**
 
-- `httptest` 模拟 iLink：请求头齐全且 `X-WECHAT-UIN` 为合法 base64；`getupdates` 游标推进；客户端超时 → 空批次；`-14`（`ret` 与 `errcode` 两种）识别；`sendmessage` body 字段。
-- 两模块共用同一组 JSON fixture（`testdata/ilink/*.json`，按模块各拷一份，CI 校验内容一致），保证两份实现行为一致。
+- `httptest` 模拟 iLink：请求头齐全且 `X-WECHAT-UIN` 为合法 base64；`getupdates` 游标推进；客户端超时 → 空批次；`-14`（`ret` / `errcode` 两种）；`sendmessage` body。
+- 两模块各持一份 `testdata/ilink/*.json`（内容相同，人工同步）。
 
 **Gateway**
 
-- Manager `Reconcile`：启用/停用、`bot_token` 变化重启、无 token 不启动、非 leader 不启动。
-- 入站：名册上报先于白名单；白名单拒绝不跑 Turn；幂等去重；非文本提示；slash 与 `/switch` 两步；"处理中"计时器（Turn < 15s 不发、> 15s 发一次）；长文本切分；同 peer 串行 / 跨 peer 并发。
-- `-14` → 停止并上报 `login_required`；网络错误退避。
+- Manager：启用 / 停用、`Generation` 变化重启、无 token 或 `SessionExpired` 不启动、改 `AllowedPeers` **不**重启、`-14` 后挂起不被 `Reconcile` 反复拉起。
+- 入站：名册上报先于白名单；游标先于处理提交；白名单每条读 Registry（同步更新后立即生效）；"无权限"10 分钟限频；幂等去重；非文本提示；slash 与 `/switch` 两步；"处理中"（<15s 不发、>15s 发一次）；HITL fail-closed；长文本切分；同 peer 串行 / 跨 peer 并发；队列满提示。
+- 游标 / 名册上报 `409` → runner 退出；网络错误退避；心跳间隔 ≤30s。
+- `channelsync` 组合多个 reconciler。
 
 **Portal**
 
-- 扫码状态机 `wait` / `scaned` / `confirmed` / `expired`；`confirmed` 单事务（token、owner 放行、游标清空）。
-- 名册上报 upsert；放行/拒绝/备注接口；`gateway/channels` 下发 `allowed_peers`；API 不回显 token。
-- `deliverChannel` `weixin_ilink` 分支（缺 peer / 不在白名单 / 无 token / 成功 / `-14`）。
-- `cronjob` 推回发起人回填（有反查 / 无反查 / 显式参数优先）。
-- `send_to_weixin` 参数默认值与校验。
-- 迁移测试。
+- 扫码：`qrcode` 与渠道绑定校验；`wait` / `scaned` / `confirmed` / `expired`；`confirmed` 单事务（token、generation+1、清失效标记、清游标、owner 放行、换号清 token）。
+- Runtime API：名册 upsert（含 `generation` 不匹配 `409` 不写入）、游标 CAS（匹配 / 不匹配）、`session-expired` 迟到忽略、`gateway/channels` 下发字段与类型过滤。
+- `AuthEphemeralRepo.Get` 非消费读：多次轮询均可校验；`confirmed` 后 `Consume`，再轮询 `404`。
+- `DeriveRuntimeStatus` 五级优先级（含"失效 + 心跳新鲜"仍为 `login_required`）。
+- `channelRepo.Update` 无法写入 `ilink_bot_token`；删除渠道级联清理。
+- `Push`：缺 peer / 不在白名单 / 无 token / 需重扫 / 成功 / `-14` 写失效；不重试。
+- Cron：create/update 校验；`portalCronClient.Create` 回填（有反查 / 非 iLink 会话 / 显式参数优先 / framework 传空 mode）。
+- `send_to_weixin`：渠道解析四步、`peer_id` 默认值、注册条件。
 
 **端到端验收（写入 Gateway README）**
 
-1. Portal 创建渠道 → 扫码 → 约 15s 内状态 `connected`；owner 已在名册且放行。
-2. 非白名单微信号发消息 → 收到"无权限"；名册出现该对端与预览。
+1. 创建渠道 → 扫码 → ≤15s `connected`；owner 已在名册且放行。
+2. 非白名单微信号发消息 → "无权限"；名册出现该对端与预览。
 3. 名册放行 → ≤15s 后对话正常；`/who`、`/switch` 可用。
 4. 微信内让 Agent 建 Cron → 到点推回本人。
-5. Portal 手动建 Cron 选对端 → 推送成功；选未对话过的对端 → `delivery_error` 明确。
-6. `send_to_weixin` 在 Web 会话中指定 `peer_id` 推送成功。
-7. 模拟/等待会话过期 → `login_required` → 重扫后恢复。
-8. 停 Gateway → ≤90s 显示 `unknown`；Cron 推送仍可用。
+5. Portal 手建 Cron 选对端 → 推送成功；选未对话过的对端 → 保存即被拒或 `delivery_error` 明确。
+6. Web 会话中 `send_to_weixin` 指定 `peer_id`（必要时 `channel_id`）推送成功。
+7. 会话过期 → 持续显示 `login_required`（不会退化为 `unknown`）→ 重扫后恢复。
+8. 停 Gateway → ≤90s `unknown`；Cron 推送仍可用。
 
 ---
 
-## 9. 风险与开放问题
+## 9. 风险
 
 | 项 | 说明 / 缓解 |
 |----|-------------|
-| 协议非正式开放 | iLink 目前以官方 OpenClaw 插件形态交付，HTTP 协议由源码公开；接口可能变动。协议常量集中在 `internal/ilink`，`channel_version` 可配置 |
-| `context_token` 有效期未知 | 公开资料未给出 TTL。出站失败（投递不到）无法从 200 响应判断；记录 `context_token_at` 供排查，后续视实测补"过旧 token 告警" |
-| 单副本约束 | 同一 bot 多实例同时长轮询会重复收消息；与 `wecom_bot` 相同，文档明确单副本 |
-| 消息长度上限 | 1800 字切分为保守值，实测后调整为配置项 |
+| 协议非正式开放 | 以官方 OpenClaw 插件形态交付，HTTP 协议由源码公开，可能变动。协议常量集中在两侧 `internal/ilink` |
+| `context_token` 有效期未知 | 200 响应无法判断是否送达；记录 `context_token_at` 供排查，后续视实测补"过旧 token 告警" |
+| 单副本约束 | 同一 bot 多实例同时长轮询会重复收消息；与 `wecom_bot` 相同，文档明确 |
+| 至多一次 | 崩溃丢在途 Turn；Portal 不可用 + 重启叠加时可能重复回复 |
+
+---
+
+## 10. 实现前验证（Phase 0 spike）
+
+用真实微信号与官方协议做一次性验证，结论回写本规格；若结论推翻假设，再调整设计：
+
+1. **非扫码人能否私聊该 bot？** 若只有扫码人能发消息，名册审批 UI 可大幅简化（只剩 owner）。
+2. **`get_qrcode_status` 是否服务端挂起？** 决定 §6.1 第 3 步的等待参数。
+3. **同一 bot 重扫后旧 `context_token` 是否仍有效？** 决定 §6.1 是否也要清空同号 token。
+4. **换 bot 后同一微信用户的 `from_user_id` 是否不变？** 决定换号时是否保留 `allowed` / `remark`。
+5. **单条文本长度上限**，校准 1800 字切分值。
