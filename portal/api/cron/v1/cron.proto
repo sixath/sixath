@@ -75,6 +75,8 @@ message CreateCronTaskRequest {
   string delivery_session_id = 16;
   string delivery_channel_id = 17;
   bool enabled = 18;
+  // weixin_ilink 渠道的接收人（原始微信用户 ID）；delivery_mode=channel 且渠道为 weixin_ilink 时必填
+  string delivery_peer_id = 19;
 }
 
 message ListCronTasksRequest {
@@ -149,6 +151,7 @@ message CronTaskReply {
   string next_run_at = 19;
   string created_at = 20;
   string updated_at = 21;
+  string delivery_peer_id = 22;
 }
 
 message CronRunReply {

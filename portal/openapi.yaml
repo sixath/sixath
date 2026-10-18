@@ -1610,6 +1610,9 @@ components:
                     type: string
                 enabled:
                     type: boolean
+                deliveryPeerId:
+                    type: string
+                    description: weixin_ilink 渠道的接收人（原始微信用户 ID）；delivery_mode=channel 且渠道为 weixin_ilink 时必填
         cron.v1.CronRunReply:
             type: object
             properties:
@@ -1685,6 +1688,8 @@ components:
                 createdAt:
                     type: string
                 updatedAt:
+                    type: string
+                deliveryPeerId:
                     type: string
         cron.v1.DeleteCronTaskReply:
             type: object

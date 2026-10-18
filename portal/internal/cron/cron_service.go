@@ -45,6 +45,7 @@ func cronTaskMetaToReply(t *biz.CronTaskMeta) *cronv1.CronTaskReply {
 		DeliveryWebhookUrl: t.DeliveryWebhookURL,
 		DeliverySessionId:  t.DeliverySessionID,
 		DeliveryChannelId:  t.DeliveryChannelID,
+		DeliveryPeerId:     t.DeliveryPeerID,
 		Enabled:            t.Enabled,
 		CreatedAt:          t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:          t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -150,6 +151,7 @@ func (s *CronService) CreateCronTask(ctx context.Context, req *cronv1.CreateCron
 		DeliveryBestEffort: req.GetDeliveryBestEffort(),
 		DeliverySessionID:  req.GetDeliverySessionId(),
 		DeliveryChannelID:  req.GetDeliveryChannelId(),
+		DeliveryPeerID:     req.GetDeliveryPeerId(),
 		Enabled:            req.GetEnabled(),
 	})
 	if err != nil {
