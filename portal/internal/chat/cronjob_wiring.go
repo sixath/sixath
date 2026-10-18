@@ -45,6 +45,18 @@ func (c *portalCronClient) Create(ctx context.Context, agentID string, in tool.C
 		timeoutSec = 300
 	}
 	deliveryMode := in.DeliveryMode
+	deliveryChannelID := in.DeliveryChannelID
+	deliveryPeerID := in.DeliveryPeerID
+	if deliveryMode == "" && deliveryChannelID == "" && deliveryPeerID == "" && in.DeliveryWebhookURL == "" && in.DeliverySessionID == "" {
+		sessionID, _ := ctx.Value(tool.ContextKeySessionID).(string)
+		channelUUID, peerID, err := c.uc.IlinkOrigin(ctx, sessionID)
+		if err != nil {
+			return tool.CronJobSummary{}, err
+		}
+		if channelUUID != "" {
+			deliveryMode, deliveryChannelID, deliveryPeerID = "channel", channelUUID, peerID
+		}
+	}
 	if deliveryMode == "" {
 		deliveryMode = "none"
 	}
@@ -64,7 +76,8 @@ func (c *portalCronClient) Create(ctx context.Context, agentID string, in tool.C
 		DeliveryMode:       deliveryMode,
 		DeliveryWebhookURL: in.DeliveryWebhookURL,
 		DeliverySessionID:  in.DeliverySessionID,
-		DeliveryChannelID:  in.DeliveryChannelID,
+		DeliveryChannelID:  deliveryChannelID,
+		DeliveryPeerID:     deliveryPeerID,
 		Enabled:            in.Enabled,
 	})
 	if err != nil {
