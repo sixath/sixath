@@ -68,8 +68,8 @@ func channelMetaToReply(ch *biz.ChannelMeta) *channelv1.ChannelReply {
 		Id:                  ch.ID,
 		ChannelId:           ch.ChannelID,
 		Type:                ch.Type,
-		DefaultAgent:       ch.DefaultAgent,
-		AllowedAgents:      ch.AllowedAgents,
+		DefaultAgent:        ch.DefaultAgent,
+		AllowedAgents:       ch.AllowedAgents,
 		Enabled:             ch.Enabled,
 		AutoRouteEnabled:    ch.AutoRouteEnabled,
 		AutoRouteMention:    ch.AutoRouteMention,
@@ -91,6 +91,11 @@ func channelMetaToReply(ch *biz.ChannelMeta) *channelv1.ChannelReply {
 	if ch.Type == "wecom" {
 		r.WebhookUrlMasked = maskWeComWebhookURL(ch.WebhookURL)
 	}
+	if ch.Type == biz.ChannelTypeWeixinIlink {
+		r.HasBotToken = ch.IlinkBotToken != ""
+		r.IlinkBotId = ch.IlinkBotID
+		r.IlinkOwnerUserId = ch.IlinkOwnerUserID
+	}
 	return r
 }
 
@@ -99,10 +104,10 @@ func runtimeStatusViewToProto(v *biz.RuntimeStatusView) *channelv1.RuntimeStatus
 		return nil
 	}
 	out := &channelv1.RuntimeStatus{
-		State:             v.State,
-		LastError:         v.LastError,
-		ReconnectAttempt:  int32(v.ReconnectAttempt),
-		ReconnectInMs:     int32(v.ReconnectInMs),
+		State:            v.State,
+		LastError:        v.LastError,
+		ReconnectAttempt: int32(v.ReconnectAttempt),
+		ReconnectInMs:    int32(v.ReconnectInMs),
 	}
 	if !v.LastHeartbeatAt.IsZero() {
 		out.LastHeartbeatAt = v.LastHeartbeatAt.UTC().Format(time.RFC3339)

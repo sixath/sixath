@@ -175,4 +175,8 @@ message ChannelReply {
   bool auto_route_enabled = 21;
   bool auto_route_mention = 22;
   bool auto_route_classifier = 23;
+  // weixin_ilink（bot_token 永不明文返回）
+  bool has_bot_token = 24;
+  string ilink_bot_id = 25;
+  string ilink_owner_user_id = 26;
 }

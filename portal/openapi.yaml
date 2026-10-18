@@ -1287,6 +1287,13 @@ components:
                     type: boolean
                 autoRouteClassifier:
                     type: boolean
+                hasBotToken:
+                    type: boolean
+                    description: weixin_ilink（bot_token 永不明文返回）
+                ilinkBotId:
+                    type: string
+                ilinkOwnerUserId:
+                    type: string
         channel.v1.CreateChannelRequest:
             type: object
             properties:

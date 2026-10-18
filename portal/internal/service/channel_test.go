@@ -222,3 +222,21 @@ func (r *channelCreateRepo) Update(context.Context, string, map[string]any) (*bi
 	return nil, pkgErrors.ErrNotFound
 }
 func (r *channelCreateRepo) Delete(context.Context, string) error { return pkgErrors.ErrNotFound }
+
+func TestChannelMetaToReply_WeixinIlink(t *testing.T) {
+	r := channelMetaToReply(&biz.ChannelMeta{
+		ID: "uuid-1", ChannelID: "wx-1", Type: biz.ChannelTypeWeixinIlink,
+		IlinkBotToken: "secret-bt", IlinkBotID: "b@im.bot", IlinkOwnerUserID: "u@im.wechat",
+	})
+	if !r.GetHasBotToken() || r.GetIlinkBotId() != "b@im.bot" || r.GetIlinkOwnerUserId() != "u@im.wechat" {
+		t.Fatalf("reply = %+v", r)
+	}
+	if strings.Contains(r.String(), "secret-bt") {
+		t.Fatal("reply leaks bot token")
+	}
+
+	other := channelMetaToReply(&biz.ChannelMeta{Type: "webhook", IlinkBotID: "stray"})
+	if other.GetHasBotToken() || other.GetIlinkBotId() != "" {
+		t.Fatalf("non-ilink reply = %+v", other)
+	}
+}
