@@ -1,7 +1,7 @@
 # 微信 iLink 机器人渠道（`weixin_ilink`）
 
 **日期**: 2026-10-18  
-**状态**: 设计已确认（rev2：吸收 spec 审阅意见），待写实现计划  
+**状态**: 设计已确认（rev3：Phase 0 实测结论已回写，见 §10），待写第 1～3 份实现计划  
 **方案**: Gateway 负责 iLink 长轮询入站与对话回复；Portal 负责扫码登录、渠道/名册真相源与出站推送（Cron / `send_to_weixin`）  
 **关联**:
 - [`2026-08-09-inbound-gateway-design.md`](./2026-08-09-inbound-gateway-design.md)（入站 Gateway 契约）
@@ -69,12 +69,13 @@
 | 基址 | 默认 `https://ilinkai.weixin.qq.com`；渠道级可覆盖（`ilink_base_url`，登录返回 `baseurl` 时写入）。扫码前一律用默认基址 |
 | 通用请求头 | `Content-Type: application/json`、`AuthorizationType: ilink_bot_token`、`Authorization: Bearer {bot_token}`、`X-WECHAT-UIN: base64(随机 uint32 十进制串)` |
 | 通用 body | `base_info: { channel_version }`；`channel_version` 为代码常量（两模块各一份） |
-| 扫码登录 | `GET /ilink/bot/get_bot_qrcode?bot_type=3` → 二维码；`GET /ilink/bot/get_qrcode_status?qrcode=…` → `wait` / `scaned` / `confirmed` / `expired`；`confirmed` 返回 `bot_token`、`ilink_bot_id`、`ilink_user_id`（扫码人）、可选 `baseurl`。**疑似服务端挂起的长轮询**，见 §10 |
+| 扫码登录 | `GET /ilink/bot/get_bot_qrcode?bot_type=3` → 二维码；`GET /ilink/bot/get_qrcode_status?qrcode=…` → `wait` / `scaned` / `confirmed` / `expired`；`confirmed` 返回 `bot_token`、`ilink_bot_id`、`ilink_user_id`（扫码人）、可选 `baseurl`。**实测为服务端挂起的长轮询**：无事件时约 30s 返回 `wait`；确认事件会立即唤醒挂起中的请求；实测未出现 `scaned`（见 §10）。**每次扫码（含同一微信号重扫）都会得到新的 `ilink_bot_id`，旧 `bot_token` 立即失效** |
 | 收消息 | `POST /ilink/bot/getupdates`，body `{ get_updates_buf }`（首次 `""`）；服务端挂起至有消息或约 35s；响应 `msgs[]` + 新 `get_updates_buf` |
 | 消息字段 | `message_id`、`from_user_id`（`…@im.wechat`）、`message_type`（1=用户，2=bot）、`context_token`、`item_list[]`（`type=1` → `text_item.text`） |
-| 发消息 | `POST /ilink/bot/sendmessage`，`msg: { from_user_id:"", to_user_id, client_id, message_type:2, message_state:2, context_token, item_list:[{type:1,text_item:{text}}] }` |
-| `context_token` | **回复必需**；缺失时服务端返回 200 但不投递。只能由对端先发消息获得；按 `(channel, peer)` 缓存最近一次 |
-| 会话过期 | `ret` 或 `errcode` = `-14` → 停止收发、清游标、重新扫码 |
+| 发消息 | `POST /ilink/bot/sendmessage`，`msg: { from_user_id:"", to_user_id, client_id, message_type:2, message_state:2, context_token, item_list:[{type:1,text_item:{text}}] }`；成功响应带 `message_id`（实测），可写入投递记录 |
+| `context_token` | **回复必需**；缺失或已失效时服务端都返回 200 但不投递（静默失败）。只能由对端先发消息获得；按 `(channel, peer)` 缓存最近一次。**绑定在 bot 上**：重扫换 bot 后旧 token 不可用（实测）。同一 token 5 分钟内连续发 9 条均送达 |
+| 会话过期 | `ret` 或 `errcode` = `-14` → 停止收发、清游标、重新扫码。实测旧 bot 返回 `{"errcode":-14,"errmsg":"session timeout"}`（`ret` 缺省为 0），两个字段都要判断 |
+| 自身消息 | bot 发出的消息不会出现在 `getupdates` 中（实测）；仍按 `message_type == 1` 过滤以防万一 |
 
 客户端侧超时（长轮询无响应）视为空批次。
 
@@ -114,7 +115,7 @@
 
 | 位置 | 改动 |
 |------|------|
-| `internal/ilink/`（新） | 精简协议客户端：请求头、`GetUpdates`、`SendText`、`-14` 识别；入站归一化（取文本 / 判非文本）；文本整形（Markdown 简化、约 1800 字切分）。只做 HTTP，不依赖 runtimeclient |
+| `internal/ilink/`（新） | 精简协议客户端：请求头、`GetUpdates`、`SendText`、`-14` 识别；入站归一化（取文本 / 判非文本）；文本整形（Markdown 简化、按 `split_runes` 切分，默认 4000 字）。只做 HTTP，不依赖 runtimeclient |
 | `internal/channel/registry.go` | `Channel` 新增 `BotToken`、`BaseURL`、`Generation`、`SessionExpired`、`AllowedPeers` |
 | `internal/runtimeclient/client.go` | `gatewayChannelItem` 映射新字段；新增 `ReportIlinkPeer`、`GetIlinkCursor`、`PutIlinkCursor`、`ReportIlinkSessionExpired` |
 | `internal/adapter/weixin_ilink_manager.go`（新） | 对齐 `WecomBotManager` 的 `Reconcile` / start / stop / drain。**可运行条件** = `enabled && BotToken != "" && !SessionExpired`。新增独立的 `IlinkConnectionChanged(a, b)`：比较 `BotToken`、`BaseURL`、`Generation`；**不含 `AllowedPeers`**（改白名单不重启 runner）。不改动现有 `ConnectionConfigChanged` |
@@ -250,13 +251,13 @@ Gateway runner 运行期间**独立于长轮询**每 ≤30s 上报一次心跳�
 2. `POST /api/v1/channels/{id}/ilink/login` → Portal 用默认基址调 `get_bot_qrcode` → `AuthEphemeralRepo.Put`（`id = hex(sha256(qrcode))`（64 字符，适配 `auth_ephemeral.id size:64`），`kind = ilink_qrcode`，payload = channel uuid，TTL 5 分钟）→ 返回 `{ qrcode, qrcode_img_content }`。
 3. 前端调用 `GET /api/v1/channels/{id}/ilink/login/status?qrcode=…`：
    - Portal 先用 `AuthEphemeralRepo.Get`（**新增的非消费读**：`Get(ctx, id, kind, now)`）校验 `qrcode` 属于该渠道，否则 `404`（防止把别人的确认结果写进任意渠道）。只在 `confirmed` 时调用 `Consume`。
-   - Portal 调 `get_qrcode_status`，单次最长等待 25s（兼容服务端挂起式长轮询），返回后前端**立即**发起下一次；若服务端立即返回，Portal 不做额外等待，前端最小间隔 1s。
-   - `wait` / `scaned`：提示"等待扫码 / 已扫码，请在手机确认"。
+   - Portal 调 `get_qrcode_status`，单次客户端超时 35s（服务端实测挂起约 30s 后返回 `wait`），返回后前端**立即**发起下一次；若服务端立即返回，Portal 不做额外等待，前端最小间隔 1s。
+   - `wait` / `scaned`：统一提示"请用微信扫码，并在手机上确认登录"。**不依赖 `scaned`**：实测未出现该状态，直接从 `wait` 跳到 `confirmed`。
    - `expired`：提示并允许"刷新二维码"（回到第 2 步）。
    - `confirmed`：**单事务**：
      - 写 `ilink_bot_token` / `ilink_bot_id` / `ilink_owner_user_id` / `ilink_base_url`；`ilink_generation += 1`；`ilink_session_expired_at = NULL`；
      - 清空 `channel_ilink_state`；
-     - 若 `ilink_bot_id` 与旧值不同（换号）：清空该渠道所有名册的 `context_token`，保留 `allowed` / `remark`；
+     - **清空该渠道所有名册的 `context_token`**（每次扫码都会换新 bot，旧 token 一律不可用，实测），保留 `allowed` / `remark`（同一微信用户的 ID 跨 bot 不变，已对扫码人实测）；
      - upsert owner 到名册并 `allowed=true`；
      - `AuthEphemeralRepo.Consume` 作废该二维码记录。
 4. Gateway 下次同步时 `IlinkConnectionChanged=true`（`Generation` 变化）→ 重启 runner → 旧 runner 迟到的游标写入被 CAS 拒绝。
@@ -288,7 +289,7 @@ loop:
 
 1. pending `/switch` 序号 → slash 指令 → `prepareAutoRoute`（`@Agent` / 分类器）→ Resolve → **`TurnsStream`**，Gateway 侧 context 超时 600s（同 `wecom_bot` 的 `turn_timeout`）。
 2. 消费流事件：15s 内未收到 final → 先 `sendmessage` 一条"处理中…"（每条入站最多一次）；HITL 识别复用 `wecom_progress` 现有逻辑，命中则回"该操作需要在 Web 端确认"。
-3. 回复：只取助手正文（不含工具时间线）→ Markdown 简化为纯文本（去标题 / 加粗标记，代码块保留内容）→ 约 1800 字切分 → 依次 `sendmessage`，均带本条消息的 `context_token`。
+3. 回复：只取助手正文（不含工具时间线）→ Markdown 简化为纯文本（去标题 / 加粗标记，代码块保留内容）→ 按 `split_runes` 切分（默认 4000 字；实测纯数字 8000 字、中文 4000 字 / 约 11.9 KB 均可完整送达，留余量）→ 依次 `sendmessage`，均带本条消息的 `context_token`。
 
 并发：同 peer 串行、跨 peer 并发；peer 队列空闲 5 分钟回收。
 
@@ -300,7 +301,7 @@ loop:
 func (uc *WeixinIlinkUsecase) Push(ctx context.Context, channelUUID, peerID, text string) error
 ```
 
-1. 查名册：不存在或 `allowed=false` → `目标 {peer} 未在白名单`；`context_token` 为空 → `对方尚未与 bot 对话，无法主动推送`；渠道 `login_required` → `微信 bot 需重新扫码登录`。均**不调用** iLink。
+1. 查名册：不存在或 `allowed=false` → `目标 {peer} 未在白名单`；`context_token` 为空 → `对方尚未与 bot 对话（或 bot 已重新登录），请对方先给 bot 发一条消息`；渠道 `login_required` → `微信 bot 需重新扫码登录`。均**不调用** iLink。
 2. 整形与切分同 §6.2，逐条调用 `internal/ilink.SendText`。**不重试**：`sendmessage` 失败无法判断是否已送达，重试会导致重复消息；Recorder 记录时 `MaxAttempts=1`。
 3. 返回 `-14` → 写 `ilink_session_expired_at`（等价于 Runtime `session-expired`，`generation` 取当前值），并返回错误。
 
@@ -380,7 +381,7 @@ func (uc *WeixinIlinkUsecase) Push(ctx context.Context, channelUUID, peerID, tex
 
 **Portal**
 
-- 扫码：`qrcode` 与渠道绑定校验；`wait` / `scaned` / `confirmed` / `expired`；`confirmed` 单事务（token、generation+1、清失效标记、清游标、owner 放行、换号清 token）。
+- 扫码：`qrcode` 与渠道绑定校验；`wait` / `scaned` / `confirmed` / `expired`；`confirmed` 单事务（token、generation+1、清失效标记、清游标、owner 放行、清空全部名册 token 但保留 `allowed` / `remark`）。
 - Runtime API：名册 upsert（含 `generation` 不匹配 `409` 不写入）、游标 CAS（匹配 / 不匹配）、`session-expired` 迟到忽略、`gateway/channels` 下发字段与类型过滤。
 - `AuthEphemeralRepo.Get` 非消费读：多次轮询均可校验；`confirmed` 后 `Consume`，再轮询 `404`。
 - `DeriveRuntimeStatus` 五级优先级（含"失效 + 心跳新鲜"仍为 `login_required`）。
@@ -408,6 +409,7 @@ func (uc *WeixinIlinkUsecase) Push(ctx context.Context, channelUUID, peerID, tex
 |----|-------------|
 | 协议非正式开放 | 以官方 OpenClaw 插件形态交付，HTTP 协议由源码公开，可能变动。协议常量集中在两侧 `internal/ilink` |
 | `context_token` 有效期未知 | 200 响应无法判断是否送达；记录 `context_token_at` 供排查，后续视实测补"过旧 token 告警" |
+| 重扫后推送中断 | 每次扫码换新 bot，名册 token 全部清空；在对方重新发言前，Cron / `send_to_weixin` 一律失败。扫码成功页提示"请让需要接收推送的人先给 bot 发一条消息"；名册显示"待激活"（无 token） |
 | 单副本约束 | 同一 bot 多实例同时长轮询会重复收消息；与 `wecom_bot` 相同，文档明确 |
 | 至多一次 | 崩溃丢在途 Turn；Portal 不可用 + 重启叠加时可能重复回复 |
 
@@ -417,8 +419,23 @@ func (uc *WeixinIlinkUsecase) Push(ctx context.Context, channelUUID, peerID, tex
 
 用真实微信号与官方协议做一次性验证，结论回写本规格；若结论推翻假设，再调整设计：
 
+工具：`scripts/ilink-spike/`（计划见 `docs/superpowers/plans/2026-10-18-weixin-ilink-p0-spike.md`）。实测日期 2026-10-18，单个微信号（ID 尾号 `gkx4`）。原始日志只保存在本地 `scripts/ilink-spike/.state/`，不入库。
+
 1. **非扫码人能否私聊该 bot？** 若只有扫码人能发消息，名册审批 UI 可大幅简化（只剩 owner）。
+   - **结论：未验证**（缺第二个微信号）。设计保持名册 + 白名单（两种情况都适用）；有条件时补测，若确认只有扫码人可对话，名册审批 UI 可移出一期。
+   - 已确认：扫码返回的 `ilink_user_id` 与该用户消息的 `from_user_id` 完全一致，§6.1"owner 入名册并放行"成立。微信里始终只有一个 bot 会话（换 bot 对用户不可见）。
 2. **`get_qrcode_status` 是否服务端挂起？** 决定 §6.1 第 3 步的等待参数。
+   - **结论：是**。无事件时服务端挂起约 30.1s 后返回 `wait`（连续多次一致）；手机确认后，挂起中的请求在第 24.5s / 23.9s 即返回 `confirmed`，事件能立即唤醒。**未出现 `scaned`**。§6.1 改为 35s 客户端超时、不依赖 `scaned`。
 3. **同一 bot 重扫后旧 `context_token` 是否仍有效？** 决定 §6.1 是否也要清空同号 token。
+   - **结论：不存在"同一 bot 重扫"**——同一微信号重扫得到**新的 `ilink_bot_id`**；旧 `bot_token` 立即返回 `-14`；旧 `context_token` 配新 `bot_token` 发送返回 200 但**未送达**（对照组：重扫前同一 token 正常送达）。§6.1 改为每次扫码都清空名册 token；§9 补"重扫后推送中断"。
 4. **换 bot 后同一微信用户的 `from_user_id` 是否不变？** 决定换号时是否保留 `allowed` / `remark`。
-5. **单条文本长度上限**，校准 1800 字切分值。
+   - **结论：不变**（扫码人实测：两次登录、两个 bot，`ilink_user_id` 相同）。保留 `allowed` / `remark`。非扫码人未验证，随问题 1 一并补测。
+5. **单条文本长度上限**，校准切分值。
+   - **结论：未触及上限**。纯数字 1000 / 2000 / 4000 / 8000 字，中文 1000 / 2000 / 4000 字（最大 11906 字节）均完整送达、未拆分、未折叠。切分默认值改为 4000 字并做成配置项 `split_runes`。
+
+额外观察：
+- `sendmessage` 成功响应为 `{"message_id": …}`，不是空对象。
+- bot 自己发出的消息不出现在 `getupdates`。
+- 未观察到群聊（`group_id` 均为空）。
+- `getupdates` 响应同时带已废弃的 `sync_buf`，忽略即可；消息还有 `seq`、`session_id`（空）、`update_time_ms` 等字段，一期不使用。
+- 同一 `context_token` 5 分钟内连续发 9 条均送达，未见回复条数限制。
