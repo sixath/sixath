@@ -22,6 +22,9 @@ const (
 	ilinkQRCodeTTL      = 5 * time.Minute
 	ilinkPreviewRunes   = 40
 	ilinkRemarkMaxRunes = 64
+	// Column widths in channel_ilink_peers; MySQL strict mode rejects longer values with a 500.
+	ilinkPeerIDMaxRunes     = 128
+	ilinkContextTokenMaxLen = 512
 )
 
 // IlinkLoginClient is the QR login subset of the iLink client (*ilink.Client satisfies it).
@@ -103,6 +106,24 @@ func ilinkSafeBaseURL(raw string) string {
 
 func ilinkUpstreamErr(op string, err error) error {
 	return kratosErrors.ServiceUnavailable("ILINK_UPSTREAM", op+"失败："+err.Error())
+}
+
+func ilinkValidPeerID(peerID string) error {
+	if peerID == "" {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "peer_id is required")
+	}
+	if utf8.RuneCountInString(peerID) > ilinkPeerIDMaxRunes {
+		return kratosErrors.BadRequest("INVALID_ARGUMENT", "peer_id is too long")
+	}
+	return nil
+}
+
+// ilinkChannelGone maps a repo ErrNotFound (channel deleted after the slug lookup) to ErrChannelNotFound.
+func ilinkChannelGone(err error) error {
+	if errors.Is(err, pkgErrors.ErrNotFound) {
+		return ErrChannelNotFound
+	}
+	return err
 }
 
 func (uc *WeixinIlinkUsecase) checkIlink(ch *ChannelMeta, err error) (*ChannelMeta, error) {
@@ -219,8 +240,8 @@ func (uc *WeixinIlinkUsecase) ListPeers(ctx context.Context, channelUUID string)
 
 func (uc *WeixinIlinkUsecase) UpdatePeer(ctx context.Context, channelUUID, peerID string, patch IlinkPeerPatch) (*IlinkPeer, error) {
 	peerID = strings.TrimSpace(peerID)
-	if peerID == "" {
-		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "peer_id is required")
+	if err := ilinkValidPeerID(peerID); err != nil {
+		return nil, err
 	}
 	if patch.Allowed == nil && patch.Remark == nil {
 		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "allowed or remark is required")
@@ -244,11 +265,15 @@ func (uc *WeixinIlinkUsecase) UpdatePeer(ctx context.Context, channelUUID, peerI
 }
 
 func (uc *WeixinIlinkUsecase) DeletePeer(ctx context.Context, channelUUID, peerID string) error {
+	peerID = strings.TrimSpace(peerID)
+	if err := ilinkValidPeerID(peerID); err != nil {
+		return err
+	}
 	ch, err := uc.channelByID(ctx, channelUUID)
 	if err != nil {
 		return err
 	}
-	err = uc.repo.DeletePeer(ctx, ch.ID, strings.TrimSpace(peerID))
+	err = uc.repo.DeletePeer(ctx, ch.ID, peerID)
 	if errors.Is(err, pkgErrors.ErrNotFound) {
 		return ErrIlinkPeerNotFound
 	}
@@ -263,8 +288,11 @@ func (uc *WeixinIlinkUsecase) AllowedPeers(ctx context.Context, channelUUID stri
 // ReportPeer records an inbound message; channelID is the channel slug used by the Gateway.
 func (uc *WeixinIlinkUsecase) ReportPeer(ctx context.Context, channelID string, generation int, in IlinkPeerReport) (*IlinkPeer, error) {
 	in.PeerID = strings.TrimSpace(in.PeerID)
-	if in.PeerID == "" {
-		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "peer_id is required")
+	if err := ilinkValidPeerID(in.PeerID); err != nil {
+		return nil, err
+	}
+	if len(in.ContextToken) > ilinkContextTokenMaxLen {
+		return nil, kratosErrors.BadRequest("INVALID_ARGUMENT", "context_token is too long")
 	}
 	ch, err := uc.channelBySlug(ctx, channelID)
 	if err != nil {
@@ -274,7 +302,11 @@ func (uc *WeixinIlinkUsecase) ReportPeer(ctx context.Context, channelID string, 
 		in.At = uc.now()
 	}
 	in.Preview = ilinkTruncate(strings.TrimSpace(in.Preview), ilinkPreviewRunes)
-	return uc.repo.UpsertPeerReport(ctx, ch.ID, generation, in)
+	p, err := uc.repo.UpsertPeerReport(ctx, ch.ID, generation, in)
+	if err != nil {
+		return nil, ilinkChannelGone(err)
+	}
+	return p, nil
 }
 
 // GetCursor returns an empty cursor for the current generation when the stored one is stale.
@@ -298,7 +330,7 @@ func (uc *WeixinIlinkUsecase) PutCursor(ctx context.Context, channelID string, c
 	if err != nil {
 		return err
 	}
-	return uc.repo.PutCursor(ctx, ch.ID, cur, uc.now())
+	return ilinkChannelGone(uc.repo.PutCursor(ctx, ch.ID, cur, uc.now()))
 }
 
 // ReportSessionExpired marks the channel login_required; ignored when generation is stale.
@@ -308,5 +340,5 @@ func (uc *WeixinIlinkUsecase) ReportSessionExpired(ctx context.Context, channelI
 		return err
 	}
 	_, err = uc.repo.MarkSessionExpired(ctx, ch.ID, generation, uc.now())
-	return err
+	return ilinkChannelGone(err)
 }

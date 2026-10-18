@@ -10,6 +10,8 @@ import (
 
 	"backend/internal/ilink"
 	pkgErrors "backend/internal/pkg/errors"
+
+	kratosErrors "github.com/go-kratos/kratos/v2/errors"
 )
 
 type ilinkFakeChannels struct {
@@ -41,6 +43,17 @@ type ilinkFakeRepo struct {
 	reports     []IlinkPeerReport
 	reportGens  []int
 	expiredGens []int
+	err         error
+}
+
+func (f *ilinkFakeRepo) UpdatePeer(_ context.Context, _ string, peerID string, _ IlinkPeerPatch) (*IlinkPeer, error) {
+	return &IlinkPeer{PeerID: peerID}, nil
+}
+
+func (f *ilinkFakeRepo) DeletePeer(context.Context, string, string) error { return nil }
+
+func (f *ilinkFakeRepo) PutCursor(context.Context, string, IlinkCursor, time.Time) error {
+	return f.err
 }
 
 func (f *ilinkFakeRepo) ConfirmLogin(_ context.Context, channelUUID string, in IlinkLoginResult, _ time.Time) (*ChannelMeta, error) {
@@ -57,12 +70,18 @@ func (f *ilinkFakeRepo) GetCursor(context.Context, string) (*IlinkCursor, error)
 }
 
 func (f *ilinkFakeRepo) UpsertPeerReport(_ context.Context, _ string, generation int, in IlinkPeerReport) (*IlinkPeer, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	f.reports = append(f.reports, in)
 	f.reportGens = append(f.reportGens, generation)
 	return &IlinkPeer{PeerID: in.PeerID}, nil
 }
 
 func (f *ilinkFakeRepo) MarkSessionExpired(_ context.Context, _ string, generation int, _ time.Time) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
 	f.expiredGens = append(f.expiredGens, generation)
 	return true, nil
 }
@@ -320,5 +339,62 @@ func TestIlinkUpdatePeer_Validation(t *testing.T) {
 	long := strings.Repeat("名", ilinkRemarkMaxRunes+1)
 	if _, err := uc.UpdatePeer(ctx, "uuid-1", "p1", IlinkPeerPatch{Remark: &long}); err == nil {
 		t.Fatal("want error for long remark")
+	}
+}
+
+func isIlinkInvalidArgument(err error) bool {
+	return kratosErrors.IsBadRequest(err) && kratosErrors.Reason(err) == "INVALID_ARGUMENT"
+}
+
+func TestIlinkReportPeer_LengthLimits(t *testing.T) {
+	uc, repo, _ := newIlinkUsecaseForTest(newQRLogin())
+	ctx := context.Background()
+
+	if _, err := uc.ReportPeer(ctx, "wx-1", 3, IlinkPeerReport{PeerID: strings.Repeat("字", 128), ContextToken: strings.Repeat("t", 512)}); err != nil {
+		t.Fatalf("at-limit report err = %v", err)
+	}
+	if _, err := uc.ReportPeer(ctx, "wx-1", 3, IlinkPeerReport{PeerID: strings.Repeat("字", 129)}); !isIlinkInvalidArgument(err) {
+		t.Fatalf("long peer_id err = %v, want INVALID_ARGUMENT", err)
+	}
+	if _, err := uc.ReportPeer(ctx, "wx-1", 3, IlinkPeerReport{PeerID: "p1", ContextToken: strings.Repeat("t", 513)}); !isIlinkInvalidArgument(err) {
+		t.Fatalf("long context_token err = %v, want INVALID_ARGUMENT", err)
+	}
+	if len(repo.reports) != 1 {
+		t.Fatalf("reports = %d, want only the at-limit one", len(repo.reports))
+	}
+}
+
+func TestIlinkUpdateDeletePeer_PeerIDLimits(t *testing.T) {
+	uc, _, _ := newIlinkUsecaseForTest(newQRLogin())
+	ctx := context.Background()
+	yes := true
+
+	if _, err := uc.UpdatePeer(ctx, "uuid-1", strings.Repeat("字", 128), IlinkPeerPatch{Allowed: &yes}); err != nil {
+		t.Fatalf("at-limit UpdatePeer err = %v", err)
+	}
+	if _, err := uc.UpdatePeer(ctx, "uuid-1", strings.Repeat("字", 129), IlinkPeerPatch{Allowed: &yes}); !isIlinkInvalidArgument(err) {
+		t.Fatalf("long peer_id UpdatePeer err = %v, want INVALID_ARGUMENT", err)
+	}
+	if err := uc.DeletePeer(ctx, "uuid-1", strings.Repeat("字", 129)); !isIlinkInvalidArgument(err) {
+		t.Fatalf("long peer_id DeletePeer err = %v, want INVALID_ARGUMENT", err)
+	}
+	if err := uc.DeletePeer(ctx, "uuid-1", "  "); !isIlinkInvalidArgument(err) {
+		t.Fatalf("empty peer_id DeletePeer err = %v, want INVALID_ARGUMENT", err)
+	}
+}
+
+func TestIlinkRuntime_RepoNotFoundMapsToChannelNotFound(t *testing.T) {
+	uc, repo, _ := newIlinkUsecaseForTest(newQRLogin())
+	ctx := context.Background()
+	repo.err = pkgErrors.ErrNotFound
+
+	if _, err := uc.ReportPeer(ctx, "wx-1", 3, IlinkPeerReport{PeerID: "p1"}); !errors.Is(err, ErrChannelNotFound) {
+		t.Fatalf("ReportPeer err = %v, want ErrChannelNotFound", err)
+	}
+	if err := uc.PutCursor(ctx, "wx-1", IlinkCursor{Generation: 3}); !errors.Is(err, ErrChannelNotFound) {
+		t.Fatalf("PutCursor err = %v, want ErrChannelNotFound", err)
+	}
+	if err := uc.ReportSessionExpired(ctx, "wx-1", 3); !errors.Is(err, ErrChannelNotFound) {
+		t.Fatalf("ReportSessionExpired err = %v, want ErrChannelNotFound", err)
 	}
 }

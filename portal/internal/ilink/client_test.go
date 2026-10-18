@@ -67,6 +67,47 @@ func TestSendTextHeadersBodyAndMessageID(t *testing.T) {
 	}
 }
 
+func TestSendTextStringMessageID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"message_id":"abc"}`))
+	}))
+	defer srv.Close()
+
+	id, err := NewClient(srv.URL, "tok").SendText(context.Background(), "u", "c", "x")
+	if err != nil || id != "abc" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+}
+
+func TestSendTextNullMessageID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"message_id":null}`))
+	}))
+	defer srv.Close()
+
+	id, err := NewClient(srv.URL, "tok").SendText(context.Background(), "u", "c", "x")
+	if err != nil || id != "" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+}
+
+func TestNetworkErrorDoesNotLeakQRCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	base := srv.URL
+	srv.Close()
+
+	_, err := NewClient(base, "").GetQRCodeStatus(context.Background(), "secret-qr")
+	if err == nil {
+		t.Fatal("want error for closed port")
+	}
+	if strings.Contains(err.Error(), "secret-qr") {
+		t.Fatalf("error leaks qrcode: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/ilink/bot/get_qrcode_status") {
+		t.Fatalf("error lost path: %v", err)
+	}
+}
+
 func TestSendTextEmptyResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{}`))

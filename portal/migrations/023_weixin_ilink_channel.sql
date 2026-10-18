@@ -11,7 +11,7 @@ ALTER TABLE channels
 
 CREATE TABLE IF NOT EXISTS channel_ilink_peers (
   channel_uuid VARCHAR(36) NOT NULL,
-  peer_id VARCHAR(128) NOT NULL,
+  peer_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   allowed TINYINT(1) NOT NULL DEFAULT 0,
   remark VARCHAR(128) NULL,
   context_token VARCHAR(512) NULL,

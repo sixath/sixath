@@ -127,12 +127,29 @@ func (c *Client) SendText(ctx context.Context, to, contextToken, text string) (s
 	sctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	var out struct {
-		MessageID json.Number `json:"message_id"`
+		MessageID json.RawMessage `json:"message_id"`
 	}
 	if err := c.post(sctx, "/ilink/bot/sendmessage", map[string]any{"msg": msg}, &out); err != nil {
 		return "", err
 	}
-	return out.MessageID.String(), nil
+	return messageIDString(out.MessageID), nil
+}
+
+// messageIDString accepts a JSON string or number; any other shape yields "".
+func messageIDString(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var n json.Number
+	if json.Unmarshal(raw, &n) == nil {
+		return n.String()
+	}
+	return ""
 }
 
 func (c *Client) get(ctx context.Context, pathAndQuery string, out any) error {
@@ -164,6 +181,11 @@ func (c *Client) post(ctx context.Context, endpoint string, body map[string]any,
 func (c *Client) do(req *http.Request, out any) error {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		// url.Error embeds the full URL, whose query may carry the short-lived qrcode.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("ilink %s %s: %w", req.Method, req.URL.Path, ue.Err)
+		}
 		return err
 	}
 	defer resp.Body.Close()

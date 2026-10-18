@@ -104,6 +104,9 @@ func NewData(c *conf.Data, auth *conf.Auth, logger log.Logger) (*Data, func(), e
 	if err := ensureUTF8MB4(context.Background(), db); err != nil {
 		return nil, nil, err
 	}
+	if err := ensureIlinkPeerCollation(context.Background(), db); err != nil {
+		return nil, nil, err
+	}
 
 	if err := BootstrapACL(context.Background(), db, auth, c.GetDataRoot()); err != nil {
 		return nil, nil, err
@@ -176,6 +179,20 @@ func ensureUTF8MB4(ctx context.Context, db *gorm.DB) error {
 		if err := db.WithContext(ctx).Exec(stmt).Error; err != nil {
 			return fmt.Errorf("convert %s to utf8mb4: %w", t, err)
 		}
+	}
+	return nil
+}
+
+// ensureIlinkPeerCollation 让 channel_ilink_peers.peer_id 区分大小写：微信 ID 大小写敏感，
+// 而库默认 utf8mb4_unicode_ci 不区分，"A" 与 "a" 会撞主键。COLLATE 不能写进 gorm tag
+// （SQLite 测试库不认 utf8mb4_bin），只能启动时补。MODIFY 幂等。
+func ensureIlinkPeerCollation(ctx context.Context, db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	stmt := "ALTER TABLE `channel_ilink_peers` MODIFY `peer_id` VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL"
+	if err := db.WithContext(ctx).Exec(stmt).Error; err != nil {
+		return fmt.Errorf("set channel_ilink_peers.peer_id collation: %w", err)
 	}
 	return nil
 }

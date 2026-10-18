@@ -77,6 +77,38 @@ func TestIlinkRepo_ConfirmLoginBumpsGenerationAndResetsState(t *testing.T) {
 	}
 }
 
+func TestIlinkRepo_ConfirmLoginIdempotent(t *testing.T) {
+	db := openChannelTestDB(t)
+	repo := newIlinkRepoForTest(db)
+	ctx := context.Background()
+	ch := seedIlinkChannel(t, db)
+	now := time.Date(2026, 10, 18, 10, 0, 0, 0, time.UTC)
+	in := biz.IlinkLoginResult{BotToken: "bt", BotID: "b@im.bot", OwnerUserID: "owner@im.wechat"}
+
+	if _, err := repo.ConfirmLogin(ctx, ch.ID, in, now); err != nil {
+		t.Fatalf("first ConfirmLogin: %v", err)
+	}
+	if _, err := repo.UpsertPeerReport(ctx, ch.ID, 1, biz.IlinkPeerReport{PeerID: "p1", ContextToken: "ctx-1", At: now}); err != nil {
+		t.Fatalf("UpsertPeerReport: %v", err)
+	}
+	meta, err := repo.ConfirmLogin(ctx, ch.ID, in, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("second ConfirmLogin: %v", err)
+	}
+	if meta.IlinkGeneration != 1 {
+		t.Fatalf("generation = %d, want 1", meta.IlinkGeneration)
+	}
+	peers, err := repo.ListPeers(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("ListPeers: %v", err)
+	}
+	for _, p := range peers {
+		if p.PeerID == "p1" && p.ContextToken != "ctx-1" {
+			t.Fatalf("context_token cleared: %+v", p)
+		}
+	}
+}
+
 func TestIlinkRepo_ConfirmLoginUnknownChannel(t *testing.T) {
 	db := openChannelTestDB(t)
 	_, err := newIlinkRepoForTest(db).ConfirmLogin(context.Background(), "missing", biz.IlinkLoginResult{BotToken: "bt"}, time.Now())

@@ -47,16 +47,25 @@ func ilinkGeneration(tx *gorm.DB, channelUUID string) (int, error) {
 func (r *weixinIlinkRepo) ConfirmLogin(ctx context.Context, channelUUID string, in biz.IlinkLoginResult, now time.Time) (*biz.ChannelMeta, error) {
 	var out model.Channel
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		gen, err := ilinkGeneration(tx, channelUUID)
+		var cur model.Channel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", channelUUID).First(&cur).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
 		if err != nil {
 			return err
+		}
+		// A repeated confirm of the same bot must not bump the generation or wipe fresh context_tokens.
+		if cur.IlinkBotToken != "" && cur.IlinkBotToken == in.BotToken && cur.IlinkBotID == in.BotID {
+			out = cur
+			return nil
 		}
 		if err := tx.Model(&model.Channel{}).Where("id = ?", channelUUID).Updates(map[string]any{
 			"ilink_bot_token":          in.BotToken,
 			"ilink_bot_id":             in.BotID,
 			"ilink_owner_user_id":      in.OwnerUserID,
 			"ilink_base_url":           in.BaseURL,
-			"ilink_generation":         gen + 1,
+			"ilink_generation":         cur.IlinkGeneration + 1,
 			"ilink_session_expired_at": nil,
 			"updated_at":               now,
 		}).Error; err != nil {
