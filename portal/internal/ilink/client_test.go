@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -219,6 +220,45 @@ func TestGetQRCodeStatusClientTimeoutIsWait(t *testing.T) {
 	}
 	if s.Status != "wait" || !s.ClientTimeout {
 		t.Fatalf("got %+v", s)
+	}
+}
+
+func hangingServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(2 * time.Second):
+		case <-r.Context().Done():
+		}
+	}))
+}
+
+func TestGetQRCodeStatusParentDeadlineIsWait(t *testing.T) {
+	srv := hangingServer()
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	s, err := NewClient(srv.URL, "").GetQRCodeStatus(ctx, "qrc-1")
+	if err != nil {
+		t.Fatalf("GetQRCodeStatus: %v", err)
+	}
+	if s.Status != "wait" || !s.ClientTimeout {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestGetQRCodeStatusParentCanceledIsError(t *testing.T) {
+	srv := hangingServer()
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	s, err := NewClient(srv.URL, "").GetQRCodeStatus(ctx, "qrc-1")
+	if err == nil {
+		t.Fatalf("want error for canceled ctx, got %+v", s)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
 

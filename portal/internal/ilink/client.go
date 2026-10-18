@@ -97,14 +97,15 @@ func (c *Client) GetBotQRCode(ctx context.Context) (*QRCode, error) {
 	return &out, nil
 }
 
-// GetQRCodeStatus treats a client-side timeout as "wait" because the server holds the request open.
+// GetQRCodeStatus treats any deadline (its own poll timeout or a shorter caller deadline) as "wait"
+// because the server holds the request open; cancellation is still an error.
 func (c *Client) GetQRCodeStatus(ctx context.Context, qrcode string) (*QRStatus, error) {
 	pctx, cancel := context.WithTimeout(ctx, c.PollTimeout)
 	defer cancel()
 	var out QRStatus
 	err := c.get(pctx, "/ilink/bot/get_qrcode_status?qrcode="+url.QueryEscape(qrcode), &out)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		if errors.Is(err, context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.Canceled) {
 			return &QRStatus{Status: "wait", ClientTimeout: true}, nil
 		}
 		return nil, err
