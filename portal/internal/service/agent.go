@@ -47,16 +47,25 @@ func protoToBizModelConfig(mc *agentv1.ModelConfig) biz.ModelConfig {
 // AgentService implements agent.v1.AgentHTTPServer and agent.v1.AgentServer
 type AgentService struct {
 	agentv1.UnimplementedAgentServer
-	uc          *biz.AgentUsecase
-	toolUC      *biz.ToolUsecase
-	mcpServerUC *biz.McpServerUsecase
-	skillUC     *biz.SkillResourceUsecase
-	channelUC   *biz.ChannelUsecase
-	proxyRepo   biz.ProxyRepo
-	codeRoots   []string
+	uc           *biz.AgentUsecase
+	toolUC       *biz.ToolUsecase
+	mcpServerUC  *biz.McpServerUsecase
+	skillUC      *biz.SkillResourceUsecase
+	channelUC    *biz.ChannelUsecase
+	proxyRepo    biz.ProxyRepo
+	codeRoots    []string
 	rcaRoots     RCARootResolver
 	handbookDirs HandbookSkillDirResolver
+	weixinIlink  WeixinIlinkSender
 	log          *log.Helper
+}
+
+// SetWeixinIlink enables the send_to_weixin tool for direct agent chats (e.g. cron agent_turn).
+func (s *AgentService) SetWeixinIlink(w WeixinIlinkSender) {
+	if s == nil {
+		return
+	}
+	s.weixinIlink = w
 }
 
 // SetRCARootResolver wires repo-binding based RCA roots.
@@ -369,6 +378,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, nil, reg, agentMeta)
+	weixinBindings := registerWeixinToolForAgent(ctx, s.weixinIlink, nil, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -376,6 +386,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		DsBindings:     regResult.DsBindings,
 		WecomChannelID: wecomChannelID,
 		ChannelType:    "wecom",
+		Channels:       weixinBindings,
 		SkillsIdx:      skillsIdx,
 	}
 	catalog, toolSearchActive, err := chat.WireCatalogAndToolSearch(ctx, catalogInput)

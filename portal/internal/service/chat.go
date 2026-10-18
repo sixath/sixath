@@ -40,6 +40,7 @@ type ChatService struct {
 	skillUC          *biz.SkillResourceUsecase
 	channelUC        *biz.ChannelUsecase
 	deliveryRecorder channel.DeliveryRecorder
+	weixinIlink      WeixinIlinkSender
 	sessionHooks     *agent.ChatSessionHookRegistry
 	memoryStore      memory.MemoryStore
 	turnTraceStore   turntrace.Store
@@ -124,6 +125,14 @@ func (s *ChatService) SetDeliveryRecorder(r channel.DeliveryRecorder) {
 		return
 	}
 	s.deliveryRecorder = r
+}
+
+// SetWeixinIlink enables the send_to_weixin tool (nil-safe).
+func (s *ChatService) SetWeixinIlink(w WeixinIlinkSender) {
+	if s == nil {
+		return
+	}
+	s.weixinIlink = w
 }
 
 func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
@@ -487,6 +496,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
+	weixinBindings := registerWeixinToolForAgent(ctx, s.weixinIlink, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -494,6 +504,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		DsBindings:     regResult.DsBindings,
 		WecomChannelID: wecomChannelID,
 		ChannelType:    "wecom",
+		Channels:       weixinBindings,
 		SkillsIdx:      skillsIdx,
 	}
 	catalog, toolSearchActive, err := chat.WireCatalogAndToolSearch(ctx, catalogInput)
@@ -801,6 +812,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
+	weixinBindings := registerWeixinToolForAgent(ctx, s.weixinIlink, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -808,6 +820,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		DsBindings:     regResult.DsBindings,
 		WecomChannelID: wecomChannelID,
 		ChannelType:    "wecom",
+		Channels:       weixinBindings,
 		SkillsIdx:      skillsIdx,
 	}
 	catalog, toolSearchActive, err := chat.WireCatalogAndToolSearch(ctx, catalogInput)
