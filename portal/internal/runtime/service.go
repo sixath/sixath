@@ -87,6 +87,7 @@ type Service struct {
 	turns         TurnBackend
 	models        ModelOverrideBackend
 	router        routeBackend
+	ilink         ilinkBackend
 }
 
 // NewService wires ChatUsecase + ChannelPeerUsecase (+ channel/agent readers + session repo ACL + rewind/turn backends).
@@ -203,6 +204,11 @@ type gatewayChannelItem struct {
 	WSURL            string   `json:"ws_url,omitempty"`
 	CorpID           string   `json:"corp_id,omitempty"`
 	CorpSecret       string   `json:"corp_secret,omitempty"`
+	BotToken         string   `json:"bot_token,omitempty"`
+	BaseURL          string   `json:"base_url,omitempty"`
+	Generation       int      `json:"generation,omitempty"`
+	SessionExpired   bool     `json:"session_expired,omitempty"`
+	AllowedPeers     []string `json:"allowed_peers,omitempty"`
 	UpdatedAt        string   `json:"updated_at,omitempty"`
 }
 
@@ -314,6 +320,11 @@ func (s *Service) listGatewayChannels(ctx context.Context) (*gatewayChannelsRepl
 			WSURL:            ch.WSURL,
 			CorpID:           ch.CorpID,
 			CorpSecret:       ch.CorpSecret,
+		}
+		if ch.Type == biz.ChannelTypeWeixinIlink {
+			if err := s.fillIlinkGatewayItem(ctx, ch, &item); err != nil {
+				return nil, err
+			}
 		}
 		if !ch.UpdatedAt.IsZero() {
 			item.UpdatedAt = ch.UpdatedAt.UTC().Format(time.RFC3339)
