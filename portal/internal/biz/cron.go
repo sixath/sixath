@@ -66,6 +66,7 @@ type CronTaskCreate struct {
 	DeliveryBestEffort bool
 	DeliverySessionID  string
 	DeliveryChannelID  string // 投递到渠道（wxpusher 等）
+	DeliveryPeerID     string // weixin_ilink 渠道的原始对端 ID（无 user: 前缀）
 	Enabled            bool
 }
 
@@ -89,6 +90,7 @@ type CronTaskMeta struct {
 	DeliveryBestEffort bool
 	DeliverySessionID  string
 	DeliveryChannelID  string
+	DeliveryPeerID     string
 	Enabled            bool
 	NextRunAt          *time.Time
 	CreatedAt          time.Time

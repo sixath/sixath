@@ -24,6 +24,7 @@ type CronTask struct {
 	DeliveryBestEffort bool       `gorm:"column:delivery_best_effort;not null;default:false"`
 	DeliverySessionID  string     `gorm:"column:delivery_session_id;size:36"`
 	DeliveryChannelID  string     `gorm:"column:delivery_channel_id;size:36"`
+	DeliveryPeerID     string     `gorm:"column:delivery_peer_id;size:128"` // weixin_ilink 原始对端 ID
 	Enabled            bool       `gorm:"column:enabled;not null;default:true"`
 	NextRunAt          *time.Time `gorm:"column:next_run_at"`
 	CreatedAt          time.Time  `gorm:"column:created_at;not null"`

@@ -61,6 +61,7 @@ func (r *cronTaskRepo) Create(ctx context.Context, t *biz.CronTaskCreate) (*biz.
 		DeliveryBestEffort: t.DeliveryBestEffort,
 		DeliverySessionID:  t.DeliverySessionID,
 		DeliveryChannelID:  t.DeliveryChannelID,
+		DeliveryPeerID:     t.DeliveryPeerID,
 		Enabled:            t.Enabled,
 	}
 	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
@@ -265,6 +266,7 @@ func cronTaskModelToBiz(m *model.CronTask) *biz.CronTaskMeta {
 		DeliveryBestEffort: m.DeliveryBestEffort,
 		DeliverySessionID:  m.DeliverySessionID,
 		DeliveryChannelID:  m.DeliveryChannelID,
+		DeliveryPeerID:     m.DeliveryPeerID,
 		Enabled:            m.Enabled,
 		NextRunAt:          m.NextRunAt,
 		CreatedAt:          m.CreatedAt,

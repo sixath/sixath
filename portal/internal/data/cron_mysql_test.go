@@ -124,3 +124,23 @@ func TestCronRunRepo_TriggerDeliveryErrorAndListRunning(t *testing.T) {
 		t.Fatalf("delivery error = %q", byID["old"].DeliveryError)
 	}
 }
+
+func TestCronTaskRepo_DeliveryPeerID(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newCronTaskRepoForTest(t)
+	task, err := repo.Create(ctx, &biz.CronTaskCreate{
+		Name: "wx", AgentID: "a1", ScheduleKind: "cron", ScheduleExpr: "0 9 * * *", Timezone: "UTC",
+		PayloadKind: "agent_turn", PayloadContent: "hi", TimeoutSec: 60,
+		DeliveryMode: "channel", DeliveryChannelID: "uuid-1", DeliveryPeerID: "p1@im.wechat", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.DeliveryPeerID != "p1@im.wechat" {
+		t.Fatalf("created peer = %q", task.DeliveryPeerID)
+	}
+	updated, err := repo.Update(ctx, task.ID, map[string]any{"delivery_peer_id": "p2@im.wechat"})
+	if err != nil || updated.DeliveryPeerID != "p2@im.wechat" {
+		t.Fatalf("updated = %+v, %v", updated, err)
+	}
+}
