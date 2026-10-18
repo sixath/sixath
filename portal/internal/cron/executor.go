@@ -36,8 +36,19 @@ type Executor struct {
 	channelUC              *biz.ChannelUsecase
 	log                    *log.Helper
 	servicePrincipalUserID string
+	ilink                  IlinkPusher
 	// payloadRunner replaces the payload dispatch when set (tests).
 	payloadRunner func(ctx context.Context, task *biz.CronTaskMeta) (string, error)
+}
+
+// IlinkPusher sends text to a weixin_ilink roster peer (*biz.WeixinIlinkUsecase satisfies it).
+type IlinkPusher interface {
+	Push(ctx context.Context, channelUUID, peerID, text string) ([]string, error)
+}
+
+// SetIlinkPusher enables delivery to weixin_ilink channels.
+func (e *Executor) SetIlinkPusher(p IlinkPusher) {
+	e.ilink = p
 }
 
 // NewExecutor 创建 CronExecutor
@@ -398,8 +409,19 @@ func (e *Executor) deliverChannel(ctx context.Context, task *biz.CronTaskMeta, o
 			return fmt.Errorf("企业微信推送失败：%w", scrubURL(err, ch.WebhookURL))
 		}
 		return nil
+	case biz.ChannelTypeWeixinIlink:
+		if e.ilink == nil {
+			return errors.New("微信渠道推送未启用")
+		}
+		if task.DeliveryPeerID == "" {
+			return fmt.Errorf("微信渠道 %s 未配置接收人（delivery_peer_id）", ch.ChannelID)
+		}
+		if _, err := e.ilink.Push(ctx, ch.ID, task.DeliveryPeerID, content); err != nil {
+			return fmt.Errorf("微信推送失败：%w", err)
+		}
+		return nil
 	default:
-		return fmt.Errorf("渠道 %s 的类型 %s 不支持投递（仅支持 wxpusher、wecom）", ch.ID, ch.Type)
+		return fmt.Errorf("渠道 %s 的类型 %s 不支持投递（仅支持 wxpusher、wecom、weixin_ilink）", ch.ID, ch.Type)
 	}
 }
 
