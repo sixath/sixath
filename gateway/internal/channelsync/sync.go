@@ -15,9 +15,21 @@ type ChannelLister interface {
 	ListGatewayChannels(ctx context.Context) ([]channel.Channel, error)
 }
 
-// Reconciler applies wecom_bot start/stop based on snapshot diffs.
+// Reconciler applies long-connection runner start/stop based on snapshot diffs.
 type Reconciler interface {
 	Reconcile(prev, next []channel.Channel)
+}
+
+// MultiReconciler fans one snapshot diff out to several reconcilers, in order.
+type MultiReconciler []Reconciler
+
+// Reconcile calls every non-nil reconciler with the same prev / next snapshots.
+func (m MultiReconciler) Reconcile(prev, next []channel.Channel) {
+	for _, r := range m {
+		if r != nil {
+			r.Reconcile(prev, next)
+		}
+	}
 }
 
 // Config wires the sync runner.
