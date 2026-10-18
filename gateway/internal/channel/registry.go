@@ -24,6 +24,12 @@ type Channel struct {
 	// Optional self-built app credentials to resolve from.userid → display name.
 	CorpID     string `yaml:"corp_id" json:"corp_id,omitempty"`
 	CorpSecret string `yaml:"corp_secret" json:"corp_secret,omitempty"`
+	// weixin_ilink fields are synced from Portal only; BotToken must never be logged.
+	BotToken       string   `yaml:"-" json:"bot_token,omitempty"`
+	BaseURL        string   `yaml:"-" json:"base_url,omitempty"`
+	Generation     int      `yaml:"-" json:"generation,omitempty"`
+	SessionExpired bool     `yaml:"-" json:"session_expired,omitempty"`
+	AllowedPeers   []string `yaml:"-" json:"allowed_peers,omitempty"`
 }
 
 type channelsFile struct {

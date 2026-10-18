@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -203,6 +204,38 @@ type gatewayChannelItem struct {
 	WSURL            string   `json:"ws_url"`
 	CorpID           string   `json:"corp_id"`
 	CorpSecret       string   `json:"corp_secret"`
+	BotToken         string   `json:"bot_token"`
+	BaseURL          string   `json:"base_url"`
+	Generation       int      `json:"generation"`
+	SessionExpired   bool     `json:"session_expired"`
+	AllowedPeers     []string `json:"allowed_peers"`
+}
+
+// IlinkPeerReport is POST /runtime/v1/gateway/channels/{channel_id}/ilink/peers body.
+type IlinkPeerReport struct {
+	Generation   int    `json:"generation"`
+	PeerID       string `json:"peer_id"`
+	ContextToken string `json:"context_token"`
+	Preview      string `json:"preview"`
+	// At is RFC3339; empty lets Portal use its own clock.
+	At string `json:"at,omitempty"`
+}
+
+// IlinkCursor is the GET / PUT .../ilink/cursor body.
+type IlinkCursor struct {
+	Generation    int    `json:"generation"`
+	GetUpdatesBuf string `json:"get_updates_buf"`
+}
+
+type ilinkSessionExpiredBody struct {
+	Generation int    `json:"generation"`
+	Reason     string `json:"reason"`
+}
+
+// IsIlinkGenerationMismatch reports Portal's 409 ILINK_GENERATION_MISMATCH (runner is stale).
+func IsIlinkGenerationMismatch(err error) bool {
+	var he *HTTPError
+	return errors.As(err, &he) && he != nil && he.StatusCode == http.StatusConflict
 }
 
 // ResolveSession maps channel+peer to a session.
@@ -265,6 +298,11 @@ func (c *Client) ListGatewayChannels(ctx context.Context) ([]channel.Channel, er
 			WSURL:            item.WSURL,
 			CorpID:           item.CorpID,
 			CorpSecret:       item.CorpSecret,
+			BotToken:         item.BotToken,
+			BaseURL:          item.BaseURL,
+			Generation:       item.Generation,
+			SessionExpired:   item.SessionExpired,
+			AllowedPeers:     item.AllowedPeers,
 		}
 		if ch.IPWhitelist == nil {
 			ch.IPWhitelist = []string{}
@@ -278,6 +316,41 @@ func (c *Client) ListGatewayChannels(ctx context.Context) ([]channel.Channel, er
 func (c *Client) ReportChannelStatus(ctx context.Context, channelID string, body StatusBody) error {
 	path := "/runtime/v1/gateway/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/status"
 	return c.doJSON(ctx, http.MethodPost, path, "", nil, body, nil)
+}
+
+func ilinkPath(channelID, suffix string) string {
+	return "/runtime/v1/gateway/channels/" + url.PathEscape(strings.TrimSpace(channelID)) + "/ilink/" + suffix
+}
+
+// ReportIlinkPeer upserts the roster entry; allowed is informational (the synced AllowedPeers decides).
+func (c *Client) ReportIlinkPeer(ctx context.Context, channelID string, req IlinkPeerReport) (bool, error) {
+	var out struct {
+		Allowed bool `json:"allowed"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, ilinkPath(channelID, "peers"), "", nil, req, &out); err != nil {
+		return false, err
+	}
+	return out.Allowed, nil
+}
+
+// GetIlinkCursor returns the stored long-poll cursor and the generation it was written under.
+func (c *Client) GetIlinkCursor(ctx context.Context, channelID string) (*IlinkCursor, error) {
+	var out IlinkCursor
+	if err := c.doJSON(ctx, http.MethodGet, ilinkPath(channelID, "cursor"), "", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PutIlinkCursor is a CAS on generation; a stale generation yields a 409 HTTPError.
+func (c *Client) PutIlinkCursor(ctx context.Context, channelID string, cur IlinkCursor) error {
+	return c.doJSON(ctx, http.MethodPut, ilinkPath(channelID, "cursor"), "", nil, cur, nil)
+}
+
+// ReportIlinkSessionExpired marks the bot session expired (-14); Portal ignores stale generations.
+func (c *Client) ReportIlinkSessionExpired(ctx context.Context, channelID string, generation int, reason string) error {
+	body := ilinkSessionExpiredBody{Generation: generation, Reason: reason}
+	return c.doJSON(ctx, http.MethodPost, ilinkPath(channelID, "session-expired"), "", nil, body, nil)
 }
 
 // RouteChannel asks Portal to classify which allowlisted agent should handle text.
