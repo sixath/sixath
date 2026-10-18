@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	pkgErrors "backend/internal/pkg/errors"
@@ -19,7 +20,11 @@ var (
 type CronUsecase struct {
 	taskRepo CronTaskRepo
 	runRepo  CronRunRepo
-	log      *log.Helper
+	// weixin_ilink 投递校验与"推回发起人"反查；未注入时跳过（见 SetWeixinIlink）
+	ilinkChannels ChannelRepo
+	ilinkPeers    ChannelPeerSessionRepo
+	ilinkRoster   WeixinIlinkRepo
+	log           *log.Helper
 }
 
 // NewCronUsecase creates a CronUsecase
@@ -29,6 +34,10 @@ func NewCronUsecase(taskRepo CronTaskRepo, runRepo CronRunRepo, logger log.Logge
 
 // Create 创建定时任务
 func (uc *CronUsecase) Create(ctx context.Context, t *CronTaskCreate) (*CronTaskMeta, error) {
+	t.DeliveryPeerID = strings.TrimSpace(t.DeliveryPeerID)
+	if err := uc.validateIlinkDelivery(ctx, t.DeliveryMode, t.DeliveryChannelID, t.DeliveryPeerID); err != nil {
+		return nil, err
+	}
 	return uc.taskRepo.Create(ctx, t)
 }
 
@@ -48,6 +57,9 @@ func (uc *CronUsecase) List(ctx context.Context, page, pageSize int32, agentID s
 
 // Update 更新
 func (uc *CronUsecase) Update(ctx context.Context, id string, updates map[string]any) (*CronTaskMeta, error) {
+	if err := uc.validateIlinkUpdate(ctx, id, updates); err != nil {
+		return nil, err
+	}
 	t, err := uc.taskRepo.Update(ctx, id, updates)
 	if err != nil && errors.Is(err, pkgErrors.ErrNotFound) {
 		return nil, ErrCronTaskNotFound

@@ -87,6 +87,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, auth *conf.Auth, grow
 	weixinIlinkRepo := data.NewWeixinIlinkRepo(dataData, logger)
 	weixinIlinkUsecase := biz.NewWeixinIlinkUsecase(channelRepo, weixinIlinkRepo, authEphemeralRepo)
 	runtimeService.SetIlink(weixinIlinkUsecase)
+	cronUsecase.SetWeixinIlink(channelRepo, channelPeerSessionRepo, weixinIlinkRepo)
 	db := data.ProvideDB(dataData)
 	terminalIdleTTL := provideTerminalIdleTTL()
 	manager := terminal.NewManager(db, terminalIdleTTL)
