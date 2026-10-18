@@ -15,6 +15,8 @@ type Config struct {
 	PortalBaseURL  string `yaml:"portal_base_url"`
 	RuntimeToken   string `yaml:"runtime_token"`
 	TurnTimeoutSec int    `yaml:"turn_timeout_sec"`
+	// IlinkSplitRunes caps each weixin_ilink reply message; 0 means 4000.
+	IlinkSplitRunes int `yaml:"ilink_split_runes"`
 	// ChannelsFile is deprecated. Runtime channel config comes from Portal
 	// (GET /runtime/v1/gateway/channels). Kept only for one-shot import tooling.
 	ChannelsFile string `yaml:"channels_file"`

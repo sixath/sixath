@@ -77,10 +77,20 @@ func main() {
 		ProgressTick: 3 * time.Second,
 	}
 	mgr := adapter.NewWecomBotManager(ctx, botDeps)
+	// Same Sessions / Idempotency / PendingSwitch as wecom_bot so slash commands and dedupe behave alike.
+	ilinkMgr := adapter.NewWeixinIlinkManager(ctx, adapter.WeixinIlinkDeps{
+		Registry:      reg,
+		Runtime:       rt,
+		Sessions:      sessions,
+		Idempotency:   idem,
+		PendingSwitch: pendingSwitch,
+		TurnTimeout:   turnTimeout,
+		SplitRunes:    cfg.IlinkSplitRunes,
+	})
 	syncer := channelsync.NewRunner(channelsync.Config{
 		Registry: reg,
 		Lister:   rt,
-		Manager:  mgr,
+		Manager:  channelsync.MultiReconciler{mgr, ilinkMgr},
 		Interval: 15 * time.Second,
 	})
 	go syncer.Run(ctx)

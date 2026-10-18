@@ -1,6 +1,6 @@
 # Sixath Inbound Gateway
 
-统一入站对话入口：浏览器 **Web**、通用 **Webhook**，以及企业微信 **智能机器人 AI+** 的 **WebSocket 长连接**（`type=wecom_bot`）。
+统一入站对话入口：浏览器 **Web**、通用 **Webhook**、企业微信 **智能机器人 AI+** 的 **WebSocket 长连接**（`type=wecom_bot`），以及个人微信 **iLink 机器人** 的 **HTTP 长轮询**（`type=weixin_ilink`）。
 
 Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→session` 路由在此完成，Agent 执行走 Portal `/runtime/v1`。
 
@@ -13,6 +13,7 @@ Gateway **不跑** ReAct / 不持有工具真相；协议适配与 `peer→sessi
 | [消息级自动路由](../docs/superpowers/specs/2026-08-10-gateway-message-auto-route-design.md) | `@Agent` + Portal 分类器 |
 | [企微智能机器人设计](../docs/superpowers/specs/2026-08-09-wecom-bot-gateway-design.md) | 长连接 Adapter |
 | [渠道 Portal 真相源 + Runtime Status](../docs/superpowers/specs/2026-08-11-channel-portal-runtime-status-design.md) | 配置同步、连接态 |
+| [微信 iLink 渠道设计](../docs/superpowers/specs/2026-10-18-weixin-ilink-channel-design.md) | `weixin_ilink` 长轮询、名册白名单、会话过期 |
 | 官方 | [智能机器人长连接](https://developer.work.weixin.qq.com/document/path/101463) |
 
 进程配置：`configs/config.example.yaml`。
@@ -67,6 +68,7 @@ Portal Channel type=wecom (群 Webhook URL)  ──▶  send_to_wecom / Cron（�
 | Web（经 Gateway） | 登录用户 Bearer | SSE 流式（含 tool/model 时间线） | 显式多 `session_id`（不按 peer 折叠） |
 | `webhook` | `POST /hooks/{channel_id}` | 默认异步 202 + `reply_url`；可同步 | `channel_id + peer_id` |
 | `wecom_bot` | 企微 WSS 推送 `aibot_msg_callback` | `aibot_respond_msg` stream 卡片 | 群 `chat:{chatid}` / 单聊 `user:{userid}` |
+| `weixin_ilink` | Gateway 长轮询 iLink `getupdates`（仅私聊文本） | `sendmessage` 纯文本（Markdown 简化 + 按 4000 字切分） | `user:{from_user_id}` |
 
 ### 企微消息路径（`wecom_bot`）
 
@@ -106,9 +108,9 @@ go run ./cmd/import-gateway-channels -config ./configs -channels ../gateway/conf
 
 导入后请在 Portal UI 核对凭证与 Agent 绑定；勿再依赖改 yaml + 重启 Gateway。
 
-### Runtime Status（仅 `wecom_bot`）
+### Runtime Status（`wecom_bot` / `weixin_ilink`）
 
-Web Channels 列表 / 编辑页展示连接态。Gateway 上报 `connected` / `disconnected` / `reconnecting` / `disabled`；Portal 读路径再派生 **`unknown`**。
+Web Channels 列表 / 编辑页展示连接态。Gateway 上报 `connected` / `disconnected` / `reconnecting` / `disabled`；Portal 读路径再派生 **`unknown`**，`weixin_ilink` 另有 **`login_required`**（未扫码或会话过期，优先级高于心跳，见下文 [微信 iLink](#微信-ilink-机器人长轮询-weixin_ilink)）。
 
 | 状态 | 含义 |
 |------|------|
@@ -123,6 +125,8 @@ Web Channels 列表 / 编辑页展示连接态。Gateway 上报 `connected` / `d
 ### 单副本约束
 
 同一 `bot_id` **不要**在多台 Gateway（含 K8s 多副本）上同时 `enabled`。新的 `aibot_subscribe` 会踢掉旧连接；重复订阅时日志常见 `wecom_bot <id> disconnected` 重连循环。
+
+`weixin_ilink` 同样**只能单副本**：两个 Gateway 同时长轮询同一个 bot 会重复收到消息、重复回复，且游标互相覆盖。Gateway 不接 leader 租约，部署时保证只有一个实例。
 
 ---
 
@@ -274,6 +278,52 @@ Web 聊天经 Gateway 代理 `/api/v1/sessions/.../messages/stream` 时，Runtim
 
 ---
 
+## 微信 iLink 机器人（长轮询 `weixin_ilink`）
+
+一个 Portal 渠道对应一个 iLink bot 账号。扫码登录、名册（白名单）与出站推送都在 Portal；Gateway 只负责长轮询收消息并回复。设计见 [微信 iLink 渠道设计](../docs/superpowers/specs/2026-10-18-weixin-ilink-channel-design.md)。
+
+### 1. Portal 侧
+
+1. Web **Channels** 新建 `type=weixin_ilink` 渠道，保存后在编辑页点「扫码登录」，用微信扫码并在手机上确认。
+2. 扫码人自动进入名册并放行；其他人首次给 bot 发消息后出现在名册中（默认拒绝），在名册里点「放行」。
+3. Gateway 约 15s 内同步到 `bot_token` / `generation` / `allowed_peers` 并启动 runner；改白名单**不会**重启 runner（每条消息现读）。
+
+### 2. 消息路径
+
+```text
+getupdates 长轮询（客户端超时 40s → 空批次，游标不变）
+    → 只取 message_type=1、无 group_id 的消息
+    → 每条先上报名册（context_token / 预览，在白名单判断之前）
+    → PUT 游标（CAS；409 = 已换号 → runner 挂起）
+    → 进程内幂等 ilink:{channel_id}:{message_id}
+    → 白名单：不在名单 → 「无权限，请联系管理员开通（ID 尾号 xxxx）」（同一人 10 分钟一次）
+    → 非文本 → 「暂只支持文字消息」
+    → 该 peer 的串行队列（排队上限 5，满则「消息太多，请稍后再试」；空闲 5 分钟回收）
+        → pending /switch 序号 → slash 指令 → @Agent / 分类器 → Resolve → TurnsStream
+        → 15s 内无结果先回一条「处理中…」
+        → 回复正文：Markdown 简化为纯文本，按 4000 字切分，逐条 sendmessage（带本条 context_token）
+```
+
+- 投递语义：**至多一次**（游标先于处理提交）。进程崩溃时在途 / 排队中的消息丢失。
+- HITL fail-closed：回复「该操作需要在 Web 端确认」。Turn 失败回复「处理失败：…」。
+- 心跳：runner 运行期间独立于长轮询每 30s 上报一次 `connected` / `reconnecting`。
+- 会话过期（iLink 返回 `-14`）：上报 Portal 后 runner **挂起**（不再请求 iLink、不被重启），Portal 显示 `login_required`；重新扫码后 `generation` 变化，runner 自动重启。
+- 日志从不打印 `bot_token` / `context_token`；对端只打 ID 尾号。
+- 进程配置可选 `ilink_split_runes`（单条回复最大字数，默认 4000）。
+
+### 3. 验收清单
+
+1. 创建渠道 → 扫码 → ≤15s Runtime Status 为 `connected`；名册里扫码人已放行。
+2. 非白名单微信号发消息 → 收到「无权限…（ID 尾号 xxxx）」；名册出现该对端与最近预览；10 分钟内再发不再回复。
+3. 名册放行 → ≤15s 后对话正常（runner 未重启）；`/who`、`/switch` + 序号、`/new` 可用。
+4. 发图片 → 「暂只支持文字消息」。
+5. 让 Agent 输出长 Markdown → 微信收到纯文本、无 `#` / `**`，超长时分多条。
+6. 重新扫码（换 bot）→ 日志出现旧 runner 停止、新 runner 启动；旧 runner 不再写游标。
+7. 让会话过期：用 `scripts/ilink-spike` 等其它客户端对同一微信号重新扫码，使 Portal 保存的旧 `bot_token` 失效（`-14`）→ 持续显示 `login_required`（不会退化为 `unknown`），Gateway 不再轮询该 bot；在 Portal 重新扫码后恢复 `connected`。
+8. 停 Gateway → ≤90s `unknown`。
+
+---
+
 ## 其它渠道
 
 ### Webhook
@@ -294,7 +344,7 @@ POST /hooks/{channel_id}
 
 ```bash
 cd gateway
-go test ./internal/wecom/ ./internal/channel/ ./internal/adapter/ ./internal/channelsync/ -count=1
+go test ./internal/wecom/ ./internal/ilink/ ./internal/channel/ ./internal/adapter/ ./internal/channelsync/ -count=1
 ```
 
 改 Portal 渠道配置后 Gateway 会热同步；改 Gateway 二进制后需**重启**进程。
