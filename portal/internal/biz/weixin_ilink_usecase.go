@@ -49,8 +49,10 @@ type WeixinIlinkUsecase struct {
 	channels  ChannelRepo
 	repo      WeixinIlinkRepo
 	ephemeral AuthEphemeralRepo
+	peers     ChannelPeerSessionRepo
 	login     IlinkLoginClient
 	qrImage   func(content string) (string, error)
+	newSender func(baseURL, token string) IlinkSender
 	now       func() time.Time
 }
 
@@ -65,6 +67,7 @@ func NewWeixinIlinkUsecaseWith(channels ChannelRepo, repo WeixinIlinkRepo, ephem
 		ephemeral: ephemeral,
 		login:     login,
 		qrImage:   qrImage,
+		newSender: func(baseURL, token string) IlinkSender { return ilink.NewClient(baseURL, token) },
 		now:       time.Now,
 	}
 }
