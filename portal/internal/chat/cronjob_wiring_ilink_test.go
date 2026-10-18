@@ -100,6 +100,19 @@ func TestPortalCronClient_BackfillsWeixinOrigin(t *testing.T) {
 	}
 }
 
+func TestPortalCronClient_ChannelSlugPersistedAsUUID(t *testing.T) {
+	client, repo := newOriginCronClient()
+	in := createIn("channel", "wx-1", "")
+	in.DeliveryPeerID = "p1@im.wechat"
+
+	if _, err := client.Create(context.Background(), "agent-1", in); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got := repo.last; got.DeliveryChannelID != "uuid-wx" || got.DeliveryPeerID != "p1@im.wechat" {
+		t.Fatalf("delivery = %q / %q", got.DeliveryChannelID, got.DeliveryPeerID)
+	}
+}
+
 func TestPortalCronClient_NoBackfill(t *testing.T) {
 	client, repo := newOriginCronClient()
 	cases := []struct {

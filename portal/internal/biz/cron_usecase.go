@@ -35,9 +35,11 @@ func NewCronUsecase(taskRepo CronTaskRepo, runRepo CronRunRepo, logger log.Logge
 // Create 创建定时任务
 func (uc *CronUsecase) Create(ctx context.Context, t *CronTaskCreate) (*CronTaskMeta, error) {
 	t.DeliveryPeerID = strings.TrimSpace(t.DeliveryPeerID)
-	if err := uc.validateIlinkDelivery(ctx, t.DeliveryMode, t.DeliveryChannelID, t.DeliveryPeerID); err != nil {
+	channelID, err := uc.validateIlinkDelivery(ctx, t.DeliveryMode, t.DeliveryChannelID, t.DeliveryPeerID)
+	if err != nil {
 		return nil, err
 	}
+	t.DeliveryChannelID = channelID
 	return uc.taskRepo.Create(ctx, t)
 }
 

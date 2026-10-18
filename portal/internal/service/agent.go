@@ -65,7 +65,7 @@ func (s *AgentService) SetWeixinIlink(w WeixinIlinkSender) {
 	if s == nil {
 		return
 	}
-	s.weixinIlink = w
+	s.weixinIlink = weixinSenderOrNil(w)
 }
 
 // SetRCARootResolver wires repo-binding based RCA roots.
@@ -378,7 +378,7 @@ func (s *AgentService) Chat(ctx context.Context, req *agentv1.ChatRequest) (*age
 		return nil, err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, nil, reg, agentMeta)
-	weixinBindings := registerWeixinToolForAgent(ctx, s.weixinIlink, nil, reg, agentMeta)
+	weixinBindings := registerWeixinToolForAgent(ctx, s.log, s.weixinIlink, nil, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{

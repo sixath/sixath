@@ -46,8 +46,11 @@ type IlinkPusher interface {
 	Push(ctx context.Context, channelUUID, peerID, text string) ([]string, error)
 }
 
-// SetIlinkPusher enables delivery to weixin_ilink channels.
+// SetIlinkPusher enables delivery to weixin_ilink channels; a typed-nil usecase disables it.
 func (e *Executor) SetIlinkPusher(p IlinkPusher) {
+	if uc, ok := p.(*biz.WeixinIlinkUsecase); ok && uc == nil {
+		p = nil
+	}
 	e.ilink = p
 }
 

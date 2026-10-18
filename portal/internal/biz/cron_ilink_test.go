@@ -56,8 +56,11 @@ func newCronIlinkUsecaseForTest() (*CronUsecase, *cronIlinkTaskRepo) {
 		peerKey("wx-1", "user:latest"): {ChannelID: "wx-1", PeerID: "user:latest", SessionID: "s-multi", UpdatedAt: now},
 	}}
 	tasks := &cronIlinkTaskRepo{tasks: map[string]*CronTaskMeta{
-		"t-wx":   {ID: "t-wx", DeliveryMode: "channel", DeliveryChannelID: "uuid-1", DeliveryPeerID: "blocked"},
-		"t-none": {ID: "t-none", DeliveryMode: "none"},
+		"t-wx":    {ID: "t-wx", DeliveryMode: "channel", DeliveryChannelID: "uuid-1", DeliveryPeerID: "blocked"},
+		"t-wx-ok": {ID: "t-wx-ok", DeliveryMode: "channel", DeliveryChannelID: "uuid-1", DeliveryPeerID: "p1"},
+		"t-wcm":   {ID: "t-wcm", DeliveryMode: "channel", DeliveryChannelID: "uuid-wcm"},
+		"t-slug":  {ID: "t-slug", DeliveryMode: "none", DeliveryChannelID: "wx-1"},
+		"t-none":  {ID: "t-none", DeliveryMode: "none"},
 	}}
 	uc := NewCronUsecase(tasks, nil, log.DefaultLogger)
 	uc.SetWeixinIlink(channels, peers, roster)
@@ -133,6 +136,87 @@ func TestCronUpdate_IlinkDeliveryValidation(t *testing.T) {
 	}
 	if len(tasks.updated) != 2 {
 		t.Fatalf("repo updates = %d, want 2", len(tasks.updated))
+	}
+}
+
+func TestCronCreate_ChannelSlugRewrittenToUUID(t *testing.T) {
+	uc, tasks := newCronIlinkUsecaseForTest()
+	ctx := context.Background()
+	create := func(channelID, peer string) error {
+		_, err := uc.Create(ctx, &CronTaskCreate{Name: "n", DeliveryMode: "channel", DeliveryChannelID: channelID, DeliveryPeerID: peer})
+		return err
+	}
+
+	if err := create("wx-1", ""); !isIlinkInvalidArgument(err) || !strings.Contains(err.Error(), "delivery_peer_id") {
+		t.Fatalf("slug without peer err = %v", err)
+	}
+	if err := create("wx-1", "blocked"); !isIlinkInvalidArgument(err) {
+		t.Fatalf("slug with disallowed peer err = %v", err)
+	}
+	if err := create("wx-1", "p1"); err != nil {
+		t.Fatalf("slug with allowed peer err = %v", err)
+	}
+	if err := create("wecom-1", ""); err != nil {
+		t.Fatalf("wecom slug err = %v", err)
+	}
+	if err := create("missing", ""); err != nil {
+		t.Fatalf("unknown channel err = %v", err)
+	}
+	var got []string
+	for _, c := range tasks.created {
+		got = append(got, c.DeliveryChannelID)
+	}
+	if strings.Join(got, ",") != "uuid-1,uuid-wcm,missing" {
+		t.Fatalf("stored channel ids = %q", got)
+	}
+}
+
+func TestCronUpdate_ChannelSlugRewrittenToUUID(t *testing.T) {
+	uc, tasks := newCronIlinkUsecaseForTest()
+	ctx := context.Background()
+
+	if _, err := uc.Update(ctx, "t-none", map[string]any{"delivery_mode": "channel", "delivery_channel_id": "wx-1", "delivery_peer_id": "blocked"}); !isIlinkInvalidArgument(err) {
+		t.Fatalf("slug with disallowed peer err = %v", err)
+	}
+	updates := map[string]any{"delivery_mode": "channel", "delivery_channel_id": "wx-1", "delivery_peer_id": "p1"}
+	if _, err := uc.Update(ctx, "t-none", updates); err != nil {
+		t.Fatalf("slug with allowed peer err = %v", err)
+	}
+	if updates["delivery_channel_id"] != "uuid-1" {
+		t.Fatalf("updates channel = %v, want uuid-1", updates["delivery_channel_id"])
+	}
+	updates = map[string]any{"delivery_channel_id": "wecom-1"}
+	if _, err := uc.Update(ctx, "t-wcm", updates); err != nil || updates["delivery_channel_id"] != "uuid-wcm" {
+		t.Fatalf("wecom slug err = %v channel = %v", err, updates["delivery_channel_id"])
+	}
+	updates = map[string]any{"delivery_mode": "channel", "delivery_peer_id": "p1"}
+	if _, err := uc.Update(ctx, "t-slug", updates); err != nil || updates["delivery_channel_id"] != "uuid-1" {
+		t.Fatalf("stored slug err = %v channel = %v", err, updates["delivery_channel_id"])
+	}
+	if len(tasks.updated) != 3 {
+		t.Fatalf("repo updates = %d, want 3", len(tasks.updated))
+	}
+}
+
+func TestCronUpdate_NonStringPeerID(t *testing.T) {
+	uc, tasks := newCronIlinkUsecaseForTest()
+	ctx := context.Background()
+
+	if _, err := uc.Update(ctx, "t-wx-ok", map[string]any{"delivery_peer_id": nil}); !isIlinkInvalidArgument(err) || !strings.Contains(err.Error(), "delivery_peer_id") {
+		t.Fatalf("null peer on weixin task err = %v", err)
+	}
+	if _, err := uc.Update(ctx, "t-wx-ok", map[string]any{"delivery_peer_id": 123}); !isIlinkInvalidArgument(err) {
+		t.Fatalf("numeric peer err = %v", err)
+	}
+	if len(tasks.updated) != 0 {
+		t.Fatalf("repo updates = %d, want none", len(tasks.updated))
+	}
+	updates := map[string]any{"delivery_peer_id": nil}
+	if _, err := uc.Update(ctx, "t-wcm", updates); err != nil {
+		t.Fatalf("null peer on wecom task err = %v", err)
+	}
+	if v, ok := updates["delivery_peer_id"].(string); !ok || v != "" {
+		t.Fatalf("persisted peer = %#v, want empty string", updates["delivery_peer_id"])
 	}
 }
 

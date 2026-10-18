@@ -83,6 +83,14 @@ func TestDeliverChannel_WeixinIlinkMisconfigured(t *testing.T) {
 	if err := e.deliverChannel(ctx, &biz.CronTaskMeta{Name: "n", DeliveryChannelID: "uuid-1", DeliveryPeerID: "p1"}, "x", nil); err == nil {
 		t.Fatal("want error when the pusher is not wired")
 	}
+	var typedNil *biz.WeixinIlinkUsecase
+	e.SetIlinkPusher(typedNil)
+	if e.ilink != nil {
+		t.Fatalf("typed-nil pusher stored as %#v", e.ilink)
+	}
+	if err := e.deliverChannel(ctx, &biz.CronTaskMeta{Name: "n", DeliveryChannelID: "uuid-1", DeliveryPeerID: "p1"}, "x", nil); err == nil {
+		t.Fatal("want error when the pusher is a typed nil")
+	}
 	err = e.deliverChannel(ctx, &biz.CronTaskMeta{Name: "n", DeliveryChannelID: "uuid-wh"}, "x", nil)
 	if err == nil || !strings.Contains(err.Error(), "weixin_ilink") {
 		t.Fatalf("unsupported type err = %v", err)

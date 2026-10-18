@@ -32,16 +32,24 @@ func (uc *CronUsecase) IlinkOrigin(ctx context.Context, sessionID string) (chann
 }
 
 // validateIlinkUpdate checks the effective delivery only when the update touches it, so pausing a
-// task whose peer was later removed from the roster still works.
+// task whose peer was later removed from the roster still works. A slug delivery_channel_id is
+// rewritten in updates to the channel UUID.
 func (uc *CronUsecase) validateIlinkUpdate(ctx context.Context, id string, updates map[string]any) error {
-	if v, ok := updates["delivery_peer_id"].(string); ok {
-		v = strings.TrimSpace(v)
+	if raw, ok := updates["delivery_peer_id"]; ok {
+		var v string
+		switch p := raw.(type) {
+		case nil:
+		case string:
+			v = strings.TrimSpace(p)
+		default:
+			return kratosErrors.BadRequest("INVALID_ARGUMENT", "delivery_peer_id must be a string")
+		}
 		if utf8.RuneCountInString(v) > ilinkPeerIDMaxRunes {
 			return kratosErrors.BadRequest("INVALID_ARGUMENT", "delivery_peer_id is too long")
 		}
 		updates["delivery_peer_id"] = v
 	}
-	if uc.ilinkChannels == nil || uc.ilinkRoster == nil {
+	if uc.ilinkChannels == nil {
 		return nil
 	}
 	touched := false
@@ -70,34 +78,48 @@ func (uc *CronUsecase) validateIlinkUpdate(ctx context.Context, id string, updat
 	if v, ok := updates["delivery_peer_id"].(string); ok {
 		peerID = v
 	}
-	return uc.validateIlinkDelivery(ctx, mode, channelID, peerID)
-}
-
-// validateIlinkDelivery requires an allowed roster peer when delivering to a weixin_ilink channel.
-// Unknown channels are left to the executor, matching the other channel types.
-func (uc *CronUsecase) validateIlinkDelivery(ctx context.Context, mode, channelID, peerID string) error {
-	if utf8.RuneCountInString(peerID) > ilinkPeerIDMaxRunes {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", "delivery_peer_id is too long")
-	}
-	if uc.ilinkChannels == nil || uc.ilinkRoster == nil || mode != "channel" || channelID == "" {
-		return nil
-	}
-	ch, err := uc.ilinkChannels.GetByID(ctx, channelID)
-	if errors.Is(err, pkgErrors.ErrNotFound) {
-		return nil
-	}
+	resolved, err := uc.validateIlinkDelivery(ctx, mode, channelID, peerID)
 	if err != nil {
 		return err
 	}
-	if ch.Type != ChannelTypeWeixinIlink {
-		return nil
+	if resolved != channelID {
+		updates["delivery_channel_id"] = resolved
+	}
+	return nil
+}
+
+// validateIlinkDelivery requires an allowed roster peer when delivering to a weixin_ilink channel
+// and returns the channel ID to persist: a channel slug (what agents see) becomes the channel UUID
+// the executor looks up. Unknown channels are left to the executor, matching the other channel types.
+func (uc *CronUsecase) validateIlinkDelivery(ctx context.Context, mode, channelID, peerID string) (string, error) {
+	if utf8.RuneCountInString(peerID) > ilinkPeerIDMaxRunes {
+		return channelID, kratosErrors.BadRequest("INVALID_ARGUMENT", "delivery_peer_id is too long")
+	}
+	if uc.ilinkChannels == nil || mode != "channel" || channelID == "" {
+		return channelID, nil
+	}
+	ch, err := uc.ilinkChannels.GetByID(ctx, channelID)
+	if errors.Is(err, pkgErrors.ErrNotFound) {
+		ch, err = uc.ilinkChannels.GetByChannelID(ctx, channelID)
+	}
+	if errors.Is(err, pkgErrors.ErrNotFound) {
+		return channelID, nil
+	}
+	if err != nil {
+		return channelID, err
+	}
+	if ch.Type != ChannelTypeWeixinIlink || uc.ilinkRoster == nil {
+		return ch.ID, nil
 	}
 	if peerID == "" {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", "投递到微信渠道必须选择接收人（delivery_peer_id）")
+		return channelID, kratosErrors.BadRequest("INVALID_ARGUMENT", "投递到微信渠道必须选择接收人（delivery_peer_id）")
 	}
 	peer, err := uc.ilinkRoster.GetPeer(ctx, ch.ID, peerID)
 	if errors.Is(err, pkgErrors.ErrNotFound) || (err == nil && !peer.Allowed) {
-		return kratosErrors.BadRequest("INVALID_ARGUMENT", fmt.Sprintf("目标 %s 未在白名单", peerID))
+		return channelID, kratosErrors.BadRequest("INVALID_ARGUMENT", fmt.Sprintf("目标 %s 未在白名单", peerID))
 	}
-	return err
+	if err != nil {
+		return channelID, err
+	}
+	return ch.ID, nil
 }

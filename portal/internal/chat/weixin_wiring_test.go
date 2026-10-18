@@ -149,6 +149,45 @@ func TestSendToWeixin_RateLimitedPerSession(t *testing.T) {
 	}
 }
 
+func TestSendToWeixin_NoSessionIsNotRateLimited(t *testing.T) {
+	p := &fakeWeixinPusher{}
+	reg := tool.NewRegistry()
+	if err := RegisterSendToWeixinTool(reg, SendToWeixinOptions{AgentID: "agent-1", Pusher: p, RateLimitInterval: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	tdef, _ := reg.Get("send_to_weixin")
+
+	for i, text := range []string{"cron-a", "cron-b"} {
+		out, _ := tdef.Execute(context.Background(), map[string]any{"text": text, "peer_id": "p1"})
+		if msg, _ := out.(string); !strings.Contains(msg, "已推送到微信") {
+			t.Fatalf("send %d without session = %q", i, msg)
+		}
+	}
+	if len(p.pushed) != 2 {
+		t.Fatalf("pushed = %d, want 2", len(p.pushed))
+	}
+}
+
+func TestSendToWeixin_ResolveErrorDoesNotConsumeRateLimit(t *testing.T) {
+	p := &fakeWeixinPusher{resolveErr: errors.New("peer_id 未在白名单")}
+	reg := tool.NewRegistry()
+	if err := RegisterSendToWeixinTool(reg, SendToWeixinOptions{AgentID: "agent-1", Pusher: p, RateLimitInterval: time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	tdef, _ := reg.Get("send_to_weixin")
+	ctx := context.WithValue(context.Background(), tool.ContextKeySessionID, "sess-wx-argerr")
+
+	out, _ := tdef.Execute(ctx, map[string]any{"text": "1", "peer_id": "bad"})
+	if msg, _ := out.(string); !strings.Contains(msg, "未在白名单") {
+		t.Fatalf("resolve error result = %q", msg)
+	}
+	p.resolveErr = nil
+	out, _ = tdef.Execute(ctx, map[string]any{"text": "2", "peer_id": "p1"})
+	if msg, _ := out.(string); !strings.Contains(msg, "已推送到微信") || len(p.pushed) != 1 {
+		t.Fatalf("send after resolve error = %q pushed = %d", msg, len(p.pushed))
+	}
+}
+
 func TestCatalogWiring_WecomAndWeixinBindings(t *testing.T) {
 	reg := tool.NewRegistry()
 	if err := RegisterSendToWeComTool(reg, SendToWeComOptions{ResolveWebhook: func(context.Context) (string, error) { return "http://x", nil }}); err != nil {

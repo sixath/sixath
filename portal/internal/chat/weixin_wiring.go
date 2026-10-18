@@ -28,7 +28,7 @@ type SendToWeixinOptions struct {
 	Pusher  WeixinPusher
 	// Recorder 可选：非空时每次投递（成功或失败）都会落一条 channel_deliveries 记录。
 	Recorder channel.DeliveryRecorder
-	// RateLimitInterval 同一会话发送的最小间隔，<=0 默认 1s。
+	// RateLimitInterval 同一会话发送的最小间隔，<=0 默认 1s；无会话（如 Cron）时不限流。
 	RateLimitInterval time.Duration
 }
 
@@ -79,12 +79,25 @@ func buildSendToWeixinExecute(opts SendToWeixinOptions) tool.ExecuteFunc {
 			agentID, _ = ctx.Value(tool.ContextKeyAgentID).(string)
 		}
 		sessionID, _ := ctx.Value(tool.ContextKeySessionID).(string)
-		if err := checkSessionRateLimit(&sendToWeixinLastSend, sessionID, opts.RateLimitInterval); err != nil {
-			return err.Error(), nil
+		// Session-less runs (cron agent_turn) are not limited, so concurrent tasks don't throttle each other.
+		limited := sessionID != ""
+		interval := opts.RateLimitInterval
+		if interval <= 0 {
+			interval = sendToWeComDefaultInterval
+		}
+		if limited {
+			if v, ok := sendToWeixinLastSend.Load(sessionID); ok {
+				if last, ok := v.(time.Time); ok && time.Since(last) < interval {
+					return fmt.Sprintf("发送过于频繁，请至少间隔 %s 后再试", interval), nil
+				}
+			}
 		}
 		target, err := opts.Pusher.ResolveSendTarget(ctx, agentID, sessionID, channelSlug, peerID)
 		if err != nil {
 			return fmt.Sprintf("send_to_weixin: %v", err), nil
+		}
+		if limited {
+			sendToWeixinLastSend.Store(sessionID, time.Now())
 		}
 		out := &weixinOutbound{pusher: opts.Pusher, channelUUID: target.Channel.ID, peerID: target.PeerID}
 		// MaxAttempts=1: a failed sendmessage may still have been delivered, so never resend.

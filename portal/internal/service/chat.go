@@ -132,7 +132,7 @@ func (s *ChatService) SetWeixinIlink(w WeixinIlinkSender) {
 	if s == nil {
 		return
 	}
-	s.weixinIlink = w
+	s.weixinIlink = weixinSenderOrNil(w)
 }
 
 func (s *ChatService) persistTurnTrace(ctx context.Context, sessionID, agentID string, tr *agent.RunTrace) {
@@ -496,7 +496,7 @@ func (s *ChatService) SendMessage(ctx context.Context, req *chatv1.SendMessageRe
 		return nil, err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
-	weixinBindings := registerWeixinToolForAgent(ctx, s.weixinIlink, s.deliveryRecorder, reg, agentMeta)
+	weixinBindings := registerWeixinToolForAgent(ctx, s.log, s.weixinIlink, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
@@ -812,7 +812,7 @@ func (s *ChatService) SendMessageStream(ctx context.Context, req *chatv1.SendMes
 		return nil, "", err
 	}
 	registerWeComToolForAgent(ctx, s.channelUC, s.deliveryRecorder, reg, agentMeta)
-	weixinBindings := registerWeixinToolForAgent(ctx, s.weixinIlink, s.deliveryRecorder, reg, agentMeta)
+	weixinBindings := registerWeixinToolForAgent(ctx, s.log, s.weixinIlink, s.deliveryRecorder, reg, agentMeta)
 
 	wecomChannelID := resolveAgentWecomChannelID(ctx, s.channelUC, agentMeta)
 	catalogInput := chat.CatalogWiringInput{
