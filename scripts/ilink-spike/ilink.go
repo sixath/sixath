@@ -125,8 +125,10 @@ type Updates struct {
 }
 
 func (c *Client) GetBotQRCode(ctx context.Context) (*QRCode, error) {
+	qctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
 	var out QRCode
-	if err := c.get(ctx, "/ilink/bot/get_bot_qrcode?bot_type=3", &out); err != nil {
+	if err := c.get(qctx, "/ilink/bot/get_bot_qrcode?bot_type=3", &out); err != nil {
 		return nil, err
 	}
 	if out.QRCode == "" {
@@ -223,7 +225,7 @@ func (c *Client) do(req *http.Request, out any) error {
 		fmt.Fprintf(c.RawLog, "<- %s %s http=%d %s\n", req.Method, req.URL.Path, resp.StatusCode, maskSecrets(data))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s %s: http %d: %s", req.Method, req.URL.Path, resp.StatusCode, truncate(string(data), 200))
+		return fmt.Errorf("%s %s: http %d: %s", req.Method, req.URL.Path, resp.StatusCode, truncate(maskSecrets(data), 200))
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil

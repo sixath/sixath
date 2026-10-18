@@ -26,6 +26,7 @@ tool.json
 **/.playwright-cli/
 scripts/deploy_remote.py
 scripts/ilink-spike/.state/
+scripts/ilink-spike/ilink-spike.exe
 
 .env
 secrets/*.txt
