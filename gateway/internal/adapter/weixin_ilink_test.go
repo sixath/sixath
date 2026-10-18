@@ -1,6 +1,7 @@
 package adapter_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sixath/gateway/internal/channel"
+	"github.com/sixath/gateway/internal/idempotency"
 )
 
 const (
@@ -355,6 +357,96 @@ func TestWeixinIlink_CursorPutFailureRetriedThenContinues(t *testing.T) {
 	if _, puts, _ := f.portal.counts(); puts != 4 {
 		t.Fatalf("cursor put attempts=%d want 4", puts)
 	}
+}
+
+func TestWeixinIlink_HungPeerReportBoundedByPortalCallTimeout(t *testing.T) {
+	f := newIlinkFixture(t, ilinkAlice)
+	f.deps.PortalCallTimeout = 100 * time.Millisecond
+	hang := blockUntilCanceled(t)
+	f.portal.set(func(p *fakeIlinkPortal) { p.peerHook = hang })
+	f.ilink.pushMsgs("b1", ilinkTextMsg(1, ilinkAlice, "hi"))
+	start := time.Now()
+	f.run(t)
+
+	sent := f.ilink.waitSent(t, 1)
+	if sent[0].text != "ok" {
+		t.Fatalf("reply=%q", sent[0].text)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("reply took %s; hung peer report blocked the runner", elapsed)
+	}
+	waitFor(t, 2*time.Second, func() bool { return f.ilink.pollCount() >= 2 }, "next getupdates after hung peer report")
+}
+
+func TestWeixinIlink_CancelDuringCursorRetryDoesNotDispatch(t *testing.T) {
+	f := newIlinkFixture(t, ilinkAlice)
+	store := idempotency.NewStore(10 * time.Minute)
+	f.deps.Idempotency = store
+	f.portal.set(func(p *fakeIlinkPortal) { p.cursorPutStatus = http.StatusBadGateway })
+	f.ilink.pushMsgs("b1", ilinkTextMsg(1, ilinkAlice, "hi"))
+	stop := f.run(t)
+
+	waitFor(t, 2*time.Second, func() bool { _, puts, _ := f.portal.counts(); return puts >= 1 }, "first cursor put")
+	stop()
+
+	if _, began, _ := store.Get(context.Background(), "ilink:wx-1:1"); began {
+		t.Fatal("message dispatched after the runner was canceled")
+	}
+	if f.portal.turnCount() != 0 || len(f.ilink.sentSnapshot()) != 0 {
+		t.Fatalf("turns=%d sent=%d want 0/0", f.portal.turnCount(), len(f.ilink.sentSnapshot()))
+	}
+}
+
+func TestWeixinIlink_EmptyAnswerRepliesChineseNotice(t *testing.T) {
+	f := newIlinkFixture(t, ilinkAlice)
+	f.portal.set(func(p *fakeIlinkPortal) {
+		p.turnHandler = func(w http.ResponseWriter, _ *http.Request, _ map[string]any) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "event: done\ndata: {}\n\n")
+		}
+	})
+	f.ilink.pushMsgs("b1", ilinkTextMsg(1, ilinkAlice, "hi"))
+	f.run(t)
+
+	sent := f.ilink.waitSent(t, 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := sentTexts(f.ilink.sentSnapshot()); !slices.Equal(got, []string{"未生成回复，请稍后重试。"}) {
+		t.Fatalf("sent=%q", got)
+	}
+	if sent[0].contextToken != "ctx-1" {
+		t.Fatalf("context_token=%q", sent[0].contextToken)
+	}
+}
+
+func TestWeixinIlink_AnswerShapedToNothingFallsBackToRaw(t *testing.T) {
+	f := newIlinkFixture(t, ilinkAlice)
+	f.portal.set(func(p *fakeIlinkPortal) {
+		p.turnHandler = func(w http.ResponseWriter, _ *http.Request, _ map[string]any) {
+			writeRuntimeSSEOK(w, "```go\n```")
+		}
+	})
+	f.ilink.pushMsgs("b1", ilinkTextMsg(1, ilinkAlice, "hi"))
+	f.run(t)
+
+	f.ilink.waitSent(t, 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := sentTexts(f.ilink.sentSnapshot()); !slices.Equal(got, []string{"```go\n```"}) {
+		t.Fatalf("sent=%q", got)
+	}
+}
+
+func TestWeixinIlink_NoticeSendDoesNotBlockPolling(t *testing.T) {
+	f := newIlinkFixture(t)
+	hang := blockUntilCanceled(t)
+	f.ilink.mu.Lock()
+	f.ilink.sendHook = hang
+	f.ilink.mu.Unlock()
+	f.ilink.pushMsgs("b1", ilinkTextMsg(1, ilinkBob, "hi"))
+	f.run(t)
+
+	f.ilink.waitSent(t, 1)
+	waitFor(t, time.Second, func() bool { return f.ilink.pollCount() >= 3 }, "polling continues while the denied reply is in flight")
 }
 
 func TestWeixinIlink_SessionExpiredReportsAndSuspends(t *testing.T) {

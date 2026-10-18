@@ -55,6 +55,8 @@ type fakeIlinkServer struct {
 	batches []string
 	polls   []string
 	sent    []ilinkSent
+	// sendHook runs after a sendmessage is recorded and before it is answered.
+	sendHook func(r *http.Request)
 }
 
 func newFakeIlink(t *testing.T, log *ilinkEventLog) *fakeIlinkServer {
@@ -107,8 +109,12 @@ func newFakeIlink(t *testing.T, log *ilinkEventLog) *fakeIlinkServer {
 			f.mu.Lock()
 			f.sent = append(f.sent, ilinkSent{to: body.Msg.To, contextToken: body.Msg.ContextToken, text: text})
 			n := len(f.sent)
+			hook := f.sendHook
 			f.mu.Unlock()
 			log.add("send:" + text)
+			if hook != nil {
+				hook(r)
+			}
 			_, _ = fmt.Fprintf(w, `{"message_id":%d}`, 9000+n)
 		default:
 			http.NotFound(w, r)
@@ -188,7 +194,9 @@ type fakeIlinkPortal struct {
 	cursorPuts      []map[string]any
 	expired         []map[string]any
 	turnHandler     func(w http.ResponseWriter, r *http.Request, body map[string]any)
-	turns           int32
+	// peerHook runs after a peer report is recorded and before it is answered.
+	peerHook func(r *http.Request)
+	turns    int32
 }
 
 func newFakeIlinkPortal(t *testing.T, log *ilinkEventLog) *fakeIlinkPortal {
@@ -200,7 +208,7 @@ func newFakeIlinkPortal(t *testing.T, log *ilinkEventLog) *fakeIlinkPortal {
 		_ = json.Unmarshal(raw, &body)
 		const base = "/runtime/v1/gateway/channels/wx-1"
 		p.mu.Lock()
-		peerStatus, cursorPutStatus, turnHandler := p.peerStatus, p.cursorPutStatus, p.turnHandler
+		peerStatus, cursorPutStatus, turnHandler, peerHook := p.peerStatus, p.cursorPutStatus, p.turnHandler, p.peerHook
 		p.mu.Unlock()
 		switch {
 		case r.URL.Path == base+"/ilink/peers":
@@ -208,6 +216,9 @@ func newFakeIlinkPortal(t *testing.T, log *ilinkEventLog) *fakeIlinkPortal {
 			p.peers = append(p.peers, body)
 			p.mu.Unlock()
 			log.add(fmt.Sprintf("peer:%v", body["peer_id"]))
+			if peerHook != nil {
+				peerHook(r)
+			}
 			if peerStatus != 0 {
 				w.WriteHeader(peerStatus)
 				_, _ = w.Write([]byte(`{"reason":"ILINK_GENERATION_MISMATCH"}`))
@@ -320,8 +331,9 @@ func newIlinkFixture(t *testing.T, allowed ...string) *ilinkFixture {
 	}
 }
 
-// run starts RunWeixinIlink; cleanup cancels it and waits before the fake servers close.
-func (f *ilinkFixture) run(t *testing.T) {
+// run starts RunWeixinIlink; the returned stop (also run at cleanup, before the fake servers
+// close) cancels it and waits for it to exit.
+func (f *ilinkFixture) run(t *testing.T) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -329,14 +341,32 @@ func (f *ilinkFixture) run(t *testing.T) {
 		adapter.RunWeixinIlink(ctx, f.ch, f.deps)
 		close(done)
 	}()
-	t.Cleanup(func() {
-		cancel()
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("runner did not exit after cancel")
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
+// blockUntilCanceled returns a hook that holds a request until the client gives up or the test ends.
+func blockUntilCanceled(t *testing.T) func(r *http.Request) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	return func(r *http.Request) {
 		select {
-		case <-done:
+		case <-r.Context().Done():
+		case <-release:
 		case <-time.After(5 * time.Second):
-			t.Error("runner did not exit after cancel")
 		}
-	})
+	}
 }
 
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, what string) {

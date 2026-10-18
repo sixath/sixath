@@ -41,6 +41,7 @@ type WeixinIlinkDeps struct {
 	PeerQueueSize         int           // pending messages per peer beyond the one in progress (5)
 	PeerIdleTimeout       time.Duration // idle peer worker exits (5m)
 	BackoffMin            time.Duration // first retry delay for iLink / Portal failures (1s), doubling to 60s
+	PortalCallTimeout     time.Duration // each cursor / peer / session-expired / status call to Portal (10s)
 }
 
 const (
@@ -53,6 +54,8 @@ const (
 	ilinkBackoffMax        = 60 * time.Second
 	ilinkCursorPutAttempts = 4
 	ilinkCursorRetryDelay  = 200 * time.Millisecond
+	ilinkDeniedPruneEvery  = 256
+	ilinkEmptyReply        = "未生成回复，请稍后重试。"
 )
 
 func normalizeWeixinIlinkDeps(deps WeixinIlinkDeps) WeixinIlinkDeps {
@@ -86,9 +89,13 @@ func normalizeWeixinIlinkDeps(deps WeixinIlinkDeps) WeixinIlinkDeps {
 	if deps.BackoffMin <= 0 {
 		deps.BackoffMin = time.Second
 	}
+	if deps.PortalCallTimeout <= 0 {
+		deps.PortalCallTimeout = 10 * time.Second
+	}
 	return deps
 }
 
+// reportIlinkStatus expects normalized deps (PortalCallTimeout set).
 func reportIlinkStatus(deps WeixinIlinkDeps, channelID string, body runtimeclient.StatusBody) {
 	var rep StatusReporter
 	if deps.Reporter != nil {
@@ -99,7 +106,7 @@ func reportIlinkStatus(deps WeixinIlinkDeps, channelID string, body runtimeclien
 	if rep == nil || channelID == "" || body.State == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), deps.PortalCallTimeout)
 	defer cancel()
 	if err := rep.ReportChannelStatus(ctx, channelID, body); err != nil {
 		log.Printf("weixin_ilink %s: report status %s: %v", channelID, body.State, err)
@@ -120,10 +127,11 @@ type ilinkRunner struct {
 	stateMu sync.Mutex
 	state   string
 
-	mu       sync.Mutex
-	queues   map[string]chan ilinkQueuedMsg
-	deniedAt map[string]time.Time
-	// workers tracks the heartbeat and peer workers; Add is only called from the poll goroutine.
+	mu           sync.Mutex
+	queues       map[string]chan ilinkQueuedMsg
+	deniedAt     map[string]time.Time
+	deniedWrites int
+	// workers tracks the heartbeat, peer workers and notice sends; Add is only called from the poll goroutine.
 	workers sync.WaitGroup
 }
 
@@ -192,7 +200,9 @@ func (r *ilinkRunner) run(ctx context.Context) {
 func (r *ilinkRunner) loadCursor(ctx context.Context) (string, bool) {
 	backoff := r.deps.BackoffMin
 	for {
-		cur, err := r.deps.Runtime.GetIlinkCursor(ctx, r.ch.ID)
+		callCtx, cancel := r.portalCtx(ctx)
+		cur, err := r.deps.Runtime.GetIlinkCursor(callCtx, r.ch.ID)
+		cancel()
 		if err == nil {
 			if cur.Generation != r.ch.Generation {
 				return "", true
@@ -209,6 +219,11 @@ func (r *ilinkRunner) loadCursor(ctx context.Context) (string, bool) {
 		}
 		backoff = nextIlinkBackoff(backoff)
 	}
+}
+
+// portalCtx bounds one Portal call so a hung Portal cannot stall polling.
+func (r *ilinkRunner) portalCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, r.deps.PortalCallTimeout)
 }
 
 func (r *ilinkRunner) setState(state, lastErr string) {
@@ -241,7 +256,9 @@ func (r *ilinkRunner) heartbeatLoop(ctx context.Context) {
 func (r *ilinkRunner) reportSessionExpired(ctx context.Context) {
 	backoff := r.deps.BackoffMin
 	for {
-		err := r.deps.Runtime.ReportIlinkSessionExpired(ctx, r.ch.ID, r.ch.Generation, "-14")
+		callCtx, cancel := r.portalCtx(ctx)
+		err := r.deps.Runtime.ReportIlinkSessionExpired(callCtx, r.ch.ID, r.ch.Generation, "-14")
+		cancel()
 		if err == nil || ctx.Err() != nil {
 			return
 		}
@@ -282,6 +299,10 @@ func (r *ilinkRunner) handleBatch(ctx context.Context, prevBuf string, upd *ilin
 			return false
 		}
 	}
+	if ctx.Err() != nil {
+		// Stopped mid-batch: this bot's credentials are no longer ours to reply with.
+		return true
+	}
 	for _, in := range msgs {
 		r.dispatch(ctx, in)
 	}
@@ -293,7 +314,9 @@ func (r *ilinkRunner) reportPeer(ctx context.Context, in ilink.Inbound) bool {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	_, err := r.deps.Runtime.ReportIlinkPeer(ctx, r.ch.ID, runtimeclient.IlinkPeerReport{
+	callCtx, cancel := r.portalCtx(ctx)
+	defer cancel()
+	_, err := r.deps.Runtime.ReportIlinkPeer(callCtx, r.ch.ID, runtimeclient.IlinkPeerReport{
 		Generation:   r.ch.Generation,
 		PeerID:       in.FromUserID,
 		ContextToken: in.ContextToken,
@@ -309,15 +332,21 @@ func (r *ilinkRunner) reportPeer(ctx context.Context, in ilink.Inbound) bool {
 	return true
 }
 
+// putCursor returns false only on a generation conflict; on cancel the caller checks ctx before dispatching.
 func (r *ilinkRunner) putCursor(ctx context.Context, buf string) bool {
 	cur := runtimeclient.IlinkCursor{Generation: r.ch.Generation, GetUpdatesBuf: buf}
 	for attempt := 1; attempt <= ilinkCursorPutAttempts; attempt++ {
-		err := r.deps.Runtime.PutIlinkCursor(ctx, r.ch.ID, cur)
+		callCtx, cancel := r.portalCtx(ctx)
+		err := r.deps.Runtime.PutIlinkCursor(callCtx, r.ch.ID, cur)
+		cancel()
 		if err == nil {
 			return true
 		}
 		if runtimeclient.IsIlinkGenerationMismatch(err) {
 			return false
+		}
+		if ctx.Err() != nil {
+			return true
 		}
 		log.Printf("weixin_ilink %s: put cursor (attempt %d/%d): %v", r.ch.ID, attempt, ilinkCursorPutAttempts, err)
 		if attempt < ilinkCursorPutAttempts && !sleepIlink(ctx, ilinkCursorRetryDelay) {
@@ -338,12 +367,14 @@ func (r *ilinkRunner) dispatch(ctx context.Context, in ilink.Inbound) {
 		return
 	}
 	if !r.peerAllowed(in.FromUserID) {
-		r.replyDenied(ctx, in)
+		if r.allowDeniedReply(in.FromUserID, time.Now()) {
+			r.notify(ctx, in, fmt.Sprintf(ilinkDeniedTemplate, ilinkPeerTail(in.FromUserID)))
+		}
 		_ = r.deps.Idempotency.Complete(ctx, key, "denied")
 		return
 	}
 	if in.NonText {
-		r.reply(ctx, in, ilinkNonTextReply)
+		r.notify(ctx, in, ilinkNonTextReply)
 		_ = r.deps.Idempotency.Complete(ctx, key, "non_text")
 		return
 	}
@@ -362,26 +393,54 @@ func (r *ilinkRunner) peerAllowed(peer string) bool {
 	return slices.Contains(cur.AllowedPeers, peer)
 }
 
-func (r *ilinkRunner) replyDenied(ctx context.Context, in ilink.Inbound) {
-	now := time.Now()
+// allowDeniedReply records peer's denied reply at now unless one was sent within DeniedReplyInterval.
+// Every ilinkDeniedPruneEvery records it drops expired entries so the map tracks only recent peers.
+func (r *ilinkRunner) allowDeniedReply(peer string, now time.Time) bool {
 	r.mu.Lock()
-	last, seen := r.deniedAt[in.FromUserID]
+	defer r.mu.Unlock()
+	last, seen := r.deniedAt[peer]
 	if seen && now.Sub(last) < r.deps.DeniedReplyInterval {
-		r.mu.Unlock()
-		return
+		return false
 	}
-	r.deniedAt[in.FromUserID] = now
-	r.mu.Unlock()
-	r.reply(ctx, in, fmt.Sprintf(ilinkDeniedTemplate, ilinkPeerTail(in.FromUserID)))
+	r.deniedAt[peer] = now
+	r.deniedWrites++
+	if r.deniedWrites%ilinkDeniedPruneEvery == 0 {
+		for p, at := range r.deniedAt {
+			if now.Sub(at) >= r.deps.DeniedReplyInterval {
+				delete(r.deniedAt, p)
+			}
+		}
+	}
+	return true
+}
+
+// notify sends a notice without blocking the poll goroutine; the worker group lets shutdown drain it.
+func (r *ilinkRunner) notify(ctx context.Context, in ilink.Inbound, text string) {
+	r.workers.Add(1)
+	go func() {
+		defer r.workers.Done()
+		r.reply(ctx, in, text)
+	}()
 }
 
 func (r *ilinkRunner) reply(ctx context.Context, in ilink.Inbound, text string) {
-	for _, part := range ilink.ShapeReply(text, r.deps.SplitRunes) {
+	for _, part := range r.replyParts(text) {
 		if _, err := r.client.SendText(ctx, in.FromUserID, in.ContextToken, part); err != nil {
 			log.Printf("weixin_ilink %s: send to …%s: %v", r.ch.ID, ilinkPeerTail(in.FromUserID), err)
 			return
 		}
 	}
+}
+
+// replyParts shapes text for WeChat; if shaping leaves nothing (e.g. only fence lines) it sends the raw text.
+func (r *ilinkRunner) replyParts(text string) []string {
+	if parts := ilink.ShapeReply(text, r.deps.SplitRunes); len(parts) > 0 {
+		return parts
+	}
+	if parts := ilink.SplitText(strings.TrimSpace(text), r.deps.SplitRunes); len(parts) > 0 {
+		return parts
+	}
+	return []string{ilinkEmptyReply}
 }
 
 func (r *ilinkRunner) enqueue(ctx context.Context, msg ilinkQueuedMsg) {
@@ -399,7 +458,7 @@ func (r *ilinkRunner) enqueue(ctx context.Context, msg ilinkQueuedMsg) {
 		r.mu.Unlock()
 	default:
 		r.mu.Unlock()
-		r.reply(ctx, msg.in, ilinkQueueFullReply)
+		r.notify(ctx, msg.in, ilinkQueueFullReply)
 		_ = r.deps.Idempotency.Complete(ctx, msg.key, "queue_full")
 	}
 }
@@ -502,10 +561,13 @@ func (r *ilinkRunner) process(ctx context.Context, msg ilinkQueuedMsg) {
 	case res.Failed:
 		if ctxErr := turnCtx.Err(); ctxErr != nil {
 			replyText(ilinkFailurePrefix + mapRuntimeUserError(ctxErr))
+		} else if strings.TrimSpace(res.ErrMsg) == "" {
+			replyText(ilinkEmptyReply)
 		} else {
 			replyText(ilinkFailurePrefix + mapTurnFailureMessage(res.ErrMsg, ""))
 		}
 	default:
+		// An empty answer falls through replyParts to ilinkEmptyReply.
 		replyText(res.Content)
 	}
 }
@@ -561,8 +623,6 @@ func consumeIlinkTurnStream(ctx context.Context, body io.Reader, noticeAt time.T
 		res.Failed, res.ErrMsg = true, st.ErrMsg
 	case ctx.Err() != nil:
 		res.Failed, res.ErrMsg = true, ctx.Err().Error()
-	case res.Content == "":
-		res.Failed, res.ErrMsg = true, "turn failed"
 	}
 	return res
 }
