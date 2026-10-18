@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { agentApi, channelApi, cronApi, type Agent, type Channel, type CreateCronTaskRequest } from '../api/client'
+import { agentApi, channelApi, cronApi, ilinkApi, type Agent, type Channel, type CreateCronTaskRequest, type IlinkPeer } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
+import { cronIlinkPeerError, ilinkPeerOptions } from '../utils/ilink'
 
 function toNumber(value: string, fallback: number): number {
   const parsed = Number(value)
@@ -32,6 +33,9 @@ export default function CronTaskForm() {
   const [deliveryBestEffort, setDeliveryBestEffort] = useState(true)
   const [deliverySessionId, setDeliverySessionId] = useState('')
   const [deliveryChannelId, setDeliveryChannelId] = useState('')
+  const [deliveryPeerId, setDeliveryPeerId] = useState('')
+  const [ilinkPeers, setIlinkPeers] = useState<IlinkPeer[]>([])
+  const [ilinkPeersError, setIlinkPeersError] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -53,8 +57,32 @@ export default function CronTaskForm() {
     setDeliveryWebhookUrl(task.delivery_webhook_url || '')
     setDeliverySessionId(task.delivery_session_id || '')
     setDeliveryChannelId(task.delivery_channel_id || '')
+    setDeliveryPeerId(task.delivery_peer_id || '')
     setEnabled(task.enabled)
   }
+
+  const selectedChannelType = channels.find((c) => c.id === deliveryChannelId)?.type
+  const isIlinkDelivery = deliveryMode === 'channel' && selectedChannelType === 'weixin_ilink'
+
+  useEffect(() => {
+    setIlinkPeersError('')
+    if (!isIlinkDelivery) {
+      setIlinkPeers([])
+      return
+    }
+    let cancelled = false
+    ilinkApi
+      .listPeers(deliveryChannelId)
+      .then((peers) => {
+        if (!cancelled) setIlinkPeers(peers)
+      })
+      .catch((e) => {
+        if (!cancelled) setIlinkPeersError((e as Error).message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isIlinkDelivery, deliveryChannelId])
 
   useEffect(() => {
     setError('')
@@ -104,6 +132,11 @@ export default function CronTaskForm() {
       setError('Payload content is required.')
       return
     }
+    const peerError = cronIlinkPeerError({ deliveryMode, channelType: selectedChannelType, peerId: deliveryPeerId })
+    if (peerError) {
+      setError(peerError)
+      return
+    }
 
     const data: CreateCronTaskRequest = {
       name: name.trim(),
@@ -123,6 +156,8 @@ export default function CronTaskForm() {
       delivery_best_effort: deliveryBestEffort,
       delivery_session_id: deliverySessionId.trim() || undefined,
       delivery_channel_id: deliveryChannelId || undefined,
+      // '' (not undefined) so an update clears the recipient when the task stops delivering to weixin_ilink
+      delivery_peer_id: isIlinkDelivery ? deliveryPeerId : '',
       enabled,
     }
 
@@ -270,12 +305,37 @@ export default function CronTaskForm() {
           {deliveryMode === 'channel' && (
             <div className="form-group">
               <label>Channel</label>
-              <select value={deliveryChannelId} onChange={(e) => setDeliveryChannelId(e.target.value)}>
+              <select
+                value={deliveryChannelId}
+                onChange={(e) => {
+                  setDeliveryChannelId(e.target.value)
+                  setDeliveryPeerId('')
+                }}
+              >
                 <option value="">Select channel</option>
                 {channels.map((channel) => (
                   <option key={channel.id} value={channel.id}>{channel.channel_id}</option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {isIlinkDelivery && (
+            <div className="form-group">
+              <label>接收人 *</label>
+              <select value={deliveryPeerId} onChange={(e) => setDeliveryPeerId(e.target.value)}>
+                <option value="">选择接收人</option>
+                {ilinkPeerOptions(ilinkPeers, deliveryPeerId).map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              {ilinkPeersError ? (
+                <div className="error">{ilinkPeersError}</div>
+              ) : (
+                <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: '0.8rem' }}>
+                  只列出名册中已放行的微信用户；对方需在 bot 最近一次扫码登录后给 bot 发过消息才能收到推送。
+                </p>
+              )}
             </div>
           )}
 
