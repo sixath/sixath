@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { agentApi, channelApi, cronApi, ilinkApi, type Agent, type Channel, type CreateCronTaskRequest, type IlinkPeer } from '../api/client'
 import { getStoredOrgId } from '../api/auth'
-import { cronIlinkPeerError, ilinkPeerOptions } from '../utils/ilink'
+import { cronIlinkPeerError, ilinkPeerOptions, keepIlinkPeer } from '../utils/ilink'
 
 function toNumber(value: string, fallback: number): number {
   const parsed = Number(value)
@@ -66,15 +66,15 @@ export default function CronTaskForm() {
 
   useEffect(() => {
     setIlinkPeersError('')
-    if (!isIlinkDelivery) {
-      setIlinkPeers([])
-      return
-    }
+    setIlinkPeers([])
+    if (!isIlinkDelivery) return
     let cancelled = false
     ilinkApi
       .listPeers(deliveryChannelId)
       .then((peers) => {
-        if (!cancelled) setIlinkPeers(peers)
+        if (cancelled) return
+        setIlinkPeers(peers)
+        setDeliveryPeerId((current) => keepIlinkPeer(peers, current))
       })
       .catch((e) => {
         if (!cancelled) setIlinkPeersError((e as Error).message)

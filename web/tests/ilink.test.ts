@@ -7,6 +7,7 @@ import {
   ilinkPeerLabel,
   ilinkPeerOptions,
   ilinkPeerTail,
+  keepIlinkPeer,
   mergeRemarkDrafts,
 } from '../src/utils/ilink.ts'
 
@@ -74,6 +75,22 @@ describe('ilinkPeerOptions', () => {
     const opts = ilinkPeerOptions(peers, 'bbbb2222@im.wechat')
     assert.deepEqual(opts[0], { value: 'bbbb2222@im.wechat', label: '尾号 2222（未放行）' })
     assert.equal(ilinkPeerOptions([], 'gone9999@im.wechat')[0].label, '尾号 9999（未放行）')
+  })
+})
+
+describe('keepIlinkPeer', () => {
+  const peers = [
+    { peer_id: 'aaaa1111@im.wechat', allowed: true },
+    { peer_id: 'bbbb2222@im.wechat', allowed: false },
+  ]
+  it('keeps a recipient that is in the roster, even if not allowed', () => {
+    assert.equal(keepIlinkPeer(peers, 'aaaa1111@im.wechat'), 'aaaa1111@im.wechat')
+    assert.equal(keepIlinkPeer(peers, 'bbbb2222@im.wechat'), 'bbbb2222@im.wechat')
+  })
+  it('clears a recipient missing from the new roster', () => {
+    assert.equal(keepIlinkPeer(peers, 'other@im.wechat'), '')
+    assert.equal(keepIlinkPeer([], 'aaaa1111@im.wechat'), '')
+    assert.equal(keepIlinkPeer(peers, ''), '')
   })
 })
 

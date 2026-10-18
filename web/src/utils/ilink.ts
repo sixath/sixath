@@ -47,6 +47,11 @@ export function ilinkPeerOptions(peers: PeerOptionRow[], current: string): Array
   return options
 }
 
+/** After loading a channel's roster, keep the selected recipient only if that roster contains it. */
+export function keepIlinkPeer(peers: Array<{ peer_id: string }>, current: string): string {
+  return current && peers.some((p) => p.peer_id === current) ? current : ''
+}
+
 type RemarkRow = { peer_id: string; remark: string }
 
 /** A draft is dirty when it differs from the server remark it was based on; dirty drafts survive a reload. */
