@@ -47,6 +47,28 @@ func TestWebhook_DisabledChannel_410(t *testing.T) {
 	}
 }
 
+func TestWebhook_NonWebhookChannel_404(t *testing.T) {
+	yaml := `channels:
+  - id: wx-1
+    type: weixin_ilink
+    enabled: true
+  - id: wb-1
+    type: wecom_bot
+    enabled: true
+    bot_id: b1
+    secret: s1
+`
+	h, _, cleanup := newWebhookFixture(t, yaml)
+	defer cleanup()
+
+	for _, id := range []string{"wx-1", "wb-1"} {
+		rr := postHook(t, h, id, "", "127.0.0.1:1", map[string]any{"content": "hi", "peer_id": "p1"})
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("%s: status=%d body=%s", id, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestWebhook_IPNotWhitelisted_403(t *testing.T) {
 	h, _, cleanup := newWebhookFixture(t, channelYAML(true, []string{"10.0.0.1"}))
 	defer cleanup()
@@ -203,11 +225,11 @@ func TestWebhook_IdempotencyKey_NoSecondTurn(t *testing.T) {
 	defer cleanup()
 
 	body := map[string]any{
-		"content":          "hi",
-		"peer_id":          "p1",
-		"reply_url":        replySrv.URL,
-		"idempotency_key":  "idem-1",
-		"reply_mode":       "async",
+		"content":         "hi",
+		"peer_id":         "p1",
+		"reply_url":       replySrv.URL,
+		"idempotency_key": "idem-1",
+		"reply_mode":      "async",
 	}
 	rr1 := postHook(t, h, "demo-webhook", "dev-webhook-secret", "127.0.0.1:1", body)
 	if rr1.Code != http.StatusAccepted {
@@ -560,12 +582,12 @@ func buildHandler(t *testing.T, yaml, portalURL string) (http.Handler, func()) {
 	}
 	rt := runtimeclient.New(portalURL, "dev-runtime-token")
 	h := adapter.NewWebhookHandler(adapter.WebhookDeps{
-		Registry:     reg,
-		Runtime:      rt,
-		Sessions:     session.NewRouter(rt, 30*time.Second),
-		Idempotency:  idempotency.NewStore(10 * time.Minute),
-		Reply:        reply.NewDispatcher(nil),
-		TurnTimeout:  5 * time.Second,
+		Registry:    reg,
+		Runtime:     rt,
+		Sessions:    session.NewRouter(rt, 30*time.Second),
+		Idempotency: idempotency.NewStore(10 * time.Minute),
+		Reply:       reply.NewDispatcher(nil),
+		TurnTimeout: 5 * time.Second,
 	})
 	mux := http.NewServeMux()
 	mux.Handle("POST /hooks/{channel_id}", h)

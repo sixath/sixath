@@ -82,6 +82,11 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown channel", http.StatusNotFound)
 		return
 	}
+	// Other channel types carry no webhook secret, so they must never be reachable through /hooks.
+	if ch.Type != "webhook" {
+		http.Error(w, "unknown channel", http.StatusNotFound)
+		return
+	}
 	if !ch.Enabled {
 		http.Error(w, "channel disabled", http.StatusGone)
 		return
