@@ -120,6 +120,7 @@
 | `internal/runtimeclient/client.go` | `gatewayChannelItem` 映射新字段；新增 `ReportIlinkPeer`、`GetIlinkCursor`、`PutIlinkCursor`、`ReportIlinkSessionExpired` |
 | `internal/adapter/weixin_ilink_manager.go`（新） | 对齐 `WecomBotManager` 的 `Reconcile` / start / stop / drain。**可运行条件** = `enabled && BotToken != "" && !SessionExpired`。新增独立的 `IlinkConnectionChanged(a, b)`：比较 `BotToken`、`BaseURL`、`Generation`；**不含 `AllowedPeers`**（改白名单不重启 runner）。不改动现有 `ConnectionConfigChanged` |
 | `internal/adapter/weixin_ilink.go`（新） | runner 循环、心跳、peer 队列、单条消息处理（§6.2） |
+| `internal/adapter/webhook.go` | **安全前置**：`/hooks/{channel_id}` 只接受 `type=webhook`。`weixin_ilink` / `wecom_bot` 无 webhook secret，空 secret 与空请求头比较相等，否则可被匿名调用、绕过白名单（`wecom_bot` 已存在此问题） |
 | `internal/channelsync/sync.go` | `Config.Manager` 改为可组合多个 `Reconciler`（或新增 `MultiReconciler`），同时驱动 `WecomBotManager` 与 `WeixinIlinkManager` |
 | `cmd/gateway/main.go` | 装配新 manager |
 | `README.md` | 渠道一览、单副本约束、验收清单 |
@@ -130,7 +131,7 @@
 |------|------|
 | `internal/ilink/`（新） | 精简协议客户端：`GetBotQRCode`、`GetQRCodeStatus`、`SendText`、`-14` 识别。只做 HTTP |
 | `internal/data/model/` | `Channel` 新列（§5.1）；新模型 `ChannelIlinkPeer`、`ChannelIlinkState`；`CronTask.DeliveryPeerID` |
-| `internal/data/data.go` | 新模型加入 `AutoMigrate` 列表与 `ensureUTF8MB4` |
+| `internal/data/data.go` | 新模型加入 `AutoMigrate` 列表（新表随 utf8mb4 DSN 创建，无需加入 `ensureUTF8MB4`） |
 | `migrations/023_weixin_ilink_channel.sql` | 手工补充迁移（编号以实现时最新为准） |
 | `internal/data/channel_mysql.go` | `ListGatewayChannels` 类型过滤加入 `weixin_ilink`；`Update` 可改字段白名单**不得**包含 `ilink_bot_token` / `ilink_generation` / `ilink_session_expired_at`（只由扫码与失效流程写）；新增 `ListIlinkByAgent(agentID)`（default 或 allowed 包含该 Agent、且 enabled） |
 | `internal/data/channel_peer_mysql.go` | 新增 `GetBySessionID(sessionID)`（`session_id` 非唯一索引；多行时取 `updated_at` 最新） |
@@ -248,14 +249,14 @@ Gateway runner 运行期间**独立于长轮询**每 ≤30s 上报一次心跳�
 权限：与现有 Channel 管理接口一致（登录用户）。
 
 1. 创建 `weixin_ilink` 渠道 → 无 token，派生 `login_required`。
-2. `POST /api/v1/channels/{id}/ilink/login` → Portal 用默认基址调 `get_bot_qrcode` → `AuthEphemeralRepo.Put`（`id = hex(sha256(qrcode))`（64 字符，适配 `auth_ephemeral.id size:64`），`kind = ilink_qrcode`，payload = channel uuid，TTL 5 分钟）→ 返回 `{ qrcode, qrcode_img_content }`。
+2. `POST /api/v1/channels/{id}/ilink/login` → Portal 用默认基址调 `get_bot_qrcode` → `AuthEphemeralRepo.Put`（`id = hex(sha256(qrcode))`（64 字符，适配 `auth_ephemeral.id size:64`），`kind = ilink_qrcode`，payload = channel uuid，TTL 5 分钟）→ 返回 `{ qrcode, qrcode_image, expires_at }`，其中 `qrcode_image` 是 Portal 用 `qrcode_img_content`（一个 URL）渲染出的 PNG data URL（Web 无二维码库，直接 `<img src>`）。
 3. 前端调用 `GET /api/v1/channels/{id}/ilink/login/status?qrcode=…`：
    - Portal 先用 `AuthEphemeralRepo.Get`（**新增的非消费读**：`Get(ctx, id, kind, now)`）校验 `qrcode` 属于该渠道，否则 `404`（防止把别人的确认结果写进任意渠道）。只在 `confirmed` 时调用 `Consume`。
    - Portal 调 `get_qrcode_status`，单次客户端超时 35s（服务端实测挂起约 30s 后返回 `wait`），返回后前端**立即**发起下一次；若服务端立即返回，Portal 不做额外等待，前端最小间隔 1s。
    - `wait` / `scaned`：统一提示"请用微信扫码，并在手机上确认登录"。**不依赖 `scaned`**：实测未出现该状态，直接从 `wait` 跳到 `confirmed`。
    - `expired`：提示并允许"刷新二维码"（回到第 2 步）。
    - `confirmed`：**单事务**：
-     - 写 `ilink_bot_token` / `ilink_bot_id` / `ilink_owner_user_id` / `ilink_base_url`；`ilink_generation += 1`；`ilink_session_expired_at = NULL`；
+     - 写 `ilink_bot_token` / `ilink_bot_id` / `ilink_owner_user_id` / `ilink_base_url`（仅接受 `https://*.weixin.qq.com`，否则存空 = 默认基址，防止 `bot_token` 被发往任意地址）；`ilink_generation += 1`；`ilink_session_expired_at = NULL`；
      - 清空 `channel_ilink_state`；
      - **清空该渠道所有名册的 `context_token`**（每次扫码都会换新 bot，旧 token 一律不可用，实测），保留 `allowed` / `remark`（同一微信用户的 ID 跨 bot 不变，已对扫码人实测）；
      - upsert owner 到名册并 `allowed=true`；
