@@ -614,6 +614,16 @@ func (f *authEphemeralFake) Consume(_ context.Context, id, kind string, now time
 	return item.payload, nil
 }
 
+func (f *authEphemeralFake) Get(_ context.Context, id, kind string, now time.Time) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item, ok := f.items[id]
+	if !ok || item.kind != kind || item.consumed || !item.expires.After(now) {
+		return "", pkgErrors.ErrNotFound
+	}
+	return item.payload, nil
+}
+
 func (f *authEphemeralFake) get(id string) (ephemeralItem, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

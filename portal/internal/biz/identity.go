@@ -81,6 +81,8 @@ type IdentityRepo interface {
 // AuthEphemeralRepo stores one-time OAuth state and exchange tickets.
 type AuthEphemeralRepo interface {
 	Put(ctx context.Context, id, kind, payloadJSON string, expiresAt time.Time) error
+	// Get returns the payload without consuming; ErrNotFound if missing/expired/already used.
+	Get(ctx context.Context, id, kind string, now time.Time) (payloadJSON string, err error)
 	// Consume marks consumed atomically; returns payload or ErrNotFound if missing/expired/already used.
 	Consume(ctx context.Context, id, kind string, now time.Time) (payloadJSON string, err error)
 }

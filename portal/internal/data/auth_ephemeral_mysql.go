@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"backend/internal/biz"
@@ -58,4 +59,18 @@ func (r *authEphemeralRepo) Consume(ctx context.Context, id, kind string, now ti
 		return nil
 	})
 	return payload, err
+}
+
+func (r *authEphemeralRepo) Get(ctx context.Context, id, kind string, now time.Time) (string, error) {
+	var m model.AuthEphemeral
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND kind = ? AND consumed_at IS NULL AND expires_at > ?", id, kind, now).
+		First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return m.PayloadJSON, nil
 }

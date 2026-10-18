@@ -67,3 +67,32 @@ func TestAuthEphemeralConsumeExpired(t *testing.T) {
 		t.Fatalf("Consume expired = %v, want ErrNotFound", err)
 	}
 }
+
+func TestAuthEphemeralRepo_GetDoesNotConsume(t *testing.T) {
+	db := openAuthEphemeralTestDB(t)
+	repo := newAuthEphemeralRepoForTest(db)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 18, 10, 0, 0, 0, time.UTC)
+
+	if err := repo.Put(ctx, "qr-key", "ilink_qrcode", `{"channel_uuid":"c1"}`, now.Add(5*time.Minute)); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		payload, err := repo.Get(ctx, "qr-key", "ilink_qrcode", now)
+		if err != nil || payload != `{"channel_uuid":"c1"}` {
+			t.Fatalf("Get #%d = %q, %v", i, payload, err)
+		}
+	}
+	if _, err := repo.Get(ctx, "qr-key", "wecom_state", now); err != ErrNotFound {
+		t.Fatalf("wrong kind err = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.Get(ctx, "qr-key", "ilink_qrcode", now.Add(6*time.Minute)); err != ErrNotFound {
+		t.Fatalf("expired err = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.Consume(ctx, "qr-key", "ilink_qrcode", now); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if _, err := repo.Get(ctx, "qr-key", "ilink_qrcode", now); err != ErrNotFound {
+		t.Fatalf("consumed err = %v, want ErrNotFound", err)
+	}
+}
