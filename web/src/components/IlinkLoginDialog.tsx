@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ilinkApi, isApiError, type IlinkLoginStatusReply } from '../api/client'
-import { ilinkLoginHint } from '../utils/ilink'
+import { ilinkLoginHint, ilinkPeerTail } from '../utils/ilink'
 import './ConfirmDialog.css'
+import './IlinkLoginDialog.css'
 
 const STATUS_MAX_RETRIES = 3
 const STATUS_RETRY_DELAY_MS = 1500
@@ -31,6 +32,7 @@ export function IlinkLoginDialog({ channelId, onClose, onConfirmed }: IlinkLogin
   const [image, setImage] = useState('')
   const [status, setStatus] = useState<IlinkLoginStatusReply['status'] | ''>('')
   const [error, setError] = useState('')
+  const [botId, setBotId] = useState('')
   const [round, setRound] = useState(0)
   const onConfirmedRef = useRef(onConfirmed)
 
@@ -44,6 +46,7 @@ export function IlinkLoginDialog({ channelId, onClose, onConfirmed }: IlinkLogin
     setImage('')
     setStatus('')
     setError('')
+    setBotId('')
     const run = async () => {
       try {
         const start = await ilinkApi.startLogin(channelId, signal)
@@ -69,6 +72,7 @@ export function IlinkLoginDialog({ channelId, onClose, onConfirmed }: IlinkLogin
           if (signal.aborted) return
           setStatus(res.status)
           if (res.status === 'confirmed') {
+            setBotId(res.bot_id || '')
             onConfirmedRef.current()
             return
           }
@@ -84,23 +88,51 @@ export function IlinkLoginDialog({ channelId, onClose, onConfirmed }: IlinkLogin
   }, [channelId, round])
 
   const canRetry = status === 'expired' || !!error
+  const confirmed = status === 'confirmed'
+  const expired = status === 'expired'
+  const dotClass = confirmed ? ' ilink-login__dot--ok' : expired ? ' ilink-login__dot--expired' : ''
+  const statusText = confirmed
+    ? `登录成功${botId ? `，bot 尾号 ${ilinkPeerTail(botId)}` : ''}`
+    : ilinkLoginHint(status)
   return (
     <div className="confirm-dialog-backdrop" role="presentation">
       <div className="confirm-dialog form-dialog" role="dialog" aria-modal="true" aria-labelledby="ilink-login-title">
         <h2 id="ilink-login-title">微信扫码登录</h2>
-        <div className="form-dialog__body" style={{ textAlign: 'center' }}>
-          {image ? (
-            <img
-              src={image}
-              alt="微信 iLink 登录二维码"
-              width={240}
-              height={240}
-              style={{ opacity: status === 'expired' || status === 'confirmed' ? 0.3 : 1 }}
-            />
-          ) : !error ? (
-            <p className="page-sub">正在获取二维码…</p>
+        <div className="form-dialog__body ilink-login">
+          <div className={`ilink-login__qr${confirmed || expired ? ' ilink-login__qr--done' : ''}`}>
+            {image ? (
+              <img src={image} alt="微信 iLink 登录二维码" />
+            ) : (
+              <span className="ilink-login__placeholder">{error ? '二维码获取失败' : '正在获取二维码…'}</span>
+            )}
+            {confirmed ? (
+              <div className="ilink-login__overlay">
+                <span className="ilink-login__badge ilink-login__badge--ok" aria-hidden>✓</span>
+                已登录
+              </div>
+            ) : expired ? (
+              <div className="ilink-login__overlay">
+                <span className="ilink-login__badge ilink-login__badge--expired" aria-hidden>↻</span>
+                已过期
+              </div>
+            ) : null}
+          </div>
+          {image || confirmed ? (
+            <p className="ilink-login__status">
+              <span className={`ilink-login__dot${dotClass}`} aria-hidden />
+              {statusText}
+            </p>
           ) : null}
-          <p className="page-sub">{ilinkLoginHint(status)}</p>
+          {confirmed ? (
+            <ul className="ilink-login__steps">
+              <li>需要接收推送的人请先给 bot 发一条消息</li>
+            </ul>
+          ) : !expired && image ? (
+            <ul className="ilink-login__steps">
+              <li>1. 打开手机微信，扫一扫上方二维码</li>
+              <li>2. 在手机上点击确认登录</li>
+            </ul>
+          ) : null}
         </div>
         {error ? <div className="error form-dialog__error">{error}</div> : null}
         <div className="confirm-dialog-actions">
